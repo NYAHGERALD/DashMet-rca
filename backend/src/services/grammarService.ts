@@ -1,0 +1,447 @@
+/**
+ * Enterprise Grammar & Writing Assistant Service
+ * Provides Grammarly-like functionality using OpenAI
+ * - Real-time spelling correction
+ * - Grammar analysis
+ * - Sentence improvement suggestions
+ * - Professional tone enhancement
+ */
+
+import OpenAI from 'openai';
+
+// Lazy initialization of OpenAI client
+function getOpenAIClient(): OpenAI | null {
+  if (!process.env.OPENAI_API_KEY) {
+    return null;
+  }
+  return new OpenAI({
+    apiKey: process.env.OPENAI_API_KEY,
+  });
+}
+
+export interface GrammarIssue {
+  type: 'spelling' | 'grammar' | 'punctuation' | 'style' | 'clarity';
+  severity: 'error' | 'warning' | 'suggestion';
+  message: string;
+  offset: number;
+  length: number;
+  originalText: string;
+  suggestions: string[];
+  explanation?: string;
+}
+
+export interface GrammarAnalysisResult {
+  issues: GrammarIssue[];
+  correctedText: string;
+  overallScore: number; // 0-100
+  metrics: {
+    spelling: number;
+    grammar: number;
+    punctuation: number;
+    clarity: number;
+    tone: number;
+  };
+  suggestions: string[];
+  error?: boolean;
+  errorMessage?: string;
+}
+
+export interface QuickFixResult {
+  correctedText: string;
+  appliedFixes: string[];
+  error?: boolean;
+}
+
+export interface EnhanceTextResult {
+  enhancedText: string;
+  changes: Array<{
+    original: string;
+    replacement: string;
+    reason: string;
+  }>;
+  improvementSummary: string;
+  error?: boolean;
+}
+
+/**
+ * Analyze text for grammar, spelling, and style issues
+ * Returns detailed issues with positions for inline highlighting
+ */
+export async function analyzeGrammar(
+  text: string,
+  context?: string
+): Promise<GrammarAnalysisResult> {
+  const openai = getOpenAIClient();
+
+  if (!openai) {
+    console.error('Grammar analysis unavailable: No OpenAI API key configured');
+    return {
+      issues: [],
+      correctedText: text,
+      overallScore: 100,
+      metrics: { spelling: 100, grammar: 100, punctuation: 100, clarity: 100, tone: 100 },
+      suggestions: [],
+      error: true,
+      errorMessage: 'AI service not configured',
+    };
+  }
+
+  if (!text || text.trim().length < 3) {
+    return {
+      issues: [],
+      correctedText: text,
+      overallScore: 100,
+      metrics: { spelling: 100, grammar: 100, punctuation: 100, clarity: 100, tone: 100 },
+      suggestions: [],
+    };
+  }
+
+  try {
+    const systemPrompt = `You are an enterprise-grade writing assistant similar to Grammarly. Analyze the provided text for:
+1. Spelling errors
+2. Grammar mistakes
+3. Punctuation issues
+4. Clarity problems
+5. Professional tone
+
+Context: ${context || 'Professional business/industrial documentation'}
+
+Return a JSON object with this EXACT structure:
+{
+  "issues": [
+    {
+      "type": "spelling|grammar|punctuation|style|clarity",
+      "severity": "error|warning|suggestion",
+      "message": "Brief description of the issue",
+      "offset": <character position where issue starts>,
+      "length": <length of problematic text>,
+      "originalText": "the problematic text",
+      "suggestions": ["suggestion1", "suggestion2"],
+      "explanation": "Why this is an issue and how to fix it"
+    }
+  ],
+  "correctedText": "The fully corrected version of the text",
+  "overallScore": <0-100 score>,
+  "metrics": {
+    "spelling": <0-100>,
+    "grammar": <0-100>,
+    "punctuation": <0-100>,
+    "clarity": <0-100>,
+    "tone": <0-100>
+  },
+  "suggestions": ["General improvement suggestion 1", "General improvement suggestion 2"]
+}
+
+IMPORTANT:
+- Calculate accurate character offsets for each issue
+- Provide multiple suggestions when possible
+- Be thorough but not overly critical
+- Focus on professional communication standards
+- Return ONLY valid JSON, no markdown or extra text`;
+
+    const response = await openai.chat.completions.create({
+      model: process.env.AI_MODEL || 'gpt-4o',
+      messages: [
+        { role: 'system', content: systemPrompt },
+        { role: 'user', content: `Analyze this text:\n\n"${text}"` },
+      ],
+      temperature: 0.3,
+      max_tokens: 2000,
+    });
+
+    const content = response.choices[0]?.message?.content;
+    if (!content) {
+      throw new Error('No response from AI');
+    }
+
+    // Parse the JSON response
+    const cleanedContent = content.replace(/```json\n?|\n?```/g, '').trim();
+    const result = JSON.parse(cleanedContent);
+
+    return {
+      issues: result.issues || [],
+      correctedText: result.correctedText || text,
+      overallScore: result.overallScore || 100,
+      metrics: result.metrics || { spelling: 100, grammar: 100, punctuation: 100, clarity: 100, tone: 100 },
+      suggestions: result.suggestions || [],
+    };
+  } catch (error) {
+    console.error('Grammar analysis error:', error);
+    return {
+      issues: [],
+      correctedText: text,
+      overallScore: 100,
+      metrics: { spelling: 100, grammar: 100, punctuation: 100, clarity: 100, tone: 100 },
+      suggestions: [],
+      error: true,
+      errorMessage: error instanceof Error ? error.message : 'Analysis failed',
+    };
+  }
+}
+
+/**
+ * Quick fix - automatically correct all spelling and grammar errors
+ */
+export async function quickFixText(text: string): Promise<QuickFixResult> {
+  const openai = getOpenAIClient();
+
+  if (!openai) {
+    return { correctedText: text, appliedFixes: [], error: true };
+  }
+
+  if (!text || text.trim().length < 3) {
+    return { correctedText: text, appliedFixes: [] };
+  }
+
+  try {
+    const response = await openai.chat.completions.create({
+      model: process.env.AI_MODEL || 'gpt-4o',
+      messages: [
+        {
+          role: 'system',
+          content: `You are a text correction assistant. Fix all spelling and grammar errors in the text.
+Return a JSON object with:
+{
+  "correctedText": "the corrected text",
+  "appliedFixes": ["description of fix 1", "description of fix 2"]
+}
+Keep the original meaning and tone. Only fix actual errors. Return ONLY valid JSON.`,
+        },
+        { role: 'user', content: text },
+      ],
+      temperature: 0.2,
+      max_tokens: 1000,
+    });
+
+    const content = response.choices[0]?.message?.content;
+    if (!content) {
+      throw new Error('No response');
+    }
+
+    const cleanedContent = content.replace(/```json\n?|\n?```/g, '').trim();
+    const result = JSON.parse(cleanedContent);
+
+    return {
+      correctedText: result.correctedText || text,
+      appliedFixes: result.appliedFixes || [],
+    };
+  } catch (error) {
+    console.error('Quick fix error:', error);
+    return { correctedText: text, appliedFixes: [], error: true };
+  }
+}
+
+/**
+ * Enhance text - improve clarity, professionalism, and readability
+ */
+export async function enhanceText(
+  text: string,
+  style: 'professional' | 'formal' | 'concise' | 'detailed' = 'professional',
+  context?: string
+): Promise<EnhanceTextResult> {
+  const openai = getOpenAIClient();
+
+  if (!openai) {
+    return {
+      enhancedText: text,
+      changes: [],
+      improvementSummary: 'AI service not available',
+      error: true,
+    };
+  }
+
+  if (!text || text.trim().length < 5) {
+    return {
+      enhancedText: text,
+      changes: [],
+      improvementSummary: 'Text too short to enhance',
+    };
+  }
+
+  const styleInstructions: Record<string, string> = {
+    professional: 'Make the text professional and suitable for business documentation',
+    formal: 'Make the text formal and suitable for official reports',
+    concise: 'Make the text concise while retaining all key information',
+    detailed: 'Expand the text with more detail and clarity',
+  };
+
+  try {
+    const response = await openai.chat.completions.create({
+      model: process.env.AI_MODEL || 'gpt-4o',
+      messages: [
+        {
+          role: 'system',
+          content: `You are a professional writing enhancement assistant for enterprise documentation.
+${styleInstructions[style]}
+${context ? `Context: ${context}` : ''}
+
+Return a JSON object:
+{
+  "enhancedText": "the improved text",
+  "changes": [
+    {"original": "original phrase", "replacement": "improved phrase", "reason": "why this change"}
+  ],
+  "improvementSummary": "Brief summary of improvements made"
+}
+
+Guidelines:
+- Fix all spelling and grammar errors
+- Improve sentence structure
+- Enhance clarity and readability
+- Maintain professional tone
+- Preserve the original meaning
+- Return ONLY valid JSON`,
+        },
+        { role: 'user', content: text },
+      ],
+      temperature: 0.4,
+      max_tokens: 1500,
+    });
+
+    const content = response.choices[0]?.message?.content;
+    if (!content) {
+      throw new Error('No response');
+    }
+
+    const cleanedContent = content.replace(/```json\n?|\n?```/g, '').trim();
+    const result = JSON.parse(cleanedContent);
+
+    return {
+      enhancedText: result.enhancedText || text,
+      changes: result.changes || [],
+      improvementSummary: result.improvementSummary || 'Text enhanced',
+    };
+  } catch (error) {
+    console.error('Enhance text error:', error);
+    return {
+      enhancedText: text,
+      changes: [],
+      improvementSummary: 'Enhancement failed',
+      error: true,
+    };
+  }
+}
+
+/**
+ * Get writing suggestions for a specific text selection
+ */
+export async function getSuggestions(
+  text: string,
+  selectedText: string,
+  suggestionType: 'rephrase' | 'expand' | 'shorten' | 'formalize' | 'simplify'
+): Promise<string[]> {
+  const openai = getOpenAIClient();
+
+  if (!openai || !selectedText) {
+    return [];
+  }
+
+  const typeInstructions: Record<string, string> = {
+    rephrase: 'Provide 3 alternative ways to phrase this text',
+    expand: 'Provide 3 expanded versions with more detail',
+    shorten: 'Provide 3 shorter, more concise versions',
+    formalize: 'Provide 3 more formal versions',
+    simplify: 'Provide 3 simpler, easier to understand versions',
+  };
+
+  try {
+    const response = await openai.chat.completions.create({
+      model: process.env.AI_MODEL || 'gpt-4o',
+      messages: [
+        {
+          role: 'system',
+          content: `${typeInstructions[suggestionType]}.
+Context (full text): "${text}"
+Return a JSON array of 3 suggestions: ["suggestion1", "suggestion2", "suggestion3"]
+Return ONLY the JSON array.`,
+        },
+        { role: 'user', content: `Selected text: "${selectedText}"` },
+      ],
+      temperature: 0.6,
+      max_tokens: 500,
+    });
+
+    const content = response.choices[0]?.message?.content;
+    if (!content) return [];
+
+    const cleanedContent = content.replace(/```json\n?|\n?```/g, '').trim();
+    return JSON.parse(cleanedContent);
+  } catch (error) {
+    console.error('Get suggestions error:', error);
+    return [];
+  }
+}
+
+/**
+ * Check a single word for spelling
+ */
+export async function checkSpelling(word: string): Promise<{ correct: boolean; suggestions: string[] }> {
+  const openai = getOpenAIClient();
+
+  if (!openai || !word || word.length < 2) {
+    return { correct: true, suggestions: [] };
+  }
+
+  try {
+    const response = await openai.chat.completions.create({
+      model: process.env.AI_MODEL || 'gpt-4o',
+      messages: [
+        {
+          role: 'system',
+          content: `Check if this word is spelled correctly. Return JSON: {"correct": true/false, "suggestions": ["suggestion1", "suggestion2"]}`,
+        },
+        { role: 'user', content: word },
+      ],
+      temperature: 0.1,
+      max_tokens: 100,
+    });
+
+    const content = response.choices[0]?.message?.content;
+    if (!content) return { correct: true, suggestions: [] };
+
+    const cleanedContent = content.replace(/```json\n?|\n?```/g, '').trim();
+    return JSON.parse(cleanedContent);
+  } catch {
+    return { correct: true, suggestions: [] };
+  }
+}
+
+/**
+ * Auto-complete sentence
+ */
+export async function autoComplete(
+  text: string,
+  context?: string
+): Promise<string[]> {
+  const openai = getOpenAIClient();
+
+  if (!openai || !text || text.length < 5) {
+    return [];
+  }
+
+  try {
+    const response = await openai.chat.completions.create({
+      model: process.env.AI_MODEL || 'gpt-4o',
+      messages: [
+        {
+          role: 'system',
+          content: `Complete this text with 3 professional suggestions.
+${context ? `Context: ${context}` : ''}
+Return a JSON array: ["completion1", "completion2", "completion3"]
+Each completion should naturally continue the text.`,
+        },
+        { role: 'user', content: text },
+      ],
+      temperature: 0.7,
+      max_tokens: 300,
+    });
+
+    const content = response.choices[0]?.message?.content;
+    if (!content) return [];
+
+    const cleanedContent = content.replace(/```json\n?|\n?```/g, '').trim();
+    return JSON.parse(cleanedContent);
+  } catch {
+    return [];
+  }
+}

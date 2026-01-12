@@ -1,0 +1,17 @@
+-- AlterTable
+ALTER TABLE "Incident" ADD COLUMN     "departmentWhereInjury" TEXT,
+ADD COLUMN     "employeeEmail" TEXT,
+ADD COLUMN     "employeeGender" TEXT,
+ADD COLUMN     "employeeHomeAddress" TEXT,
+ADD COLUMN     "employeeLanguage" TEXT,
+ADD COLUMN     "employeeLastSSN4" TEXT,
+ADD COLUMN     "employeePhone" TEXT,
+ADD COLUMN     "interpreterAssisting" BOOLEAN,
+ADD COLUMN     "isLostTime" BOOLEAN,
+ADD COLUMN     "jobAssignmentAtInjury" TEXT,
+ADD COLUMN     "needsInterpreter" BOOLEAN,
+ADD COLUMN     "oshaCaseNumber" TEXT,
+ADD COLUMN     "ownedJobTitle" TEXT,
+ADD COLUMN     "wasEmployeeInstructedInSOP" BOOLEAN,
+ADD COLUMN     "wasProperProcedureFollowed" BOOLEAN,
+ADD COLUMN     "wasViolationOfSafetyRules" BOOLEAN;

@@ -1,0 +1,2 @@
+-- AlterEnum
+ALTER TYPE "DropdownType" ADD VALUE 'PREVENTIVE_CONTROL_TYPE';

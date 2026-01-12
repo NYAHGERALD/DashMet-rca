@@ -1,0 +1,1115 @@
+generator client {
+  provider      = "prisma-client-js"
+  binaryTargets = ["native", "darwin", "darwin-arm64"]
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+model AccessCode {
+  id        String   @id @default(uuid())
+  code      String   @unique
+  role      UserRole
+  isActive  Boolean  @default(true)
+  usedCount Int      @default(0)
+  maxUses   Int      @default(1000)
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([code])
+  @@index([role])
+}
+
+model ArchivedChatMessage {
+  id                String            @id @default(uuid())
+  originalMessageId String
+  incidentId        String
+  userId            String
+  content           String
+  messageType       ChatMessageType   @default(TEXT)
+  replyToId         String?
+  isEdited          Boolean           @default(false)
+  attachments       Json?
+  mentions          String[]          @default([])
+  isPinned          Boolean           @default(false)
+  pinnedAt          DateTime?
+  pinnedById        String?
+  actionItemId      String?
+  evidenceId        String?
+  handoffData       Json?
+  rcaAnalysisId     String?
+  rcaItemId         String?
+  rcaItemType       String?
+  statusChange      Json?
+  announcementData  Json?
+  decisionData      Json?
+  questionData      Json?
+  updateData        Json?
+  originalCreatedAt DateTime
+  archivedAt        DateTime          @default(now())
+  archiveReason     ChatArchiveReason @default(TEAM_TO_PRIVATE)
+  archivedByUserId  String
+  archiveBatchId    String
+  senderFirstName   String
+  senderLastName    String
+  senderEmail       String
+  Incident          Incident          @relation(fields: [incidentId], references: [id], onDelete: Cascade)
+
+  @@index([archiveBatchId])
+  @@index([archivedAt])
+  @@index([incidentId])
+  @@index([originalCreatedAt])
+}
+
+model Area {
+  id           String      @id @default(uuid())
+  name         String
+  description  String?
+  facilityId   String?
+  createdAt    DateTime    @default(now())
+  updatedAt DateTime @updatedAt
+  departmentId String?
+  Department   Department? @relation(fields: [departmentId], references: [id], onDelete: Cascade)
+  Facility     Facility?   @relation(fields: [facilityId], references: [id], onDelete: Cascade)
+  Incident     Incident[]
+  Line         Line[]
+
+  @@index([departmentId])
+  @@index([facilityId])
+}
+
+model AssignmentRule {
+  id                 String        @id @default(uuid())
+  name               String
+  description        String?
+  organizationId     String
+  isActive           Boolean       @default(true)
+  priority           Int           @default(0)
+  incidentType       IncidentType?
+  categoryId         String?
+  facilityId         String?
+  areaId             String?
+  severity           Severity?
+  assignToUserId     String?
+  assignToRole       UserRole?
+  slaResponseHours   Int?
+  slaResolutionHours Int?
+  createdAt          DateTime      @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([incidentType])
+  @@index([organizationId, isActive])
+  @@index([severity])
+}
+
+model AuditLog {
+  id        String      @id @default(uuid())
+  action    AuditAction
+  entity    String
+  entityId  String
+  userId    String?
+  changes   Json?
+  ipAddress String?
+  userAgent String?
+  createdAt DateTime    @default(now())
+  User      User?       @relation(fields: [userId], references: [id])
+
+  @@index([createdAt])
+  @@index([entity, entityId])
+  @@index([userId])
+}
+
+model CAPAction {
+  id                      String         @id @default(uuid())
+  actionType              ActionType
+  title                   String
+  description             String
+  status                  ActionStatus   @default(PLANNED)
+  priority                ActionPriority
+  ownerId                 String
+  dueDate                 DateTime
+  completedAt             DateTime?
+  effectivenessReviewDate DateTime?
+  effectivenessScore      Int?
+  isEffective             Boolean?
+  recurrenceDetected      Boolean        @default(false)
+  aiQualityScore          Float?
+  aiWeaknessFlags         String[]
+  resourceImpact          String?
+  rcaAnalysisId           String?
+  createdAt               DateTime       @default(now())
+  updatedAt DateTime @updatedAt
+  completedById           String?
+  completionEvidence      String?
+  completionNotes         String?
+  implementationNotes     String?
+  implementationPlan      String?
+  startedAt               DateTime?
+  startedById             String?
+  verificationNotes       String?
+  verifiedAt              DateTime?
+  verifiedById            String?
+  regulatoryTags          String[]
+  User                    User           @relation(fields: [ownerId], references: [id])
+  RCAAnalysis             RCAAnalysis?   @relation(fields: [rcaAnalysisId], references: [id], onDelete: Cascade)
+  CAPAuditLog             CAPAuditLog[]
+
+  @@index([ownerId])
+  @@index([rcaAnalysisId])
+  @@index([status])
+}
+
+model CAPAuditLog {
+  id              String    @id @default(uuid())
+  capActionId     String
+  action          String
+  previousStatus  String?
+  newStatus       String?
+  previousData    Json?
+  newData         Json?
+  notes           String?
+  evidence        String?
+  performedById   String
+  performedByName String
+  performedAt     DateTime  @default(now())
+  ipAddress       String?
+  userAgent       String?
+  CAPAction       CAPAction @relation(fields: [capActionId], references: [id], onDelete: Cascade)
+
+  @@index([capActionId])
+  @@index([performedAt])
+  @@index([performedById])
+}
+
+model Category {
+  id               String       @id @default(uuid())
+  type             IncidentType
+  name             String
+  parentId         String?
+  allowCustomTitle Boolean      @default(false)
+  organizationId   String
+  sortOrder        Int          @default(0)
+  isActive         Boolean      @default(true)
+  createdAt        DateTime     @default(now())
+  updatedAt DateTime @updatedAt
+  Organization     Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  Category         Category?    @relation("CategoryToCategory", fields: [parentId], references: [id])
+  other_Category   Category[]   @relation("CategoryToCategory")
+  Incident         Incident[]
+
+  @@index([organizationId, type])
+  @@index([parentId])
+}
+
+model ChatMessage {
+  id                  String                @id @default(uuid())
+  incidentId          String
+  userId              String
+  content             String
+  messageType         ChatMessageType       @default(TEXT)
+  replyToId           String?
+  isEdited            Boolean               @default(false)
+  isDeleted           Boolean               @default(false)
+  attachments         Json?
+  readBy              String[]              @default([])
+  createdAt           DateTime              @default(now())
+  updatedAt DateTime @updatedAt
+  isPinned            Boolean               @default(false)
+  mentions            String[]              @default([])
+  pinnedAt            DateTime?
+  pinnedById          String?
+  actionItemId        String?
+  evidenceId          String?
+  handoffData         Json?
+  rcaAnalysisId       String?
+  rcaItemId           String?
+  rcaItemType         String?
+  statusChange        Json?
+  announcementData    Json?
+  decisionData        Json?
+  questionData        Json?
+  updateData          Json?
+  Incident            Incident              @relation(fields: [incidentId], references: [id], onDelete: Cascade)
+  ChatMessage         ChatMessage?          @relation("ChatMessageToChatMessage", fields: [replyToId], references: [id])
+  other_ChatMessage   ChatMessage[]         @relation("ChatMessageToChatMessage")
+  User                User                  @relation(fields: [userId], references: [id])
+  ChatMessageReaction ChatMessageReaction[]
+
+  @@index([actionItemId])
+  @@index([createdAt])
+  @@index([evidenceId])
+  @@index([incidentId])
+  @@index([isPinned])
+  @@index([messageType])
+  @@index([rcaAnalysisId])
+  @@index([userId])
+}
+
+model ChatMessageReaction {
+  id          String      @id @default(uuid())
+  messageId   String
+  userId      String
+  emoji       String
+  createdAt   DateTime    @default(now())
+  ChatMessage ChatMessage @relation(fields: [messageId], references: [id], onDelete: Cascade)
+  User        User        @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([messageId, userId, emoji])
+  @@index([messageId])
+  @@index([userId])
+}
+
+model ChatMessageTemplate {
+  id         String    @id @default(uuid())
+  userId     String
+  name       String
+  category   String    @default("general")
+  content    String
+  isGlobal   Boolean   @default(false)
+  usageCount Int       @default(0)
+  lastUsedAt DateTime?
+  createdAt  DateTime  @default(now())
+  updatedAt DateTime @updatedAt
+  User       User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([category])
+  @@index([isGlobal])
+  @@index([userId])
+}
+
+model Comment {
+  id            String       @id @default(uuid())
+  content       String
+  userId        String
+  incidentId    String?
+  rcaAnalysisId String?
+  createdAt     DateTime     @default(now())
+  updatedAt DateTime @updatedAt
+  Incident      Incident?    @relation(fields: [incidentId], references: [id], onDelete: Cascade)
+  RCAAnalysis   RCAAnalysis? @relation(fields: [rcaAnalysisId], references: [id], onDelete: Cascade)
+  User          User         @relation(fields: [userId], references: [id])
+
+  @@index([incidentId])
+  @@index([rcaAnalysisId])
+  @@index([userId])
+}
+
+model Department {
+  id          String     @id @default(uuid())
+  name        String
+  description String?
+  facilityId  String
+  createdAt   DateTime   @default(now())
+  updatedAt DateTime @updatedAt
+  Area        Area[]
+  Facility    Facility   @relation(fields: [facilityId], references: [id], onDelete: Cascade)
+  Incident    Incident[]
+
+  @@index([facilityId])
+}
+
+model DropdownOption {
+  id             String       @id @default(uuid())
+  optionType     DropdownType
+  value          String
+  label          String
+  description    String?
+  sortOrder      Int          @default(0)
+  isActive       Boolean      @default(true)
+  isDefault      Boolean      @default(false)
+  isRequired     Boolean      @default(false)
+  placeholder    String?
+  organizationId String
+  createdAt      DateTime     @default(now())
+  updatedAt DateTime @updatedAt
+  Organization   Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+
+  @@unique([organizationId, optionType, value])
+  @@index([optionType])
+  @@index([organizationId, optionType])
+}
+
+model Evidence {
+  id            String       @id @default(uuid())
+  type          EvidenceType
+  fileName      String
+  filePath      String
+  fileSize      Int
+  mimeType      String
+  transcription String?
+  incidentId    String?
+  rcaAnalysisId String?
+  uploadedById  String
+  uploadedAt    DateTime     @default(now())
+  Incident      Incident?    @relation(fields: [incidentId], references: [id], onDelete: Cascade)
+  RCAAnalysis   RCAAnalysis? @relation(fields: [rcaAnalysisId], references: [id], onDelete: Cascade)
+
+  @@index([incidentId])
+  @@index([rcaAnalysisId])
+}
+
+model Facility {
+  id             String       @id @default(uuid())
+  name           String
+  timezone       String       @default("America/New_York")
+  address        String?
+  organizationId String
+  createdAt      DateTime     @default(now())
+  updatedAt DateTime @updatedAt
+  Area           Area[]
+  Department     Department[]
+  Organization   Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  Incident       Incident[]
+  Shift          Shift[]
+
+  @@index([organizationId])
+}
+
+model FieldConfiguration {
+  id             String       @id @default(uuid())
+  incidentType   String
+  fieldName      String
+  fieldLabel     String
+  fieldType      String
+  isRequired     Boolean      @default(false)
+  placeholder    String?
+  helpText       String?
+  sortOrder      Int          @default(0)
+  isActive       Boolean      @default(true)
+  organizationId String
+  createdAt      DateTime     @default(now())
+  updatedAt DateTime @updatedAt
+  Organization   Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+
+  @@unique([organizationId, incidentType, fieldName])
+  @@index([incidentType])
+  @@index([organizationId, incidentType])
+}
+
+model Incident {
+  id                                             String                @id @default(uuid())
+  incidentNumber                                 String                @unique
+  type                                           IncidentType
+  categoryId                                     String
+  customTitle                                    String?
+  facilityId                                     String
+  areaId                                         String?
+  lineId                                         String?
+  shiftId                                        String?
+  productName                                    String?
+  lotNumber                                      String?
+  machineId                                      String?
+  description                                    String
+  aiSummary                                      String?
+  aiAnalysisData                                 Json?
+  occurredAt                                     DateTime
+  reportedAt                                     DateTime              @default(now())
+  status                                         IncidentStatus        @default(DRAFT)
+  severity                                       Severity?
+  aiSuggestedSeverity                            Severity?
+  createdById                                    String
+  assignedToId                                   String?
+  dueDate                                        DateTime?
+  organizationId                                 String
+  createdAt                                      DateTime              @default(now())
+  updatedAt DateTime @updatedAt
+  departmentId                                   String?
+  additionalEmployerHours                        String?
+  additionalEmployerStartDate                    DateTime?
+  additionalEmployers                            String?
+  allBodyPartsInjured                            String?
+  areaSecured                                    String?
+  assignmentRuleId                               String?
+  autoAssigned                                   Boolean               @default(false)
+  bodyPartsAffected                              String[]
+  caseClassification                             String?
+  contributingActsConditions                     String?
+  contributingFactors                            Json?
+  dateIncidentReported                           DateTime?
+  dateInjuryKnownWorkRelated                     DateTime?
+  dateOfInjury                                   DateTime?
+  dateTimeLeftWork                               DateTime?
+  dateTimeReturnedToWork                         DateTime?
+  didLeaveWork                                   Boolean?
+  didReturnToWork                                Boolean?
+  didSiteRevealCause                             Boolean?
+  directCause                                    String?
+  employedElsewhere                              Boolean?
+  employeeIdNumber                               String?
+  employeeName                                   String?
+  environmentalConditions                        String[]
+  escalatedAt                                    DateTime?
+  escalatedToId                                  String?
+  exposureDuration                               String?
+  firstAidProvided                               Boolean?
+  hadPhysicalRestrictions                        Boolean?
+  incidentDate                                   DateTime?
+  incidentDescriptionDetailed                    String?
+  incidentTime                                   String?
+  inconsistencyExplanation                       String?
+  injuryCausedByWork                             String?
+  injuryDescriptionDetailed                      String?
+  injuryDevelopedOverTime                        Boolean?
+  injuryDevelopmentPattern                       String?
+  injuryLocation                                 String?
+  injuryType                                     String?
+  injuryTypeDescription                          String?
+  injuryWitnessed                                Boolean?
+  injuryWorkRelation                             String?
+  interviewedNames                               String?
+  investigationBodyParts                         String[]
+  investigationInjuryType                        String?
+  investigationSubmittedAt                       DateTime?
+  investigationSubmittedById                     String?
+  isAreaUnderSurveillance                        Boolean?
+  isOshaRecordable                               Boolean?
+  isRoutineTask                                  Boolean?
+  knownRestrictions                              String?
+  leaderActsConditionsOpinion                    String?
+  lotoRequired                                   String?
+  machineSafeguardsInPlace                       String?
+  medicalProvidersInvolved                       String?
+  medicalTreatmentRequired                       Boolean?
+  notifiedIndividuals                            String?
+  otherBodyPartDetail                            String?
+  otherDutiesExplanation                         String?
+  otherEmployerNames                             String?
+  positionAtTimeOfIncident                       String?
+  ppeRequired                                    Boolean?
+  ppeWorn                                        Boolean?
+  preventionRecommendations                      String?
+  previousSimilarConditionDetails                String?
+  previousSimilarConditionReported               Boolean?
+  previousSimilarIncidents                       Boolean?
+  priorSurgeryDescription                        String?
+  priorSurgeryPerformed                          Boolean?
+  reportedToMedicalDept                          Boolean?
+  resolvedAt                                     DateTime?
+  respondedAt                                    DateTime?
+  siteRevealExplanation                          String?
+  siteViewDate                                   DateTime?
+  siteViewTime                                   String?
+  slaResolutionBreached                          Boolean               @default(false)
+  slaResolutionDeadline                          DateTime?
+  slaResponseBreached                            Boolean               @default(false)
+  slaResponseDeadline                            DateTime?
+  sopAvailable                                   Boolean?
+  sopFollowed                                    Boolean?
+  specificInjuryLocation                         String?
+  supervisorActions                              String?
+  supervisorNotified                             Boolean?
+  taskBeingPerformed                             String?
+  taskFrequency                                  String?
+  timeOfInjury                                   String?
+  treatingDoctors                                String?
+  unsafeActOrCondition                           String?
+  wasClockedIn                                   Boolean?
+  wasIncidentSiteViewed                          Boolean?
+  wasInjuryConsistentWithSite                    Boolean?
+  wasInjuryWitnessed                             Boolean?
+  wasPerformingOtherDuties                       Boolean?
+  wasSurveillanceAvailable                       Boolean?
+  weightOrForce                                  String?
+  weightOrForceUnit                              String?
+  wereCoworkersPresent                           Boolean?
+  wereInterviewsDocumented                       Boolean?
+  werePhotosVideosTaken                          Boolean?
+  witnessNames                                   String?
+  witnessNamesList                               String?
+  workedForOtherLast6Months                      Boolean?
+  environmentalConditionsNA                      Boolean?
+  bodyPartsAffectedNA                            Boolean?
+  departmentWhereInjury                          String?
+  employeeEmail                                  String?
+  employeeGender                                 String?
+  employeeHomeAddress                            String?
+  employeeLanguage                               String?
+  employeeLastSSN4                               String?
+  employeePhone                                  String?
+  interpreterAssisting                           Boolean?
+  isLostTime                                     Boolean?
+  jobAssignmentAtInjury                          String?
+  needsInterpreter                               Boolean?
+  oshaCaseNumber                                 String?
+  ownedJobTitle                                  String?
+  wasEmployeeInstructedInSOP                     Boolean?
+  wasProperProcedureFollowed                     Boolean?
+  wasViolationOfSafetyRules                      Boolean?
+  isTeamIncident                                 Boolean               @default(false)
+  visibility                                     IncidentVisibility    @default(PRIVATE)
+  isPublic                                       Boolean               @default(false)
+  sharedWithUserIds                              String[]
+  contributingFactorTypes                        String[]
+  correctiveActionTypes                          String[]
+  incidentPattern                                String?
+  injuryDevelopmentType                          String?
+  taskRoutineType                                String?
+  ArchivedChatMessage                            ArchivedChatMessage[]
+  ChatMessage                                    ChatMessage[]
+  Comment                                        Comment[]
+  Evidence                                       Evidence[]
+  Area                                           Area?                 @relation(fields: [areaId], references: [id])
+  User_Incident_assignedToIdToUser               User?                 @relation("Incident_assignedToIdToUser", fields: [assignedToId], references: [id])
+  Category                                       Category              @relation(fields: [categoryId], references: [id])
+  User_Incident_createdByIdToUser                User                  @relation("Incident_createdByIdToUser", fields: [createdById], references: [id])
+  Department                                     Department?           @relation(fields: [departmentId], references: [id])
+  Facility                                       Facility              @relation(fields: [facilityId], references: [id])
+  User_Incident_investigationSubmittedByIdToUser User?                 @relation("Incident_investigationSubmittedByIdToUser", fields: [investigationSubmittedById], references: [id])
+  Line                                           Line?                 @relation(fields: [lineId], references: [id])
+  Organization                                   Organization          @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  Shift                                          Shift?                @relation(fields: [shiftId], references: [id])
+  IncidentParticipant                            IncidentParticipant[]
+  Notification                                   Notification[]
+  RCAAnalysis                                    RCAAnalysis[]
+
+  @@index([assignedToId])
+  @@index([createdById])
+  @@index([incidentNumber])
+  @@index([organizationId])
+  @@index([slaResolutionDeadline])
+  @@index([slaResponseDeadline])
+  @@index([status])
+  @@index([visibility])
+}
+
+model IncidentParticipant {
+  id                                       String           @id @default(uuid())
+  incidentId                               String
+  userId                                   String
+  role                                     ParticipantRole  @default(MEMBER)
+  addedById                                String
+  joinedAt                                 DateTime         @default(now())
+  leftAt                                   DateTime?
+  isActive                                 Boolean          @default(true)
+  canEdit                                  Boolean          @default(true)
+  canChat                                  Boolean          @default(true)
+  lastViewedAt                             DateTime?
+  createdAt                                DateTime         @default(now())
+  updatedAt DateTime @updatedAt
+  invitationStatus                         InvitationStatus @default(PENDING)
+  invitedAt                                DateTime         @default(now())
+  respondedAt                              DateTime?
+  User_IncidentParticipant_addedByIdToUser User             @relation("IncidentParticipant_addedByIdToUser", fields: [addedById], references: [id])
+  Incident                                 Incident         @relation(fields: [incidentId], references: [id], onDelete: Cascade)
+  User_IncidentParticipant_userIdToUser    User             @relation("IncidentParticipant_userIdToUser", fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([incidentId, userId])
+  @@index([incidentId])
+  @@index([invitationStatus])
+  @@index([isActive])
+  @@index([userId])
+}
+
+model KnowledgeArticle {
+  id                String       @id @default(uuid())
+  title             String
+  summary           String
+  sourceIncidentId  String       @unique
+  incidentType      IncidentType
+  categoryNames     String[]
+  rootCause         String
+  successfulActions String[]
+  keywords          String[]
+  viewCount         Int          @default(0)
+  helpfulCount      Int          @default(0)
+  createdAt         DateTime     @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([incidentType])
+  @@index([keywords])
+}
+
+model Line {
+  id          String      @id @default(uuid())
+  name        String
+  description String?
+  machineIds  String[]
+  areaId      String
+  createdAt   DateTime    @default(now())
+  updatedAt DateTime @updatedAt
+  lineNumber  String?
+  Incident    Incident[]
+  Area        Area        @relation(fields: [areaId], references: [id], onDelete: Cascade)
+  ShiftLine   ShiftLine[]
+
+  @@index([areaId])
+}
+
+model Notification {
+  id         String           @id @default(uuid())
+  type       NotificationType
+  title      String
+  message    String
+  isRead     Boolean          @default(false)
+  userId     String
+  incidentId String?
+  createdAt  DateTime         @default(now())
+  Incident   Incident?        @relation(fields: [incidentId], references: [id], onDelete: Cascade)
+
+  @@index([incidentId])
+  @@index([userId, isRead])
+}
+
+model Organization {
+  id                 String               @id @default(uuid())
+  name               String
+  region             Region
+  defaultLanguage    Language             @default(ENGLISH)
+  isActive           Boolean              @default(true)
+  regulatoryRuleset  String?
+  createdAt          DateTime             @default(now())
+  updatedAt DateTime @updatedAt
+  isPublic           Boolean              @default(false)
+  signupCode         String?              @unique
+  Category           Category[]
+  DropdownOption     DropdownOption[]
+  Facility           Facility[]
+  FieldConfiguration FieldConfiguration[]
+  Incident           Incident[]
+  SupportRequest     SupportRequest[]
+  User               User[]
+
+  @@index([name])
+  @@index([signupCode])
+}
+
+model PolicyDocument {
+  id              String           @id @default(uuid())
+  type            PolicyType       @unique
+  title           String
+  content         String
+  version         Int              @default(1)
+  isPublished     Boolean          @default(false)
+  publishedAt     DateTime?
+  updatedByUserId String?
+  createdAt       DateTime         @default(now())
+  updatedAt DateTime @updatedAt
+  User            User?            @relation(fields: [updatedByUserId], references: [id])
+  PolicyRevision  PolicyRevision[]
+
+  @@index([isPublished])
+  @@index([type])
+}
+
+model PolicyRevision {
+  id              String         @id @default(uuid())
+  policyId        String
+  version         Int
+  title           String
+  content         String
+  createdByUserId String?
+  createdAt       DateTime       @default(now())
+  User            User?          @relation(fields: [createdByUserId], references: [id])
+  PolicyDocument  PolicyDocument @relation(fields: [policyId], references: [id], onDelete: Cascade)
+
+  @@unique([policyId, version])
+  @@index([policyId])
+}
+
+model RCAAnalysis {
+  id                     String       @id @default(uuid())
+  method                 RCAMethod
+  status                 RCAStatus    @default(NOT_STARTED)
+  incidentId             String
+  aiRecommendedMethod    RCAMethod?
+  aiRecommendationReason String?
+  rootCauseStatement     String?
+  fiveWhysData           Json?
+  fishboneData           Json?
+  isValidated            Boolean      @default(false)
+  validatedAt            DateTime?
+  validatedById          String?
+  analystId              String
+  createdAt              DateTime     @default(now())
+  updatedAt DateTime @updatedAt
+  CAPAction              CAPAction[]
+  Comment                Comment[]
+  Evidence               Evidence[]
+  User                   User         @relation(fields: [analystId], references: [id])
+  Incident               Incident     @relation(fields: [incidentId], references: [id], onDelete: Cascade)
+  RCAVersion             RCAVersion[]
+
+  @@index([incidentId])
+  @@index([status])
+}
+
+model RCAVersion {
+  id            String      @id @default(uuid())
+  versionNumber Int
+  data          Json
+  changedBy     String
+  changeReason  String?
+  rcaAnalysisId String
+  createdAt     DateTime    @default(now())
+  RCAAnalysis   RCAAnalysis @relation(fields: [rcaAnalysisId], references: [id], onDelete: Cascade)
+
+  @@index([rcaAnalysisId])
+}
+
+model SLAConfiguration {
+  id                   String    @id @default(uuid())
+  organizationId       String
+  severity             Severity
+  responseTimeHours    Int
+  resolutionTimeHours  Int
+  escalationEnabled    Boolean   @default(true)
+  escalationAfterHours Int?
+  escalationToRole     UserRole?
+  isActive             Boolean   @default(true)
+  createdAt            DateTime  @default(now())
+  updatedAt            DateTime  @default(now())
+
+  @@unique([organizationId, severity])
+  @@index([organizationId])
+}
+
+model Session {
+  id           String   @id @default(uuid())
+  userId       String
+  token        String   @unique
+  refreshToken String   @unique
+  expiresAt    DateTime
+  deviceInfo   String?
+  ipAddress    String?
+  createdAt    DateTime @default(now())
+
+  @@index([token])
+  @@index([userId])
+}
+
+model Shift {
+  id         String      @id @default(uuid())
+  name       String
+  startTime  String
+  endTime    String
+  facilityId String?
+  createdAt  DateTime    @default(now())
+  updatedAt DateTime @updatedAt
+  lineId     String?
+  Incident   Incident[]
+  Facility   Facility?   @relation(fields: [facilityId], references: [id], onDelete: Cascade)
+  ShiftLine  ShiftLine[]
+
+  @@index([facilityId])
+  @@index([lineId])
+}
+
+model ShiftLine {
+  id        String   @id @default(uuid())
+  shiftId   String
+  lineId    String
+  createdAt DateTime @default(now())
+  Line      Line     @relation(fields: [lineId], references: [id], onDelete: Cascade)
+  Shift     Shift    @relation(fields: [shiftId], references: [id], onDelete: Cascade)
+
+  @@unique([shiftId, lineId])
+  @@index([lineId])
+  @@index([shiftId])
+}
+
+model SupportRequest {
+  id                                          String               @id @default(uuid())
+  submittedByUserId                           String?
+  organizationId                              String?
+  category                                    SupportCategory
+  description                                 String
+  status                                      SupportRequestStatus @default(OPEN)
+  internalNotes                               String?
+  createdAt                                   DateTime             @default(now())
+  updatedAt DateTime @updatedAt
+  resolvedAt                                  DateTime?
+  resolvedByUserId                            String?
+  subject                                     String
+  submittedByUserEmail                        String?
+  Organization                                Organization?        @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  User_SupportRequest_resolvedByUserIdToUser  User?                @relation("SupportRequest_resolvedByUserIdToUser", fields: [resolvedByUserId], references: [id])
+  User_SupportRequest_submittedByUserIdToUser User?                @relation("SupportRequest_submittedByUserIdToUser", fields: [submittedByUserId], references: [id], onDelete: Cascade)
+
+  @@index([category])
+  @@index([organizationId])
+  @@index([resolvedByUserId])
+  @@index([status])
+  @@index([submittedByUserId])
+}
+
+model User {
+  id                                                      String                @id @default(uuid())
+  email                                                   String                @unique
+  password                                                String?
+  workEmail                                               String?
+  firstName                                               String
+  lastName                                                String
+  role                                                    UserRole
+  isActive                                                Boolean               @default(true)
+  emailVerified                                           Boolean               @default(false)
+  mfaEnabled                                              Boolean               @default(false)
+  mfaSecret                                               String?
+  theme                                                   Theme                 @default(LIGHT)
+  language                                                Language              @default(ENGLISH)
+  defaultSiteId                                           String?
+  defaultLineId                                           String?
+  loginAttempts                                           Int                   @default(0)
+  lockedUntil                                             DateTime?
+  lastLoginAt                                             DateTime?
+  lastLoginIp                                             String?
+  passwordResetToken                                      String?
+  passwordResetExpires                                    DateTime?
+  organizationId                                          String?
+  createdAt                                               DateTime              @default(now())
+  updatedAt                                               DateTime              @updatedAt
+  firebaseUid                                             String?               @unique
+  isOnline                                                Boolean               @default(false)
+  lastSeenAt                                              DateTime?
+  socketId                                                String?
+  profilePicture                                          String?
+  AuditLog                                                AuditLog[]
+  CAPAction                                               CAPAction[]
+  ChatMessage                                             ChatMessage[]
+  ChatMessageReaction                                     ChatMessageReaction[]
+  ChatMessageTemplate                                     ChatMessageTemplate[]
+  Comment                                                 Comment[]
+  Incident_Incident_assignedToIdToUser                    Incident[]            @relation("Incident_assignedToIdToUser")
+  Incident_Incident_createdByIdToUser                     Incident[]            @relation("Incident_createdByIdToUser")
+  Incident_Incident_investigationSubmittedByIdToUser      Incident[]            @relation("Incident_investigationSubmittedByIdToUser")
+  IncidentParticipant_IncidentParticipant_addedByIdToUser IncidentParticipant[] @relation("IncidentParticipant_addedByIdToUser")
+  IncidentParticipant_IncidentParticipant_userIdToUser    IncidentParticipant[] @relation("IncidentParticipant_userIdToUser")
+  PolicyDocument                                          PolicyDocument[]
+  PolicyRevision                                          PolicyRevision[]
+  RCAAnalysis                                             RCAAnalysis[]
+  SupportRequest_SupportRequest_resolvedByUserIdToUser    SupportRequest[]      @relation("SupportRequest_resolvedByUserIdToUser")
+  SupportRequest_SupportRequest_submittedByUserIdToUser   SupportRequest[]      @relation("SupportRequest_submittedByUserIdToUser")
+  Organization                                            Organization?         @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+
+  @@index([email])
+  @@index([isOnline])
+  @@index([organizationId])
+  @@index([role])
+}
+
+enum ActionPriority {
+  LOW
+  MEDIUM
+  HIGH
+  CRITICAL
+}
+
+enum ActionStatus {
+  PLANNED
+  IN_PROGRESS
+  COMPLETED
+  VERIFIED
+  INEFFECTIVE
+}
+
+enum ActionType {
+  CORRECTIVE
+  PREVENTIVE
+}
+
+enum AuditAction {
+  CREATE
+  UPDATE
+  DELETE
+  LOGIN
+  LOGOUT
+  EXPORT
+  VIEW
+}
+
+enum ChatArchiveReason {
+  TEAM_TO_PRIVATE
+  TEAM_TO_PUBLIC
+  LAST_MEMBER_REMOVED
+}
+
+enum ChatMessageType {
+  TEXT
+  SYSTEM
+  FILE
+  IMAGE
+  EVIDENCE_LINK
+  RCA_LINK
+  ACTION_ITEM
+  STATUS_UPDATE
+  HANDOFF
+  DECISION
+  QUESTION
+  UPDATE
+  ANNOUNCEMENT
+}
+
+enum DropdownType {
+  INJURY_TYPE
+  TASK_FREQUENCY
+  UNSAFE_ACT_CONDITION
+  INJURY_DEVELOPMENT
+  SEVERITY_LEVEL
+  BODY_PART
+  ENVIRONMENTAL_CONDITION
+  CASE_CLASSIFICATION
+  INJURY_WORK_RELATION
+  TASK_ROUTINE_TYPE
+  WEIGHT_FORCE_UNIT
+  CONTRIBUTING_FACTOR_TYPE
+  POSITION_JOB_TYPE
+  INJURY_MECHANISM
+  CORRECTIVE_ACTION_TYPE
+  INCIDENT_PATTERN
+  EMPLOYEE_LANGUAGE
+  EMPLOYEE_GENDER
+  RESPONSIBLE_PARTY
+  PREVENTIVE_CONTROL_TYPE
+}
+
+enum EvidenceType {
+  PHOTO
+  VIDEO
+  DOCUMENT
+  VOICE_RECORDING
+}
+
+enum IncidentStatus {
+  DRAFT
+  SUBMITTED
+  IN_TRIAGE
+  ASSIGNED
+  IN_PROGRESS
+  IN_REVIEW
+  CLOSED
+  REJECTED
+}
+
+enum IncidentType {
+  FOOD_SAFETY
+  MACHINE_EQUIPMENT
+  WORKPLACE_SAFETY
+}
+
+enum IncidentVisibility {
+  PRIVATE
+  TEAM
+  PUBLIC
+}
+
+enum InvitationStatus {
+  PENDING
+  ACCEPTED
+  DECLINED
+}
+
+enum Language {
+  ENGLISH
+  SPANISH
+  FRENCH
+  GERMAN
+  PORTUGUESE
+  ITALIAN
+  CHINESE
+  JAPANESE
+  KOREAN
+  ARABIC
+  HINDI
+  RUSSIAN
+  DUTCH
+  POLISH
+  TURKISH
+  VIETNAMESE
+  THAI
+  INDONESIAN
+  MALAY
+  FILIPINO
+}
+
+enum NotificationType {
+  INCIDENT_ASSIGNED
+  INCIDENT_STATUS_CHANGED
+  RCA_COMPLETED
+  CAPA_DUE_SOON
+  CAPA_OVERDUE
+  COMMENT_ADDED
+  INCIDENT_SUBMITTED
+  INCIDENT_ESCALATED
+  SLA_RESPONSE_WARNING
+  SLA_RESPONSE_BREACHED
+  SLA_RESOLUTION_WARNING
+  SLA_RESOLUTION_BREACHED
+  INCIDENT_UPDATED
+}
+
+enum ParticipantRole {
+  OWNER
+  LEAD
+  MEMBER
+  OBSERVER
+}
+
+enum PolicyType {
+  PRIVACY_POLICY
+  TERMS_OF_SERVICE
+  COOKIE_POLICY
+  SECURITY
+}
+
+enum RCAMethod {
+  FIVE_WHYS
+  FISHBONE
+  FMEA
+  FAULT_TREE
+}
+
+enum RCAStatus {
+  NOT_STARTED
+  IN_PROGRESS
+  IN_REVIEW
+  VALIDATED
+  COMPLETED
+}
+
+enum Region {
+  USA
+  MEXICO
+  CANADA
+}
+
+enum Severity {
+  LOW
+  MEDIUM
+  HIGH
+  CRITICAL
+}
+
+enum SupportCategory {
+  GENERAL_INQUIRY
+  TECHNICAL_ISSUE
+  BILLING_QUESTION
+  FEATURE_REQUEST
+  BUG_REPORT
+  ACCOUNT_ASSISTANCE
+  OTHER
+}
+
+enum SupportRequestStatus {
+  OPEN
+  IN_PROGRESS
+  RESOLVED
+  CLOSED
+}
+
+enum Theme {
+  LIGHT
+  DARK
+  SYSTEM
+}
+
+enum UserRole {
+  OPERATOR
+  SUPERVISOR
+  QA_FOOD_SAFETY
+  MAINTENANCE_ENGINEERING
+  CI_MANAGER
+  ADMIN
+  SYSTEM_ADMIN
+  SAFETY_SECURITY_MANAGER
+}
