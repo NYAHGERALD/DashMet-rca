@@ -2066,54 +2066,6 @@ function createClosingSlide(pptx: PptxGenJS, incident: any): void {
 }
 
 // ============================================================================
-// Helper Functions
-// ============================================================================
-
-function formatIncidentType(type: string): string {
-  const types: Record<string, string> = {
-    FOOD_SAFETY: 'Food Safety',
-    WORKPLACE_SAFETY: 'Workplace Safety',
-    MACHINE_EQUIPMENT: 'Machine & Equipment',
-  };
-  return types[type] || type?.replace('_', ' ') || 'Unknown';
-}
-
-function formatDate(date: string | Date | null | undefined): string {
-  if (!date) return 'N/A';
-  try {
-    return new Date(date).toLocaleDateString('en-US', {
-      year: 'numeric',
-      month: 'short',
-      day: 'numeric',
-    });
-  } catch {
-    return 'N/A';
-  }
-}
-
-function getSeverityColor(severity: string): string {
-  const colors: Record<string, string> = {
-    CRITICAL: COLORS.danger,
-    HIGH: 'dc2626',
-    MEDIUM: COLORS.warning,
-    LOW: COLORS.accent,
-  };
-  return colors[severity] || COLORS.text;
-}
-
-function getStatusColor(status: string): string {
-  const colors: Record<string, string> = {
-    PLANNED: COLORS.muted,
-    IN_PROGRESS: COLORS.secondary,
-    COMPLETED: COLORS.accent,
-    VERIFIED: '7c3aed',
-    INEFFECTIVE: COLORS.danger,
-    CLOSED: COLORS.dark,
-  };
-  return colors[status] || COLORS.text;
-}
-
-// ============================================================================
 // Main Export Functions
 // ============================================================================
 
