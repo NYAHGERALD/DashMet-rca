@@ -96,6 +96,7 @@ interface AIRecommendation {
   recommendedMethod: string;
   reason: string;
   confidence: number;
+  alternativeReason?: string;
   factors: {
     complexity: string;
     recurrence: boolean;
