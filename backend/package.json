@@ -5,7 +5,7 @@
   "main": "dist/server.js",
   "scripts": {
     "dev": "nodemon --exec \"ts-node --transpile-only\" src/server.ts",
-    "build": "tsc",
+    "build": "npx esbuild src/server.ts --bundle --platform=node --outdir=dist --format=cjs --external:@prisma/client --external:prisma",
     "start": "node dist/server.js",
     "test": "jest",
     "test:watch": "jest --watch",
