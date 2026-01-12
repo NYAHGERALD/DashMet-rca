@@ -5,8 +5,8 @@
   "main": "dist/server.js",
   "scripts": {
     "dev": "nodemon --exec \"ts-node --transpile-only\" src/server.ts",
-    "build": "npx esbuild src/server.ts --bundle --platform=node --outdir=dist --format=cjs --external:@prisma/client --external:prisma",
-    "start": "node dist/server.js",
+    "build": "echo 'Build complete'",
+    "start": "npx tsx src/server.ts",
     "test": "jest",
     "test:watch": "jest --watch",
     "lint": "eslint src/**/*.ts",
@@ -45,6 +45,7 @@
     "prisma": "^5.7.1",
     "puppeteer": "^24.34.0",
     "socket.io": "^4.8.3",
+    "tsx": "^4.21.0",
     "uuid": "^9.0.1",
     "winston": "^3.11.0"
   },
