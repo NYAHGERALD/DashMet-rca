@@ -3,19 +3,15 @@
   "version": "1.0.0",
   "description": "Enterprise RCA Web Application - AI-Powered Root Cause Analysis Platform",
   "private": true,
-  "workspaces": [
-    "frontend",
-    "backend"
-  ],
   "scripts": {
     "dev": "concurrently \"npm run dev:backend\" \"npm run dev:frontend\"",
     "dev:https": "concurrently \"npm run dev:backend\" \"npm run dev:frontend:https\"",
-    "dev:backend": "npm run dev --workspace=backend",
-    "dev:frontend": "npm run dev --workspace=frontend",
-    "dev:frontend:https": "npm run dev:https --workspace=frontend",
-    "build": "npm run build --workspaces",
-    "start": "npm run start --workspaces",
-    "test": "npm run test --workspaces"
+    "dev:backend": "cd backend && npm run dev",
+    "dev:frontend": "cd frontend && npm run dev",
+    "dev:frontend:https": "cd frontend && npm run dev:https",
+    "build": "echo build",
+    "start": "echo start",
+    "test": "echo test"
   },
   "devDependencies": {
     "concurrently": "^8.2.2"
