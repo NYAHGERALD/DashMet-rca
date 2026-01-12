@@ -1,16 +1,32 @@
+// Immediate startup logging
+console.log('🚀 Server starting...');
+console.log('📁 Current directory:', process.cwd());
+console.log('🔧 Node version:', process.version);
+
 import express, { Application } from 'express';
 import cors from 'cors';
 import helmet from 'helmet';
 import dotenv from 'dotenv';
 import path from 'path';
 import { createServer } from 'http';
+
+console.log('✅ Core imports loaded');
+
+dotenv.config();
+console.log('✅ Environment loaded');
+console.log('🔑 DATABASE_URL exists:', !!process.env.DATABASE_URL);
+console.log('🔑 JWT_SECRET exists:', !!process.env.JWT_SECRET);
+
 import { errorHandler } from './middleware/errorHandler';
 import { requestLogger } from './middleware/requestLogger';
 import { rateLimiter } from './middleware/rateLimiter';
-import routes from './routes';
-import { websocketService } from './services/websocketService';
+console.log('✅ Middleware loaded');
 
-dotenv.config();
+import routes from './routes';
+console.log('✅ Routes loaded');
+
+import { websocketService } from './services/websocketService';
+console.log('✅ WebSocket service loaded');
 
 // Add comprehensive error handling
 process.on('uncaughtException', (error) => {
@@ -26,6 +42,7 @@ process.on('unhandledRejection', (reason, promise) => {
 
 const app: Application = express();
 const PORT = parseInt(process.env.PORT || '5001', 10);
+console.log('✅ Express app created, PORT:', PORT);
 
 // ==================== PHASE 0.1: SECURITY & MIDDLEWARE ====================
 
