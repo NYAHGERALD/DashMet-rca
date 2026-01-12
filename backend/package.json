@@ -18,6 +18,7 @@
   "dependencies": {
     "@aws-sdk/client-s3": "^3.948.0",
     "@aws-sdk/s3-request-presigner": "^3.948.0",
+    "@google-cloud/storage": "^7.7.0",
     "@prisma/client": "^5.22.0",
     "axios": "^1.6.2",
     "bcryptjs": "^2.4.3",
