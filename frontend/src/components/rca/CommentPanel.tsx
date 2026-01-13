@@ -1,6 +1,7 @@
 'use client';
 
 import { useState } from 'react';
+import { formatRelativeDateTime } from '@/lib/dateUtils';
 
 interface Comment {
   id: string;
@@ -35,16 +36,8 @@ export default function CommentPanel({ comments, onAddComment }: CommentPanelPro
     }
   };
 
-  const formatDate = (dateString: string) => {
-    const date = new Date(dateString);
-    const now = new Date();
-    const diffInMinutes = (now.getTime() - date.getTime()) / (1000 * 60);
-
-    if (diffInMinutes < 1) return 'Just now';
-    if (diffInMinutes < 60) return `${Math.floor(diffInMinutes)}m ago`;
-    if (diffInMinutes < 1440) return `${Math.floor(diffInMinutes / 60)}h ago`;
-    return date.toLocaleDateString([], { month: 'short', day: 'numeric' });
-  };
+  // Use centralized date formatting with proper timezone handling
+  const formatDate = (dateString: string) => formatRelativeDateTime(dateString);
 
   const getInitials = (firstName: string, lastName: string) => {
     return `${firstName.charAt(0)}${lastName.charAt(0)}`.toUpperCase();

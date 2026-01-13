@@ -1,8 +1,22 @@
 'use client';
 
 import { useState, useRef, useCallback, useEffect } from 'react';
-import ReactCrop, { Crop, PixelCrop, centerCrop, makeAspectCrop } from 'react-image-crop';
-import 'react-image-crop/dist/ReactCrop.css';
+import dynamic from 'next/dynamic';
+import type { Crop, PixelCrop } from 'react-image-crop';
+import { centerCrop, makeAspectCrop } from 'react-image-crop';
+
+// Dynamically import ReactCrop with SSR disabled to avoid DOMMatrix error
+const ReactCrop = dynamic(
+  () => import('react-image-crop').then((mod) => {
+    // Import CSS when the component loads on client side
+    require('react-image-crop/dist/ReactCrop.css');
+    return mod.default;
+  }),
+  { 
+    ssr: false,
+    loading: () => <div className="w-full h-64 bg-gray-200 dark:bg-gray-700 rounded-lg animate-pulse flex items-center justify-center">Loading cropper...</div>
+  }
+);
 
 interface ProfilePictureCropperProps {
   onImageCropped: (croppedImageBlob: Blob) => void;

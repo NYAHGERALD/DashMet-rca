@@ -4,6 +4,7 @@ import { useState, useEffect } from 'react';
 import ProtectedRoute from '@/components/auth/ProtectedRoute';
 import { useAuth } from '@/components/providers/AuthProvider';
 import api from '@/lib/api';
+import { formatDate } from '@/lib/dateUtils';
 import Link from 'next/link';
 import Image from 'next/image';
 
@@ -359,7 +360,7 @@ function SystemAdminContent() {
                         )}
                       </td>
                       <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500 dark:text-gray-400">
-                        {new Date(code.createdAt).toLocaleDateString()}
+                        {formatDate(code.createdAt)}
                       </td>
                       <td className="px-6 py-4 whitespace-nowrap text-sm">
                         {code.role !== 'SYSTEM_ADMIN' && (
@@ -422,7 +423,7 @@ function SystemAdminContent() {
                       <span className="text-sm text-gray-900 dark:text-white">{org._count.Incident}</span>
                     </td>
                     <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500 dark:text-gray-400">
-                      {new Date(org.createdAt).toLocaleDateString()}
+                      {formatDate(org.createdAt)}
                     </td>
                   </tr>
                 ))}

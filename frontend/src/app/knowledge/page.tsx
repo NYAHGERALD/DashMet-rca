@@ -1,6 +1,7 @@
 'use client';
 
 import React, { useState, useEffect, useCallback } from 'react';
+import { formatDate } from '@/lib/dateUtils';
 import Link from 'next/link';
 import Image from 'next/image';
 import api from '@/lib/api';
@@ -405,14 +406,6 @@ function KnowledgePageContent() {
       }
     };
     return defaults[step] || defaults.problem_statement;
-  };
-
-  const formatDate = (dateString: string) => {
-    return new Date(dateString).toLocaleDateString('en-US', {
-      year: 'numeric',
-      month: 'short',
-      day: 'numeric'
-    });
   };
 
   // ============================================================================

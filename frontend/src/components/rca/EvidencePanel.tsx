@@ -1,5 +1,7 @@
 'use client';
 
+import { formatDate } from '@/lib/dateUtils';
+
 interface Evidence {
   id: string;
   type: string;
@@ -99,7 +101,7 @@ export default function EvidencePanel({ incidentEvidence, rcaEvidence }: Evidenc
                 {evidence.fileName}
               </p>
               <p className="text-xs text-gray-500 dark:text-gray-400">
-                {formatFileSize(evidence.fileSize)} • {new Date(evidence.uploadedAt).toLocaleDateString()}
+                {formatFileSize(evidence.fileSize)} • {formatDate(evidence.uploadedAt)}
               </p>
               {evidence.transcription && (
                 <p className="text-xs text-gray-600 dark:text-gray-300 mt-1 line-clamp-2">

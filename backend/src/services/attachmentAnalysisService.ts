@@ -4,8 +4,16 @@
 
 import OpenAI from 'openai';
 import axios from 'axios';
-// eslint-disable-next-line @typescript-eslint/no-require-imports
-const pdfParse = require('pdf-parse');
+
+// Lazy load pdf-parse to avoid DOMMatrix error on import
+let pdfParse: any = null;
+async function getPdfParser() {
+  if (!pdfParse) {
+    // Dynamic import to avoid loading pdfjs-dist at module load time
+    pdfParse = require('pdf-parse');
+  }
+  return pdfParse;
+}
 
 // Lazy initialization of OpenAI client
 function getOpenAIClient(): OpenAI | null {
@@ -210,8 +218,9 @@ async function analyzePDF(
       throw new Error(`Unsupported protocol for PDF: ${pdfUrl.substring(0, 30)}...`);
     }
     
-    // Extract text from PDF
-    const pdfData = await pdfParse(pdfBuffer);
+    // Extract text from PDF using lazy-loaded parser
+    const parser = await getPdfParser();
+    const pdfData = await parser(pdfBuffer);
     const extractedText = pdfData.text?.substring(0, 10000) || ''; // Limit to 10k chars
 
     if (!extractedText || extractedText.trim().length < 50) {

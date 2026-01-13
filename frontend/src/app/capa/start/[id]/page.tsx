@@ -7,6 +7,7 @@ import Image from 'next/image';
 import { useAuth } from '@/components/providers/AuthProvider';
 import ProtectedRoute from '@/components/auth/ProtectedRoute';
 import api from '@/lib/api';
+import { formatDate } from '@/lib/dateUtils';
 
 // Types for structured implementation steps
 interface ImplementationStep {
@@ -537,7 +538,7 @@ function StartActionContent() {
                     <div>
                       <p className="text-xs sm:text-sm text-gray-500 dark:text-gray-400">Due Date</p>
                       <p className="text-gray-900 dark:text-white text-sm">
-                        {new Date(action.dueDate).toLocaleDateString()}
+                        {formatDate(action.dueDate)}
                       </p>
                     </div>
                   </div>

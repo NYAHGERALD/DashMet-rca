@@ -1129,6 +1129,22 @@ export default function IncidentChatPanel({
 
   const isUserOnline = (userId: string) => onlineUsers.has(userId);
 
+  // Generate a consistent color for each user based on their ID
+  const getUserColor = useCallback((userId: string) => {
+    const colors = [
+      { bg: 'bg-purple-500', text: 'text-purple-600 dark:text-purple-400', light: 'bg-purple-100 dark:bg-purple-900/30' },
+      { bg: 'bg-green-500', text: 'text-green-600 dark:text-green-400', light: 'bg-green-100 dark:bg-green-900/30' },
+      { bg: 'bg-orange-500', text: 'text-orange-600 dark:text-orange-400', light: 'bg-orange-100 dark:bg-orange-900/30' },
+      { bg: 'bg-pink-500', text: 'text-pink-600 dark:text-pink-400', light: 'bg-pink-100 dark:bg-pink-900/30' },
+      { bg: 'bg-teal-500', text: 'text-teal-600 dark:text-teal-400', light: 'bg-teal-100 dark:bg-teal-900/30' },
+      { bg: 'bg-indigo-500', text: 'text-indigo-600 dark:text-indigo-400', light: 'bg-indigo-100 dark:bg-indigo-900/30' },
+      { bg: 'bg-red-500', text: 'text-red-600 dark:text-red-400', light: 'bg-red-100 dark:bg-red-900/30' },
+      { bg: 'bg-cyan-500', text: 'text-cyan-600 dark:text-cyan-400', light: 'bg-cyan-100 dark:bg-cyan-900/30' },
+    ];
+    const hash = userId.split('').reduce((acc, char) => acc + char.charCodeAt(0), 0);
+    return colors[hash % colors.length];
+  }, []);
+
   // Get unique users from messages for filter dropdown
   const uniqueUsers = React.useMemo(() => {
     const userMap = new Map<string, { id: string; firstName: string; lastName: string }>();
@@ -1551,7 +1567,7 @@ export default function IncidentChatPanel({
                             ) : (
                               <div
                                 className={`w-8 h-8 rounded-full flex items-center justify-center text-xs font-semibold text-white ${
-                                  isOwn ? 'bg-blue-600' : 'bg-emerald-500'
+                                  isOwn ? 'bg-blue-600' : getUserColor(message.userId).bg
                                 } ring-2 ring-white dark:ring-slate-800 shadow-sm`}
                               >
                                 {`${message.user.firstName?.[0] || ''}${message.user.lastName?.[0] || ''}`.toUpperCase()}
@@ -1561,7 +1577,7 @@ export default function IncidentChatPanel({
                           {/* Deleted evidence message */}
                           <div className={`max-w-[75%] min-w-0`}>
                             <div className={`flex items-center gap-1.5 mb-0.5 ${isOwn ? 'justify-end' : 'justify-start'}`}>
-                              <span className={`text-xs font-semibold ${isOwn ? 'text-blue-600 dark:text-blue-400' : 'text-emerald-600 dark:text-emerald-400'}`}>
+                              <span className={`text-xs font-semibold ${isOwn ? 'text-blue-600 dark:text-blue-400' : getUserColor(message.userId).text}`}>
                                 {isOwn ? 'You' : `${message.user.firstName} ${message.user.lastName}`}
                               </span>
                               <span className="text-[10px] text-gray-400 dark:text-gray-500">
@@ -1624,7 +1640,7 @@ export default function IncidentChatPanel({
                         ) : (
                           <div
                             className={`w-8 h-8 rounded-full flex items-center justify-center text-xs font-semibold text-white ${
-                              isOwn ? 'bg-blue-600' : 'bg-emerald-500'
+                              isOwn ? 'bg-blue-600' : getUserColor(message.userId).bg
                             } ring-2 ring-white dark:ring-slate-800 shadow-sm`}
                           >
                             {`${message.user.firstName?.[0] || ''}${message.user.lastName?.[0] || ''}`.toUpperCase()}
@@ -1636,7 +1652,7 @@ export default function IncidentChatPanel({
                       <div className={`max-w-[75%] min-w-0`}>
                         {/* Sender name */}
                         <div className={`flex items-center gap-1.5 mb-0.5 ${isOwn ? 'justify-end' : 'justify-start'}`}>
-                          <span className={`text-xs font-semibold ${isOwn ? 'text-blue-600 dark:text-blue-400' : 'text-emerald-600 dark:text-emerald-400'}`}>
+                          <span className={`text-xs font-semibold ${isOwn ? 'text-blue-600 dark:text-blue-400' : getUserColor(message.userId).text}`}>
                             {isOwn ? 'You' : `${message.user.firstName} ${message.user.lastName}`}
                           </span>
                           <span className="text-[10px] text-gray-400 dark:text-gray-500">
@@ -1835,7 +1851,7 @@ export default function IncidentChatPanel({
                           ) : (
                             <div
                               className={`w-8 h-8 rounded-full flex items-center justify-center text-xs font-semibold text-white ${
-                                isOwn ? 'bg-blue-600' : 'bg-emerald-500'
+                                isOwn ? 'bg-blue-600' : getUserColor(message.userId).bg
                               } ring-2 ring-white dark:ring-slate-800 shadow-sm`}
                             >
                               {`${message.user.firstName?.[0] || ''}${message.user.lastName?.[0] || ''}`.toUpperCase()}
@@ -1847,7 +1863,7 @@ export default function IncidentChatPanel({
                         <div className={`max-w-[75%] min-w-0`}>
                           {/* Sender name */}
                           <div className={`flex items-center gap-1.5 mb-0.5 ${isOwn ? 'justify-end' : 'justify-start'}`}>
-                            <span className={`text-xs font-semibold ${isOwn ? 'text-blue-600 dark:text-blue-400' : 'text-emerald-600 dark:text-emerald-400'}`}>
+                            <span className={`text-xs font-semibold ${isOwn ? 'text-blue-600 dark:text-blue-400' : getUserColor(message.userId).text}`}>
                               {isOwn ? 'You' : `${message.user.firstName} ${message.user.lastName}`}
                             </span>
                             <span className="text-[10px] text-gray-400 dark:text-gray-500">
@@ -1961,7 +1977,7 @@ export default function IncidentChatPanel({
                           ) : (
                             <div
                               className={`w-8 h-8 rounded-full flex items-center justify-center text-xs font-semibold text-white ${
-                                isOwn ? 'bg-blue-600' : 'bg-emerald-500'
+                                isOwn ? 'bg-blue-600' : getUserColor(message.userId).bg
                               } ring-2 ring-white dark:ring-slate-800 shadow-sm opacity-50`}
                             >
                               {`${message.user.firstName?.[0] || ''}${message.user.lastName?.[0] || ''}`.toUpperCase()}
@@ -1971,7 +1987,7 @@ export default function IncidentChatPanel({
                         {/* Deleted message bubble */}
                         <div className={`max-w-[75%] min-w-0`}>
                           <div className={`flex items-center gap-1.5 mb-0.5 ${isOwn ? 'justify-end' : 'justify-start'}`}>
-                            <span className={`text-xs font-semibold opacity-50 ${isOwn ? 'text-blue-600 dark:text-blue-400' : 'text-emerald-600 dark:text-emerald-400'}`}>
+                            <span className={`text-xs font-semibold opacity-50 ${isOwn ? 'text-blue-600 dark:text-blue-400' : getUserColor(message.userId).text}`}>
                               {isOwn ? 'You' : `${message.user.firstName} ${message.user.lastName}`}
                             </span>
                           </div>
@@ -2020,7 +2036,7 @@ export default function IncidentChatPanel({
                         ) : (
                           <div
                             className={`w-8 h-8 rounded-full flex items-center justify-center text-xs font-semibold text-white ${
-                              isOwn ? 'bg-blue-600' : 'bg-emerald-500'
+                              isOwn ? 'bg-blue-600' : getUserColor(message.userId).bg
                             } ring-2 ring-white dark:ring-slate-800 shadow-sm`}
                           >
                             {`${message.user.firstName?.[0] || ''}${message.user.lastName?.[0] || ''}`.toUpperCase()}
@@ -2032,7 +2048,7 @@ export default function IncidentChatPanel({
                       <div className={`max-w-[75%] min-w-0`}>
                         {/* Sender name */}
                         <div className={`flex items-center gap-1.5 mb-0.5 ${isOwn ? 'justify-end' : 'justify-start'}`}>
-                          <span className={`text-xs font-semibold ${isOwn ? 'text-blue-600 dark:text-blue-400' : 'text-emerald-600 dark:text-emerald-400'}`}>
+                          <span className={`text-xs font-semibold ${isOwn ? 'text-blue-600 dark:text-blue-400' : getUserColor(message.userId).text}`}>
                             {isOwn ? 'You' : `${message.user.firstName} ${message.user.lastName}`}
                           </span>
                           <span className="text-[10px] text-gray-400 dark:text-gray-500">
@@ -2257,22 +2273,6 @@ export default function IncidentChatPanel({
                   </React.Fragment>
                   );
                 }
-
-                // Generate a consistent color for each user based on their ID
-                const getUserColor = (userId: string) => {
-                  const colors = [
-                    { bg: 'bg-purple-500', text: 'text-purple-500', light: 'bg-purple-100 dark:bg-purple-900/30' },
-                    { bg: 'bg-green-500', text: 'text-green-600', light: 'bg-green-100 dark:bg-green-900/30' },
-                    { bg: 'bg-orange-500', text: 'text-orange-600', light: 'bg-orange-100 dark:bg-orange-900/30' },
-                    { bg: 'bg-pink-500', text: 'text-pink-600', light: 'bg-pink-100 dark:bg-pink-900/30' },
-                    { bg: 'bg-teal-500', text: 'text-teal-600', light: 'bg-teal-100 dark:bg-teal-900/30' },
-                    { bg: 'bg-indigo-500', text: 'text-indigo-600', light: 'bg-indigo-100 dark:bg-indigo-900/30' },
-                    { bg: 'bg-red-500', text: 'text-red-600', light: 'bg-red-100 dark:bg-red-900/30' },
-                    { bg: 'bg-cyan-500', text: 'text-cyan-600', light: 'bg-cyan-100 dark:bg-cyan-900/30' },
-                  ];
-                  const hash = userId.split('').reduce((acc, char) => acc + char.charCodeAt(0), 0);
-                  return colors[hash % colors.length];
-                };
 
                 const userColor = isOwn ? null : getUserColor(message.userId);
                 const userInitials = `${message.user.firstName?.[0] || ''}${message.user.lastName?.[0] || ''}`.toUpperCase();

@@ -7,6 +7,7 @@ import Image from 'next/image';
 import { useAuth } from '@/components/providers/AuthProvider';
 import ProtectedRoute from '@/components/auth/ProtectedRoute';
 import api from '@/lib/api';
+import { formatDate } from '@/lib/dateUtils';
 import dynamic from 'next/dynamic';
 
 // Dynamically import RichTextEditor to avoid SSR issues
@@ -593,7 +594,7 @@ function CompleteActionContent() {
                     <div>
                       <p className="text-xs sm:text-sm text-gray-500 dark:text-gray-400">Started</p>
                       <p className="text-sm sm:text-base text-gray-900 dark:text-white">
-                        {new Date(action.startedAt).toLocaleDateString()}
+                        {formatDate(action.startedAt)}
                       </p>
                     </div>
                   )}

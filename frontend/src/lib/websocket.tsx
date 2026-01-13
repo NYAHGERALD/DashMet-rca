@@ -121,9 +121,15 @@ export function WebSocketProvider({ children }: { children: React.ReactNode }) {
     connectionAttempted.current = true;
 
     // Use WS_URL if available, otherwise derive from API_URL
-    const backendUrl = process.env.NEXT_PUBLIC_WS_URL || 
-      process.env.NEXT_PUBLIC_API_URL?.replace('/api', '').replace('https://', 'wss://').replace('http://', 'ws://') || 
-      'http://localhost:5002';
+    // For production: API_URL might be https://api.dashmet.com/api, we need https://api.dashmet.com for WebSocket
+    let backendUrl = process.env.NEXT_PUBLIC_WS_URL;
+    
+    if (!backendUrl && process.env.NEXT_PUBLIC_API_URL) {
+      // Remove /api suffix and keep the protocol (Socket.IO handles ws/wss automatically)
+      backendUrl = process.env.NEXT_PUBLIC_API_URL.replace(/\/api\/?$/, '');
+    }
+    
+    backendUrl = backendUrl || 'http://localhost:5002';
     
     console.log('🔌 Connecting WebSocket to:', backendUrl);
     

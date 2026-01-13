@@ -19,6 +19,7 @@ import {
   Line,
 } from 'recharts';
 import { useAuth } from '@/components/providers/AuthProvider';
+import { formatDate } from '@/lib/dateUtils';
 
 interface DashboardStats {
   totalIncidents: number;
@@ -48,12 +49,11 @@ const SEVERITY_COLORS = {
   LOW: '#22c55e',
 };
 
-// Format date in browser's timezone
+// Format date in browser's timezone using centralized utility
 const formatDateLocal = (isoDate: string | undefined, fallbackName: string): string => {
   if (!isoDate) return fallbackName;
   try {
-    const date = new Date(isoDate);
-    return date.toLocaleDateString(undefined, { month: 'short', day: 'numeric' });
+    return formatDate(isoDate, { month: 'short', day: 'numeric' });
   } catch {
     return fallbackName;
   }

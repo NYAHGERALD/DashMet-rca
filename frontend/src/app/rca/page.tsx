@@ -5,6 +5,7 @@ import { useRouter } from 'next/navigation';
 import Link from 'next/link';
 import Image from 'next/image';
 import api from '@/lib/api';
+import { formatDate } from '@/lib/dateUtils';
 
 interface RCAAnalysis {
   id: string;
@@ -296,7 +297,7 @@ export default function RCAListPage() {
                       {rca.analyst.firstName} {rca.analyst.lastName}
                     </td>
                     <td className="px-6 py-4 text-sm text-gray-500 dark:text-gray-400">
-                      {new Date(rca.createdAt).toLocaleDateString()}
+                      {formatDate(rca.createdAt)}
                     </td>
                     <td className="px-6 py-4 text-right">
                       <Link

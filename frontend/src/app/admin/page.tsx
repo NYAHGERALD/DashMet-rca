@@ -5,6 +5,7 @@ import { useRouter } from 'next/navigation';
 import ProtectedRoute from '@/components/auth/ProtectedRoute';
 import { useAuth } from '@/components/providers/AuthProvider';
 import api from '@/lib/api';
+import { formatDate } from '@/lib/dateUtils';
 import Link from 'next/link';
 import Image from 'next/image';
 
@@ -227,7 +228,7 @@ function AdminContent() {
                       </span>
                     </td>
                     <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500 dark:text-gray-400">
-                      {u.lastLoginAt ? new Date(u.lastLoginAt).toLocaleDateString() : 'Never'}
+                      {u.lastLoginAt ? formatDate(u.lastLoginAt) : 'Never'}
                     </td>
                     <td className="px-6 py-4 whitespace-nowrap text-sm">
                       {u.id !== user?.id && (

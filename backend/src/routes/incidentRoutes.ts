@@ -2242,6 +2242,25 @@ router.post('/generate-summary-with-attachments', async (req: Request, res: Resp
     // Import attachment analysis service
     const { analyzeAllAttachments, generateEnhancedSummaryWithAttachments } = await import('../services/attachmentAnalysisService');
 
+    // Check if OpenAI is configured
+    if (!process.env.OPENAI_API_KEY) {
+      console.warn('⚠️ OPENAI_API_KEY not configured - skipping attachment analysis');
+      return res.json({
+        success: true,
+        data: {
+          aiSummary: 'AI analysis unavailable - OpenAI API key not configured.',
+          suggestedSeverity: severity || 'MEDIUM',
+          evidenceSummary: null,
+          keyFindings: [],
+          investigationGuidance: [],
+          attachmentAnalysis: null,
+          aiError: true,
+          errorMessage: 'OpenAI API key not configured',
+        },
+        message: 'AI analysis unavailable - please configure OPENAI_API_KEY',
+      });
+    }
+
     // Analyze all attachments if provided
     let attachmentAnalysis = null;
     if (attachments && Array.isArray(attachments) && attachments.length > 0) {

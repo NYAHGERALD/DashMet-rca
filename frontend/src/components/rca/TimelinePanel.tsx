@@ -1,6 +1,7 @@
 'use client';
 
 import { useState, useEffect } from 'react';
+import { formatRelativeDateTime } from '@/lib/dateUtils';
 import api from '@/lib/api';
 
 interface TimelineEvent {
@@ -101,20 +102,8 @@ export default function TimelinePanel({ incidentId }: TimelinePanelProps) {
     }
   };
 
-  const formatDate = (dateString: string) => {
-    const date = new Date(dateString);
-    const now = new Date();
-    const diffInHours = (now.getTime() - date.getTime()) / (1000 * 60 * 60);
-
-    if (diffInHours < 24) {
-      return date.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
-    }
-    if (diffInHours < 48) {
-      return 'Yesterday ' + date.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
-    }
-    return date.toLocaleDateString([], { month: 'short', day: 'numeric' }) +
-      ' ' + date.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
-  };
+  // Use centralized date formatting with proper timezone handling
+  const formatDate = (dateString: string) => formatRelativeDateTime(dateString);
 
   if (loading) {
     return (

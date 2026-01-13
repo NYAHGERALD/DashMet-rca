@@ -6,6 +6,7 @@ import Image from 'next/image';
 import { auth } from '@/lib/firebase';
 import { onAuthStateChanged, User } from 'firebase/auth';
 import Link from 'next/link';
+import { formatDate } from '@/lib/dateUtils';
 
 interface TrendData {
   date: string;
@@ -283,7 +284,7 @@ export default function AnalyticsPage() {
                 style={{ height: `${(item.count / maxCount) * chartHeight}px` }}
               />
               <span className="text-xs text-gray-500 mt-1 transform -rotate-45 origin-top-left">
-                {new Date(item.date).toLocaleDateString('en-US', { month: 'short', day: 'numeric' })}
+                {formatDate(item.date, { month: 'short', day: 'numeric' })}
               </span>
             </div>
           ))}
@@ -626,7 +627,7 @@ export default function AnalyticsPage() {
                             <div>
                               <span className="text-gray-500">Predicted Next:</span>
                               <span className="ml-2 font-medium text-red-600">
-                                {new Date(pattern.predictedNextOccurrence).toLocaleDateString()}
+                                {formatDate(pattern.predictedNextOccurrence)}
                               </span>
                             </div>
                           </div>

@@ -1,11 +1,12 @@
 import type { ReactNode } from 'react';
 import { ClosePolicyButton } from './ClosePolicyButton';
+import { formatDate } from '@/lib/dateUtils';
 
 function formatEffectiveDate(publishedAt: Date | string | null | undefined) {
   if (!publishedAt) return null;
   const date = publishedAt instanceof Date ? publishedAt : new Date(publishedAt);
   if (Number.isNaN(date.getTime())) return null;
-  return date.toLocaleDateString();
+  return formatDate(date.toISOString());
 }
 
 export function PolicyModalShell({

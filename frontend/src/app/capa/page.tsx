@@ -13,7 +13,7 @@ import { useRouter } from 'next/navigation';
 import { useAuth } from '@/components/providers/AuthProvider';
 import ProtectedRoute from '@/components/auth/ProtectedRoute';
 import api from '@/lib/api';
-import { formatDate } from '@/lib/dateUtils';
+import { formatDate, formatDateTime } from '@/lib/dateUtils';
 import PowerPointGenerator from '@/components/powerpoint';
 import { SavedReportsModal } from '@/components/powerpoint/SavedReportsList';
 
@@ -1297,7 +1297,7 @@ function CAPAContent() {
                               {entry.previousStatus} → {entry.newStatus}
                             </span>
                             <span className="text-gray-500 text-xs">
-                              {new Date(entry.performedAt).toLocaleString()}
+                              {formatDateTime(entry.performedAt)}
                             </span>
                           </div>
                           <div className="text-gray-600 dark:text-gray-400 text-xs">

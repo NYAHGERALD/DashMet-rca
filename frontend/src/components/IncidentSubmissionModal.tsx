@@ -1,6 +1,7 @@
 'use client';
 
 import React from 'react';
+import { formatDateTime, formatTime as formatTimeUtil } from '@/lib/dateUtils';
 
 interface SubmittedIncidentData {
   id: string;
@@ -67,14 +68,10 @@ const IncidentSubmissionModal: React.FC<IncidentSubmissionModalProps> = ({
     }
   };
 
+  // Use centralized date formatting with proper timezone handling
   const formatDate = (dateStr: string) => {
     try {
-      return new Date(dateStr).toLocaleDateString('en-US', { 
-        weekday: 'long', 
-        year: 'numeric', 
-        month: 'long', 
-        day: 'numeric' 
-      });
+      return formatDateTime(dateStr, { weekday: 'long', year: 'numeric', month: 'long', day: 'numeric', hour: undefined, minute: undefined });
     } catch {
       return dateStr;
     }
@@ -82,11 +79,16 @@ const IncidentSubmissionModal: React.FC<IncidentSubmissionModalProps> = ({
 
   const formatTime = (timeStr: string) => {
     try {
-      const [hours, minutes] = timeStr.split(':');
-      const hour = parseInt(hours);
-      const ampm = hour >= 12 ? 'PM' : 'AM';
-      const hour12 = hour % 12 || 12;
-      return `${hour12}:${minutes} ${ampm}`;
+      // If it's just a time string like "14:30", format it
+      if (timeStr.match(/^\d{1,2}:\d{2}$/)) {
+        const [hours, minutes] = timeStr.split(':');
+        const hour = parseInt(hours);
+        const ampm = hour >= 12 ? 'PM' : 'AM';
+        const hour12 = hour % 12 || 12;
+        return `${hour12}:${minutes} ${ampm}`;
+      }
+      // Otherwise use the utility
+      return formatTimeUtil(timeStr);
     } catch {
       return timeStr;
     }

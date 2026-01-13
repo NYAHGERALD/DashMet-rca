@@ -3,6 +3,7 @@
 import { useState, useEffect, useCallback } from 'react';
 import { useParams, useRouter } from 'next/navigation';
 import api from '@/lib/api';
+import { formatDate } from '@/lib/dateUtils';
 import FiveWhysBuilder from '@/components/rca/FiveWhysBuilder';
 import FishboneBuilder from '@/components/rca/FishboneBuilder';
 import TimelinePanel from '@/components/rca/TimelinePanel';
@@ -821,7 +822,7 @@ export default function RCAWorkspacePage() {
                     >
                       <span className="font-medium">v{version.versionNumber}</span>
                       <span className="mx-2">•</span>
-                      <span>{new Date(version.createdAt).toLocaleDateString()}</span>
+                      <span>{formatDate(version.createdAt)}</span>
                       {version.changeReason && (
                         <span className="text-xs text-gray-500 dark:text-gray-400 ml-2">
                           ({version.changeReason})

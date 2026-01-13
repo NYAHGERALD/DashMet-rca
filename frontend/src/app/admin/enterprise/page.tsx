@@ -5,6 +5,7 @@ import ProtectedRoute from '@/components/auth/ProtectedRoute';
 import { useAuth } from '@/components/providers/AuthProvider';
 import Link from 'next/link';
 import Image from 'next/image';
+import { formatDateTime, formatDate } from '@/lib/dateUtils';
 
 // Types
 interface AuditLog {
@@ -129,10 +130,6 @@ function EnterpriseAdminContent() {
 
     fetchData();
   }, [activeTab, auditPagination.page, auditFilters, regulationType, getIdToken, apiUrl]);
-
-  const formatDate = (dateString: string) => {
-    return new Date(dateString).toLocaleString();
-  };
 
   const formatUptime = (seconds: number) => {
     const days = Math.floor(seconds / 86400);

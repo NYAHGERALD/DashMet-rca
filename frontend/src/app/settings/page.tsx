@@ -281,17 +281,8 @@ function SettingsContent() {
     return { browser, os };
   };
 
-  // Format date for display
-  const formatSessionDate = (dateString: string) => {
-    const date = new Date(dateString);
-    return date.toLocaleDateString('en-US', {
-      month: 'short',
-      day: 'numeric',
-      year: 'numeric',
-      hour: '2-digit',
-      minute: '2-digit',
-    });
-  };
+  // Format date for display using centralized timezone-aware utility
+  const formatSessionDate = (dateString: string) => formatDateTime(dateString);
 
   const tabs = [
     { id: 'profile', label: t('settings.profile'), icon: '👤' },

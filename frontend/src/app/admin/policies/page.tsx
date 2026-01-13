@@ -3,6 +3,7 @@
 import { useEffect, useMemo, useState } from 'react';
 import ProtectedRoute from '@/components/auth/ProtectedRoute';
 import api from '@/lib/api';
+import { formatDateTime } from '@/lib/dateUtils';
 
 type PolicyType = 'PRIVACY_POLICY' | 'TERMS_OF_SERVICE' | 'COOKIE_POLICY' | 'SECURITY';
 
@@ -176,7 +177,7 @@ export default function AdminPoliciesPage() {
                               {selectedPolicy.isPublished && selectedPolicy.publishedAt ? (
                                 <>
                                   {' '}
-                                  • Published <span className="font-semibold">{new Date(selectedPolicy.publishedAt).toLocaleString()}</span>
+                                  • Published <span className="font-semibold">{formatDateTime(selectedPolicy.publishedAt)}</span>
                                 </>
                               ) : (
                                 <>
