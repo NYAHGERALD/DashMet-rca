@@ -13,8 +13,13 @@ const nextConfig = {
     NEXT_PUBLIC_API_URL: process.env.NEXT_PUBLIC_API_URL || 'http://localhost:5000',
   },
   images: {
-    domains: ['localhost'],
+    remotePatterns: [
+      { protocol: 'https', hostname: '**' },
+      { protocol: 'http', hostname: 'localhost' },
+    ],
   },
+  // Optimize for production memory usage
+  output: 'standalone',
   // Suppress hydration warnings from browser extensions
   onDemandEntries: {
     maxInactiveAge: 25 * 1000,
