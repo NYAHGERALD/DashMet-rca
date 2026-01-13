@@ -7,22 +7,32 @@ import * as fs from 'fs';
 if (!admin.apps.length) {
   let credential: admin.credential.Credential;
   
-  // Debug: Check environment variable
-  const envJson = process.env.GOOGLE_APPLICATION_CREDENTIALS_JSON;
-  console.log('🔍 GOOGLE_APPLICATION_CREDENTIALS_JSON exists:', !!envJson);
-  console.log('🔍 GOOGLE_APPLICATION_CREDENTIALS_JSON length:', envJson?.length || 0);
-  console.log('🔍 First 50 chars:', envJson?.substring(0, 50));
+  // Check for base64 encoded credentials first
+  const base64Creds = process.env.FIREBASE_CREDENTIALS_BASE64;
+  const jsonCreds = process.env.GOOGLE_APPLICATION_CREDENTIALS_JSON;
   
-  // Check for environment variable first (production)
-  if (envJson) {
+  console.log('🔍 FIREBASE_CREDENTIALS_BASE64 exists:', !!base64Creds);
+  console.log('🔍 GOOGLE_APPLICATION_CREDENTIALS_JSON exists:', !!jsonCreds);
+  
+  if (base64Creds) {
     try {
-      const serviceAccount = JSON.parse(envJson);
+      const decoded = Buffer.from(base64Creds, 'base64').toString('utf-8');
+      const serviceAccount = JSON.parse(decoded);
       console.log('🔍 Parsed project_id:', serviceAccount.project_id);
       credential = admin.credential.cert(serviceAccount);
-      console.log('✅ Firebase Admin SDK initialized from environment variable');
+      console.log('✅ Firebase Admin SDK initialized from base64 environment variable');
+    } catch (error) {
+      console.error('❌ Failed to parse FIREBASE_CREDENTIALS_BASE64:', error);
+      throw error;
+    }
+  } else if (jsonCreds) {
+    try {
+      const serviceAccount = JSON.parse(jsonCreds);
+      console.log('🔍 Parsed project_id:', serviceAccount.project_id);
+      credential = admin.credential.cert(serviceAccount);
+      console.log('✅ Firebase Admin SDK initialized from JSON environment variable');
     } catch (error) {
       console.error('❌ Failed to parse GOOGLE_APPLICATION_CREDENTIALS_JSON:', error);
-      console.error('❌ Raw value (first 100 chars):', envJson?.substring(0, 100));
       throw error;
     }
   } else {
