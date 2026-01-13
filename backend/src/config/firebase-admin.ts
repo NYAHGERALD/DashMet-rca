@@ -7,25 +7,47 @@ import * as fs from 'fs';
 if (!admin.apps.length) {
   let credential: admin.credential.Credential;
   
-  // Check for environment variable first (production - Render)
-  if (process.env.GOOGLE_APPLICATION_CREDENTIALS_JSON) {
+  // Debug: Check environment variable
+  const envJson = process.env.GOOGLE_APPLICATION_CREDENTIALS_JSON;
+  console.log('🔍 GOOGLE_APPLICATION_CREDENTIALS_JSON exists:', !!envJson);
+  console.log('🔍 GOOGLE_APPLICATION_CREDENTIALS_JSON length:', envJson?.length || 0);
+  console.log('🔍 First 50 chars:', envJson?.substring(0, 50));
+  
+  // Check for environment variable first (production)
+  if (envJson) {
     try {
-      const serviceAccount = JSON.parse(process.env.GOOGLE_APPLICATION_CREDENTIALS_JSON);
+      const serviceAccount = JSON.parse(envJson);
+      console.log('🔍 Parsed project_id:', serviceAccount.project_id);
       credential = admin.credential.cert(serviceAccount);
       console.log('✅ Firebase Admin SDK initialized from environment variable');
     } catch (error) {
       console.error('❌ Failed to parse GOOGLE_APPLICATION_CREDENTIALS_JSON:', error);
+      console.error('❌ Raw value (first 100 chars):', envJson?.substring(0, 100));
       throw error;
     }
   } else {
-    // Fallback to file-based credentials (local development)
-    const serviceAccountPath = path.join(process.cwd(), '..', 'firebase-adminsdk-fbsvc.json');
+    // Fallback to file-based credentials
+    // Try multiple possible locations
+    const possiblePaths = [
+      path.join(process.cwd(), 'firebase-adminsdk-fbsvc.json'),  // Same directory
+      path.join(process.cwd(), '..', 'firebase-adminsdk-fbsvc.json'),  // Parent directory
+      path.join(__dirname, '..', '..', 'firebase-adminsdk-fbsvc.json'),  // Relative to this file
+    ];
     
-    if (fs.existsSync(serviceAccountPath)) {
-      credential = admin.credential.cert(serviceAccountPath);
-      console.log('✅ Firebase Admin SDK initialized from file:', serviceAccountPath);
+    let foundPath: string | null = null;
+    for (const p of possiblePaths) {
+      if (fs.existsSync(p)) {
+        foundPath = p;
+        break;
+      }
+    }
+    
+    if (foundPath) {
+      credential = admin.credential.cert(foundPath);
+      console.log('✅ Firebase Admin SDK initialized from file:', foundPath);
     } else {
-      console.error('❌ Firebase credentials not found. Set GOOGLE_APPLICATION_CREDENTIALS_JSON env var or provide firebase-adminsdk-fbsvc.json file');
+      console.error('❌ Firebase credentials not found. Tried:', possiblePaths);
+      console.error('Set GOOGLE_APPLICATION_CREDENTIALS_JSON env var or provide firebase-adminsdk-fbsvc.json file');
       throw new Error('Firebase credentials not configured');
     }
   }
