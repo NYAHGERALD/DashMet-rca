@@ -120,7 +120,12 @@ export function WebSocketProvider({ children }: { children: React.ReactNode }) {
     if (socket?.connected || connectionAttempted.current) return;
     connectionAttempted.current = true;
 
-    const backendUrl = process.env.NEXT_PUBLIC_API_URL?.replace('/api', '') || 'http://localhost:5002';
+    // Use WS_URL if available, otherwise derive from API_URL
+    const backendUrl = process.env.NEXT_PUBLIC_WS_URL || 
+      process.env.NEXT_PUBLIC_API_URL?.replace('/api', '').replace('https://', 'wss://').replace('http://', 'ws://') || 
+      'http://localhost:5002';
+    
+    console.log('🔌 Connecting WebSocket to:', backendUrl);
     
     const newSocket = io(backendUrl, {
       auth: { userId, organizationId },
