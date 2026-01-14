@@ -84,7 +84,7 @@ export default function ChatSidebar({
   const previousTabRef = useRef<TabType>(defaultTab);
   const originalTitleRef = useRef<string>('');
 
-  const { isConnected, socket } = useWebSocket();
+  const { isConnected, socket, markMessagesRead } = useWebSocket();
   const { setChatOpen } = useBrowserNotifications();
 
   // Subscribe to persistent unread count changes
@@ -266,15 +266,18 @@ export default function ChatSidebar({
     }
   }, [isOpen, fetchUnreadCount]);
 
-  // Mark messages as read on the backend
+  // Mark messages as read on the backend and via WebSocket
   const markMessagesAsRead = useCallback(async () => {
     if (!incidentId) return;
     try {
+      // Use WebSocket to mark as read and notify other users in real-time
+      markMessagesRead(incidentId);
+      // Also call REST API for persistence
       await api.post(`/chat/${incidentId}/mark-read`);
     } catch (error) {
       console.error('Failed to mark messages as read:', error);
     }
-  }, [incidentId]);
+  }, [incidentId, markMessagesRead]);
 
   const toggleSidebar = () => {
     if (isOpen) {

@@ -233,6 +233,7 @@ export default function IncidentChatPanel({
     onReaction,
     onMessagePinned,
     onMessageUnpinned,
+    onMessagesRead,
   } = useWebSocket();
 
   // Fetch messages
@@ -967,6 +968,24 @@ export default function IncidentChatPanel({
     return unsubUnpinned;
   }, [incidentId, onMessageUnpinned]);
 
+  // Subscribe to messages read events (real-time read status updates)
+  useEffect(() => {
+    const unsubRead = onMessagesRead((data) => {
+      if (data.incidentId === incidentId && data.userId !== currentUserId) {
+        // Another user has read messages - update readBy array for all messages
+        setMessages(prev => prev.map(msg => {
+          // Only update if this user hasn't already read this message
+          if (!msg.readBy.includes(data.userId)) {
+            return { ...msg, readBy: [...msg.readBy, data.userId] };
+          }
+          return msg;
+        }));
+      }
+    });
+    
+    return unsubRead;
+  }, [incidentId, currentUserId, onMessagesRead]);
+
   // Fetch unread count and pinned messages on mount
   useEffect(() => {
     fetchUnreadCount();
@@ -980,13 +999,13 @@ export default function IncidentChatPanel({
     }
   }, [messages, isOpen, isMinimized]);
 
-  // Mark messages as read when opening panel
+  // Note: Message read marking is handled by ChatSidebar when it opens
+  // We only reset unread count here for UI consistency
   useEffect(() => {
     if (isOpen && !isMinimized && unreadCount > 0) {
-      markMessagesRead(incidentId);
       setUnreadCount(0);
     }
-  }, [isOpen, isMinimized, incidentId, unreadCount, markMessagesRead]);
+  }, [isOpen, isMinimized, unreadCount]);
 
   const handleSendMessage = async () => {
     if (!newMessage.trim() || !isParticipant) return;
@@ -1067,7 +1086,9 @@ export default function IncidentChatPanel({
 
   const formatTime = (dateString: string) => {
     try {
-      return formatDistanceToNow(new Date(dateString), { addSuffix: true });
+      const date = new Date(dateString);
+      // Show actual time in 12-hour format with AM/PM
+      return format(date, 'h:mm a');
     } catch {
       return '';
     }
@@ -1302,14 +1323,14 @@ export default function IncidentChatPanel({
 
                 {/* Filter Dropdown Menu */}
                 {showFilterMenu && (
-                  <div className="absolute top-full left-0 mt-2 w-96 bg-white dark:bg-slate-800 rounded-xl shadow-2xl border border-gray-200 dark:border-slate-600 z-50 overflow-hidden animate-context-menu">
-                    <div className="p-5 border-b border-gray-100 dark:border-slate-700">
+                  <div className="fixed sm:absolute inset-x-2 sm:inset-x-auto top-auto sm:top-full sm:left-0 bottom-20 sm:bottom-auto sm:mt-2 w-auto sm:w-80 md:w-96 max-h-[70vh] overflow-y-auto bg-white dark:bg-slate-800 rounded-xl shadow-2xl border border-gray-200 dark:border-slate-600 z-50 animate-context-menu">
+                    <div className="p-3 sm:p-4 border-b border-gray-100 dark:border-slate-700">
                       <div className="flex items-center justify-between">
-                        <h4 className="text-lg font-bold text-gray-800 dark:text-gray-200">Filter Messages</h4>
+                        <h4 className="text-sm sm:text-base font-bold text-gray-800 dark:text-gray-200">Filter Messages</h4>
                         {hasActiveFilters && (
                           <button
                             onClick={clearFilters}
-                            className="text-base text-blue-500 hover:text-blue-600 dark:text-blue-400 font-medium"
+                            className="text-xs sm:text-sm text-blue-500 hover:text-blue-600 dark:text-blue-400 font-medium"
                           >
                             Clear all
                           </button>
@@ -1318,15 +1339,15 @@ export default function IncidentChatPanel({
                     </div>
 
                     {/* Filter by User */}
-                    <div className="p-5 border-b border-gray-100 dark:border-slate-700">
-                      <label className="flex items-center gap-2.5 text-base font-medium text-gray-600 dark:text-gray-400 mb-3">
-                        <User className="w-5 h-5" />
+                    <div className="p-3 sm:p-4 border-b border-gray-100 dark:border-slate-700">
+                      <label className="flex items-center gap-2 text-xs sm:text-sm font-medium text-gray-600 dark:text-gray-400 mb-2">
+                        <User className="w-4 h-4" />
                         By User
                       </label>
                       <select
                         value={filterByUser || ''}
                         onChange={(e) => setFilterByUser(e.target.value || null)}
-                        className="w-full px-4 py-3 text-base bg-gray-50 dark:bg-slate-700 border border-gray-200 dark:border-slate-600 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+                        className="w-full px-3 py-2 text-sm bg-gray-50 dark:bg-slate-700 border border-gray-200 dark:border-slate-600 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent"
                       >
                         <option value="">All users</option>
                         {uniqueUsers.map(user => (
@@ -1338,12 +1359,12 @@ export default function IncidentChatPanel({
                     </div>
 
                     {/* Filter by Type */}
-                    <div className="p-5 border-b border-gray-100 dark:border-slate-700">
-                      <label className="flex items-center gap-2.5 text-base font-medium text-gray-600 dark:text-gray-400 mb-3">
-                        <Paperclip className="w-5 h-5" />
+                    <div className="p-3 sm:p-4 border-b border-gray-100 dark:border-slate-700">
+                      <label className="flex items-center gap-2 text-xs sm:text-sm font-medium text-gray-600 dark:text-gray-400 mb-2">
+                        <Paperclip className="w-4 h-4" />
                         By Type
                       </label>
-                      <div className="grid grid-cols-2 gap-2.5">
+                      <div className="grid grid-cols-2 gap-2">
                         {[
                           { value: 'all', label: 'All' },
                           { value: 'text', label: 'Text Only' },
@@ -1354,7 +1375,7 @@ export default function IncidentChatPanel({
                           <button
                             key={option.value}
                             onClick={() => setFilterByType(option.value as any)}
-                            className={`px-4 py-2.5 text-base font-medium rounded-lg transition-colors ${
+                            className={`px-2 sm:px-3 py-2 text-xs sm:text-sm font-medium rounded-lg transition-colors ${
                               filterByType === option.value
                                 ? 'bg-blue-500 text-white'
                                 : 'bg-gray-100 dark:bg-slate-700 text-gray-600 dark:text-gray-300 hover:bg-gray-200 dark:hover:bg-slate-600'
@@ -1367,30 +1388,30 @@ export default function IncidentChatPanel({
                     </div>
 
                     {/* Filter by Date */}
-                    <div className="p-5">
-                      <label className="flex items-center gap-2.5 text-base font-medium text-gray-600 dark:text-gray-400 mb-3">
-                        <Calendar className="w-5 h-5" />
+                    <div className="p-3 sm:p-4">
+                      <label className="flex items-center gap-2 text-xs sm:text-sm font-medium text-gray-600 dark:text-gray-400 mb-2">
+                        <Calendar className="w-4 h-4" />
                         By Date Range
                       </label>
-                      <div className="space-y-4">
+                      <div className="space-y-3">
                         <div>
-                          <label className="text-sm text-gray-500 dark:text-gray-400 mb-1.5 block">From</label>
+                          <label className="text-xs text-gray-500 dark:text-gray-400 mb-1 block">From</label>
                           <input
                             type="date"
                             value={filterByDateFrom}
                             onChange={(e) => setFilterByDateFrom(e.target.value)}
                             max={filterByDateTo || undefined}
-                            className="w-full px-4 py-3 text-base bg-gray-50 dark:bg-slate-700 border border-gray-200 dark:border-slate-600 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+                            className="w-full px-3 py-2 text-sm bg-gray-50 dark:bg-slate-700 border border-gray-200 dark:border-slate-600 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent"
                           />
                         </div>
                         <div>
-                          <label className="text-sm text-gray-500 dark:text-gray-400 mb-1.5 block">To</label>
+                          <label className="text-xs text-gray-500 dark:text-gray-400 mb-1 block">To</label>
                           <input
                             type="date"
                             value={filterByDateTo}
                             onChange={(e) => setFilterByDateTo(e.target.value)}
                             min={filterByDateFrom || undefined}
-                            className="w-full px-4 py-3 text-base bg-gray-50 dark:bg-slate-700 border border-gray-200 dark:border-slate-600 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+                            className="w-full px-3 py-2 text-sm bg-gray-50 dark:bg-slate-700 border border-gray-200 dark:border-slate-600 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent"
                           />
                         </div>
                       </div>
@@ -1926,7 +1947,7 @@ export default function IncidentChatPanel({
                                 isOwn ? 'border-blue-500' : 'border-gray-100 dark:border-slate-700'
                               }`}>
                                 <a
-                                  href={`/incidents/${incidentId}/rca/${message.rcaAnalysisId}`}
+                                  href={`/rca/${message.rcaAnalysisId}`}
                                   className={`text-xs flex items-center gap-1 hover:underline ${
                                     isOwn ? 'text-blue-200 hover:text-blue-100' : 'text-blue-600 dark:text-blue-400 hover:text-blue-700'
                                   }`}
@@ -2060,7 +2081,7 @@ export default function IncidentChatPanel({
                             {isOwn ? 'You' : `${message.user.firstName} ${message.user.lastName}`}
                           </span>
                           <span className="text-[10px] text-gray-400 dark:text-gray-500">
-                            {formatDistanceToNow(new Date(message.createdAt), { addSuffix: true })}
+                            {formatTime(message.createdAt)}
                           </span>
                         </div>
 
@@ -2419,9 +2440,24 @@ export default function IncidentChatPanel({
               })}
             </>
           )}
-          {renderTypingIndicator()}
           <div ref={messagesEndRef} />
         </div>
+
+        {/* Typing indicator - outside scrollable area for visibility */}
+        {typingUsers.size > 0 && (
+          <div className="flex-none px-4 py-1.5 bg-gray-50 dark:bg-slate-800/50 border-t border-gray-100 dark:border-slate-700">
+            <div className="flex items-center gap-2 text-xs text-gray-500 dark:text-gray-400">
+              <div className="flex space-x-1">
+                <span className="w-1.5 h-1.5 bg-blue-500 rounded-full animate-bounce" style={{ animationDelay: '0ms' }} />
+                <span className="w-1.5 h-1.5 bg-blue-500 rounded-full animate-bounce" style={{ animationDelay: '150ms' }} />
+                <span className="w-1.5 h-1.5 bg-blue-500 rounded-full animate-bounce" style={{ animationDelay: '300ms' }} />
+              </div>
+              <span className="italic">
+                {Array.from(typingUsers.values()).map(u => u.firstName).join(', ')} {typingUsers.size === 1 ? 'is' : 'are'} typing...
+              </span>
+            </div>
+          </div>
+        )}
 
         {/* Editing indicator */}
         {editingMessage && (

@@ -116,6 +116,7 @@ export function WebSocketProvider({ children }: { children: React.ReactNode }) {
   const reactionCallbacks = useRef<Set<(data: any) => void>>(new Set());
   const messagePinnedCallbacks = useRef<Set<(data: any) => void>>(new Set());
   const messageUnpinnedCallbacks = useRef<Set<(data: any) => void>>(new Set());
+  const messagesReadCallbacks = useRef<Set<(data: { userId: string; incidentId: string }) => void>>(new Set());
 
   const connect = useCallback((userId: string, organizationId: string) => {
     // Prevent multiple connection attempts
@@ -278,6 +279,12 @@ export function WebSocketProvider({ children }: { children: React.ReactNode }) {
       messageUnpinnedCallbacks.current.forEach(cb => cb(data));
     });
 
+    // Handle messages read (real-time read status updates)
+    newSocket.on('chat:read', (data: { userId: string; incidentId: string }) => {
+      console.log('✓ Messages read event:', data);
+      messagesReadCallbacks.current.forEach(cb => cb(data));
+    });
+
     // Handle incident participants list
     newSocket.on('incident:participants', (data: { incidentId: string; participants: any[] }) => {
       const onlineIds = data.participants.filter(p => p.isOnline).map(p => p.id);
@@ -429,6 +436,11 @@ export function WebSocketProvider({ children }: { children: React.ReactNode }) {
     return () => { messageUnpinnedCallbacks.current.delete(callback); };
   }, []);
 
+  const onMessagesRead = useCallback((callback: (data: { userId: string; incidentId: string }) => void) => {
+    messagesReadCallbacks.current.add(callback);
+    return () => { messagesReadCallbacks.current.delete(callback); };
+  }, []);
+
   // Cleanup on unmount
   useEffect(() => {
     return () => {
@@ -470,6 +482,7 @@ export function WebSocketProvider({ children }: { children: React.ReactNode }) {
         onReaction,
         onMessagePinned,
         onMessageUnpinned,
+        onMessagesRead,
       }}
     >
       {children}

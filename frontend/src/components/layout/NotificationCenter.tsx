@@ -376,15 +376,6 @@ export default function NotificationCenter({ className = '', isSystemAdmin = fal
               ))
             )}
           </div>
-
-          {/* Footer - Hide for System Admin */}
-          {!isSystemAdmin && notifications.length > 0 && (
-            <div className="px-3 sm:px-4 py-1.5 sm:py-2 bg-gray-50 dark:bg-slate-700/50 border-t border-gray-200 dark:border-slate-700">
-              <p className="text-[10px] sm:text-xs text-center text-gray-500 dark:text-gray-400">
-                Notifications are stored locally and persist until dismissed
-              </p>
-            </div>
-          )}
         </div>
       )}
     </div>
