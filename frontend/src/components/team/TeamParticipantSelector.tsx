@@ -431,7 +431,7 @@ export default function TeamParticipantSelector({
       isOpen: true,
       participantId: participant.id,
       userId: participant.userId,
-      participantName: `${participant.user.firstName} ${participant.user.lastName}`,
+      participantName: `${participant.user?.firstName || 'Unknown'} ${participant.user?.lastName || ''}`,
       isLastMember,
     });
   };
@@ -509,7 +509,7 @@ export default function TeamParticipantSelector({
 
       {/* Selected Participants */}
       <div className="space-y-2">
-        {selectedParticipants.map((participant) => {
+        {selectedParticipants.filter(p => p.user).map((participant) => {
           const RoleIcon = roleIcons[participant.role];
           const online = isUserOnline(participant.userId);
           
@@ -521,16 +521,16 @@ export default function TeamParticipantSelector({
               <div className="flex items-center space-x-3">
                 {/* Avatar with online indicator */}
                 <div className="relative">
-                  {participant.user.profilePicture ? (
+                  {participant.user?.profilePicture ? (
                     <img
                       src={participant.user.profilePicture}
-                      alt={`${participant.user.firstName} ${participant.user.lastName}`}
+                      alt={`${participant.user?.firstName || 'Unknown'} ${participant.user?.lastName || ''}`}
                       className="w-10 h-10 rounded-full object-cover"
                     />
                   ) : (
                     <div className="w-10 h-10 rounded-full bg-gradient-to-br from-blue-500 to-indigo-600 flex items-center justify-center text-white font-medium">
-                      {participant.user.firstName?.[0]?.toUpperCase()}
-                      {participant.user.lastName?.[0]?.toUpperCase()}
+                      {participant.user?.firstName?.[0]?.toUpperCase() || 'U'}
+                      {participant.user?.lastName?.[0]?.toUpperCase()}
                     </div>
                   )}
                   <span
@@ -543,10 +543,10 @@ export default function TeamParticipantSelector({
                 
                 <div>
                   <div className="font-medium text-gray-900 dark:text-white">
-                    {participant.user.firstName} {participant.user.lastName}
+                    {participant.user?.firstName || 'Unknown'} {participant.user?.lastName || ''}
                   </div>
                   <div className="text-xs text-gray-500 dark:text-gray-400">
-                    {participant.user.email}
+                    {participant.user?.email || ''}
                   </div>
                 </div>
               </div>

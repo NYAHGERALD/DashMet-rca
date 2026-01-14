@@ -390,6 +390,17 @@ router.patch('/:incidentId/:userId', async (req, res) => {
     },
   });
 
+  // Emit WebSocket event for real-time role update
+  websocketService.emitToIncident(incidentId, 'participant:role-updated', {
+    incidentId,
+    participantId: updated.id,
+    userId,
+    role: updated.role,
+    canEdit: updated.canEdit,
+    canChat: updated.canChat,
+    updatedBy: user.id,
+  });
+
   res.json({
     success: true,
     data: updated,

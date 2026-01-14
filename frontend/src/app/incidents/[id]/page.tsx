@@ -248,7 +248,7 @@ export default function IncidentDetailPage() {
   const incidentId = params.id as string;
 
   // WebSocket for team collaboration
-  const { connect, isConnected, joinIncident, leaveIncident, onlineUsers, onParticipantsUpdated, onInvitationDeclined, onVisibilityChanged } = useWebSocket();
+  const { connect, isConnected, joinIncident, leaveIncident, onlineUsers, onParticipantsUpdated, onParticipantRoleUpdated, onInvitationDeclined, onVisibilityChanged } = useWebSocket();
 
   const [incident, setIncident] = useState<Incident | null>(null);
   const [loading, setLoading] = useState(true);
@@ -345,6 +345,27 @@ export default function IncidentDetailPage() {
     });
     return unsubscribe;
   }, [incidentId, onParticipantsUpdated]);
+
+  // Listen for participant role updates (real-time)
+  useEffect(() => {
+    const unsubscribe = onParticipantRoleUpdated((data) => {
+      if (data.incidentId === incidentId) {
+        // Update the participant role in local state immediately
+        setIncident(prev => {
+          if (!prev || !prev.IncidentParticipant) return prev;
+          return {
+            ...prev,
+            IncidentParticipant: prev.IncidentParticipant.map(p => 
+              p.userId === data.userId
+                ? { ...p, role: data.role as Participant['role'], canEdit: data.canEdit, canChat: data.canChat }
+                : p
+            )
+          };
+        });
+      }
+    });
+    return unsubscribe;
+  }, [incidentId, onParticipantRoleUpdated]);
 
   // Listen for invitation declined events (direct notification to owner)
   useEffect(() => {

@@ -250,9 +250,11 @@ export default function IncidentChatPanel({
       const rawMessages = response.data?.data || response.data?.messages || [];
       
       // Normalize backend response: Prisma returns 'User' but frontend expects 'user'
+      // Also normalize 'Evidence' to 'evidence' for evidence link messages
       const fetchedMessages = rawMessages.map((msg: any) => ({
         ...msg,
         user: msg.User || msg.user,
+        evidence: msg.Evidence || msg.evidence,
         replyTo: msg.replyTo ? {
           ...msg.replyTo,
           user: msg.replyTo.User || msg.replyTo.user
@@ -281,9 +283,11 @@ export default function IncidentChatPanel({
       const response = await api.get(`/chat/${incidentId}/pinned`);
       const rawPinned = response.data?.data || [];
       // Normalize backend response: Prisma returns 'User' but frontend expects 'user'
+      // Also normalize 'Evidence' to 'evidence' for evidence link messages
       const normalizedPinned = rawPinned.map((msg: any) => ({
         ...msg,
         user: msg.User || msg.user,
+        evidence: msg.Evidence || msg.evidence,
         replyTo: msg.replyTo ? {
           ...msg.replyTo,
           user: msg.replyTo.User || msg.replyTo.user
@@ -787,9 +791,11 @@ export default function IncidentChatPanel({
     const unsubMessage = onMessage((message) => {
       if (message.incidentId === incidentId) {
         // Normalize backend response: Prisma returns 'User' but frontend expects 'user'
+        // Also normalize 'Evidence' to 'evidence' for evidence link messages
         const normalizedMessage = {
           ...message,
           user: (message as any).User || message.user,
+          evidence: (message as any).Evidence || (message as any).evidence,
           replyTo: message.replyTo ? {
             ...message.replyTo,
             user: (message.replyTo as any).User || message.replyTo.user
@@ -820,9 +826,11 @@ export default function IncidentChatPanel({
     const unsubMessageUpdated = onMessageUpdated((updatedMessage) => {
       if (updatedMessage.incidentId === incidentId) {
         // Normalize backend response: Prisma returns 'User' but frontend expects 'user'
+        // Also normalize 'Evidence' to 'evidence' for evidence link messages
         const normalizedMessage = {
           ...updatedMessage,
           user: (updatedMessage as any).User || updatedMessage.user,
+          evidence: (updatedMessage as any).Evidence || (updatedMessage as any).evidence,
           replyTo: updatedMessage.replyTo ? {
             ...updatedMessage.replyTo,
             user: (updatedMessage.replyTo as any).User || updatedMessage.replyTo.user

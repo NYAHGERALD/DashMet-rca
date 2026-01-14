@@ -75,6 +75,7 @@ interface WebSocketContextType {
   onParticipantJoined: (callback: (data: { incidentId: string; userId: string; firstName: string; lastName: string }) => void) => () => void;
   onParticipantLeft: (callback: (data: { incidentId: string; userId: string }) => void) => () => void;
   onParticipantsUpdated: (callback: (data: { incidentId: string; action: string; participants?: any[]; userId?: string }) => void) => () => void;
+  onParticipantRoleUpdated: (callback: (data: { incidentId: string; participantId: string; userId: string; role: string; canEdit: boolean; canChat: boolean; updatedBy: string }) => void) => () => void;
   onUserOnline: (callback: (data: OnlineUser) => void) => () => void;
   onUserOffline: (callback: (data: { userId: string }) => void) => () => void;
   // Invitation event handlers
@@ -106,6 +107,7 @@ export function WebSocketProvider({ children }: { children: React.ReactNode }) {
   const participantJoinedCallbacks = useRef<Set<(data: any) => void>>(new Set());
   const participantLeftCallbacks = useRef<Set<(data: any) => void>>(new Set());
   const participantsUpdatedCallbacks = useRef<Set<(data: any) => void>>(new Set());
+  const participantRoleUpdatedCallbacks = useRef<Set<(data: any) => void>>(new Set());
   const userOnlineCallbacks = useRef<Set<(data: OnlineUser) => void>>(new Set());
   const userOfflineCallbacks = useRef<Set<(data: any) => void>>(new Set());
   const invitationReceivedCallbacks = useRef<Set<(data: any) => void>>(new Set());
@@ -231,6 +233,12 @@ export function WebSocketProvider({ children }: { children: React.ReactNode }) {
     newSocket.on('IncidentParticipant:updated', (data: any) => {
       console.log('👥 IncidentParticipant:updated event:', data);
       participantsUpdatedCallbacks.current.forEach(cb => cb(data));
+    });
+
+    // Handle participant role updated
+    newSocket.on('participant:role-updated', (data: any) => {
+      console.log('👥 participant:role-updated event:', data);
+      participantRoleUpdatedCallbacks.current.forEach(cb => cb(data));
     });
 
     // Handle invitation received (sent directly to invited user)
@@ -372,6 +380,11 @@ export function WebSocketProvider({ children }: { children: React.ReactNode }) {
     return () => { participantsUpdatedCallbacks.current.delete(callback); };
   }, []);
 
+  const onParticipantRoleUpdated = useCallback((callback: (data: any) => void) => {
+    participantRoleUpdatedCallbacks.current.add(callback);
+    return () => { participantRoleUpdatedCallbacks.current.delete(callback); };
+  }, []);
+
   const onUserOnline = useCallback((callback: (data: OnlineUser) => void) => {
     userOnlineCallbacks.current.add(callback);
     return () => { userOnlineCallbacks.current.delete(callback); };
@@ -448,6 +461,7 @@ export function WebSocketProvider({ children }: { children: React.ReactNode }) {
         onParticipantJoined,
         onParticipantLeft,
         onParticipantsUpdated,
+        onParticipantRoleUpdated,
         onUserOnline,
         onUserOffline,
         onInvitationReceived,

@@ -94,8 +94,9 @@ const MentionInput = forwardRef<MentionInputHandle, MentionInputProps>(
 
     // Filter participants based on mention query
     const filteredParticipants = participants.filter((p) => {
+      if (!p.firstName) return false; // Skip participants without names
       if (!mentionQuery) return true;
-      const fullName = `${p.firstName} ${p.lastName}`.toLowerCase();
+      const fullName = `${p.firstName || ''} ${p.lastName || ''}`.toLowerCase();
       const query = mentionQuery.toLowerCase();
       return fullName.includes(query) || p.email?.toLowerCase().includes(query);
     });
@@ -266,8 +267,8 @@ const MentionInput = forwardRef<MentionInputHandle, MentionInputProps>(
                   {/* Avatar */}
                   <div className="relative">
                     <div className="w-8 h-8 rounded-full bg-gradient-to-br from-blue-500 to-indigo-600 flex items-center justify-center text-white text-sm font-medium">
-                      {participant.firstName[0]}
-                      {participant.lastName[0]}
+                      {participant.firstName?.[0] || 'U'}
+                      {participant.lastName?.[0]}
                     </div>
                     {participant.isOnline && (
                       <span className="absolute bottom-0 right-0 w-2.5 h-2.5 bg-green-500 border-2 border-white dark:border-slate-800 rounded-full" />
@@ -277,7 +278,7 @@ const MentionInput = forwardRef<MentionInputHandle, MentionInputProps>(
                   {/* Name and role */}
                   <div className="ml-3 text-left">
                     <div className="text-sm font-medium text-gray-900 dark:text-white">
-                      {participant.firstName} {participant.lastName}
+                      {participant.firstName || 'Unknown'} {participant.lastName || ''}
                     </div>
                     {participant.role && (
                       <div className="text-xs text-gray-500 dark:text-gray-400">

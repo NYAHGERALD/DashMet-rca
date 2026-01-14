@@ -122,7 +122,7 @@ export default function RCAWorkspacePage() {
   const router = useRouter();
   const rcaId = params.id as string;
   const { user } = useAuth();
-  const { connect, onlineUsers, onParticipantsUpdated, isConnected, joinIncident, leaveIncident } = useWebSocket();
+  const { connect, onlineUsers, onParticipantsUpdated, onParticipantRoleUpdated, isConnected, joinIncident, leaveIncident } = useWebSocket();
 
   // Connect to WebSocket when user is available
   useEffect(() => {
@@ -224,6 +224,32 @@ export default function RCAWorkspacePage() {
     });
     return unsubscribe;
   }, [rca?.incident?.id, onParticipantsUpdated, fetchRCA]);
+
+  // Listen for participant role updates (real-time)
+  useEffect(() => {
+    if (!rca?.incident?.id) return;
+    
+    const unsubscribe = onParticipantRoleUpdated((data) => {
+      if (data.incidentId === rca.incident.id) {
+        // Update the participant role in local state immediately
+        setRca(prev => {
+          if (!prev || !prev.incident?.participants) return prev;
+          return {
+            ...prev,
+            incident: {
+              ...prev.incident,
+              participants: prev.incident.participants.map(p => 
+                p.userId === data.userId
+                  ? { ...p, role: data.role as Participant['role'], canEdit: data.canEdit, canChat: data.canChat }
+                  : p
+              )
+            }
+          };
+        });
+      }
+    });
+    return unsubscribe;
+  }, [rca?.incident?.id, onParticipantRoleUpdated]);
 
   const handleMethodChange = async (method: 'FIVE_WHYS' | 'FISHBONE') => {
     try {

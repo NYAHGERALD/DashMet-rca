@@ -119,23 +119,23 @@ export default function EvidencePicker({
         onClick={onClose}
       />
       
-      {/* Modal */}
-      <div className="fixed inset-x-4 top-1/2 -translate-y-1/2 max-w-lg mx-auto bg-white dark:bg-slate-800 rounded-xl shadow-2xl z-50 overflow-hidden max-h-[80vh] flex flex-col">
+      {/* Modal - Responsive for mobile */}
+      <div className="fixed inset-x-2 sm:inset-x-4 top-1/2 -translate-y-1/2 max-w-lg mx-auto bg-white dark:bg-slate-800 rounded-xl shadow-2xl z-50 overflow-hidden max-h-[85vh] sm:max-h-[80vh] flex flex-col">
         {/* Header */}
-        <div className="flex items-center justify-between px-4 py-3 border-b border-gray-200 dark:border-slate-700">
-          <h3 className="text-lg font-semibold text-gray-900 dark:text-white">
+        <div className="flex items-center justify-between px-3 sm:px-4 py-2.5 sm:py-3 border-b border-gray-200 dark:border-slate-700">
+          <h3 className="text-base sm:text-lg font-semibold text-gray-900 dark:text-white">
             Share Evidence
           </h3>
           <button
             onClick={onClose}
-            className="p-1 text-gray-400 hover:text-gray-600 dark:hover:text-gray-200 transition-colors"
+            className="p-1.5 sm:p-1 text-gray-400 hover:text-gray-600 dark:hover:text-gray-200 transition-colors"
           >
             <X className="w-5 h-5" />
           </button>
         </div>
 
         {/* Search */}
-        <div className="px-4 py-2 border-b border-gray-200 dark:border-slate-700">
+        <div className="px-3 sm:px-4 py-2 border-b border-gray-200 dark:border-slate-700">
           <div className="relative">
             <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-gray-400" />
             <input
@@ -149,13 +149,13 @@ export default function EvidencePicker({
         </div>
 
         {/* Evidence List */}
-        <div className="flex-1 overflow-y-auto p-4 space-y-2">
+        <div className="flex-1 overflow-y-auto p-3 sm:p-4 space-y-2">
           {loading ? (
             <div className="flex items-center justify-center py-8">
               <Loader2 className="w-6 h-6 animate-spin text-blue-500" />
             </div>
           ) : filteredEvidence.length === 0 ? (
-            <div className="text-center py-8 text-gray-500 dark:text-gray-400">
+            <div className="text-center py-8 text-gray-500 dark:text-gray-400 text-sm">
               {searchQuery ? 'No matching evidence found' : 'No evidence uploaded yet'}
             </div>
           ) : (
@@ -163,20 +163,20 @@ export default function EvidencePicker({
               <button
                 key={item.id}
                 onClick={() => setSelectedEvidence(item)}
-                className={`w-full flex items-center p-3 rounded-lg border transition-all ${
+                className={`w-full flex items-center p-2.5 sm:p-3 rounded-lg border transition-all ${
                   selectedEvidence?.id === item.id
                     ? 'border-blue-500 bg-blue-50 dark:bg-blue-900/30'
                     : 'border-gray-200 dark:border-slate-600 hover:bg-gray-50 dark:hover:bg-slate-700'
                 }`}
               >
-                <div className="flex-shrink-0 w-10 h-10 rounded-lg bg-gray-100 dark:bg-slate-600 flex items-center justify-center">
+                <div className="flex-shrink-0 w-9 h-9 sm:w-10 sm:h-10 rounded-lg bg-gray-100 dark:bg-slate-600 flex items-center justify-center">
                   {getEvidenceIcon(item.type)}
                 </div>
-                <div className="flex-1 ml-3 text-left">
-                  <p className="text-sm font-medium text-gray-900 dark:text-white truncate">
+                <div className="flex-1 ml-2.5 sm:ml-3 text-left min-w-0">
+                  <p className="text-xs sm:text-sm font-medium text-gray-900 dark:text-white truncate">
                     {item.fileName}
                   </p>
-                  <p className="text-xs text-gray-500 dark:text-gray-400">
+                  <p className="text-[10px] sm:text-xs text-gray-500 dark:text-gray-400 truncate">
                     {item.type} • {formatFileSize(item.fileSize)} • {formatDistanceToNow(new Date(item.uploadedAt), { addSuffix: true })}
                   </p>
                 </div>
@@ -194,10 +194,10 @@ export default function EvidencePicker({
 
         {/* Selected Evidence Preview & Comment */}
         {selectedEvidence && (
-          <div className="border-t border-gray-200 dark:border-slate-700 p-4 space-y-3 bg-gray-50 dark:bg-slate-900">
-            <div className="flex items-center space-x-2">
+          <div className="border-t border-gray-200 dark:border-slate-700 p-3 sm:p-4 space-y-2.5 sm:space-y-3 bg-gray-50 dark:bg-slate-900">
+            <div className="flex items-center space-x-2 min-w-0">
               {getEvidenceIcon(selectedEvidence.type)}
-              <span className="text-sm font-medium text-gray-900 dark:text-white">
+              <span className="text-xs sm:text-sm font-medium text-gray-900 dark:text-white truncate">
                 {selectedEvidence.fileName}
               </span>
             </div>
@@ -212,27 +212,27 @@ export default function EvidencePicker({
         )}
         {/* Error */}
         {error && (
-          <div className="px-4 py-2 bg-red-50 dark:bg-red-900/20 border-t border-red-200 dark:border-red-800">
-            <p className="text-sm text-red-600 dark:text-red-400">{error}</p>
+          <div className="px-3 sm:px-4 py-2 bg-red-50 dark:bg-red-900/20 border-t border-red-200 dark:border-red-800">
+            <p className="text-xs sm:text-sm text-red-600 dark:text-red-400">{error}</p>
           </div>
         )}
         {/* Footer */}
-        <div className="flex items-center justify-end space-x-2 px-4 py-3 border-t border-gray-200 dark:border-slate-700">
+        <div className="flex items-center justify-end space-x-2 px-3 sm:px-4 py-2.5 sm:py-3 border-t border-gray-200 dark:border-slate-700">
           <button
             onClick={onClose}
-            className="px-4 py-2 text-sm text-gray-600 dark:text-gray-300 hover:bg-gray-100 dark:hover:bg-slate-700 rounded-lg transition-colors"
+            className="px-3 sm:px-4 py-2 text-xs sm:text-sm text-gray-600 dark:text-gray-300 hover:bg-gray-100 dark:hover:bg-slate-700 rounded-lg transition-colors"
           >
             Cancel
           </button>
           <button
             onClick={handleSend}
             disabled={!selectedEvidence || sending}
-            className="flex items-center px-4 py-2 text-sm bg-blue-600 hover:bg-blue-700 disabled:bg-gray-300 dark:disabled:bg-slate-600 text-white rounded-lg transition-colors disabled:cursor-not-allowed"
+            className="flex items-center px-3 sm:px-4 py-2 text-xs sm:text-sm bg-blue-600 hover:bg-blue-700 disabled:bg-gray-300 dark:disabled:bg-slate-600 text-white rounded-lg transition-colors disabled:cursor-not-allowed"
           >
             {sending ? (
-              <Loader2 className="w-4 h-4 animate-spin mr-2" />
+              <Loader2 className="w-3.5 h-3.5 sm:w-4 sm:h-4 animate-spin mr-1.5 sm:mr-2" />
             ) : (
-              <Send className="w-4 h-4 mr-2" />
+              <Send className="w-3.5 h-3.5 sm:w-4 sm:h-4 mr-1.5 sm:mr-2" />
             )}
             Share
           </button>

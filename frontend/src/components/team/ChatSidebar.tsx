@@ -487,11 +487,11 @@ export default function ChatSidebar({
                 incidentTitle={incidentTitle}
                 currentUserId={currentUserId}
                 isParticipant={isParticipant}
-                participants={participants.map(p => ({
+                participants={participants.filter(p => p.user).map(p => ({
                   id: p.user.id,
-                  firstName: p.user.firstName,
-                  lastName: p.user.lastName,
-                  email: p.user.email,
+                  firstName: p.user.firstName || 'Unknown',
+                  lastName: p.user.lastName || '',
+                  email: p.user.email || '',
                   role: p.user.role,
                   isOnline: p.user.isOnline,
                 }))}
@@ -521,11 +521,11 @@ export default function ChatSidebar({
                 incidentId={incidentId}
                 organizationId={organizationId}
                 currentUserId={currentUserId}
-                selectedParticipants={participants.map(p => ({
+                selectedParticipants={participants.filter(p => p.user).map(p => ({
                   ...p,
                   user: {
                     ...p.user,
-                    role: p.user.role || 'USER'
+                    role: p.user?.role || 'USER'
                   }
                 }))}
                 onParticipantsChange={onParticipantsChange}
@@ -609,11 +609,11 @@ export default function ChatSidebar({
                     incidentTitle={incidentTitle}
                     currentUserId={currentUserId}
                     isParticipant={isParticipant}
-                    participants={participants.map(p => ({
+                    participants={participants.filter(p => p.user).map(p => ({
                       id: p.user.id,
-                      firstName: p.user.firstName,
-                      lastName: p.user.lastName,
-                      email: p.user.email,
+                      firstName: p.user.firstName || 'Unknown',
+                      lastName: p.user.lastName || '',
+                      email: p.user.email || '',
                       role: p.user.role,
                       isOnline: p.user.isOnline,
                     }))}
@@ -644,11 +644,11 @@ export default function ChatSidebar({
                       incidentId={incidentId}
                       organizationId={organizationId}
                       currentUserId={currentUserId}
-                      selectedParticipants={participants.map(p => ({
+                      selectedParticipants={participants.filter(p => p.user).map(p => ({
                         ...p,
                         user: {
                           ...p.user,
-                          role: p.user.role || 'USER'
+                          role: p.user?.role || 'USER'
                         }
                       }))}
                       onParticipantsChange={onParticipantsChange}

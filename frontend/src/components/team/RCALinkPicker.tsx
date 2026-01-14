@@ -58,11 +58,11 @@ interface RCAAnalysis {
     rootCauseText?: string;
   };
   createdAt: string;
-  analyst: {
+  analyst?: {
     id: string;
     firstName: string;
     lastName: string;
-  };
+  } | null;
 }
 
 interface RCALinkPickerProps {
@@ -267,7 +267,7 @@ export default function RCALinkPicker({
                        'Combined Analysis'}
                     </p>
                     <p className="text-xs text-gray-500 dark:text-gray-400">
-                      By {rca.analyst.firstName} {rca.analyst.lastName} • {formatDistanceToNow(new Date(rca.createdAt), { addSuffix: true })}
+                      By {rca.analyst?.firstName || 'Unknown'} {rca.analyst?.lastName || ''} • {formatDistanceToNow(new Date(rca.createdAt), { addSuffix: true })}
                     </p>
                   </div>
                   <ChevronRight className={`w-5 h-5 text-gray-400 transition-transform duration-200 ${
