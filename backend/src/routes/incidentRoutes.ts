@@ -1832,11 +1832,10 @@ router.post('/:id/evidence', uploadMultiple, async (req: Request, res: Response,
         const fileExtension = path.extname(file.originalname);
         const uniqueFileName = `evidence/${id}/${uuidv4()}${fileExtension}`;
         
-        // Upload to Firebase Storage
-        const fileBuffer = fs.readFileSync(file.path);
+        // Upload to Firebase Storage from memory buffer (cloud-compatible)
         const firebaseFile = bucket.file(uniqueFileName);
         
-        await firebaseFile.save(fileBuffer, {
+        await firebaseFile.save(file.buffer, {
           metadata: {
             contentType: file.mimetype,
             metadata: {
@@ -1851,9 +1850,6 @@ router.post('/:id/evidence', uploadMultiple, async (req: Request, res: Response,
         // Make the file publicly accessible and get the URL
         await firebaseFile.makePublic();
         const publicUrl = `https://storage.googleapis.com/${bucket.name}/${uniqueFileName}`;
-
-        // Delete local temp file
-        fs.unlinkSync(file.path);
 
         // Get transcription for voice recordings
         const transcription = type === 'VOICE_RECORDING' && parsedTranscriptions[index] 

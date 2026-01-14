@@ -2470,8 +2470,8 @@ router.post('/:incidentId/upload', upload.single('file'), handleMulterError, asy
   const uniqueFileName = `chat/${incidentId}/${uuidv4()}${fileExtension}`;
   const firebaseFile = bucket.file(uniqueFileName);
 
-  // Upload the file
-  await firebaseFile.save(fs.readFileSync(file.path), {
+  // Upload the file from memory buffer (cloud-compatible)
+  await firebaseFile.save(file.buffer, {
     metadata: {
       contentType: file.mimetype,
     },
@@ -2482,9 +2482,6 @@ router.post('/:incidentId/upload', upload.single('file'), handleMulterError, asy
 
   // Get the public URL
   const publicUrl = `https://storage.googleapis.com/${bucket.name}/${uniqueFileName}`;
-
-  // Delete local temp file
-  fs.unlinkSync(file.path);
 
   // Determine message type based on file mime type
   let determinedMessageType: 'FILE' | 'IMAGE' | 'VOICE' = 'FILE';
@@ -2609,8 +2606,8 @@ router.post('/:incidentId/upload-multiple', upload.array('files', 10), handleMul
     const uniqueFileName = `chat/${incidentId}/${uuidv4()}${fileExtension}`;
     const firebaseFile = bucket.file(uniqueFileName);
 
-    // Upload the file
-    await firebaseFile.save(fs.readFileSync(file.path), {
+    // Upload the file from memory buffer (cloud-compatible)
+    await firebaseFile.save(file.buffer, {
       metadata: {
         contentType: file.mimetype,
       },
@@ -2621,9 +2618,6 @@ router.post('/:incidentId/upload-multiple', upload.array('files', 10), handleMul
 
     // Get the public URL
     const publicUrl = `https://storage.googleapis.com/${bucket.name}/${uniqueFileName}`;
-
-    // Delete local temp file
-    fs.unlinkSync(file.path);
 
     // Determine message type based on file mime type
     let messageType: 'FILE' | 'IMAGE' = 'FILE';

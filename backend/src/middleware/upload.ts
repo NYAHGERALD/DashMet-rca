@@ -10,15 +10,9 @@ import { ValidationError } from './errorHandler';
 // Frontend limits: Photos 10MB, Videos 50MB, Documents 25MB, Voice 25MB
 const MAX_FILE_SIZE = parseInt(process.env.MAX_FILE_SIZE || '52428800'); // 50MB
 
-const storage = multer.diskStorage({
-  destination: (req, file, cb) => {
-    cb(null, process.env.UPLOAD_PATH || './uploads');
-  },
-  filename: (req, file, cb) => {
-    const uniqueName = `${uuidv4()}${path.extname(file.originalname)}`;
-    cb(null, uniqueName);
-  },
-});
+// Use memory storage for cloud deployment (Railway, Render, etc.)
+// Files are stored in memory buffer and uploaded directly to Firebase Storage
+const storage = multer.memoryStorage();
 
 const fileFilter = (
   req: Request,
