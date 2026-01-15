@@ -203,7 +203,7 @@ Keep responses focused, detailed, and suitable for enterprise presentation.`,
         },
       ],
       temperature: 0.3,
-      max_tokens: 800,
+      max_completion_tokens: 800,
     });
 
     return completion.choices[0]?.message?.content?.trim() || getDefaultNarrative(section, rca, incident);

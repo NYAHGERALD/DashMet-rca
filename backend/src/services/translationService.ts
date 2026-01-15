@@ -99,7 +99,7 @@ export async function translateText(
     const sourceLangName = SUPPORTED_LANGUAGES[sourceLanguage];
 
     const completion = await openai.chat.completions.create({
-      model: 'gpt-3.5-turbo', // Using 3.5-turbo for wide availability
+      model: process.env.AI_MODEL || 'gpt-5.2',
       messages: [
         {
           role: 'system',
@@ -120,7 +120,7 @@ Rules:
         },
       ],
       temperature: 0.3, // Lower temperature for consistent translations
-      max_tokens: 500,
+      max_completion_tokens: 500,
     });
 
     const translation = completion.choices[0]?.message?.content?.trim() || text;
@@ -197,7 +197,7 @@ export async function translateBatch(
       .join('\n');
 
     const completion = await openai.chat.completions.create({
-      model: 'gpt-3.5-turbo',
+      model: process.env.AI_MODEL || 'gpt-5.2',
       messages: [
         {
           role: 'system',
@@ -218,7 +218,7 @@ Rules:
         },
       ],
       temperature: 0.3,
-      max_tokens: 2000,
+      max_completion_tokens: 2000,
     });
 
     const response = completion.choices[0]?.message?.content?.trim() || '';

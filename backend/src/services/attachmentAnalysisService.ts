@@ -134,7 +134,7 @@ For each observation, note its potential relevance to the reported incident.`
           ]
         }
       ],
-      max_tokens: 1000,
+      max_completion_tokens: 1000,
       temperature: 0.2
     });
 
@@ -244,7 +244,7 @@ async function analyzePDF(
           content: `INCIDENT CONTEXT:\n${incidentContext}\n\nDOCUMENT CONTENT:\n${extractedText}\n\nAnalyze this document as evidence. Identify:\n1. KEY INFORMATION: Relevant facts, dates, names, procedures mentioned\n2. COMPLIANCE INDICATORS: Any references to standards, regulations, SOPs\n3. EVIDENCE VALUE: How this document relates to the incident\n4. RISK FACTORS: Any warnings, violations, or concerns documented\n5. BRIEF SUMMARY: 2-3 sentence summary of the document's relevance\n\nBe concise and factual.`
         }
       ],
-      max_tokens: 800,
+      max_completion_tokens: 800,
       temperature: 0.2
     });
 
@@ -476,7 +476,7 @@ SUMMARY:
             content: consolidationPrompt
           }
         ],
-        max_tokens: 1000,
+        max_completion_tokens: 1000,
         temperature: 0.2
       });
 
@@ -726,7 +726,7 @@ Important guidelines:
           content: prompt
         }
       ],
-      max_tokens: 1500,
+      max_completion_tokens: 1500,
       temperature: 0.3
     });
 

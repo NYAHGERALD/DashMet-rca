@@ -64,27 +64,27 @@ export async function analyzeActionQuality(
       messages: [
         {
           role: 'system',
-          content: `You are an expert quality analyst specializing in manufacturing CAPA (Corrective and Preventive Actions). 
-Analyze the given action for quality and effectiveness.
+          content: `You are a practical workplace advisor who reviews action plans. Your job is to check if an action makes sense and can actually be done.
 
-Evaluate based on:
-1. SMART criteria (Specific, Measurable, Achievable, Relevant, Time-bound)
-2. Actionability - Can it be clearly executed?
-3. Root cause addressing - Does it target the actual cause?
-4. Completeness - Is it comprehensive enough?
-5. Sustainability - Will it provide lasting improvement?
+Think about it like a experienced supervisor would:
+- Is this action clear enough that someone could actually do it?
+- Does it make sense for fixing or preventing the problem?
+- Is it realistic with normal workplace resources?
+- Will someone know when it's done?
 
-For ${actionType === 'CORRECTIVE' ? 'CORRECTIVE' : 'PREVENTIVE'} actions:
+For ${actionType === 'CORRECTIVE' ? 'CORRECTIVE (fixing what happened)' : 'PREVENTIVE (stopping it from happening again)'} actions:
 ${actionType === 'CORRECTIVE' 
-  ? '- Should directly address the immediate issue\n- Should prevent recurrence of the specific problem\n- Should have clear completion criteria'
-  : '- Should prevent future occurrences\n- Should address systemic issues\n- Should include monitoring mechanisms'}
+  ? '- Should clearly fix the immediate problem\n- Should be doable in a reasonable timeframe\n- Should have a clear end point'
+  : '- Should stop the problem from happening again\n- Should be something that can be maintained long-term\n- Should include a way to check it\'s working'}
+
+Be helpful and constructive - point out what's good and what could be clearer.
 
 Respond in JSON format:
 {
   "score": <0-100>,
   "rating": "<POOR|FAIR|GOOD|EXCELLENT>",
-  "weaknesses": ["weakness1", "weakness2"],
-  "strengths": ["strength1", "strength2"]
+  "weaknesses": ["explain issues in simple words"],
+  "strengths": ["explain good points in simple words"]
 }`,
         },
         {
@@ -95,7 +95,7 @@ Description: ${description}`,
         },
       ],
       temperature: 0.3,
-      max_tokens: 500,
+      max_completion_tokens: 500,
       response_format: { type: 'json_object' },
     });
 
@@ -303,34 +303,39 @@ export async function suggestActionImprovements(
       messages: [
         {
           role: 'system',
-          content: `You are a quality improvement specialist. Analyze the CAPA action and suggest specific improvements.
-Focus on:
-1. Making actions more specific and measurable
-2. Adding verification mechanisms
-3. Ensuring sustainability
-4. Addressing root causes
-5. Industry best practices for ${incidentType === 'FOOD_SAFETY' ? 'food safety' : 'equipment maintenance'}
+          content: `You are a helpful coworker giving friendly advice on how to improve an action plan. Speak in simple, everyday language like you're chatting with a colleague.
+
+Look at the action and think:
+- Is anything unclear that could confuse someone?
+- Is there a simple way to make this better?
+- What's missing that would help someone actually do this?
+- Would a new employee understand what to do?
+
+Give practical, realistic suggestions - things that can actually be done in a normal workplace. Don't suggest complicated solutions when simple ones work.
 
 Respond in JSON format:
 {
   "suggestions": [
     {
-      "currentIssue": "description of current weakness",
-      "suggestion": "specific improvement recommendation",
+      "currentIssue": "Explain the problem in plain English",
+      "suggestion": "Give a practical tip to fix it - like advice to a coworker",
       "priority": "HIGH|MEDIUM|LOW"
     }
   ]
-}`,
+}
+
+Keep suggestions friendly and helpful, not critical or overwhelming. 2-4 suggestions is usually enough.`,
         },
         {
           role: 'user',
-          content: `${actionType} action for ${incidentType} - ${categoryName}:
-Title: ${title}
-Description: ${description}`,
+          content: `Help me improve this ${actionType === 'CORRECTIVE' ? 'fix-it' : 'prevention'} action for a ${incidentType === 'FOOD_SAFETY' ? 'food safety' : 'workplace'} issue (${categoryName}):
+
+Action: ${title}
+Details: ${description}`,
         },
       ],
       temperature: 0.4,
-      max_tokens: 600,
+      max_completion_tokens: 600,
       response_format: { type: 'json_object' },
     });
 

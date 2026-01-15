@@ -1438,7 +1438,7 @@ Keep the plan concise but thorough. Write it as a practical guide the owner can 
         },
       ],
       temperature: 0.7,
-      max_tokens: 1500,
+      max_completion_tokens: 1500,
     });
 
     const generatedPlan = completion.choices[0]?.message?.content || '';
@@ -1571,7 +1571,7 @@ Respond in JSON format:
         },
       ],
       temperature: 0.5,
-      max_tokens: 1000,
+      max_completion_tokens: 1000,
       response_format: { type: 'json_object' },
     });
 
@@ -1774,28 +1774,37 @@ router.post('/:id/generate-structured-plan', async (req: AuthRequest, res: Respo
       messages: [
         {
           role: 'system',
-          content: `You are a senior Quality Assurance expert specializing in CAPA (Corrective and Preventive Action) implementation in manufacturing and food safety environments. Generate structured implementation plans that are practical, measurable, and compliant with FDA, ISO 9001, ISO 22000 standards.
+          content: `You are a helpful workplace safety advisor who explains things in simple, everyday language. Think of yourself as a friendly coworker with experience in fixing problems and preventing accidents.
+
+Your job is to create step-by-step plans that anyone can follow - no fancy jargon, just clear and practical steps that make sense.
+
+IMPORTANT RULES:
+- Use simple words that everyone understands (avoid technical terms unless necessary)
+- Give realistic steps that can actually be done with normal resources
+- Think about what a regular employee or supervisor can realistically accomplish
+- Make each step feel natural, like advice from an experienced colleague
+- Be specific but not overly complicated
 
 CRITICAL: Return ONLY valid JSON in this exact format:
 {
   "steps": [
     {
-      "actionDescription": "Clear, specific action to take",
-      "estimatedTime": "Time estimate (e.g., '2 hours', '1 day')",
-      "responsibleParty": "Role or department responsible",
-      "dueDate": "Suggested due date relative to action start",
-      "ownership": "Department/function that owns this step",
-      "verificationMethod": "How to verify completion",
-      "notes": "Any dependencies or special considerations"
+      "actionDescription": "Write this like you're telling a coworker what to do - simple and clear",
+      "estimatedTime": "Realistic time (e.g., '30 minutes', '1-2 hours', 'half a day')",
+      "responsibleParty": "Who should do this (e.g., 'Supervisor', 'Safety Team', 'Maintenance')",
+      "dueDate": "When this should be done by",
+      "ownership": "Which team owns this",
+      "verificationMethod": "Simple way to check it was done right",
+      "notes": "Any helpful tips or things to watch out for"
     }
   ]
 }
 
-Generate 5-8 logical, sequential steps. Each step should be:
-1. Specific and actionable (not vague)
-2. Assignable to a role/person
-3. Time-bounded
-4. Verifiable`,
+Generate 4-6 practical steps. Each step should be:
+1. Easy to understand without special training
+2. Something a real person can actually do
+3. Have a clear way to check if it's done
+4. Make sense in the order given`,
         },
         {
           role: 'user',
@@ -1819,7 +1828,7 @@ Return the structured steps as JSON.`,
         },
       ],
       temperature: 0.7,
-      max_tokens: 2000,
+      max_completion_tokens: 2000,
       response_format: { type: 'json_object' },
     });
 
@@ -1913,7 +1922,7 @@ Provide validation scores and suggestions.`,
         },
       ],
       temperature: 0.3,
-      max_tokens: 500,
+      max_completion_tokens: 500,
       response_format: { type: 'json_object' },
     });
 
@@ -1998,7 +2007,7 @@ Provide a specific, actionable next step that logically follows the existing ste
         },
       ],
       temperature: 0.7,
-      max_tokens: 300,
+      max_completion_tokens: 300,
       response_format: { type: 'json_object' },
     });
 
@@ -2103,7 +2112,7 @@ Respond ONLY with valid JSON:`;
           model: 'gpt-4o',
           messages: [{ role: 'user', content: prompt }],
           temperature: 0.3,
-          max_tokens: 1000,
+          max_completion_tokens: 1000,
         });
 
         const responseText = completion.choices[0].message.content || '';
@@ -2221,7 +2230,7 @@ Format as a clear, professional narrative suitable for a knowledge base (3-5 par
           model: 'gpt-4o',
           messages: [{ role: 'user', content: prompt }],
           temperature: 0.5,
-          max_tokens: 1500,
+          max_completion_tokens: 1500,
         });
 
         const lessons = completion.choices[0].message.content || '';
@@ -2321,7 +2330,7 @@ Respond ONLY with valid JSON:`;
           model: 'gpt-4o',
           messages: [{ role: 'user', content: prompt }],
           temperature: 0.3,
-          max_tokens: 800,
+          max_completion_tokens: 800,
         });
 
         const responseText = completion.choices[0].message.content || '';
@@ -2408,7 +2417,7 @@ Return ONLY the improved text, nothing else. Do not include any explanations, pr
           model: 'gpt-4o',
           messages: [{ role: 'user', content: prompt }],
           temperature: 0.3,
-          max_tokens: 2000,
+          max_completion_tokens: 2000,
         });
 
         const improvedContent = completion.choices[0].message.content?.trim() || content;

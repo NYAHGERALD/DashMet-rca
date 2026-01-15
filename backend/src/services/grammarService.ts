@@ -146,7 +146,7 @@ IMPORTANT:
         { role: 'user', content: `Analyze this text:\n\n"${text}"` },
       ],
       temperature: 0.3,
-      max_tokens: 2000,
+      max_completion_tokens: 2000,
     });
 
     const content = response.choices[0]?.message?.content;
@@ -210,7 +210,7 @@ Keep the original meaning and tone. Only fix actual errors. Return ONLY valid JS
         { role: 'user', content: text },
       ],
       temperature: 0.2,
-      max_tokens: 1000,
+      max_completion_tokens: 1000,
     });
 
     const content = response.choices[0]?.message?.content;
@@ -295,7 +295,7 @@ Guidelines:
         { role: 'user', content: text },
       ],
       temperature: 0.4,
-      max_tokens: 1500,
+      max_completion_tokens: 1500,
     });
 
     const content = response.choices[0]?.message?.content;
@@ -358,7 +358,7 @@ Return ONLY the JSON array.`,
         { role: 'user', content: `Selected text: "${selectedText}"` },
       ],
       temperature: 0.6,
-      max_tokens: 500,
+      max_completion_tokens: 500,
     });
 
     const content = response.choices[0]?.message?.content;
@@ -393,7 +393,7 @@ export async function checkSpelling(word: string): Promise<{ correct: boolean; s
         { role: 'user', content: word },
       ],
       temperature: 0.1,
-      max_tokens: 100,
+      max_completion_tokens: 100,
     });
 
     const content = response.choices[0]?.message?.content;
@@ -433,7 +433,7 @@ Each completion should naturally continue the text.`,
         { role: 'user', content: text },
       ],
       temperature: 0.7,
-      max_tokens: 300,
+      max_completion_tokens: 300,
     });
 
     const content = response.choices[0]?.message?.content;

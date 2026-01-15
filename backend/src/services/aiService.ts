@@ -147,7 +147,7 @@ IMPORTANT: Reply with ONLY the improved text. No explanations or extra words.`,
         },
       ],
       temperature: 0.4,
-      max_tokens: 1000,
+      max_completion_tokens: 1000,
     });
 
     const enhancedText = completion.choices[0]?.message?.content?.trim() || text;
@@ -252,7 +252,7 @@ RATIONALE: [Brief one-sentence justification for severity level]`,
         },
       ],
       temperature: 0.2, // Lower temperature for more consistent, professional output
-      max_tokens: 600,
+      max_completion_tokens: 600,
     });
 
     const response = completion.choices[0]?.message?.content || '';
@@ -772,7 +772,7 @@ OUTPUT FORMAT (JSON only):
         },
       ],
       temperature: 0.2, // Lower for more consistent recommendations
-      max_tokens: 800,
+      max_completion_tokens: 800,
       response_format: { type: 'json_object' },
     });
 
@@ -1234,7 +1234,7 @@ OUTPUT FORMAT (JSON only):
         },
       ],
       temperature: 0.3,
-      max_tokens: 2000,
+      max_completion_tokens: 2000,
       response_format: { type: 'json_object' },
     });
 
@@ -1426,7 +1426,7 @@ OUTPUT FORMAT (JSON only):
         },
       ],
       temperature: 0.3,
-      max_tokens: 3000,
+      max_completion_tokens: 3000,
       response_format: { type: 'json_object' },
     });
 
@@ -1558,7 +1558,7 @@ Provide the next why question and suggested answer. Remember to focus on ${incid
         },
       ],
       temperature: 0.3,
-      max_tokens: 500,
+      max_completion_tokens: 500,
       response_format: { type: 'json_object' },
     });
 
@@ -1638,7 +1638,7 @@ Suggest 3-5 additional potential causes for this category, avoiding duplicates.`
         },
       ],
       temperature: 0.4,
-      max_tokens: 600,
+      max_completion_tokens: 600,
       response_format: { type: 'json_object' },
     });
 
@@ -1723,7 +1723,7 @@ Evaluate this problem statement and determine if it's suitable for a Fishbone an
         },
       ],
       temperature: 0.3,
-      max_tokens: 700,
+      max_completion_tokens: 700,
       response_format: { type: 'json_object' },
     });
 
@@ -1876,7 +1876,7 @@ Apply 5 Whys to drill down to the TRUE root cause. Remember:
         },
       ],
       temperature: 0.3,
-      max_tokens: 1800,
+      max_completion_tokens: 1800,
       response_format: { type: 'json_object' },
     });
 
@@ -2019,7 +2019,7 @@ VALIDATE:
         },
       ],
       temperature: 0.3,
-      max_tokens: 1500,
+      max_completion_tokens: 1500,
       response_format: { type: 'json_object' },
     });
 
@@ -2147,7 +2147,7 @@ Please validate this analysis. Check for:
         },
       ],
       temperature: 0.3,
-      max_tokens: 2000,
+      max_completion_tokens: 2000,
       response_format: { type: 'json_object' },
     });
 
@@ -2283,7 +2283,7 @@ Based on ALL the above information, conduct a comprehensive Fishbone analysis:
         },
       ],
       temperature: 0.3,
-      max_tokens: 6000,
+      max_completion_tokens: 6000,
       response_format: { type: 'json_object' },
     });
 
@@ -2536,7 +2536,7 @@ Remember: For workplace safety incidents, the question MUST focus on WHY THE INJ
         },
       ],
       temperature: 0.3,
-      max_tokens: 300,
+      max_completion_tokens: 300,
       response_format: { type: 'json_object' },
     });
 
@@ -2635,7 +2635,7 @@ Please validate this answer against the incident data.`,
         },
       ],
       temperature: 0.3,
-      max_tokens: 700,
+      max_completion_tokens: 700,
       response_format: { type: 'json_object' },
     });
 
@@ -2762,7 +2762,7 @@ Complete the remaining 4 Whys analysis, building logically from the user's first
         },
       ],
       temperature: 0.3,
-      max_tokens: 2000,
+      max_completion_tokens: 2000,
       response_format: { type: 'json_object' },
     });
 
@@ -3212,7 +3212,7 @@ Generate 2-4 actions per category and 3-5 preventive controls. Be specific and a
         },
       ],
       temperature: 0.3,
-      max_tokens: 3000,
+      max_completion_tokens: 3000,
     });
 
     const response = completion.choices[0]?.message?.content || '';
@@ -3500,7 +3500,7 @@ The refined actions should be realistic, specific, and directly tied to root cau
         },
       ],
       temperature: 0.3,
-      max_tokens: 3000,
+      max_completion_tokens: 3000,
     });
 
     const response = completion.choices[0]?.message?.content || '';
@@ -3917,7 +3917,7 @@ Perform deep analysis considering the incident narrative and category context.`,
         },
       ],
       temperature: 0.2,
-      max_tokens: 3000,
+      max_completion_tokens: 3000,
       response_format: { type: 'json_object' },
     });
 
@@ -4092,7 +4092,7 @@ Return valid JSON only.`,
         },
       ],
       temperature: 0.4,
-      max_tokens: 1500,
+      max_completion_tokens: 1500,
       response_format: { type: 'json_object' },
     });
 
@@ -4336,7 +4336,7 @@ Generate controls that a safety professional would be proud to present to manage
         },
       ],
       temperature: 0.4,
-      max_tokens: 2500,
+      max_completion_tokens: 2500,
     });
 
     const response = completion.choices[0]?.message?.content || '';
