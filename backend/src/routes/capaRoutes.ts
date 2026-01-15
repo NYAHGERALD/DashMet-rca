@@ -2109,7 +2109,7 @@ Analyze this deviation and provide a JSON response with:
 Respond ONLY with valid JSON:`;
 
         const completion = await openai.chat.completions.create({
-          model: 'gpt-4o',
+          model: process.env.AI_MODEL || 'gpt-4o',
           messages: [{ role: 'user', content: prompt }],
           temperature: 0.3,
           max_completion_tokens: 1000,
@@ -2227,7 +2227,7 @@ Generate lessons learned that include:
 Format as a clear, professional narrative suitable for a knowledge base (3-5 paragraphs).`;
 
         const completion = await openai.chat.completions.create({
-          model: 'gpt-4o',
+          model: process.env.AI_MODEL || 'gpt-4o',
           messages: [{ role: 'user', content: prompt }],
           temperature: 0.5,
           max_completion_tokens: 1500,
@@ -2327,7 +2327,7 @@ Evaluate and provide a JSON response:
 Respond ONLY with valid JSON:`;
 
         const completion = await openai.chat.completions.create({
-          model: 'gpt-4o',
+          model: process.env.AI_MODEL || 'gpt-4o',
           messages: [{ role: 'user', content: prompt }],
           temperature: 0.3,
           max_completion_tokens: 800,
@@ -2414,7 +2414,7 @@ ${content}
 Return ONLY the improved text, nothing else. Do not include any explanations, prefixes, or metadata.`;
 
         const completion = await openai.chat.completions.create({
-          model: 'gpt-4o',
+          model: process.env.AI_MODEL || 'gpt-4o',
           messages: [{ role: 'user', content: prompt }],
           temperature: 0.3,
           max_completion_tokens: 2000,
