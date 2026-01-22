@@ -1164,9 +1164,9 @@ function FMIRNewPageContent() {
     }
   }, [autoSaveEnabled]);
 
-  // Immediate save for QA-only fields (productPlacedOnHold, corporateNotified)
+  // Immediate save for QA-only fields (productPlacedOnHold, corporateNotified, maintenanceWorkCompleted)
   // These need instant sync for real-time collaboration - no debounce
-  const saveQAFieldImmediately = useCallback(async (fieldName: string, fieldValue: boolean, updatedFormData: FMIRFormData) => {
+  const saveQAFieldImmediately = useCallback(async (fieldName: string, fieldValue: boolean | string, updatedFormData: FMIRFormData) => {
     const reportId = currentReportId || editId;
     if (!reportId) return; // Can't save if no report exists yet
     
@@ -3479,22 +3479,98 @@ function FMIRNewPageContent() {
               />
 
               <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 sm:gap-4">
-                <FormRadioGroup
-                  label="Was Maintenance Work Completed?"
-                  name="maintenanceWorkCompleted"
-                  value={formData.maintenanceWorkCompleted}
-                  options={[
-                    { value: 'Y', label: 'Yes' },
-                    { value: 'N', label: 'No' },
-                  ]}
-                  onChange={(value) => {
-                    const updatedFormData = { ...formData, maintenanceWorkCompleted: value };
-                    setFormData(updatedFormData);
-                    // Immediate save for real-time sync with other users
-                    saveQAFieldImmediately('maintenanceWorkCompleted', value === 'Y', updatedFormData);
-                  }}
-                  disabled={!canEditRestrictedSections}
-                />
+                {/* Was Maintenance Work Completed - with N/A option */}
+                <div className={!canEditRestrictedSections ? 'opacity-60' : ''}>
+                  <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">
+                    Was Maintenance Work Completed?
+                  </label>
+                  <div className="flex flex-wrap gap-2">
+                    {/* N/A Option */}
+                    <label
+                      className={`flex items-center gap-2 px-3 py-2 rounded-lg border transition-colors ${
+                        !canEditRestrictedSections ? 'cursor-not-allowed' : 'cursor-pointer'
+                      } ${
+                        formData.maintenanceWorkCompleted === 'NA'
+                          ? 'bg-gray-200 dark:bg-gray-600 border-gray-500 text-gray-700 dark:text-gray-200'
+                          : 'bg-gray-50 dark:bg-gray-700 border-gray-300 dark:border-gray-600 text-gray-700 dark:text-gray-300 hover:bg-gray-100 dark:hover:bg-gray-650'
+                      }`}
+                    >
+                      <input
+                        type="radio"
+                        name="maintenanceWorkCompleted"
+                        value="NA"
+                        checked={formData.maintenanceWorkCompleted === 'NA'}
+                        onChange={() => {
+                          if (!canEditRestrictedSections) return;
+                          const updatedFormData = { ...formData, maintenanceWorkCompleted: 'NA' };
+                          setFormData(updatedFormData);
+                          saveQAFieldImmediately('maintenanceWorkCompleted', 'NA', updatedFormData);
+                        }}
+                        disabled={!canEditRestrictedSections}
+                        className="sr-only"
+                      />
+                      <span className="text-sm font-medium">N/A</span>
+                    </label>
+                    
+                    {/* Yes Option */}
+                    <label
+                      className={`flex items-center gap-2 px-3 py-2 rounded-lg border transition-colors ${
+                        !canEditRestrictedSections || formData.maintenanceWorkCompleted === 'NA' ? 'cursor-not-allowed' : 'cursor-pointer'
+                      } ${
+                        formData.maintenanceWorkCompleted === 'NA'
+                          ? 'opacity-40 bg-gray-100 dark:bg-gray-800 border-gray-200 dark:border-gray-700 text-gray-400 dark:text-gray-500'
+                          : formData.maintenanceWorkCompleted === 'Y'
+                            ? 'bg-primary-50 dark:bg-primary-900/30 border-primary-500 text-primary-700 dark:text-primary-300'
+                            : 'bg-gray-50 dark:bg-gray-700 border-gray-300 dark:border-gray-600 text-gray-700 dark:text-gray-300 hover:bg-gray-100 dark:hover:bg-gray-650'
+                      }`}
+                    >
+                      <input
+                        type="radio"
+                        name="maintenanceWorkCompleted"
+                        value="Y"
+                        checked={formData.maintenanceWorkCompleted === 'Y'}
+                        onChange={() => {
+                          if (!canEditRestrictedSections || formData.maintenanceWorkCompleted === 'NA') return;
+                          const updatedFormData = { ...formData, maintenanceWorkCompleted: 'Y' };
+                          setFormData(updatedFormData);
+                          saveQAFieldImmediately('maintenanceWorkCompleted', 'Y', updatedFormData);
+                        }}
+                        disabled={!canEditRestrictedSections || formData.maintenanceWorkCompleted === 'NA'}
+                        className="sr-only"
+                      />
+                      <span className="text-sm font-medium">Yes</span>
+                    </label>
+                    
+                    {/* No Option */}
+                    <label
+                      className={`flex items-center gap-2 px-3 py-2 rounded-lg border transition-colors ${
+                        !canEditRestrictedSections || formData.maintenanceWorkCompleted === 'NA' ? 'cursor-not-allowed' : 'cursor-pointer'
+                      } ${
+                        formData.maintenanceWorkCompleted === 'NA'
+                          ? 'opacity-40 bg-gray-100 dark:bg-gray-800 border-gray-200 dark:border-gray-700 text-gray-400 dark:text-gray-500'
+                          : formData.maintenanceWorkCompleted === 'N'
+                            ? 'bg-primary-50 dark:bg-primary-900/30 border-primary-500 text-primary-700 dark:text-primary-300'
+                            : 'bg-gray-50 dark:bg-gray-700 border-gray-300 dark:border-gray-600 text-gray-700 dark:text-gray-300 hover:bg-gray-100 dark:hover:bg-gray-650'
+                      }`}
+                    >
+                      <input
+                        type="radio"
+                        name="maintenanceWorkCompleted"
+                        value="N"
+                        checked={formData.maintenanceWorkCompleted === 'N'}
+                        onChange={() => {
+                          if (!canEditRestrictedSections || formData.maintenanceWorkCompleted === 'NA') return;
+                          const updatedFormData = { ...formData, maintenanceWorkCompleted: 'N' };
+                          setFormData(updatedFormData);
+                          saveQAFieldImmediately('maintenanceWorkCompleted', 'N', updatedFormData);
+                        }}
+                        disabled={!canEditRestrictedSections || formData.maintenanceWorkCompleted === 'NA'}
+                        className="sr-only"
+                      />
+                      <span className="text-sm font-medium">No</span>
+                    </label>
+                  </div>
+                </div>
                 <FormToggle
                   label="Sanitation/Clean-up Required"
                   name="sanitationRequired"
