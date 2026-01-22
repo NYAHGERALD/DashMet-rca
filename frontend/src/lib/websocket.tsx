@@ -91,6 +91,8 @@ interface WebSocketContextType {
   onFmirCollaboratorAdded: (callback: (data: any) => void) => () => void;
   // FMIR collaborator removed event handler (for real-time removal notification)
   onFmirCollaboratorRemoved: (callback: (data: { reportId: string; reportNumber: string; removedUserId: string; removedByName: string }) => void) => () => void;
+  // FMIR collaborators updated event handler (for real-time list updates when collaborators change)
+  onFmirCollaboratorsUpdated: (callback: (data: { reportId: string; reportNumber: string; action: 'added' | 'removed'; collaboratorIds: string[]; collaborators: any[]; updatedByName: string; updatedById: string; removedUserId?: string }) => void) => () => void;
   // FMIR visibility changed event handler
   onFmirVisibilityChanged: (callback: (data: { reportId: string; reportNumber: string; isVisible: boolean; ownerId: string }) => void) => () => void;
   // FMIR visibility off event handler (for immediate modal on collaborators)
@@ -143,6 +145,7 @@ export function WebSocketProvider({ children }: { children: React.ReactNode }) {
   const messagesReadCallbacks = useRef<Set<(data: { userId: string; incidentId: string }) => void>>(new Set());
   const fmirCollaboratorAddedCallbacks = useRef<Set<(data: any) => void>>(new Set());
   const fmirCollaboratorRemovedCallbacks = useRef<Set<(data: any) => void>>(new Set());
+  const fmirCollaboratorsUpdatedCallbacks = useRef<Set<(data: any) => void>>(new Set());
   const fmirVisibilityChangedCallbacks = useRef<Set<(data: any) => void>>(new Set());
   const fmirVisibilityOffCallbacks = useRef<Set<(data: any) => void>>(new Set());
   const fmirUpdatedCallbacks = useRef<Set<(data: any) => void>>(new Set());
@@ -331,6 +334,12 @@ export function WebSocketProvider({ children }: { children: React.ReactNode }) {
     newSocket.on('fmir:collaborator-removed', (data: any) => {
       console.log('👤 FMIR collaborator removed event:', data);
       fmirCollaboratorRemovedCallbacks.current.forEach(cb => cb(data));
+    });
+
+    // Handle FMIR collaborators updated (broadcast to all viewers when collaborator list changes)
+    newSocket.on('fmir:collaborators-updated', (data: any) => {
+      console.log('👥 FMIR collaborators updated event:', data);
+      fmirCollaboratorsUpdatedCallbacks.current.forEach(cb => cb(data));
     });
 
     // Handle FMIR visibility changed (when owner toggles visibility)
@@ -559,6 +568,11 @@ export function WebSocketProvider({ children }: { children: React.ReactNode }) {
     return () => { fmirCollaboratorRemovedCallbacks.current.delete(callback); };
   }, []);
 
+  const onFmirCollaboratorsUpdated = useCallback((callback: (data: any) => void) => {
+    fmirCollaboratorsUpdatedCallbacks.current.add(callback);
+    return () => { fmirCollaboratorsUpdatedCallbacks.current.delete(callback); };
+  }, []);
+
   const onFmirVisibilityChanged = useCallback((callback: (data: any) => void) => {
     fmirVisibilityChangedCallbacks.current.add(callback);
     return () => { fmirVisibilityChangedCallbacks.current.delete(callback); };
@@ -653,6 +667,7 @@ export function WebSocketProvider({ children }: { children: React.ReactNode }) {
         onMessagesRead,
         onFmirCollaboratorAdded,
         onFmirCollaboratorRemoved,
+        onFmirCollaboratorsUpdated,
         onFmirVisibilityChanged,
         onFmirVisibilityOff,
         onFmirUpdated,

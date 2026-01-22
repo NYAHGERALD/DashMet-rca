@@ -276,7 +276,7 @@ interface FMIRSuccessAuditAnalysis {
 function FMIRListContent() {
   const router = useRouter();
   const { user, getIdToken } = useAuth();
-  const { onFmirCollaboratorAdded, onFmirCollaboratorRemoved, onFmirVisibilityChanged, onFmirClosedStatusChanged, onFmirStatusChanged, onFmirUpdated, onFmirDeleted, onFmirAuditProgress } = useWebSocket();
+  const { onFmirCollaboratorAdded, onFmirCollaboratorRemoved, onFmirCollaboratorsUpdated, onFmirVisibilityChanged, onFmirClosedStatusChanged, onFmirStatusChanged, onFmirUpdated, onFmirDeleted, onFmirAuditProgress } = useWebSocket();
 
   const [reports, setReports] = useState<FMIRReport[]>([]);
   const [loading, setLoading] = useState(true);
@@ -660,6 +660,43 @@ function FMIRListContent() {
 
     return () => unsubscribe();
   }, [onFmirCollaboratorAdded, user?.id]);
+
+  // Listen for collaborator list updates (broadcast to all viewers including QA)
+  useEffect(() => {
+    const unsubscribe = onFmirCollaboratorsUpdated((data: { 
+      reportId: string; 
+      reportNumber: string; 
+      action: 'added' | 'removed'; 
+      collaboratorIds: string[]; 
+      collaborators: any[]; 
+      updatedByName: string; 
+      updatedById: string;
+      removedUserId?: string;
+    }) => {
+      console.log('👥 FMIR collaborators updated event received:', data);
+      
+      // Don't update if we're the one who made the change (we already have the update from API response)
+      if (data.updatedById === user?.id) {
+        return;
+      }
+      
+      // Update the collaborators for this report in the list
+      setReports(prevReports => 
+        prevReports.map(report => {
+          if (report.id === data.reportId) {
+            return {
+              ...report,
+              collaboratorIds: data.collaboratorIds,
+              Collaborators: data.collaborators,
+            };
+          }
+          return report;
+        })
+      );
+    });
+
+    return () => unsubscribe();
+  }, [onFmirCollaboratorsUpdated, user?.id]);
 
   // Close dropdown when clicking outside
   useEffect(() => {

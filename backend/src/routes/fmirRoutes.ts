@@ -2463,6 +2463,7 @@ router.post(
     
     console.log(`👥 FMIR ${report.reportNumber}: ${newlyAddedUserIds.length} collaborator(s) added by ${ownerName}`);
     
+    // Emit to each newly added user directly
     for (const addedUserId of newlyAddedUserIds) {
       websocketService.emitToUser(addedUserId, 'fmir:collaborator-added', {
         reportId: id,
@@ -2472,6 +2473,17 @@ router.post(
         addedById: userId,
       });
     }
+    
+    // Also broadcast to organization so all viewers (including QA) see the update on their list
+    websocketService.emitToOrganization(userOrgId, 'fmir:collaborators-updated', {
+      reportId: id,
+      reportNumber: report.reportNumber,
+      action: 'added',
+      collaboratorIds: newCollaboratorIds,
+      collaborators: collaborators,
+      updatedByName: ownerName,
+      updatedById: userId,
+    });
 
     res.json({
       success: true,
@@ -2557,6 +2569,18 @@ router.delete(
       reportNumber: report.reportNumber,
       removedUserId: collaboratorId,
       removedByName: ownerName,
+    });
+    
+    // Also broadcast to organization so all viewers (including QA) see the update on their list
+    websocketService.emitToOrganization(userOrgId, 'fmir:collaborators-updated', {
+      reportId: id,
+      reportNumber: report.reportNumber,
+      action: 'removed',
+      removedUserId: collaboratorId,
+      collaboratorIds: newCollaboratorIds,
+      collaborators: collaborators,
+      updatedByName: ownerName,
+      updatedById: userId,
     });
 
     res.json({
