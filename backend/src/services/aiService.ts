@@ -3,14 +3,91 @@
 
 import OpenAI from 'openai';
 
-// Lazy initialization of OpenAI client
+// Lazy initialization of OpenAI client with proper timeout configuration
+let openaiClient: OpenAI | null = null;
+
 function getOpenAIClient(): OpenAI | null {
   if (!process.env.OPENAI_API_KEY) {
     return null;
   }
-  return new OpenAI({
+  
+  // Reuse existing client to maintain connection pool
+  if (openaiClient) {
+    return openaiClient;
+  }
+  
+  openaiClient = new OpenAI({
     apiKey: process.env.OPENAI_API_KEY,
+    timeout: 120000, // 2 minutes timeout for long AI operations
+    maxRetries: 2, // OpenAI SDK built-in retries
   });
+  
+  return openaiClient;
+}
+
+/**
+ * Retry helper with exponential backoff for OpenAI API calls
+ * Handles transient network errors and rate limiting
+ */
+async function withRetry<T>(
+  fn: () => Promise<T>,
+  options: {
+    maxRetries?: number;
+    initialDelayMs?: number;
+    maxDelayMs?: number;
+    operationName?: string;
+  } = {}
+): Promise<T> {
+  const {
+    maxRetries = 3,
+    initialDelayMs = 1000,
+    maxDelayMs = 10000,
+    operationName = 'OpenAI API call'
+  } = options;
+
+  let lastError: Error | null = null;
+
+  for (let attempt = 1; attempt <= maxRetries; attempt++) {
+    try {
+      return await fn();
+    } catch (error: any) {
+      lastError = error;
+
+      // Check if error is retryable
+      const isRetryable =
+        error.code === 'ECONNRESET' ||
+        error.code === 'ETIMEDOUT' ||
+        error.code === 'UND_ERR_SOCKET' ||
+        error.code === 'ENOTFOUND' ||
+        error.message?.includes('Connection error') ||
+        error.message?.includes('fetch failed') ||
+        error.message?.includes('socket') ||
+        error.status === 429 || // Rate limited
+        error.status === 500 || // Server error
+        error.status === 502 || // Bad gateway
+        error.status === 503 || // Service unavailable
+        error.status === 504;   // Gateway timeout
+
+      if (!isRetryable || attempt === maxRetries) {
+        throw error;
+      }
+
+      // Calculate delay with exponential backoff and jitter
+      const delay = Math.min(
+        initialDelayMs * Math.pow(2, attempt - 1) + Math.random() * 500,
+        maxDelayMs
+      );
+
+      console.log(
+        `⚠️ ${operationName} failed (attempt ${attempt}/${maxRetries}), retrying in ${Math.round(delay)}ms...`,
+        error.code || error.message?.slice(0, 50)
+      );
+
+      await new Promise(resolve => setTimeout(resolve, delay));
+    }
+  }
+
+  throw lastError;
 }
 
 interface IncidentData {
@@ -4421,3 +4498,1552 @@ function generateFallbackPreventiveControls(
   return { preventiveControls: controls };
 }
 
+// ============================================================================
+// FMIR VALIDATION AND COMPLIANCE ANALYSIS
+// ============================================================================
+
+interface FMIRValidationField {
+  field: string;
+  section: number;
+  label: string;
+  value: any;
+  required: boolean;
+  reason: string;
+}
+
+interface FMIRValidationResult {
+  isValid: boolean;
+  missingFields: FMIRValidationField[];
+  hasEvidence: boolean;
+  evidenceCount: number;
+  sectionStatus: { [key: number]: { complete: boolean; missing: string[] } };
+}
+
+interface FMIRComplianceAnalysis {
+  overallCompliance: 'COMPLIANT' | 'NEEDS_IMPROVEMENT' | 'NON_COMPLIANT';
+  complianceScore: number;
+  summary: string;
+  fieldAnalysis: {
+    field: string;
+    section: number;
+    issue: string;
+    recommendation: string;
+    regulatoryReference?: string;
+  }[];
+  evidenceAnalysis: {
+    adequate: boolean;
+    summary: string;
+    recommendations: string[];
+  };
+  auditReadiness: {
+    ready: boolean;
+    concerns: string[];
+    strengths: string[];
+  };
+  aiExplanation: string;
+}
+
+/**
+ * Validate an FMIR report for completeness before locking
+ * Checks all required fields across all sections
+ */
+export function validateFMIRForLocking(report: any, evidence: any[]): FMIRValidationResult {
+  const missingFields: FMIRValidationField[] = [];
+  const sectionStatus: { [key: number]: { complete: boolean; missing: string[] } } = {};
+
+  // Section 1: General Information
+  const section1Fields = [
+    { field: 'incidentDate', label: 'Incident Date', required: true, reason: 'Required for incident timeline and traceability' },
+    { field: 'incidentTime', label: 'Incident Time', required: true, reason: 'Needed to establish precise incident timeline' },
+    { field: 'department', label: 'Department', required: true, reason: 'Required for department accountability and tracking' },
+    { field: 'fmSourceCategory', label: 'FM Source Category', required: true, reason: 'Required to categorize the foreign material source' },
+    { field: 'productName', label: 'Product Name', required: true, reason: 'Essential for product traceability and recall if needed' },
+  ];
+
+  // Section 2: Foreign Material Description
+  const section2Fields = [
+    { field: 'foreignMaterialDescription', label: 'Foreign Material Description', required: true, reason: 'Core requirement for identifying and documenting the contamination' },
+    { field: 'foreignMaterialSize', label: 'Size of Foreign Material', required: true, reason: 'Size determines hazard level and regulatory reporting requirements' },
+    { field: 'foreignMaterialHardness', label: 'Hardness', required: true, reason: 'Hardness affects injury potential and disposition decisions' },
+  ];
+
+  // Section 3: Cause Identification
+  const section3Fields = [
+    { field: 'causeIdentification', label: 'Cause Identification', required: true, reason: 'Root cause analysis is mandatory for FSMA compliance and audit readiness' },
+    { field: 'possibleSource', label: 'Possible Source', required: true, reason: 'Source identification enables targeted corrective actions' },
+    { field: 'howWhyOccurred', label: 'How/Why It Occurred', required: true, reason: 'Understanding the mechanism prevents recurrence' },
+  ];
+
+  // Section 4: Corrective Action
+  const section4Fields = [
+    { field: 'correctiveAction', label: 'Corrective Action Taken', required: true, reason: 'Corrective actions are mandatory under 21 CFR 117 and GFSI standards' },
+  ];
+
+  // Section 5: Verification
+  const section5Fields = [
+    { field: 'verificationActions', label: 'Verification Actions', required: true, reason: 'Verification ensures corrective actions are implemented and effective' },
+    { field: 'maintenanceWorkCompleted', label: 'Maintenance Work Completed', required: true, reason: 'Documents equipment-related corrective actions for audit trail' },
+  ];
+
+  // Section 6: Product Hold - conditional logic
+  const section6Fields: FMIRValidationField[] = [];
+  if (report.productPlacedOnHold) {
+    if (!report.itemsHeld || report.itemsHeld.trim() === '') {
+      section6Fields.push({ field: 'itemsHeld', section: 6, label: 'Items Held', value: report.itemsHeld, required: true, reason: 'When product is held, you must document what was held for traceability' });
+    }
+  } else {
+    if (!report.holdDecisionDetails || report.holdDecisionDetails.trim() === '') {
+      section6Fields.push({ field: 'holdDecisionDetails', section: 6, label: 'Decision Details (No Hold)', value: report.holdDecisionDetails, required: true, reason: 'When product is NOT held, you must justify why to demonstrate due diligence' });
+    }
+  }
+
+  // Section 7: Screening Process
+  const section7Fields = [
+    { field: 'screeningProcess', label: 'Screening Process', required: true, reason: 'Documentation of screening methods is required for GFSI audits' },
+  ];
+
+  // Section 8: Final Disposition
+  const section8Fields = [
+    { field: 'finalDisposition', label: 'Final Disposition', required: true, reason: 'Final disposition is critical for regulatory compliance and product safety' },
+    { field: 'dispositionJustification', label: 'Justification for Decision', required: true, reason: 'Justification demonstrates risk-based decision making required by regulators' },
+  ];
+
+  // Section 9: Prevention Measures
+  const section9Fields = [
+    { field: 'preventionMeasures', label: 'Prevention Measures', required: true, reason: 'Prevention measures demonstrate continuous improvement and CAPA compliance' },
+  ];
+
+  // Section 10: Corporate & Pre-Shipment - conditional logic
+  const section10Fields: FMIRValidationField[] = [];
+  
+  // Person(s) Notified is only required if Corporate Notified is Yes
+  if (report.corporateNotified) {
+    if (!report.corporatePersonsNotified || report.corporatePersonsNotified.trim() === '') {
+      section10Fields.push({ 
+        field: 'corporatePersonsNotified', 
+        section: 10, 
+        label: 'Person(s) Notified', 
+        value: report.corporatePersonsNotified, 
+        required: true, 
+        reason: 'When corporate is notified, you must document who was contacted' 
+      });
+    }
+  }
+  
+  // Pre-Shipment Review Notes and Date are only required if Product was Placed on Hold
+  if (report.productPlacedOnHold) {
+    if (!report.preShipmentReview || report.preShipmentReview.trim() === '') {
+      section10Fields.push({ 
+        field: 'preShipmentReview', 
+        section: 10, 
+        label: 'Pre-Shipment Review Notes', 
+        value: report.preShipmentReview, 
+        required: true, 
+        reason: 'Pre-shipment review is required when product is placed on hold' 
+      });
+    }
+    if (!report.preShipmentReviewDate) {
+      section10Fields.push({ 
+        field: 'preShipmentReviewDate', 
+        section: 10, 
+        label: 'Pre-Shipment Review Date', 
+        value: report.preShipmentReviewDate, 
+        required: true, 
+        reason: 'Pre-shipment review date is required when product is placed on hold' 
+      });
+    }
+  }
+
+  // Check each section
+  const allSectionFields = [
+    { section: 1, fields: section1Fields },
+    { section: 2, fields: section2Fields },
+    { section: 3, fields: section3Fields },
+    { section: 4, fields: section4Fields },
+    { section: 5, fields: section5Fields },
+    { section: 6, fields: section6Fields.map(f => ({ field: f.field, label: f.label, required: f.required, reason: f.reason })) },
+    { section: 7, fields: section7Fields },
+    { section: 8, fields: section8Fields },
+    { section: 9, fields: section9Fields },
+    { section: 10, fields: section10Fields.map(f => ({ field: f.field, label: f.label, required: f.required, reason: f.reason })) },
+  ];
+
+  for (const { section, fields } of allSectionFields) {
+    const sectionMissing: string[] = [];
+    
+    for (const fieldDef of fields) {
+      const value = report[fieldDef.field];
+      const isEmpty = value === null || value === undefined || 
+        (typeof value === 'string' && value.trim() === '') ||
+        (typeof value === 'boolean' && fieldDef.required);
+      
+      // For boolean fields that need to be explicitly set, check differently
+      if (fieldDef.required && isEmpty && fieldDef.field !== 'corporateNotified') {
+        missingFields.push({
+          field: fieldDef.field,
+          section,
+          label: fieldDef.label,
+          value,
+          required: true,
+          reason: fieldDef.reason,
+        });
+        sectionMissing.push(fieldDef.label);
+      }
+    }
+    
+    // Add pre-calculated section 6 missing fields
+    if (section === 6) {
+      for (const f of section6Fields) {
+        if (!missingFields.find(m => m.field === f.field)) {
+          missingFields.push(f);
+          sectionMissing.push(f.label);
+        }
+      }
+    }
+    
+    // Add pre-calculated section 10 missing fields (conditional based on corporateNotified and productPlacedOnHold)
+    if (section === 10) {
+      for (const f of section10Fields) {
+        if (!missingFields.find(m => m.field === f.field)) {
+          missingFields.push(f);
+          sectionMissing.push(f.label);
+        }
+      }
+    }
+    
+    sectionStatus[section] = {
+      complete: sectionMissing.length === 0,
+      missing: sectionMissing,
+    };
+  }
+
+  // Check evidence
+  const hasEvidence = evidence && evidence.length > 0;
+  if (!hasEvidence) {
+    missingFields.push({
+      field: 'evidence',
+      section: 0,
+      label: 'Evidence Attachments',
+      value: null,
+      required: true,
+      reason: 'At least one piece of evidence (photo, document) is required to support the FMIR and demonstrate the incident for audit purposes',
+    });
+  }
+
+  return {
+    isValid: missingFields.length === 0,
+    missingFields,
+    hasEvidence,
+    evidenceCount: evidence?.length || 0,
+    sectionStatus,
+  };
+}
+
+/**
+ * Deep AI analysis of FMIR for compliance and audit readiness
+ * Uses GPT to analyze all fields and evidence for regulatory compliance
+ */
+export async function analyzeFMIRCompliance(
+  report: any,
+  evidence: any[],
+  validationResult: FMIRValidationResult
+): Promise<FMIRComplianceAnalysis> {
+  const openai = getOpenAIClient();
+  
+  // If no OpenAI key, return basic analysis
+  if (!openai) {
+    return generateBasicComplianceAnalysis(report, evidence, validationResult);
+  }
+
+  try {
+    // Filter out videos from evidence for analysis
+    const analyzableEvidence = evidence.filter(e => 
+      e.type !== 'VIDEO' && !e.mimeType?.startsWith('video/')
+    );
+
+    const prompt = `You are an experienced Food Safety Auditor and Regulatory Compliance Expert. Analyze this Foreign Material Incident Report (FMIR) for compliance with FDA 21 CFR 117 (Preventive Controls), FSMA requirements, GFSI standards (SQF, BRC, FSSC 22000), and general food safety audit best practices.
+
+IMPORTANT: Write naturally like a real auditor would speak. Use simple, clear English. Explain your reasoning, don't just list points. Be helpful and constructive.
+
+FMIR Report Data:
+- Report Number: ${report.reportNumber}
+- Incident Date: ${report.incidentDate}
+- Department: ${report.department || 'Not specified'}
+- Product: ${report.productName || 'Not specified'}
+- Lot/Batch: ${report.productCodeBatchLot || 'Not specified'}
+
+Foreign Material Details:
+- Description: ${report.foreignMaterialDescription || 'Not provided'}
+- Size: ${report.foreignMaterialSize || 'Not specified'}
+- Hardness: ${report.foreignMaterialHardness || 'Not specified'}
+- Hard/Sharp/Large: ${report.isHardSharpOrLarge ? 'Yes' : 'No'}
+
+Cause Analysis:
+- Cause Identification: ${report.causeIdentification || 'Not provided'}
+- Possible Source: ${report.possibleSource || 'Not provided'}
+- How/Why Occurred: ${report.howWhyOccurred || 'Not provided'}
+
+Corrective Action:
+${report.correctiveAction || 'Not provided'}
+
+Verification:
+- Verification Actions: ${report.verificationActions || 'Not provided'}
+- Maintenance Work Completed: ${report.maintenanceWorkCompleted || 'Not specified'}
+- Sanitation Required: ${report.sanitationRequired ? 'Yes' : 'No'}
+
+Product Hold Decision:
+- Product Placed on Hold: ${report.productPlacedOnHold ? 'Yes' : 'No'}
+${report.productPlacedOnHold ? `- Items Held: ${report.itemsHeld || 'Not specified'}` : `- Decision Details (No Hold): ${report.holdDecisionDetails || 'Not provided'}`}
+
+Screening Process:
+${report.screeningProcess || 'Not provided'}
+
+Final Disposition:
+- Disposition: ${report.finalDisposition || 'Not provided'}
+- Volume: ${report.dispositionVolume || 'Not specified'}
+- Justification: ${report.dispositionJustification || 'Not provided'}
+
+Prevention Measures:
+${report.preventionMeasures || 'Not provided'}
+
+Evidence Attached:
+${analyzableEvidence.length > 0 
+  ? analyzableEvidence.map(e => `- ${e.fileName} (${e.type}): ${e.description || 'No description'}`).join('\n')
+  : 'No evidence attached'}
+
+${validationResult.missingFields.length > 0 
+  ? `\nMISSING REQUIRED FIELDS:\n${validationResult.missingFields.map(f => `- ${f.label}: ${f.reason}`).join('\n')}`
+  : ''}
+
+Analyze this FMIR and provide:
+1. Overall compliance assessment (be specific about what's good and what needs work)
+2. For each issue found, explain WHY it matters for audits and what could happen if not addressed
+3. Evaluate if the evidence provided supports the incident documentation adequately
+4. Assess audit readiness - would this pass a third-party audit?
+5. Give a natural, conversational summary that a QA manager would find helpful
+
+Respond in JSON format:
+{
+  "overallCompliance": "COMPLIANT" | "NEEDS_IMPROVEMENT" | "NON_COMPLIANT",
+  "complianceScore": <0-100>,
+  "summary": "<conversational 2-3 sentence summary>",
+  "fieldAnalysis": [
+    {
+      "field": "<field name>",
+      "section": <section number>,
+      "issue": "<what's wrong or missing>",
+      "recommendation": "<specific action to fix>",
+      "regulatoryReference": "<relevant standard, e.g., '21 CFR 117.150'>"
+    }
+  ],
+  "evidenceAnalysis": {
+    "adequate": <true/false>,
+    "summary": "<assessment of evidence quality>",
+    "recommendations": ["<specific evidence improvements>"]
+  },
+  "auditReadiness": {
+    "ready": <true/false>,
+    "concerns": ["<audit concerns>"],
+    "strengths": ["<what's done well>"]
+  },
+  "aiExplanation": "<detailed 3-5 paragraph natural language explanation of the analysis, written like an auditor talking to a colleague. Explain the importance of each finding, connect them to real audit scenarios, and provide actionable guidance. Use simple language.>"
+}`;
+
+    const response = await openai.chat.completions.create({
+      model: process.env.AI_MODEL || 'gpt-4o',
+      messages: [
+        {
+          role: 'system',
+          content: 'You are a senior Food Safety Auditor with 20+ years of experience. You speak naturally and explain things clearly. You help QA teams understand regulatory requirements in practical terms. Your goal is to help companies be audit-ready and compliant.'
+        },
+        {
+          role: 'user',
+          content: prompt
+        }
+      ],
+      temperature: 0.7,
+      max_completion_tokens: 3000,
+      response_format: { type: 'json_object' }
+    });
+
+    const content = response.choices[0]?.message?.content;
+    if (!content) {
+      throw new Error('No response from AI');
+    }
+
+    const analysis = JSON.parse(content) as FMIRComplianceAnalysis;
+    return analysis;
+
+  } catch (error) {
+    console.error('Error in AI FMIR compliance analysis:', error);
+    return generateBasicComplianceAnalysis(report, evidence, validationResult);
+  }
+}
+
+/**
+ * Generate basic compliance analysis without AI
+ * Used as fallback when OpenAI is unavailable
+ */
+function generateBasicComplianceAnalysis(
+  report: any,
+  evidence: any[],
+  validationResult: FMIRValidationResult
+): FMIRComplianceAnalysis {
+  const missingCount = validationResult.missingFields.length;
+  const hasEvidence = validationResult.hasEvidence;
+  
+  let overallCompliance: 'COMPLIANT' | 'NEEDS_IMPROVEMENT' | 'NON_COMPLIANT';
+  let complianceScore: number;
+  
+  if (missingCount === 0 && hasEvidence) {
+    overallCompliance = 'COMPLIANT';
+    complianceScore = 95;
+  } else if (missingCount <= 3 && hasEvidence) {
+    overallCompliance = 'NEEDS_IMPROVEMENT';
+    complianceScore = 70 - (missingCount * 10);
+  } else {
+    overallCompliance = 'NON_COMPLIANT';
+    complianceScore = Math.max(20, 50 - (missingCount * 5));
+  }
+
+  const fieldAnalysis = validationResult.missingFields.map(f => ({
+    field: f.field,
+    section: f.section,
+    issue: `${f.label} is missing or empty`,
+    recommendation: `Please provide the ${f.label}. ${f.reason}`,
+    regulatoryReference: getFieldRegReference(f.field),
+  }));
+
+  const evidenceAnalysis = {
+    adequate: hasEvidence && evidence.length >= 1,
+    summary: hasEvidence 
+      ? `${evidence.length} piece(s) of evidence attached. Evidence documentation supports the incident report.`
+      : 'No evidence has been attached to this FMIR. At least one photo or document is required for audit purposes.',
+    recommendations: hasEvidence ? [] : ['Attach at least one photo of the foreign material', 'Include any relevant documentation'],
+  };
+
+  const auditConcerns: string[] = [];
+  const auditStrengths: string[] = [];
+
+  if (!hasEvidence) auditConcerns.push('Missing evidence documentation');
+  if (missingCount > 0) auditConcerns.push(`${missingCount} required field(s) incomplete`);
+  if (!report.correctiveAction) auditConcerns.push('No corrective action documented');
+  if (!report.preventionMeasures) auditConcerns.push('No prevention measures specified');
+  
+  if (report.foreignMaterialDescription) auditStrengths.push('Foreign material properly described');
+  if (report.correctiveAction) auditStrengths.push('Corrective actions documented');
+  if (report.verificationActions) auditStrengths.push('Verification steps recorded');
+  if (hasEvidence) auditStrengths.push('Evidence attached');
+
+  let aiExplanation = '';
+  
+  if (missingCount === 0 && hasEvidence) {
+    aiExplanation = `Great job! This FMIR is ready to submit. You've filled in all the important details and attached evidence. This is exactly what auditors like to see - it shows your team handled the incident properly and documented everything.\n\nTake a quick look at your evidence to make sure the photos clearly show what happened. When you're happy with everything, go ahead and submit!`;
+  } else if (missingCount === 0 && !hasEvidence) {
+    aiExplanation = `Good news - all your fields are filled in! You can submit now, but I'd recommend adding some photos or documents first. Pictures of the foreign material really help tell the full story and make your report stronger.\n\nUp to you - submit now or add evidence first.`;
+  } else {
+    const issues: string[] = [];
+    if (!hasEvidence) issues.push('no photos or documents attached');
+    if (missingCount > 0) issues.push(`${missingCount} field(s) still need to be filled in`);
+    
+    aiExplanation = `Hold on - this report isn't quite ready yet. ${issues.join(', and ')}.\n\n`;
+    
+    if (missingCount > 0) {
+      aiExplanation += `Each field matters for a reason. The cause tells us why it happened, the corrective action shows what you did to fix it, and the prevention measures explain how you'll stop it from happening again. Auditors look for this whole story.\n\n`;
+    }
+    
+    if (!hasEvidence) {
+      aiExplanation += `Adding photos really helps. A picture of the foreign material or where you found it makes your report much more complete.\n\n`;
+    }
+    
+    aiExplanation += `Please fill in the missing items above, then try again.`;
+  }
+
+  return {
+    overallCompliance,
+    complianceScore,
+    summary: missingCount === 0 && hasEvidence 
+      ? 'This FMIR appears complete and ready for closure.'
+      : `This FMIR needs attention. ${missingCount} field(s) are missing and ${hasEvidence ? 'evidence is attached' : 'no evidence has been provided'}.`,
+    fieldAnalysis,
+    evidenceAnalysis,
+    auditReadiness: {
+      ready: missingCount === 0 && hasEvidence,
+      concerns: auditConcerns,
+      strengths: auditStrengths,
+    },
+    aiExplanation,
+  };
+}
+
+/**
+ * Get regulatory reference for a specific field
+ */
+function getFieldRegReference(field: string): string {
+  const references: { [key: string]: string } = {
+    causeIdentification: '21 CFR 117.150 - Corrective Actions',
+    correctiveAction: '21 CFR 117.150(a) - Corrective Action Procedures',
+    verificationActions: '21 CFR 117.155 - Verification',
+    preventionMeasures: '21 CFR 117.135 - Preventive Controls',
+    finalDisposition: 'GFSI Benchmarking Requirements - Product Release',
+    screeningProcess: 'GFSI - Foreign Material Control',
+    evidence: 'FDA Guidance - Documentation Requirements',
+    holdDecisionDetails: '21 CFR 117.150(b) - Risk-Based Decision Making',
+  };
+  
+  return references[field] || 'GFSI Food Safety Standards';
+}
+
+/**
+ * Explain a food safety regulation in plain English using AI
+ */
+export async function explainRegulation(
+  regulatoryReference: string,
+  fieldName: string,
+  issue: string,
+  recommendation: string
+): Promise<{
+  title: string;
+  plainExplanation: string;
+  whyItMatters: string;
+  practicalExample: string;
+  keyTakeaways: string[];
+}> {
+  const openai = getOpenAIClient();
+  const model = process.env.AI_MODEL || 'gpt-4o-mini';
+  
+  // If no OpenAI client, return a fallback explanation
+  if (!openai) {
+    return {
+      title: regulatoryReference,
+      plainExplanation: `This regulation (${regulatoryReference}) is a food safety requirement that helps ensure products are safe for consumers.`,
+      whyItMatters: 'Following food safety regulations protects consumers and helps your facility pass audits.',
+      practicalExample: `When dealing with ${fieldName}, make sure to document everything properly and follow your facility\'s procedures.`,
+      keyTakeaways: [
+        'Document all incidents thoroughly',
+        'Follow your facility\'s standard procedures',
+        'Keep records for audits'
+      ],
+    };
+  }
+
+  try {
+    const response = await openai.chat.completions.create({
+      model,
+      messages: [
+        {
+          role: 'system',
+          content: `You are a friendly food safety expert who explains regulations in simple, everyday language. Think of yourself as a helpful coworker who has been doing this for 20 years. You explain things clearly without jargon, using real-world examples that anyone can understand.
+
+Your explanations should:
+- Use simple words (avoid technical terms unless absolutely necessary, and explain them if used)
+- Give practical, real-world examples from a food manufacturing environment
+- Be conversational and warm, like talking to a friend
+- Focus on WHY this matters, not just WHAT it says
+- Make the person feel confident they can do this, not intimidated
+
+Always respond in JSON format with exactly these fields:
+{
+  "title": "A friendly, plain-English title for this regulation",
+  "plainExplanation": "A 2-3 paragraph explanation in simple terms that anyone can understand",
+  "whyItMatters": "Why this is important - connect it to real consequences like keeping people safe or passing audits",
+  "practicalExample": "A specific, relatable example from a food facility",
+  "keyTakeaways": ["3-5 bullet points summarizing the key actions to take"]
+}`
+        },
+        {
+          role: 'user',
+          content: `Please explain this food safety regulation in plain English:
+
+**Regulation:** ${regulatoryReference}
+**Related Field:** ${fieldName}
+**The Issue Found:** ${issue}
+**The Recommendation Given:** ${recommendation}
+
+Help me understand what this regulation is about, why it exists, and what I need to do to comply with it. Make it feel approachable and doable.`
+        }
+      ],
+      temperature: 0.7,
+      max_completion_tokens: 1500,
+    });
+
+    const content = response.choices[0]?.message?.content;
+    if (!content) {
+      throw new Error('No response from AI');
+    }
+
+    // Parse JSON response
+    const cleanedContent = content.replace(/```json\n?/g, '').replace(/```\n?/g, '').trim();
+    const parsed = JSON.parse(cleanedContent);
+
+    return {
+      title: parsed.title || regulatoryReference,
+      plainExplanation: parsed.plainExplanation || 'This regulation helps ensure food safety.',
+      whyItMatters: parsed.whyItMatters || 'Following this helps protect consumers and pass audits.',
+      practicalExample: parsed.practicalExample || 'Document everything and follow your procedures.',
+      keyTakeaways: parsed.keyTakeaways || ['Document thoroughly', 'Follow procedures', 'Keep records'],
+    };
+  } catch (error) {
+    console.error('Error explaining regulation:', error);
+    return {
+      title: regulatoryReference,
+      plainExplanation: `This regulation (${regulatoryReference}) is a food safety requirement related to ${fieldName}. ${issue}`,
+      whyItMatters: 'Following food safety regulations protects consumers, helps your facility pass audits, and demonstrates your commitment to quality.',
+      practicalExample: recommendation,
+      keyTakeaways: [
+        'Complete all required documentation',
+        'Follow your facility\'s standard procedures',
+        'Keep detailed records for audits',
+        'Ask your supervisor if you\'re unsure'
+      ],
+    };
+  }
+}
+// ============================================================================
+// FMIR SUCCESS AUDIT ANALYSIS (When all fields pass validation)
+// ============================================================================
+
+interface AnswerQualityAssessment {
+  field: string;
+  answer: string;
+  isAdequate: boolean;
+  qualityScore: number; // 0-100
+  issues: string[];
+  recommendations: string[];
+  regulatoryGap?: string;
+}
+
+interface EvidenceAssessmentDetail {
+  filename: string;
+  type: string;
+  relevance: 'high' | 'medium' | 'low' | 'unclear';
+  assessment: string;
+  supportsReport: boolean;
+  concerns?: string;
+  missingContext?: string;
+}
+
+interface FMIRSuccessAuditAnalysis {
+  // CRITICAL: Whether the report can be closed
+  canBeClosed: boolean;
+  blockingReasons: string[]; // Reasons preventing closure if canBeClosed is false
+  
+  congratulations: boolean;
+  auditScore: number;
+  overallVerdict: 'EXCELLENT' | 'GOOD' | 'SATISFACTORY' | 'NEEDS_IMPROVEMENT' | 'CANNOT_CLOSE';
+  passesAudit: boolean; // Whether this would pass a regulatory audit
+  
+  summary: {
+    headline: string;
+    keyStrengths: string[];
+    criticalConcerns: string[]; // Issues that could fail an audit
+    immediateActions: string[]; // Actions required before closure
+  };
+  
+  reportSummary: {
+    incidentOverview: string;
+    foreignMaterial: string;
+    causeAnalysis: string;
+    correctiveActions: string;
+    verification: string;
+    disposition: string;
+    prevention: string;
+  };
+  
+  // ENHANCED: Answer Quality Assessment for each key field
+  answerQuality: {
+    overallScore: number;
+    passesMinimumStandard: boolean;
+    assessments: AnswerQualityAssessment[];
+  };
+  
+  contentQuality: {
+    causeAnalysisAdequate: boolean;
+    causeAnalysisFeedback: string;
+    causeAnalysisRecommendation?: string;
+    correctiveActionsAdequate: boolean;
+    correctiveActionsFeedback: string;
+    correctiveActionsRecommendation?: string;
+    preventionMeasuresAdequate: boolean;
+    preventionMeasuresFeedback: string;
+    preventionMeasuresRecommendation?: string;
+    logicalConsistency: boolean; // Do cause, actions, and prevention align?
+    logicalConsistencyFeedback: string;
+    logicalGaps?: string[];
+  };
+  
+  // ENHANCED: Thorough Evidence Analysis
+  evidenceAnalysis: {
+    adequate: boolean;
+    count: number;
+    minimumRequired: number;
+    quality: 'excellent' | 'good' | 'acceptable' | 'insufficient' | 'missing';
+    supportsIncident: boolean;
+    feedback: string;
+    recommendations: string[];
+    missingEvidenceTypes: string[]; // What types of evidence are missing
+    detailedFindings: EvidenceAssessmentDetail[];
+  };
+  
+  regulatoryReadiness: {
+    fda21cfr117: boolean; // Preventive Controls compliance
+    gfsiStandards: boolean; // SQF/BRC/FSSC 22000
+    fsmaCompliance: boolean;
+    overallReady: boolean;
+    concerns: string[];
+    recommendations: string[];
+    specificViolations?: string[]; // Specific regulatory violations found
+  };
+  
+  fieldValidation: {
+    field: string;
+    section: number;
+    value: string;
+    assessment: 'excellent' | 'good' | 'acceptable' | 'needs_attention' | 'inadequate';
+    feedback: string;
+    suggestion?: string;
+    regulatoryNote?: string; // Specific regulatory reference if relevant
+  }[];
+  
+  improvementAreas: {
+    priority: 'critical' | 'high' | 'medium' | 'low';
+    area: string;
+    currentState: string;
+    recommendation: string;
+    regulatoryReference?: string;
+    blocksClosureUntilFixed: boolean;
+  }[];
+  
+  auditorNarrative: string;
+  closingStatement: string;
+}
+
+/**
+ * Generate comprehensive success audit analysis when FMIR passes all validation
+ * This provides a detailed AI auditor review with field-by-field feedback
+ * ENHANCED: Now includes thorough content quality assessment, evidence analysis, and regulatory compliance checks
+ */
+export async function generateFMIRSuccessAudit(
+  report: any,
+  evidence: any[]
+): Promise<FMIRSuccessAuditAnalysis> {
+  const startTime = Date.now();
+  console.log(`🔍 [FMIR Audit] Starting audit for report ${report.reportNumber || report.id}`);
+  
+  const openai = getOpenAIClient();
+  
+  // If no OpenAI key, return basic success analysis
+  if (!openai) {
+    console.log('⚠️ [FMIR Audit] No OpenAI client available, returning basic audit');
+    return generateBasicSuccessAudit(report, evidence);
+  }
+
+  try {
+    const analyzableEvidence = evidence.filter(e => 
+      e.type !== 'VIDEO' && !e.mimeType?.startsWith('video/')
+    );
+    console.log(`📷 [FMIR Audit] Found ${analyzableEvidence.length} analyzable evidence items (excluding videos)`);
+
+    // Analyze evidence images using GPT-4 Vision if available
+    // Process images IN PARALLEL for speed, with timeout per image
+    let evidenceAnalysisResults: Array<{filename: string; type: string; analysis: string; concerns?: string}> = [];
+    
+    const analyzeWithTimeout = async (ev: any): Promise<{filename: string; type: string; analysis: string; concerns?: string}> => {
+      const imagePath = ev.filePath || ev.fileUrl;
+      if (!imagePath) {
+        return {
+          filename: ev.fileName || ev.filename,
+          type: ev.type,
+          analysis: 'No file path available for this evidence.',
+          concerns: 'Image path missing'
+        };
+      }
+      
+      // 10 second timeout per image (reduced from 15s)
+      const timeoutPromise = new Promise<{filename: string; type: string; analysis: string; concerns?: string}>((_, reject) => 
+        setTimeout(() => reject(new Error('Image analysis timeout')), 10000)
+      );
+      
+      const analysisPromise = analyzeEvidenceForAudit(openai, imagePath, report).then(imageAnalysis => ({
+        filename: ev.fileName || ev.filename,
+        type: ev.type,
+        analysis: imageAnalysis.assessment,
+        concerns: imageAnalysis.concerns
+      }));
+      
+      return Promise.race([analysisPromise, timeoutPromise]);
+    };
+    
+    // Process images IN PARALLEL (not sequentially)
+    const imageEvidence = analyzableEvidence
+      .filter(ev => ev.type === 'PHOTO' || ev.mimeType?.startsWith('image/'))
+      .slice(0, 2); // Limit to 2 images for speed
+    
+    const nonImageEvidence = analyzableEvidence
+      .filter(ev => ev.type !== 'PHOTO' && !ev.mimeType?.startsWith('image/'))
+      .slice(0, 3);
+    
+    console.log(`🖼️ [FMIR Audit] Processing ${imageEvidence.length} images in parallel...`);
+    const imageStartTime = Date.now();
+    
+    // Process all images in parallel
+    const imageAnalysisPromises = imageEvidence.map(async (ev) => {
+      try {
+        return await analyzeWithTimeout(ev);
+      } catch (err: any) {
+        console.error(`❌ [FMIR Audit] Failed to analyze evidence ${ev.fileName}:`, err?.message || err);
+        return {
+          filename: ev.fileName || ev.filename,
+          type: ev.type,
+          analysis: 'Unable to analyze image automatically. Manual review required.',
+          concerns: 'Image analysis unavailable or timed out'
+        };
+      }
+    });
+    
+    // Wait for all image analyses to complete in parallel
+    const imageResults = await Promise.all(imageAnalysisPromises);
+    evidenceAnalysisResults.push(...imageResults);
+    
+    console.log(`✅ [FMIR Audit] Image analysis completed in ${Date.now() - imageStartTime}ms`);
+    
+    // Add non-image evidence (no API calls needed)
+    for (const ev of nonImageEvidence) {
+      evidenceAnalysisResults.push({
+        filename: ev.fileName || ev.filename,
+        type: ev.type,
+        analysis: `${ev.type} document attached. ${ev.description || 'No description provided.'}`,
+        concerns: ev.description ? undefined : 'No description provided for this evidence'
+      });
+    }
+
+    const prompt = `You are Marcus, a STRICT and THOROUGH Food Safety Auditor with over 25 years of experience auditing facilities for FDA, SQF, BRC, and FSSC 22000 compliance. You are reviewing a Foreign Material Incident Report (FMIR) that PASSED all required field validations - but that only means fields aren't empty. Your job is to determine if the QUALITY of the answers would pass a real regulatory audit.
+
+YOU MUST BE CRITICAL. Don't just congratulate - actually evaluate if:
+1. The answers are SPECIFIC and ACTIONABLE (not vague or generic)
+2. The cause analysis LOGICALLY explains how the FM got there
+3. The corrective actions DIRECTLY address the identified cause
+4. The prevention measures would ACTUALLY prevent recurrence
+5. The evidence SUPPORTS the claims made in the report
+6. An FDA or GFSI auditor would be SATISFIED with this documentation
+
+RED FLAGS to look for:
+- Vague descriptions like "metal found" without size/color/characteristics
+- Generic causes like "human error" without specifics
+- Corrective actions that don't match the cause (e.g., training for equipment failure)
+- Prevention measures that are too general or don't address the root cause
+- Missing logical connection between FM type and identified source
+- Evidence that doesn't clearly show what's described
+- Insufficient evidence for the severity of the incident
+
+SCORING GUIDELINES:
+- 95-100: Exceptional - Would impress any auditor, specific details, clear logic, strong evidence
+- 85-94: Good - Solid documentation, minor improvements possible
+- 75-84: Satisfactory - Adequate but has notable gaps or vague areas
+- 65-74: Needs Improvement - Passes technically but would raise auditor questions
+- Below 65: Should NOT pass - Significant quality issues despite all fields filled
+
+FMIR Report Data:
+===================================
+Report Number: ${report.reportNumber}
+Incident Date: ${report.incidentDate ? new Date(report.incidentDate).toLocaleDateString() : 'N/A'}
+Time: ${report.incidentTime || 'N/A'}
+Department: ${report.department || 'N/A'}
+Area: ${report.area || 'N/A'}
+Line: ${report.line || 'N/A'}
+
+Product Information:
+- Product Name: ${report.productName || 'N/A'}
+- Item Number: ${report.productItemNumber || 'N/A'}
+- Lot/Batch: ${report.productCodeBatchLot || 'N/A'}
+- Amount Affected: ${report.amount || 'N/A'}
+
+Foreign Material Details:
+- Description: ${report.foreignMaterialDescription || 'N/A'}
+- Size: ${report.foreignMaterialSize || 'N/A'}
+- Hardness: ${report.foreignMaterialHardness || 'N/A'}
+- Hard/Sharp/Large: ${report.isHardSharpOrLarge ? 'Yes' : 'No'}
+- FM Source Category: ${report.fmSourceCategory || 'N/A'}
+- FM Source Type: ${report.fmSourceType || 'N/A'}
+
+Cause Analysis:
+- Cause Identification: ${report.causeIdentification || 'N/A'}
+- Possible Source: ${report.possibleSource || 'N/A'}
+- How/Why It Occurred: ${report.howWhyOccurred || 'N/A'}
+
+Corrective Action:
+${report.correctiveAction || 'N/A'}
+
+Verification:
+- Verification Actions: ${report.verificationActions || 'N/A'}
+- Maintenance Work Completed: ${report.maintenanceWorkCompleted || 'N/A'}
+- Sanitation Required: ${report.sanitationRequired ? 'Yes' : 'No'}
+${report.sanitationNotes ? `- Sanitation Notes: ${report.sanitationNotes}` : ''}
+
+Product Hold Decision:
+- Product Placed on Hold: ${report.productPlacedOnHold ? 'Yes' : 'No'}
+${report.productPlacedOnHold ? `- Items Held: ${report.itemsHeld || 'N/A'}` : `- Decision Details (No Hold): ${report.holdDecisionDetails || 'N/A'}`}
+
+Screening Process:
+${report.screeningProcess || 'N/A'}
+
+Final Disposition:
+- Disposition: ${report.finalDisposition || 'N/A'}
+- Volume: ${report.dispositionVolume || 'N/A'}
+- Justification: ${report.dispositionJustification || 'N/A'}
+
+Prevention Measures:
+${report.preventionMeasures || 'N/A'}
+
+Corporate Notification:
+- Corporate Notified: ${report.corporateNotified ? 'Yes' : 'No'}
+${report.corporatePersonsNotified ? `- Persons Notified: ${report.corporatePersonsNotified}` : ''}
+
+Evidence Analysis Results (from AI Vision):
+${evidenceAnalysisResults.length > 0 
+  ? evidenceAnalysisResults.map((e, i) => `${i+1}. ${e.filename} (${e.type}): ${e.analysis}${e.concerns ? ` [CONCERN: ${e.concerns}]` : ''}`).join('\n')
+  : 'No evidence was attached to this report - THIS IS A MAJOR CONCERN'}
+===================================
+
+CRITICAL DECISION - CAN THIS REPORT BE CLOSED?
+A report CANNOT be closed if ANY of these conditions exist:
+1. Audit score is below 65 (too many quality issues)
+2. Evidence is missing or clearly insufficient for the severity
+3. Cause analysis is vague/generic without specific details
+4. Corrective actions don't logically address the identified cause
+5. Prevention measures are too generic to actually prevent recurrence
+6. There are significant logical gaps (FM type doesn't match cause, actions don't match cause, etc.)
+7. Evidence doesn't support the claims made in the report
+8. Critical regulatory requirements are not met
+
+Respond in JSON format:
+{
+  "canBeClosed": <CRITICAL: true ONLY if all quality checks pass and report is audit-ready. false if there are blocking issues>,
+  "blockingReasons": ["<List specific reasons why this cannot be closed - empty if canBeClosed is true>"],
+  
+  "congratulations": <true if score >= 75 AND canBeClosed is true, false otherwise>,
+  "auditScore": <0-100 based on actual quality>,
+  "overallVerdict": "EXCELLENT" | "GOOD" | "SATISFACTORY" | "NEEDS_IMPROVEMENT" | "CANNOT_CLOSE",
+  "passesAudit": <true only if this would genuinely pass an FDA/GFSI audit>,
+  
+  "summary": {
+    "headline": "<If canBeClosed: warm but specific congratulations. If not: clear explanation of what needs to be fixed>",
+    "keyStrengths": ["<List actual specific strengths - be genuine, not generic>"],
+    "criticalConcerns": ["<List any issues that could cause audit problems - empty array if none>"],
+    "immediateActions": ["<Actions required before this can be closed - empty if ready to close>"]
+  },
+  
+  "reportSummary": {
+    "incidentOverview": "<Factual 1-2 sentence summary>",
+    "foreignMaterial": "<Brief description of FM>",
+    "causeAnalysis": "<Summary of cause - note if it's vague>",
+    "correctiveActions": "<Summary of actions - note if they align with cause>",
+    "verification": "<Summary of verification>",
+    "disposition": "<Summary of disposition>",
+    "prevention": "<Summary of prevention - note if adequate>"
+  },
+  
+  "answerQuality": {
+    "overallScore": <0-100 average of all answer quality scores>,
+    "passesMinimumStandard": <true if all critical answers are adequate>,
+    "assessments": [
+      {
+        "field": "Foreign Material Description",
+        "answer": "<summarize user's answer>",
+        "isAdequate": <true/false - is this answer specific enough?>,
+        "qualityScore": <0-100>,
+        "issues": ["<specific problems with this answer - written like a human colleague explaining the issue>"],
+        "recommendations": ["<what would make this answer audit-ready - be specific and helpful>"],
+        "exampleAnswer": "<CRITICAL: Write a complete, realistic example of what a BETTER answer would look like for THIS specific incident. Use the actual FM type, location, and context from their report. Make it sound natural, like what an experienced QA professional would write. This should be a ready-to-use example they can adapt.>",
+        "regulatoryGap": "<relevant regulation this falls short of, if any>"
+      },
+      {
+        "field": "Cause Identification",
+        "answer": "<summarize user's answer>",
+        "isAdequate": <true/false>,
+        "qualityScore": <0-100>,
+        "issues": ["<specific problems - explain WHY this matters in simple terms>"],
+        "recommendations": ["<improvements needed>"],
+        "exampleAnswer": "<Write a complete example cause analysis for THIS incident. Include the chain of events: what failed, why it failed, and how that led to the FM. Be specific to their situation - reference their equipment, line, and FM type. Example format: 'During scheduled maintenance on [equipment], [specific failure occurred] because [root cause]. This allowed [FM type] to [how it entered product].'",
+        "regulatoryGap": "<regulatory gap, if any>"
+      },
+      {
+        "field": "Corrective Action",
+        "answer": "<summarize user's answer>",
+        "isAdequate": <true/false>,
+        "qualityScore": <0-100>,
+        "issues": ["<specific problems - explain the disconnect if actions don't match cause>"],
+        "recommendations": ["<improvements needed>"],
+        "exampleAnswer": "<Write specific corrective actions that DIRECTLY address the cause identified in their report. Use action verbs, include WHO is responsible, and WHEN it was/will be done. Example: '1. [Name/Role] immediately [action taken] on [date]. 2. Maintenance team [specific repair] to [equipment]. 3. QA verified [what was checked] before restart.' Make it realistic and complete.>",
+        "regulatoryGap": "<regulatory gap, if any>"
+      },
+      {
+        "field": "Prevention Measures",
+        "answer": "<summarize user's answer>",
+        "isAdequate": <true/false>,
+        "qualityScore": <0-100>,
+        "issues": ["<specific problems - explain why generic measures won't prevent recurrence>"],
+        "recommendations": ["<improvements needed>"],
+        "exampleAnswer": "<Write prevention measures that would ACTUALLY prevent this specific incident from happening again. Be specific to their cause. Include: 1) A systemic change (process/equipment), 2) A monitoring step, 3) A verification frequency. Example: 'Implemented [specific change] to prevent [failure mode]. Added [inspection/check] at [frequency] by [who]. Updated [SOP/checklist] to include [specific step].'",
+        "regulatoryGap": "<regulatory gap, if any>"
+      },
+      {
+        "field": "Disposition Justification",
+        "answer": "<summarize user's answer>",
+        "isAdequate": <true/false>,
+        "qualityScore": <0-100>,
+        "issues": ["<specific problems - explain what auditors look for in disposition rationale>"],
+        "recommendations": ["<improvements needed>"],
+        "exampleAnswer": "<Write a clear disposition justification for their decision. If product was released: explain the risk assessment and why it's safe. If destroyed: explain why. Include: the scope of affected product, what screening was done, and the rationale. Example: 'Product from Lot [X] was [screened/held]. [X units] passed metal detection at [sensitivity]. Based on [evidence], affected product was limited to [scope]. Remaining product released after [verification step].'",
+        "regulatoryGap": "<regulatory gap, if any>"
+      }
+    ]
+  },
+  
+  "contentQuality": {
+    "causeAnalysisAdequate": <true/false - is the cause explanation specific and logical?>,
+    "causeAnalysisFeedback": "<Specific feedback on the cause analysis quality>",
+    "causeAnalysisRecommendation": "<What specifically should be improved, if anything>",
+    "correctiveActionsAdequate": <true/false - do actions directly address the cause?>,
+    "correctiveActionsFeedback": "<Specific feedback on corrective actions>",
+    "correctiveActionsRecommendation": "<What specifically should be improved, if anything>",
+    "preventionMeasuresAdequate": <true/false - would these actually prevent recurrence?>,
+    "preventionMeasuresFeedback": "<Specific feedback on prevention measures>",
+    "preventionMeasuresRecommendation": "<What specifically should be improved, if anything>",
+    "logicalConsistency": <true/false - does FM type match cause match actions match prevention?>,
+    "logicalConsistencyFeedback": "<Explain any logical gaps or confirm alignment>",
+    "logicalGaps": ["<List any specific logical disconnections between FM, cause, actions, prevention>"]
+  },
+  
+  "evidenceAnalysis": {
+    "adequate": <true/false - is evidence sufficient for this incident severity?>,
+    "count": ${evidence.length},
+    "minimumRequired": <how many pieces of evidence should this incident have?>,
+    "quality": "excellent" | "good" | "acceptable" | "insufficient" | "missing",
+    "supportsIncident": <true/false - does evidence actually support the claims?>,
+    "feedback": "<Overall evidence quality assessment - be thorough>",
+    "recommendations": ["<Specific recommendations for evidence improvement>"],
+    "missingEvidenceTypes": ["<What types of evidence are missing? e.g., 'Photo of FM', 'Location photo', 'Equipment damage photo'>"],
+    "detailedFindings": [${evidenceAnalysisResults.length > 0 ? evidenceAnalysisResults.map(e => `
+      {
+        "filename": "${e.filename}",
+        "type": "${e.type}",
+        "relevance": "<high/medium/low/unclear based on analysis>",
+        "assessment": "<What the evidence shows and whether it supports the report>",
+        "supportsReport": <true/false>,
+        "concerns": "<Any concerns about this evidence - null if none>",
+        "missingContext": "<What additional context would make this evidence more useful?>"
+      }`).join(',') : ''}
+    ]
+  },
+  
+  "regulatoryReadiness": {
+    "fda21cfr117": <true/false - meets Preventive Controls requirements?>,
+    "gfsiStandards": <true/false - meets SQF/BRC/FSSC 22000 standards?>,
+    "fsmaCompliance": <true/false - FSMA compliant documentation?>,
+    "overallReady": <true/false - would pass any regulatory audit?>,
+    "concerns": ["<Specific regulatory concerns>"],
+    "recommendations": ["<What to improve for regulatory compliance>"],
+    "specificViolations": ["<Specific regulation sections that are not met>"]
+  },
+  
+  "fieldValidation": [
+    {
+      "field": "<field name>",
+      "section": <1-10>,
+      "value": "<actual value - summarize if long>",
+      "assessment": "excellent" | "good" | "acceptable" | "needs_attention" | "inadequate",
+      "feedback": "<Honest, conversational feedback like you're explaining to a colleague. Tell them what's working or what's missing.>",
+      "suggestion": "<What could be improved - be specific, not generic. If the field is good, set to null>",
+      "exampleAnswer": "<ONLY include this if assessment is 'needs_attention' or 'inadequate'. Write a COMPLETE, realistic example answer that shows exactly how this field SHOULD be written for THIS specific incident. Use their actual FM type, equipment, location, and situation. Make it natural and ready-to-use. If the field is already good/excellent, set to null>",
+      "regulatoryNote": "<Relevant regulation reference if applicable>"
+    }
+  ],
+  
+  "improvementAreas": [
+    {
+      "priority": "critical" | "high" | "medium" | "low",
+      "area": "<Area needing improvement>",
+      "currentState": "<What's currently documented>",
+      "recommendation": "<Specific actionable improvement>",
+      "regulatoryReference": "<Relevant regulation if applicable>",
+      "blocksClosureUntilFixed": <true/false - is this a must-fix before closing?>
+    }
+  ],
+  
+  "auditorNarrative": "<3-5 paragraph conversational narrative as Marcus. Be HONEST and THOROUGH. If the report cannot be closed, explain clearly what needs to be fixed. If there are quality issues with answers, call them out specifically. Reference actual content from their report. If evidence is insufficient, explain exactly what's needed. An auditor reading this should understand exactly what's strong and what needs work. Don't sugarcoat issues - that doesn't help anyone prepare for a real audit.>",
+  "closingStatement": "<If canBeClosed: Brief closing - encouraging and confirm it's ready. If NOT canBeClosed: Clear statement that report needs revision before closure, with the most important next step>"
+}`;
+
+    const response = await withRetry(
+      () => openai.chat.completions.create({
+        model: process.env.AI_MODEL || 'gpt-4o',
+        messages: [
+          {
+            role: 'system',
+            content: `You are Marcus, a senior Food Safety Auditor with 25+ years of hands-on experience. You've conducted hundreds of FDA, SQF, BRC, and FSSC 22000 audits. You talk like a real person - straightforward, helpful, and practical.
+
+YOUR PERSONALITY:
+- You're like a wise mentor, not a robot. You explain things the way you'd explain to a colleague over coffee.
+- You use simple, everyday language. No corporate jargon or overly formal phrasing.
+- You're firm but kind - you point out problems clearly, but always with helpful solutions.
+- You give REAL examples based on what they actually wrote, not generic templates.
+- You think about what would actually happen in a real audit and share that perspective.
+
+YOUR JOB:
+You're reviewing FMIR reports before they can be closed. Your goal is to help QA teams create documentation that will pass any audit with flying colors.
+
+WHEN SOMETHING NEEDS WORK:
+1. Tell them exactly what's missing in plain English
+2. Explain WHY it matters (what would an auditor ask? what's the risk?)
+3. Give them a SPECIFIC EXAMPLE of a better answer using THEIR incident details
+   - Use their FM type, their equipment, their location
+   - Write it like a real QA professional would write it
+   - Make it ready-to-use, not a vague template
+
+EXAMPLE OF YOUR STYLE:
+Instead of: "Cause identification lacks specificity regarding the failure mechanism."
+Say: "I see you mentioned the oven maintenance, but an auditor is going to ask: 'Okay, but HOW exactly did the metal get into the product?' Walk me through it step by step. Here's what I'd write for your situation: 'During preventive maintenance on Oven #3, the technician removed the worn heating element guard. A 2cm metal fragment broke off from the corroded bracket but wasn't noticed. When production resumed, the fragment fell onto the conveyor and was incorporated into product on Line 5.' See how that tells the whole story?"
+
+KEY CHECKS:
+- Does the cause ACTUALLY explain how the FM got there? (Not just "maintenance happened")
+- Do the corrective actions FIX the cause they identified? (They must match!)
+- Will the prevention measures ACTUALLY stop this from happening again?
+- Is there enough evidence to support what they're claiming?
+
+BE A GATEKEEPER:
+If the documentation isn't audit-ready, say so clearly. It's better to fix it now than fail an audit later. But always show them HOW to fix it with real examples.`
+          },
+        {
+          role: 'user',
+          content: prompt
+        }
+      ],
+      temperature: 0.6,
+      max_completion_tokens: 5000,
+      response_format: { type: 'json_object' }
+    }),
+      {
+        maxRetries: 3,
+        initialDelayMs: 1000,
+        operationName: 'FMIR Success Audit'
+      }
+    );
+
+    console.log(`✅ [FMIR Audit] Main audit call completed in ${Date.now() - startTime}ms`);
+
+    const content = response.choices[0]?.message?.content;
+    if (!content) {
+      throw new Error('No response from AI');
+    }
+
+    const analysis = JSON.parse(content) as FMIRSuccessAuditAnalysis;
+    console.log(`🎉 [FMIR Audit] Total audit time: ${Date.now() - startTime}ms, score: ${analysis.auditScore || 'N/A'}`);
+    return analysis;
+
+  } catch (error) {
+    console.error(`❌ [FMIR Audit] Error after ${Date.now() - startTime}ms:`, error);
+    return generateBasicSuccessAudit(report, evidence);
+  }
+}
+
+/**
+ * Analyze a piece of evidence for the audit using GPT-4 Vision
+ */
+async function analyzeEvidenceForAudit(
+  openai: OpenAI,
+  imageUrl: string,
+  report: any
+): Promise<{ assessment: string; concerns?: string }> {
+  try {
+    // Guard against undefined imageUrl
+    if (!imageUrl) {
+      return { assessment: 'No image path provided', concerns: 'Image path missing' };
+    }
+    
+    const imageStartTime = Date.now();
+    console.log(`🖼️ [Evidence Analysis] Starting for: ${imageUrl.substring(0, 50)}...`);
+
+    let base64Image: string;
+    let mimeType: string;
+
+    // Handle data URL or fetch from URL
+    if (imageUrl.startsWith('data:')) {
+      const matches = imageUrl.match(/^data:([^;]+);base64,(.+)$/);
+      if (!matches) {
+        return { assessment: 'Invalid image format', concerns: 'Could not process image' };
+      }
+      mimeType = matches[1];
+      base64Image = matches[2];
+    } else if (imageUrl.startsWith('http://') || imageUrl.startsWith('https://')) {
+      const axios = require('axios');
+      const response = await axios.get(imageUrl, { responseType: 'arraybuffer', timeout: 5000 });
+      base64Image = Buffer.from(response.data).toString('base64');
+      mimeType = response.headers['content-type'] || 'image/jpeg';
+    } else if (imageUrl.startsWith('uploads/') || imageUrl.includes('/uploads/')) {
+      // Handle local file path
+      const fs = require('fs');
+      const path = require('path');
+      const fullPath = path.join(__dirname, '../../', imageUrl);
+      
+      if (!fs.existsSync(fullPath)) {
+        return { assessment: 'Image file not found on server', concerns: 'File missing' };
+      }
+      
+      const fileBuffer = fs.readFileSync(fullPath);
+      base64Image = fileBuffer.toString('base64');
+      
+      // Determine mime type from extension
+      const ext = path.extname(imageUrl).toLowerCase();
+      const mimeTypes: Record<string, string> = {
+        '.jpg': 'image/jpeg',
+        '.jpeg': 'image/jpeg',
+        '.png': 'image/png',
+        '.gif': 'image/gif',
+        '.webp': 'image/webp',
+        '.bmp': 'image/bmp'
+      };
+      mimeType = mimeTypes[ext] || 'image/jpeg';
+    } else {
+      return { assessment: 'Unsupported image URL format', concerns: 'Could not process image' };
+    }
+    
+    console.log(`📤 [Evidence Analysis] Image loaded, sending to OpenAI Vision (${Math.round(base64Image.length / 1024)}KB)...`);
+
+    const completion = await openai.chat.completions.create({
+      model: 'gpt-4o', // Use gpt-4o specifically for vision, not the AI_MODEL which may not support images
+      messages: [
+        {
+          role: 'system',
+          content: 'You are a food safety evidence analyst. Be brief and objective.'
+        },
+        {
+          role: 'user',
+          content: [
+            {
+              type: 'text',
+              text: `Evidence for FMIR: FM="${report.foreignMaterialDescription || 'N/A'}", Cause="${report.causeIdentification || 'N/A'}". Briefly: 1) What shows? 2) Supports claims? (yes/no/partial) 3) Concerns? Max 100 words.`
+            },
+            {
+              type: 'image_url',
+              image_url: {
+                url: `data:${mimeType};base64,${base64Image}`,
+                detail: 'low'
+              }
+            }
+          ]
+        }
+      ],
+      max_completion_tokens: 150,
+      temperature: 0.2
+    });
+
+    const analysisText = completion.choices[0]?.message?.content || '';
+    console.log(`✅ [Evidence Analysis] Completed in ${Date.now() - imageStartTime}ms`);
+    
+    // Check if there are concerns mentioned
+    const hasConcerns = analysisText.toLowerCase().includes('concern') || 
+                       analysisText.toLowerCase().includes('unclear') ||
+                       analysisText.toLowerCase().includes('does not support') ||
+                       analysisText.toLowerCase().includes('partially');
+    
+    return {
+      assessment: analysisText,
+      concerns: hasConcerns ? 'Review image relevance and quality' : undefined
+    };
+  } catch (error: any) {
+    console.error(`❌ [Evidence Analysis] Failed:`, error.message);
+    return { assessment: 'Unable to analyze image', concerns: 'Automated analysis unavailable' };
+  }
+}
+
+/**
+ * Generate basic success audit without AI
+ * Updated to match enhanced interface structure with canBeClosed and answer quality assessment
+ */
+function generateBasicSuccessAudit(
+  report: any,
+  evidence: any[]
+): FMIRSuccessAuditAnalysis {
+  const hasEvidence = evidence && evidence.length > 0;
+  const hasDetailedCause = report.causeIdentification && report.causeIdentification.length > 50;
+  const hasDetailedActions = report.correctiveAction && report.correctiveAction.length > 50;
+  const hasDetailedPrevention = report.preventionMeasures && report.preventionMeasures.length > 50;
+  const hasDetailedDisposition = report.dispositionJustification && report.dispositionJustification.length > 30;
+  
+  // Calculate basic quality score
+  let baseScore = 70;
+  if (hasEvidence) baseScore += 8;
+  if (hasDetailedCause) baseScore += 6;
+  if (hasDetailedActions) baseScore += 6;
+  if (hasDetailedPrevention) baseScore += 5;
+  if (evidence.length >= 2) baseScore += 5;
+  
+  const auditScore = Math.min(baseScore, 90);
+  
+  // Determine if can be closed - more strict without AI analysis
+  const blockingReasons: string[] = [];
+  if (!hasEvidence) {
+    blockingReasons.push('No evidence attached - at least one photo of the foreign material is required');
+  }
+  if (!hasDetailedCause) {
+    blockingReasons.push('Cause analysis is too brief - need specific details about how and why the incident occurred');
+  }
+  if (!hasDetailedActions) {
+    blockingReasons.push('Corrective actions need more detail - include specific steps, responsible parties, and completion status');
+  }
+  if (!hasDetailedPrevention) {
+    blockingReasons.push('Prevention measures need more specificity - explain what systemic changes will prevent recurrence');
+  }
+  
+  // Without AI analysis, we can only allow closure if basic checks pass
+  const canBeClosed = blockingReasons.length === 0 && auditScore >= 75;
+  const passesAudit = auditScore >= 75 && hasEvidence;
+  
+  // Generate answer quality assessments
+  const answerAssessments: AnswerQualityAssessment[] = [
+    {
+      field: 'Foreign Material Description',
+      answer: report.foreignMaterialDescription || 'Not provided',
+      isAdequate: report.foreignMaterialDescription?.length > 30,
+      qualityScore: report.foreignMaterialDescription?.length > 100 ? 90 : report.foreignMaterialDescription?.length > 50 ? 75 : report.foreignMaterialDescription?.length > 30 ? 65 : 40,
+      issues: report.foreignMaterialDescription?.length <= 30 ? ['Description is too brief', 'Missing size, color, or material characteristics'] : [],
+      recommendations: report.foreignMaterialDescription?.length <= 30 ? ['Include material type (metal, plastic, glass, etc.)', 'Add size measurements', 'Describe color and texture'] : [],
+      regulatoryGap: report.foreignMaterialDescription?.length <= 30 ? '21 CFR 117.190(a) - Complete records required' : undefined
+    },
+    {
+      field: 'Cause Identification',
+      answer: report.causeIdentification || 'Not provided',
+      isAdequate: hasDetailedCause,
+      qualityScore: hasDetailedCause ? (report.causeIdentification.length > 100 ? 85 : 70) : 45,
+      issues: hasDetailedCause ? [] : ['Cause analysis is too vague', 'Missing specific mechanism of contamination'],
+      recommendations: hasDetailedCause ? [] : ['Explain specifically how the FM entered the process', 'Identify the exact source location', 'Describe why existing controls failed'],
+      regulatoryGap: hasDetailedCause ? undefined : '21 CFR 117.150(b) - Root cause analysis required'
+    },
+    {
+      field: 'Corrective Action',
+      answer: report.correctiveAction || 'Not provided',
+      isAdequate: hasDetailedActions,
+      qualityScore: hasDetailedActions ? (report.correctiveAction.length > 100 ? 85 : 70) : 45,
+      issues: hasDetailedActions ? [] : ['Corrective actions lack detail', 'Missing responsible parties and timelines'],
+      recommendations: hasDetailedActions ? [] : ['List specific actions taken', 'Identify who was responsible', 'Include completion dates'],
+      regulatoryGap: hasDetailedActions ? undefined : '21 CFR 117.150(a) - Corrective actions required'
+    },
+    {
+      field: 'Prevention Measures',
+      answer: report.preventionMeasures || 'Not provided',
+      isAdequate: hasDetailedPrevention,
+      qualityScore: hasDetailedPrevention ? (report.preventionMeasures.length > 100 ? 85 : 70) : 45,
+      issues: hasDetailedPrevention ? [] : ['Prevention measures are too generic', 'Does not address root cause'],
+      recommendations: hasDetailedPrevention ? [] : ['Specify systemic changes to prevent recurrence', 'Include verification methods', 'Set review dates'],
+      regulatoryGap: hasDetailedPrevention ? undefined : '21 CFR 117.150(c) - Preventive controls required'
+    },
+    {
+      field: 'Disposition Justification',
+      answer: report.dispositionJustification || 'Not provided',
+      isAdequate: hasDetailedDisposition,
+      qualityScore: hasDetailedDisposition ? 75 : 50,
+      issues: hasDetailedDisposition ? [] : ['Justification is brief or missing'],
+      recommendations: hasDetailedDisposition ? [] : ['Explain the risk-based rationale for disposition decision'],
+      regulatoryGap: hasDetailedDisposition ? undefined : '21 CFR 117.150 - Risk-based decisions required'
+    }
+  ];
+  
+  const overallAnswerScore = Math.round(answerAssessments.reduce((sum, a) => sum + a.qualityScore, 0) / answerAssessments.length);
+  const passesMinimumStandard = answerAssessments.every(a => a.isAdequate);
+  
+  return {
+    canBeClosed,
+    blockingReasons,
+    congratulations: canBeClosed && passesAudit,
+    auditScore,
+    overallVerdict: !canBeClosed ? 'CANNOT_CLOSE' : auditScore >= 90 ? 'EXCELLENT' : auditScore >= 80 ? 'GOOD' : auditScore >= 75 ? 'SATISFACTORY' : 'NEEDS_IMPROVEMENT',
+    passesAudit,
+    summary: {
+      headline: canBeClosed 
+        ? 'Your FMIR report is complete. AI-powered deep analysis is unavailable - please review content quality manually before final closure.'
+        : `This FMIR cannot be closed yet. ${blockingReasons.length} issue(s) need to be addressed first.`,
+      keyStrengths: [
+        'All required fields have been completed',
+        ...(hasEvidence ? [`${evidence.length} piece(s) of evidence attached`] : []),
+        ...(hasDetailedCause ? ['Cause analysis has been provided'] : []),
+        ...(hasDetailedActions ? ['Corrective actions are documented'] : []),
+      ],
+      criticalConcerns: [
+        ...(hasEvidence ? [] : ['No evidence attached - strongly recommended for audit compliance']),
+        ...(!canBeClosed ? ['Report does not meet minimum standards for closure'] : []),
+        'AI-powered quality analysis unavailable - manual review recommended',
+      ],
+      immediateActions: blockingReasons
+    },
+    reportSummary: {
+      incidentOverview: `Foreign material incident reported on ${report.incidentDate ? new Date(report.incidentDate).toLocaleDateString() : 'N/A'} in ${report.department || 'the facility'}.`,
+      foreignMaterial: report.foreignMaterialDescription || 'Foreign material was documented',
+      causeAnalysis: report.causeIdentification || 'Cause has been identified',
+      correctiveActions: report.correctiveAction || 'Corrective actions have been documented',
+      verification: report.verificationActions || 'Verification steps have been recorded',
+      disposition: report.finalDisposition || 'Final disposition has been determined',
+      prevention: report.preventionMeasures || 'Prevention measures have been established'
+    },
+    answerQuality: {
+      overallScore: overallAnswerScore,
+      passesMinimumStandard,
+      assessments: answerAssessments
+    },
+    contentQuality: {
+      causeAnalysisAdequate: hasDetailedCause,
+      causeAnalysisFeedback: hasDetailedCause 
+        ? 'Cause analysis has been provided. Manual review recommended to verify logical consistency.'
+        : 'Cause analysis appears brief. Consider adding more specific details about how and why the incident occurred.',
+      causeAnalysisRecommendation: hasDetailedCause ? undefined : 'Explain specifically how the FM entered the process and why it wasn\'t detected earlier.',
+      correctiveActionsAdequate: hasDetailedActions,
+      correctiveActionsFeedback: hasDetailedActions
+        ? 'Corrective actions have been documented. Verify they directly address the identified cause.'
+        : 'Corrective actions may need more detail to demonstrate effective response.',
+      correctiveActionsRecommendation: hasDetailedActions ? undefined : 'Include specific actions, responsible parties, and completion dates.',
+      preventionMeasuresAdequate: hasDetailedPrevention,
+      preventionMeasuresFeedback: hasDetailedPrevention
+        ? 'Prevention measures have been specified. Ensure they address the root cause.'
+        : 'Prevention measures could be more specific to prevent recurrence.',
+      preventionMeasuresRecommendation: hasDetailedPrevention ? undefined : 'Specify what systemic changes will prevent recurrence.',
+      logicalConsistency: true,
+      logicalConsistencyFeedback: 'Manual review required to verify cause → action → prevention alignment.',
+      logicalGaps: []
+    },
+    evidenceAnalysis: {
+      adequate: hasEvidence,
+      count: evidence.length,
+      minimumRequired: 1,
+      quality: hasEvidence ? (evidence.length >= 3 ? 'good' : 'acceptable') : 'missing',
+      supportsIncident: hasEvidence,
+      feedback: hasEvidence 
+        ? `${evidence.length} piece(s) of evidence attached. AI vision analysis unavailable - manual review of evidence quality recommended.`
+        : 'No evidence attached. Photos of the foreign material and affected product are strongly recommended for audit compliance.',
+      recommendations: hasEvidence 
+        ? ['Manual review of evidence quality recommended']
+        : ['Attach photos of the foreign material found', 'Include photos of the affected product/line', 'Document the source location'],
+      missingEvidenceTypes: hasEvidence ? [] : ['Photo of foreign material', 'Photo of affected product/area', 'Source location documentation'],
+      detailedFindings: evidence.map(e => ({
+        filename: e.fileName || e.filename || 'Unknown',
+        type: e.type || 'DOCUMENT',
+        relevance: 'medium' as const,
+        assessment: 'Automated analysis unavailable. Manual review required.',
+        supportsReport: true,
+        concerns: 'AI vision analysis unavailable',
+        missingContext: 'Manual verification of evidence relevance recommended'
+      }))
+    },
+    regulatoryReadiness: {
+      fda21cfr117: hasEvidence && hasDetailedCause && hasDetailedActions,
+      gfsiStandards: hasEvidence && hasDetailedCause && hasDetailedActions && hasDetailedPrevention,
+      fsmaCompliance: hasEvidence && hasDetailedCause,
+      overallReady: hasEvidence && hasDetailedCause && hasDetailedActions && hasDetailedPrevention,
+      concerns: [
+        ...(hasEvidence ? [] : ['Missing evidence documentation']),
+        'Automated regulatory analysis unavailable - manual compliance review recommended'
+      ],
+      recommendations: [
+        'Review documentation against 21 CFR 117.150 (Corrective Actions) requirements',
+        'Ensure GFSI standard documentation requirements are met',
+        'Verify all FSMA preventive control documentation is complete'
+      ],
+      specificViolations: [
+        ...(!hasEvidence ? ['21 CFR 117.190(a) - Records requirements'] : []),
+        ...(!hasDetailedCause ? ['21 CFR 117.150(b) - Root cause analysis'] : []),
+        ...(!hasDetailedActions ? ['21 CFR 117.150(a) - Corrective actions'] : []),
+        ...(!hasDetailedPrevention ? ['21 CFR 117.150(c) - Preventive controls'] : []),
+      ]
+    },
+    fieldValidation: [
+      {
+        field: 'Foreign Material Description',
+        section: 2,
+        value: report.foreignMaterialDescription || 'Documented',
+        assessment: report.foreignMaterialDescription?.length > 30 ? 'good' : 'acceptable',
+        feedback: 'The foreign material has been documented. Ensure description includes material type, size, color, and characteristics.',
+      },
+      {
+        field: 'Cause Identification',
+        section: 3,
+        value: report.causeIdentification || 'Documented',
+        assessment: hasDetailedCause ? 'good' : 'needs_attention',
+        feedback: hasDetailedCause 
+          ? 'Root cause analysis has been completed.'
+          : 'Consider adding more specific details to the cause analysis.',
+        suggestion: hasDetailedCause ? undefined : 'Explain specifically how the FM entered the process and why it wasn\'t detected earlier.',
+      },
+      {
+        field: 'Corrective Action',
+        section: 4,
+        value: report.correctiveAction || 'Documented',
+        assessment: hasDetailedActions ? 'good' : 'needs_attention',
+        feedback: hasDetailedActions
+          ? 'Corrective actions have been documented.'
+          : 'Corrective actions could be more detailed.',
+        suggestion: hasDetailedActions ? undefined : 'Include specific actions, responsible parties, and completion dates.',
+      },
+      {
+        field: 'Prevention Measures',
+        section: 9,
+        value: report.preventionMeasures || 'Documented',
+        assessment: hasDetailedPrevention ? 'good' : 'needs_attention',
+        feedback: hasDetailedPrevention
+          ? 'Prevention measures are in place.'
+          : 'Prevention measures need more specificity.',
+        suggestion: hasDetailedPrevention ? undefined : 'Specify what systemic changes will prevent recurrence.',
+      }
+    ],
+    improvementAreas: [
+      ...(hasEvidence ? [] : [{
+        priority: 'critical' as const,
+        area: 'Evidence Documentation',
+        currentState: 'No evidence attached',
+        recommendation: 'Attach photos of the foreign material, affected product, and source location',
+        regulatoryReference: '21 CFR 117.190 - Records requirements',
+        blocksClosureUntilFixed: true
+      }]),
+      ...(!hasDetailedCause ? [{
+        priority: 'critical' as const,
+        area: 'Cause Analysis Detail',
+        currentState: 'Brief cause description',
+        recommendation: 'Expand cause analysis to explain the specific mechanism of contamination',
+        regulatoryReference: '21 CFR 117.150(b) - Root cause analysis',
+        blocksClosureUntilFixed: true
+      }] : []),
+      ...(!hasDetailedActions ? [{
+        priority: 'critical' as const,
+        area: 'Corrective Actions',
+        currentState: 'Actions lack detail',
+        recommendation: 'Add specific actions, responsible parties, and completion dates',
+        regulatoryReference: '21 CFR 117.150(a) - Corrective actions',
+        blocksClosureUntilFixed: true
+      }] : []),
+      ...(!hasDetailedPrevention ? [{
+        priority: 'high' as const,
+        area: 'Prevention Measures',
+        currentState: 'Prevention measures are generic',
+        recommendation: 'Specify systemic changes that will prevent recurrence',
+        regulatoryReference: '21 CFR 117.150(c) - Preventive controls',
+        blocksClosureUntilFixed: true
+      }] : []),
+    ],
+    auditorNarrative: canBeClosed 
+      ? `Your FMIR report has been submitted with all required fields completed and meets the basic standards for closure. ${hasEvidence ? `You've attached ${evidence.length} piece(s) of evidence, which supports your documentation.` : ''}
+
+${hasDetailedCause && hasDetailedActions && hasDetailedPrevention 
+  ? 'The documentation covers the key elements: cause identification, corrective actions, and prevention measures. However, without AI-powered analysis, I cannot fully verify the logical consistency between these elements. Please ensure that your corrective actions directly address the identified cause, and that your prevention measures will genuinely prevent recurrence.'
+  : 'Some sections have adequate responses but could be stronger. For best audit compliance, consider reviewing the improvement areas noted below.'}
+
+Note: This is a basic assessment because AI-powered deep analysis is currently unavailable. For a thorough audit review, please have a qualified food safety professional manually review this documentation against FDA 21 CFR 117, GFSI, and FSMA requirements.`
+      : `I'm unable to approve this FMIR for closure at this time. There are ${blockingReasons.length} critical issue(s) that need to be addressed first.
+
+${blockingReasons.map((reason, i) => `${i + 1}. ${reason}`).join('\n')}
+
+These issues are flagged because regulatory auditors will specifically look for this documentation. Without these elements, your facility could face non-conformances during an FDA or GFSI audit.
+
+Please go back to the report and address each of these items. Once the improvements are made, try closing the report again and I'll re-evaluate.`,
+    closingStatement: canBeClosed 
+      ? 'This FMIR meets basic documentation requirements. Manual quality review recommended to ensure audit readiness.'
+      : `This FMIR cannot be closed until the ${blockingReasons.length} blocking issue(s) are resolved. Address these concerns and try again.`
+  };
+}

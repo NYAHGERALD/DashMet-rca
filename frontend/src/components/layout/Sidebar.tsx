@@ -18,6 +18,7 @@ import {
   BookOpen,
   FileText,
   ClipboardList,
+  AlertTriangle,
 } from 'lucide-react';
 
 export default function Sidebar() {
@@ -75,6 +76,12 @@ export default function Sidebar() {
       name: t('nav.investigationReport'),
       href: '/investigation-report',
       icon: ClipboardList,
+      roles: ['*'], // Available to all users
+    },
+    {
+      name: t('nav.fmir') || 'Foreign Material',
+      href: '/fmir',
+      icon: AlertTriangle,
       roles: ['*'], // Available to all users
     },
   ];

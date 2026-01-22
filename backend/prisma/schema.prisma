@@ -69,7 +69,7 @@ model Area {
   description  String?
   facilityId   String?
   createdAt    DateTime    @default(now())
-  updatedAt DateTime @updatedAt
+  updatedAt    DateTime @updatedAt
   departmentId String?
   Department   Department? @relation(fields: [departmentId], references: [id], onDelete: Cascade)
   Facility     Facility?   @relation(fields: [facilityId], references: [id], onDelete: Cascade)
@@ -97,7 +97,7 @@ model AssignmentRule {
   slaResponseHours   Int?
   slaResolutionHours Int?
   createdAt          DateTime      @default(now())
-  updatedAt DateTime @updatedAt
+  updatedAt          DateTime @updatedAt
 
   @@index([incidentType])
   @@index([organizationId, isActive])
@@ -140,7 +140,7 @@ model CAPAction {
   resourceImpact          String?
   rcaAnalysisId           String?
   createdAt               DateTime       @default(now())
-  updatedAt DateTime @updatedAt
+  updatedAt               DateTime @updatedAt
   completedById           String?
   completionEvidence      String?
   completionNotes         String?
@@ -193,7 +193,7 @@ model Category {
   sortOrder        Int          @default(0)
   isActive         Boolean      @default(true)
   createdAt        DateTime     @default(now())
-  updatedAt DateTime @updatedAt
+  updatedAt        DateTime @updatedAt
   Organization     Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
   Category         Category?    @relation("CategoryToCategory", fields: [parentId], references: [id])
   other_Category   Category[]   @relation("CategoryToCategory")
@@ -215,7 +215,7 @@ model ChatMessage {
   attachments         Json?
   readBy              String[]              @default([])
   createdAt           DateTime              @default(now())
-  updatedAt DateTime @updatedAt
+  updatedAt           DateTime @updatedAt
   isPinned            Boolean               @default(false)
   mentions            String[]              @default([])
   pinnedAt            DateTime?
@@ -271,7 +271,7 @@ model ChatMessageTemplate {
   usageCount Int       @default(0)
   lastUsedAt DateTime?
   createdAt  DateTime  @default(now())
-  updatedAt DateTime @updatedAt
+  updatedAt  DateTime @updatedAt
   User       User      @relation(fields: [userId], references: [id], onDelete: Cascade)
 
   @@index([category])
@@ -286,7 +286,7 @@ model Comment {
   incidentId    String?
   rcaAnalysisId String?
   createdAt     DateTime     @default(now())
-  updatedAt DateTime @updatedAt
+  updatedAt     DateTime @updatedAt
   Incident      Incident?    @relation(fields: [incidentId], references: [id], onDelete: Cascade)
   RCAAnalysis   RCAAnalysis? @relation(fields: [rcaAnalysisId], references: [id], onDelete: Cascade)
   User          User         @relation(fields: [userId], references: [id])
@@ -302,7 +302,7 @@ model Department {
   description String?
   facilityId  String
   createdAt   DateTime   @default(now())
-  updatedAt DateTime @updatedAt
+  updatedAt   DateTime @updatedAt
   Area        Area[]
   Facility    Facility   @relation(fields: [facilityId], references: [id], onDelete: Cascade)
   Incident    Incident[]
@@ -323,7 +323,7 @@ model DropdownOption {
   placeholder    String?
   organizationId String
   createdAt      DateTime     @default(now())
-  updatedAt DateTime @updatedAt
+  updatedAt      DateTime @updatedAt
   Organization   Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
 
   @@unique([organizationId, optionType, value])
@@ -350,19 +350,90 @@ model Evidence {
   @@index([rcaAnalysisId])
 }
 
+model FMIRAuditReport {
+  id                      String                  @id @default(uuid())
+  fmirId                  String
+  reportNumber            String
+  organizationId          String
+  canBeClosed             Boolean
+  auditScore              Int
+  overallVerdict          String
+  passesAudit             Boolean
+  congratulations         Boolean                 @default(false)
+  blockingReasons         String[]                @default([])
+  summary                 Json
+  reportSummary           Json
+  answerQuality           Json
+  contentQuality          Json
+  evidenceAnalysis        Json
+  regulatoryReadiness     Json
+  fieldValidation         Json
+  improvementAreas        Json
+  auditorNarrative        String
+  closingStatement        String
+  auditedById             String
+  auditDurationMs         Int?
+  aiModel                 String?
+  createdAt               DateTime                @default(now())
+  User                    User                    @relation(fields: [auditedById], references: [id])
+  ForeignMaterialIncident ForeignMaterialIncident @relation(fields: [fmirId], references: [id], onDelete: Cascade)
+  Organization            Organization            @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+
+  @@index([auditScore])
+  @@index([auditedById])
+  @@index([canBeClosed])
+  @@index([createdAt])
+  @@index([fmirId])
+  @@index([organizationId])
+}
+
+model FMIREvidence {
+  id                      String                  @id @default(uuid())
+  fmirId                  String
+  type                    EvidenceType
+  fileName                String
+  filePath                String
+  fileSize                Int
+  mimeType                String
+  description             String?
+  uploadedById            String
+  uploadedAt              DateTime                @default(now())
+  ForeignMaterialIncident ForeignMaterialIncident @relation(fields: [fmirId], references: [id], onDelete: Cascade)
+
+  @@index([fmirId])
+}
+
+model FMIRComment {
+  id                      String                  @id @default(uuid())
+  fmirId                  String
+  sectionNumber           Int                     // Which section (1-10) this comment is for
+  content                 String                  // The comment text
+  authorId                String                  // User who created the comment
+  visibleToIds            String[]                @default([]) // Array of user IDs who can view this comment (empty = visible to all collaborators)
+  createdAt               DateTime                @default(now())
+  updatedAt               DateTime                @updatedAt
+  ForeignMaterialIncident ForeignMaterialIncident @relation(fields: [fmirId], references: [id], onDelete: Cascade)
+  Author                  User                    @relation(fields: [authorId], references: [id])
+
+  @@index([fmirId])
+  @@index([sectionNumber])
+  @@index([authorId])
+}
+
 model Facility {
-  id             String       @id @default(uuid())
-  name           String
-  timezone       String       @default("America/New_York")
-  address        String?
-  organizationId String
-  createdAt      DateTime     @default(now())
-  updatedAt DateTime @updatedAt
-  Area           Area[]
-  Department     Department[]
-  Organization   Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
-  Incident       Incident[]
-  Shift          Shift[]
+  id                      String                    @id @default(uuid())
+  name                    String
+  timezone                String                    @default("America/New_York")
+  address                 String?
+  organizationId          String
+  createdAt               DateTime                  @default(now())
+  updatedAt               DateTime                  @updatedAt
+  Area                    Area[]
+  Department              Department[]
+  Organization            Organization              @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  ForeignMaterialIncident ForeignMaterialIncident[]
+  Incident                Incident[]
+  Shift                   Shift[]
 
   @@index([organizationId])
 }
@@ -380,12 +451,103 @@ model FieldConfiguration {
   isActive       Boolean      @default(true)
   organizationId String
   createdAt      DateTime     @default(now())
-  updatedAt DateTime @updatedAt
+  updatedAt      DateTime @updatedAt
   Organization   Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
 
   @@unique([organizationId, incidentType, fieldName])
   @@index([incidentType])
   @@index([organizationId, incidentType])
+}
+
+model ForeignMaterialIncident {
+  id                                               String            @id @default(uuid())
+  reportNumber                                     String            @unique
+  status                                           FMIRStatus        @default(DRAFT)
+  incidentDate                                     DateTime
+  incidentTime                                     String?
+  department                                       String?
+  rawMaterialSource                                String?
+  productName                                      String?
+  productItemNumber                                String?
+  productCodeBatchLot                              String?
+  amount                                           String?
+  individualsInvolved                              String?
+  foreignMaterialDescription                       String
+  foreignMaterialSize                              String?
+  foreignMaterialHardness                          String?
+  section2Initials                                 String?
+  section2Date                                     DateTime?
+  isHardSharpOrLarge                               Boolean           @default(false)
+  unforeseeHazardFormRequired                      Boolean           @default(false)
+  causeIdentification                              String?
+  possibleSource                                   String?
+  howWhyOccurred                                   String?
+  section3Initials                                 String?
+  section3Date                                     DateTime?
+  correctiveAction                                 String?
+  section4Initials                                 String?
+  section4Date                                     DateTime?
+  verificationActions                              String?
+  section5Initials                                 String?
+  section5Date                                     DateTime?
+  maintenanceWorkCompleted                         String?
+  sanitationRequired                               Boolean           @default(false)
+  sanitationNotes                                  String?
+  productPlacedOnHold                              Boolean           @default(false)
+  itemsHeld                                        String?
+  holdDecisionDetails                              String?
+  contaminationWindowDetails                       String?
+  section6Initials                                 String?
+  section6Date                                     DateTime?
+  screeningProcess                                 String?
+  section7Initials                                 String?
+  section7Date                                     DateTime?
+  finalDisposition                                 String?
+  dispositionVolume                                String?
+  dispositionJustification                         String?
+  section8Initials                                 String?
+  section8Date                                     DateTime?
+  dispositionDate                                  DateTime?
+  dispositionInitials                              String?
+  preventionMeasures                               String?
+  section9Initials                                 String?
+  section9Date                                     DateTime?
+  corporateNotified                                Boolean           @default(false)
+  corporatePersonsNotified                         String?
+  preShipmentReview                                String?
+  preShipmentReviewDate                            DateTime?
+  preShipmentSignatureRequired                     Boolean           @default(false)
+  organizationId                                   String
+  facilityId                                       String?
+  createdById                                      String
+  rcaAnalysisId                                    String?
+  createdAt                                        DateTime          @default(now())
+  updatedAt                                        DateTime @updatedAt
+  submittedAt                                      DateTime?
+  submittedById                                    String?
+  fmSourceCategory                                 String?
+  fmSourceType                                     String?
+  collaboratorIds                                  String[]          @default([])
+  isVisible                                        Boolean           @default(false)
+  closedAt                                         DateTime?
+  closedById                                       String?
+  isClosed                                         Boolean           @default(false)
+  area                                             String?
+  line                                             String?
+  FMIRAuditReport                                  FMIRAuditReport[]
+  FMIRComment                                      FMIRComment[]
+  FMIREvidence                                     FMIREvidence[]
+  User_ForeignMaterialIncident_createdByIdToUser   User              @relation("ForeignMaterialIncident_createdByIdToUser", fields: [createdById], references: [id])
+  Facility                                         Facility?         @relation(fields: [facilityId], references: [id])
+  Organization                                     Organization      @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  User_ForeignMaterialIncident_submittedByIdToUser User?             @relation("ForeignMaterialIncident_submittedByIdToUser", fields: [submittedById], references: [id])
+
+  @@index([createdById])
+  @@index([facilityId])
+  @@index([incidentDate])
+  @@index([organizationId])
+  @@index([rcaAnalysisId])
+  @@index([status])
 }
 
 model Incident {
@@ -403,7 +565,6 @@ model Incident {
   machineId                                      String?
   description                                    String
   aiSummary                                      String?
-  aiAnalysisData                                 Json?
   occurredAt                                     DateTime
   reportedAt                                     DateTime              @default(now())
   status                                         IncidentStatus        @default(DRAFT)
@@ -414,7 +575,7 @@ model Incident {
   dueDate                                        DateTime?
   organizationId                                 String
   createdAt                                      DateTime              @default(now())
-  updatedAt DateTime @updatedAt
+  updatedAt                                      DateTime @updatedAt
   departmentId                                   String?
   additionalEmployerHours                        String?
   additionalEmployerStartDate                    DateTime?
@@ -539,13 +700,14 @@ model Incident {
   wasViolationOfSafetyRules                      Boolean?
   isTeamIncident                                 Boolean               @default(false)
   visibility                                     IncidentVisibility    @default(PRIVATE)
-  isPublic                                       Boolean               @default(false)
-  sharedWithUserIds                              String[]
   contributingFactorTypes                        String[]
   correctiveActionTypes                          String[]
   incidentPattern                                String?
   injuryDevelopmentType                          String?
   taskRoutineType                                String?
+  aiAnalysisData                                 Json?
+  sharedWithUserIds                              String[]
+  isPublic                                       Boolean               @default(false)
   ArchivedChatMessage                            ArchivedChatMessage[]
   ChatMessage                                    ChatMessage[]
   Comment                                        Comment[]
@@ -587,7 +749,7 @@ model IncidentParticipant {
   canChat                                  Boolean          @default(true)
   lastViewedAt                             DateTime?
   createdAt                                DateTime         @default(now())
-  updatedAt DateTime @updatedAt
+  updatedAt                                DateTime @updatedAt
   invitationStatus                         InvitationStatus @default(PENDING)
   invitedAt                                DateTime         @default(now())
   respondedAt                              DateTime?
@@ -615,7 +777,7 @@ model KnowledgeArticle {
   viewCount         Int          @default(0)
   helpfulCount      Int          @default(0)
   createdAt         DateTime     @default(now())
-  updatedAt DateTime @updatedAt
+  updatedAt         DateTime @updatedAt
 
   @@index([incidentType])
   @@index([keywords])
@@ -628,7 +790,7 @@ model Line {
   machineIds  String[]
   areaId      String
   createdAt   DateTime    @default(now())
-  updatedAt DateTime @updatedAt
+  updatedAt   DateTime @updatedAt
   lineNumber  String?
   Incident    Incident[]
   Area        Area        @relation(fields: [areaId], references: [id], onDelete: Cascade)
@@ -653,23 +815,25 @@ model Notification {
 }
 
 model Organization {
-  id                 String               @id @default(uuid())
-  name               String
-  region             Region
-  defaultLanguage    Language             @default(ENGLISH)
-  isActive           Boolean              @default(true)
-  regulatoryRuleset  String?
-  createdAt          DateTime             @default(now())
-  updatedAt DateTime @updatedAt
-  isPublic           Boolean              @default(false)
-  signupCode         String?              @unique
-  Category           Category[]
-  DropdownOption     DropdownOption[]
-  Facility           Facility[]
-  FieldConfiguration FieldConfiguration[]
-  Incident           Incident[]
-  SupportRequest     SupportRequest[]
-  User               User[]
+  id                      String                    @id @default(uuid())
+  name                    String
+  region                  Region
+  defaultLanguage         Language                  @default(ENGLISH)
+  isActive                Boolean                   @default(true)
+  regulatoryRuleset       String?
+  createdAt               DateTime                  @default(now())
+  updatedAt               DateTime                  @updatedAt
+  isPublic                Boolean                   @default(false)
+  signupCode              String?                   @unique
+  Category                Category[]
+  DropdownOption          DropdownOption[]
+  FMIRAuditReport         FMIRAuditReport[]
+  Facility                Facility[]
+  FieldConfiguration      FieldConfiguration[]
+  ForeignMaterialIncident ForeignMaterialIncident[]
+  Incident                Incident[]
+  SupportRequest          SupportRequest[]
+  User                    User[]
 
   @@index([name])
   @@index([signupCode])
@@ -685,7 +849,7 @@ model PolicyDocument {
   publishedAt     DateTime?
   updatedByUserId String?
   createdAt       DateTime         @default(now())
-  updatedAt DateTime @updatedAt
+  updatedAt       DateTime @updatedAt
   User            User?            @relation(fields: [updatedByUserId], references: [id])
   PolicyRevision  PolicyRevision[]
 
@@ -723,7 +887,7 @@ model RCAAnalysis {
   validatedById          String?
   analystId              String
   createdAt              DateTime     @default(now())
-  updatedAt DateTime @updatedAt
+  updatedAt              DateTime @updatedAt
   CAPAction              CAPAction[]
   Comment                Comment[]
   Evidence               Evidence[]
@@ -786,7 +950,7 @@ model Shift {
   endTime    String
   facilityId String?
   createdAt  DateTime    @default(now())
-  updatedAt DateTime @updatedAt
+  updatedAt  DateTime @updatedAt
   lineId     String?
   Incident   Incident[]
   Facility   Facility?   @relation(fields: [facilityId], references: [id], onDelete: Cascade)
@@ -818,7 +982,7 @@ model SupportRequest {
   status                                      SupportRequestStatus @default(OPEN)
   internalNotes                               String?
   createdAt                                   DateTime             @default(now())
-  updatedAt DateTime @updatedAt
+  updatedAt                                   DateTime @updatedAt
   resolvedAt                                  DateTime?
   resolvedByUserId                            String?
   subject                                     String
@@ -835,52 +999,57 @@ model SupportRequest {
 }
 
 model User {
-  id                                                      String                @id @default(uuid())
-  email                                                   String                @unique
-  password                                                String?
-  workEmail                                               String?
-  firstName                                               String
-  lastName                                                String
-  role                                                    UserRole
-  isActive                                                Boolean               @default(true)
-  emailVerified                                           Boolean               @default(false)
-  mfaEnabled                                              Boolean               @default(false)
-  mfaSecret                                               String?
-  theme                                                   Theme                 @default(LIGHT)
-  language                                                Language              @default(ENGLISH)
-  defaultSiteId                                           String?
-  defaultLineId                                           String?
-  loginAttempts                                           Int                   @default(0)
-  lockedUntil                                             DateTime?
-  lastLoginAt                                             DateTime?
-  lastLoginIp                                             String?
-  passwordResetToken                                      String?
-  passwordResetExpires                                    DateTime?
-  organizationId                                          String?
-  createdAt                                               DateTime              @default(now())
-  updatedAt                                               DateTime              @updatedAt
-  firebaseUid                                             String?               @unique
-  isOnline                                                Boolean               @default(false)
-  lastSeenAt                                              DateTime?
-  socketId                                                String?
-  profilePicture                                          String?
-  AuditLog                                                AuditLog[]
-  CAPAction                                               CAPAction[]
-  ChatMessage                                             ChatMessage[]
-  ChatMessageReaction                                     ChatMessageReaction[]
-  ChatMessageTemplate                                     ChatMessageTemplate[]
-  Comment                                                 Comment[]
-  Incident_Incident_assignedToIdToUser                    Incident[]            @relation("Incident_assignedToIdToUser")
-  Incident_Incident_createdByIdToUser                     Incident[]            @relation("Incident_createdByIdToUser")
-  Incident_Incident_investigationSubmittedByIdToUser      Incident[]            @relation("Incident_investigationSubmittedByIdToUser")
-  IncidentParticipant_IncidentParticipant_addedByIdToUser IncidentParticipant[] @relation("IncidentParticipant_addedByIdToUser")
-  IncidentParticipant_IncidentParticipant_userIdToUser    IncidentParticipant[] @relation("IncidentParticipant_userIdToUser")
-  PolicyDocument                                          PolicyDocument[]
-  PolicyRevision                                          PolicyRevision[]
-  RCAAnalysis                                             RCAAnalysis[]
-  SupportRequest_SupportRequest_resolvedByUserIdToUser    SupportRequest[]      @relation("SupportRequest_resolvedByUserIdToUser")
-  SupportRequest_SupportRequest_submittedByUserIdToUser   SupportRequest[]      @relation("SupportRequest_submittedByUserIdToUser")
-  Organization                                            Organization?         @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  id                                                                  String                    @id @default(uuid())
+  email                                                               String                    @unique
+  password                                                            String?
+  workEmail                                                           String?
+  firstName                                                           String
+  lastName                                                            String
+  role                                                                UserRole
+  isActive                                                            Boolean                   @default(true)
+  emailVerified                                                       Boolean                   @default(false)
+  mfaEnabled                                                          Boolean                   @default(false)
+  mfaSecret                                                           String?
+  theme                                                               Theme                     @default(LIGHT)
+  language                                                            Language                  @default(ENGLISH)
+  defaultSiteId                                                       String?
+  defaultLineId                                                       String?
+  loginAttempts                                                       Int                       @default(0)
+  lockedUntil                                                         DateTime?
+  lastLoginAt                                                         DateTime?
+  lastLoginIp                                                         String?
+  passwordResetToken                                                  String?
+  passwordResetExpires                                                DateTime?
+  organizationId                                                      String?
+  createdAt                                                           DateTime                  @default(now())
+  updatedAt                                                           DateTime                  @updatedAt
+  firebaseUid                                                         String?                   @unique
+  isOnline                                                            Boolean                   @default(false)
+  lastSeenAt                                                          DateTime?
+  socketId                                                            String?
+  profilePicture                                                      String?
+  autoSaveEnabled                                                     Boolean                   @default(false)
+  AuditLog                                                            AuditLog[]
+  CAPAction                                                           CAPAction[]
+  ChatMessage                                                         ChatMessage[]
+  ChatMessageReaction                                                 ChatMessageReaction[]
+  ChatMessageTemplate                                                 ChatMessageTemplate[]
+  Comment                                                             Comment[]
+  FMIRAuditReport                                                     FMIRAuditReport[]
+  FMIRComment                                                         FMIRComment[]
+  ForeignMaterialIncident_ForeignMaterialIncident_createdByIdToUser   ForeignMaterialIncident[] @relation("ForeignMaterialIncident_createdByIdToUser")
+  ForeignMaterialIncident_ForeignMaterialIncident_submittedByIdToUser ForeignMaterialIncident[] @relation("ForeignMaterialIncident_submittedByIdToUser")
+  Incident_Incident_assignedToIdToUser                                Incident[]                @relation("Incident_assignedToIdToUser")
+  Incident_Incident_createdByIdToUser                                 Incident[]                @relation("Incident_createdByIdToUser")
+  Incident_Incident_investigationSubmittedByIdToUser                  Incident[]                @relation("Incident_investigationSubmittedByIdToUser")
+  IncidentParticipant_IncidentParticipant_addedByIdToUser             IncidentParticipant[]     @relation("IncidentParticipant_addedByIdToUser")
+  IncidentParticipant_IncidentParticipant_userIdToUser                IncidentParticipant[]     @relation("IncidentParticipant_userIdToUser")
+  PolicyDocument                                                      PolicyDocument[]
+  PolicyRevision                                                      PolicyRevision[]
+  RCAAnalysis                                                         RCAAnalysis[]
+  SupportRequest_SupportRequest_resolvedByUserIdToUser                SupportRequest[]          @relation("SupportRequest_resolvedByUserIdToUser")
+  SupportRequest_SupportRequest_submittedByUserIdToUser               SupportRequest[]          @relation("SupportRequest_submittedByUserIdToUser")
+  Organization                                                        Organization?             @relation(fields: [organizationId], references: [id], onDelete: Cascade)
 
   @@index([email])
   @@index([isOnline])
@@ -968,6 +1137,14 @@ enum EvidenceType {
   VIDEO
   DOCUMENT
   VOICE_RECORDING
+}
+
+enum FMIRStatus {
+  DRAFT
+  SUBMITTED
+  UNDER_INVESTIGATION
+  RESOLVED
+  CLOSED
 }
 
 enum IncidentStatus {

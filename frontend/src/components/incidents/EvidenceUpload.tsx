@@ -7,6 +7,7 @@
 
 import { useState, useRef, useEffect, useCallback } from 'react';
 import api from '@/lib/api';
+import { trimVideo as ffmpegTrimVideo, isFFmpegSupported, preloadFFmpeg } from '@/lib/ffmpegTrimmer';
 
 // Custom compact audio player component - fully inline, no popups
 const CompactAudioPlayer = ({ src, type = 'audio/webm' }: { src: string; type?: string }) => {
@@ -266,13 +267,13 @@ export default function EvidenceUpload({
 
     setError('');
 
-    // Auto-stage files with preview for images/videos
+    // Stage files with preview for images/videos
     const newStagedFiles: StagedFile[] = Array.from(files).map((file) => {
       const preview = (type === 'PHOTO' || type === 'VIDEO') ? URL.createObjectURL(file) : undefined;
       return {
         id: `staged-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`,
         file,
-        customName: file.name.replace(/\.[^/.]+$/, ''), // Name without extension
+        customName: file.name.replace(/\.[^/.]+$/, ''),
         originalName: file.name,
         type,
         preview,
@@ -846,20 +847,28 @@ export default function EvidenceUpload({
     }
   };
 
-  // Format time as M:SS for short display
-  const formatTime = (seconds: number) => {
-    if (!isFinite(seconds) || isNaN(seconds)) return '0:00';
+  // Format time as M:SS.ms for short display with milliseconds
+  const formatTime = (seconds: number, showMs = false) => {
+    if (!isFinite(seconds) || isNaN(seconds)) return showMs ? '0:00.000' : '0:00';
     const mins = Math.floor(seconds / 60);
     const secs = Math.floor(seconds % 60);
+    if (showMs) {
+      const ms = Math.floor((seconds % 1) * 1000);
+      return `${mins}:${secs.toString().padStart(2, '0')}.${ms.toString().padStart(3, '0')}`;
+    }
     return `${mins}:${secs.toString().padStart(2, '0')}`;
   };
 
-  // Format time as HH:MM:SS for inputs
-  const formatTimeHMS = (seconds: number) => {
-    if (!isFinite(seconds) || isNaN(seconds)) return '00:00:00';
+  // Format time as HH:MM:SS.mmm for inputs with optional milliseconds
+  const formatTimeHMS = (seconds: number, showMs = false) => {
+    if (!isFinite(seconds) || isNaN(seconds)) return showMs ? '00:00:00.000' : '00:00:00';
     const hrs = Math.floor(seconds / 3600);
     const mins = Math.floor((seconds % 3600) / 60);
     const secs = Math.floor(seconds % 60);
+    if (showMs) {
+      const ms = Math.floor((seconds % 1) * 1000);
+      return `${hrs.toString().padStart(2, '0')}:${mins.toString().padStart(2, '0')}:${secs.toString().padStart(2, '0')}.${ms.toString().padStart(3, '0')}`;
+    }
     return `${hrs.toString().padStart(2, '0')}:${mins.toString().padStart(2, '0')}:${secs.toString().padStart(2, '0')}`;
   };
 
@@ -916,7 +925,14 @@ export default function EvidenceUpload({
   const [isTrimming, setIsTrimming] = useState(false);
   const [trimProgress, setTrimProgress] = useState(0);
 
-  // Simple and reliable trim using MediaRecorder
+  // Preload FFmpeg when trim modal opens
+  useEffect(() => {
+    if (trimVideo && isFFmpegSupported()) {
+      preloadFFmpeg();
+    }
+  }, [trimVideo]);
+
+  // FFmpeg-based trim that preserves original format
   const applyTrim = async () => {
     if (!trimVideo || !trimVideoRef.current) return;
     
@@ -926,174 +942,38 @@ export default function EvidenceUpload({
       return;
     }
 
+    // Check FFmpeg support
+    if (!isFFmpegSupported()) {
+      setError('Video trimming requires a modern browser with SharedArrayBuffer support. Please use Chrome, Firefox, or Edge.');
+      return;
+    }
+
     setIsTrimming(true);
     setTrimProgress(0);
     setError('');
 
     try {
-      // Check if already webm to avoid quality loss from re-encoding
-      const isAlreadyWebm = trimVideo.file.type === 'video/webm' || 
-                            trimVideo.originalName.toLowerCase().endsWith('.webm');
-      
-      // Create video element for processing
-      const video = document.createElement('video');
-      video.src = trimVideo.preview || '';
-      video.playsInline = true;
-      video.crossOrigin = 'anonymous';
-      // Keep audio unmuted and at full volume for capture
-      video.muted = false;
-      video.volume = 1;
-      
-      await new Promise<void>((resolve, reject) => {
-        video.onloadedmetadata = () => resolve();
-        video.onerror = () => reject(new Error('Failed to load video'));
-        setTimeout(() => reject(new Error('Video load timeout')), 10000);
-      });
-
-      setTrimProgress(10);
-
-      // Create canvas for capturing
-      const canvas = document.createElement('canvas');
-      canvas.width = video.videoWidth || 1280;
-      canvas.height = video.videoHeight || 720;
-      const ctx = canvas.getContext('2d');
-      if (!ctx) throw new Error('Canvas context not available');
-
-      // Get best supported mime type - use higher quality for first encode
-      const mimeType = MediaRecorder.isTypeSupported('video/webm;codecs=vp9,opus')
-        ? 'video/webm;codecs=vp9,opus'
-        : MediaRecorder.isTypeSupported('video/webm;codecs=vp8,opus')
-        ? 'video/webm;codecs=vp8,opus'
-        : 'video/webm';
-
-      // Create canvas stream with high framerate
-      const canvasStream = canvas.captureStream(30);
-      
-      // Setup audio capture BEFORE any playback
-      let audioCtx: AudioContext | null = null;
-      let audioSource: MediaElementAudioSourceNode | null = null;
-      let audioDest: MediaStreamAudioDestinationNode | null = null;
-      
-      try {
-        audioCtx = new AudioContext();
-        // Resume audio context (required for some browsers)
-        if (audioCtx.state === 'suspended') {
-          await audioCtx.resume();
+      // Use FFmpeg to trim video (preserves original format)
+      const result = await ffmpegTrimVideo({
+        file: trimVideo.file,
+        fileName: trimVideo.originalName,
+        mimeType: trimVideo.file.type || 'video/mp4',
+        startTime: trimRange.start,
+        endTime: trimRange.end,
+        onProgress: (progress) => {
+          setTrimProgress(progress);
         }
-        audioSource = audioCtx.createMediaElementSource(video);
-        audioDest = audioCtx.createMediaStreamDestination();
-        // Connect source to destination for recording
-        audioSource.connect(audioDest);
-        // Also connect to speakers so we can hear it (optional, but helps with sync)
-        audioSource.connect(audioCtx.destination);
-        
-        const audioTrack = audioDest.stream.getAudioTracks()[0];
-        if (audioTrack) {
-          canvasStream.addTrack(audioTrack);
-          console.log('Audio track added successfully');
-        }
-      } catch (e) {
-        console.warn('Audio capture setup failed:', e);
-      }
-
-      // Setup recorder - use higher bitrate if re-encoding to minimize quality loss
-      const videoBitrate = isAlreadyWebm ? 8000000 : 5000000; // 8 Mbps for re-encode, 5 Mbps for first encode
-      const recorder = new MediaRecorder(canvasStream, { 
-        mimeType, 
-        videoBitsPerSecond: videoBitrate,
-        audioBitsPerSecond: 128000 // 128 kbps audio
-      });
-      
-      const chunks: Blob[] = [];
-      recorder.ondataavailable = (e) => { 
-        if (e.data.size > 0) chunks.push(e.data); 
-      };
-
-      setTrimProgress(15);
-
-      // Seek to start position
-      video.currentTime = trimRange.start;
-      await new Promise<void>((resolve) => {
-        const onSeeked = () => {
-          video.removeEventListener('seeked', onSeeked);
-          resolve();
-        };
-        video.addEventListener('seeked', onSeeked);
-      });
-
-      setTrimProgress(20);
-
-      // Start recording and playing
-      recorder.start(100);
-      
-      // Small delay to ensure recorder is ready
-      await new Promise(r => setTimeout(r, 50));
-      
-      await video.play();
-
-      // Capture frames until we reach trim end
-      await new Promise<void>((resolve) => {
-        const checkAndDraw = () => {
-          if (video.currentTime >= trimRange.end - 0.05 || video.paused || video.ended) {
-            video.pause();
-            setTimeout(() => {
-              if (recorder.state === 'recording') {
-                recorder.stop();
-              }
-              resolve();
-            }, 200);
-            return;
-          }
-          
-          // Draw frame to canvas
-          ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
-          
-          // Update progress (20-90%)
-          const elapsed = video.currentTime - trimRange.start;
-          const progress = 20 + (elapsed / duration) * 70;
-          setTrimProgress(Math.min(90, Math.round(progress)));
-          
-          requestAnimationFrame(checkAndDraw);
-        };
-        checkAndDraw();
-      });
-
-      // Wait for recorder to finish
-      const outputBlob = await new Promise<Blob>((resolve, reject) => {
-        const timeout = setTimeout(() => reject(new Error('Recording timeout')), 5000);
-        recorder.onstop = () => {
-          clearTimeout(timeout);
-          if (chunks.length === 0) {
-            reject(new Error('No video data recorded'));
-            return;
-          }
-          resolve(new Blob(chunks, { type: mimeType }));
-        };
       });
 
       setTrimProgress(95);
 
-      // Cleanup audio context
-      if (audioSource) {
-        try { audioSource.disconnect(); } catch (e) { /* ignore */ }
-      }
-      if (audioCtx) {
-        try { await audioCtx.close(); } catch (e) { /* ignore */ }
-      }
-      video.pause();
-      video.src = '';
-
-      if (outputBlob.size < 1000) {
-        throw new Error('Trimmed video is too small');
-      }
-
-      // Create new file
+      // Create new file with the result
       const trimmedFile = new File(
-        [outputBlob], 
-        `${trimVideo.customName}_trimmed.webm`,
-        { type: mimeType }
+        [result.blob], 
+        result.fileName,
+        { type: result.mimeType }
       );
-      const newPreview = URL.createObjectURL(outputBlob);
+      const newPreview = URL.createObjectURL(result.blob);
 
       // Update staged files
       setStagedFiles(prev => prev.map(sf => {
@@ -1412,7 +1292,7 @@ export default function EvidenceUpload({
                   <button 
                     onClick={() => openTrimModal(sf)}
                     className="relative group w-10 h-10 sm:w-12 sm:h-12 rounded overflow-hidden border-2 border-transparent hover:border-primary-500 transition-colors flex-shrink-0"
-                    title="Click to preview & trim"
+                    title="Click to play"
                   >
                     <video src={sf.preview} className="w-full h-full object-cover" muted />
                     <div className="absolute inset-0 bg-black/50 opacity-0 group-hover:opacity-100 transition-opacity flex items-center justify-center">
@@ -1818,400 +1698,58 @@ export default function EvidenceUpload({
         </div>
       )}
 
-      {/* Video Trim Modal (for staged files) - Modern Design */}
+      {/* Video Player Modal (Playback Only) */}
       {trimVideo && trimVideo.preview && (
         <div 
-          className="fixed inset-0 bg-slate-900 flex items-center justify-center z-50 p-4"
+          className="fixed inset-0 bg-slate-900/95 backdrop-blur-sm flex items-center justify-center z-50 p-4 animate-in fade-in duration-200"
           onClick={closeTrimModal}
         >
           <div 
-            className="relative w-full max-w-3xl bg-slate-800 rounded-2xl overflow-hidden shadow-2xl"
+            className="relative w-full max-w-3xl bg-gradient-to-b from-slate-800 to-slate-850 rounded-2xl overflow-hidden shadow-2xl ring-1 ring-white/10 animate-in zoom-in-95 slide-in-from-bottom-4 duration-300"
             onClick={(e) => e.stopPropagation()}
+            style={{ backgroundColor: '#1e293b' }}
           >
             {/* Header */}
-            <div className="text-center py-6 px-4">
-              <h2 className="text-2xl font-bold text-white mb-2">Video Trimmer</h2>
-              <p className="text-slate-400 text-sm">
-                Trim your video easily with the slider or input specific start and end times.
+            <div className="text-center py-6 px-4 bg-gradient-to-b from-slate-700/50 to-transparent">
+              <div className="flex items-center justify-center gap-2 mb-2">
+                <svg className="w-6 h-6 text-cyan-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M14.752 11.168l-3.197-2.132A1 1 0 0010 9.87v4.263a1 1 0 001.555.832l3.197-2.132a1 1 0 000-1.664z" />
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
+                </svg>
+                <h2 className="text-2xl font-bold text-white">Video Player</h2>
+              </div>
+              <p className="text-slate-400 text-sm max-w-md mx-auto">
+                {trimVideo.originalName}
               </p>
             </div>
             
-            {/* Video Preview with Play Button Overlay */}
-            <div className="relative bg-black mx-4 rounded-lg overflow-hidden">
+            {/* Video Preview with native controls */}
+            <div className="relative bg-black mx-4 rounded-xl overflow-hidden shadow-inner ring-1 ring-white/10">
               <video
                 ref={trimVideoRef}
                 src={trimVideo.preview}
-                className="w-full max-h-[40vh] object-contain"
+                className="w-full max-h-[50vh] object-contain"
                 preload="metadata"
-                muted={isMuted}
                 playsInline
-                onLoadedMetadata={handleVideoLoaded}
-                onLoadedData={handleVideoLoaded}
-                onDurationChange={handleVideoLoaded}
-                onTimeUpdate={handleVideoTimeUpdate}
-                onEnded={() => setIsPlaying(false)}
-                onClick={togglePlayPause}
+                controls
+                style={{ backgroundColor: '#000' }}
               />
-              
-              {/* Play button overlay */}
-              {!isPlaying && (
-                <button
-                  onClick={togglePlayPause}
-                  className="absolute inset-0 flex items-center justify-center bg-black/30 hover:bg-black/40 transition-colors"
-                >
-                  <div className="w-16 h-16 rounded-full bg-white/90 flex items-center justify-center shadow-lg">
-                    <svg className="w-8 h-8 text-slate-800 ml-1" fill="currentColor" viewBox="0 0 24 24">
-                      <path d="M8 5v14l11-7z"/>
-                    </svg>
-                  </div>
-                </button>
-              )}
-              
-              {/* Time display on video */}
-              <div className="absolute bottom-3 left-3 px-2 py-1 bg-black/70 rounded text-white text-sm font-mono">
-                {formatTime(currentTime)} / {formatTime(videoDuration)}
-              </div>
-              
-              {/* Video controls */}
-              <div className="absolute bottom-3 right-3 flex gap-2">
-                <button 
-                  onClick={() => setIsMuted(!isMuted)}
-                  className="p-2 bg-black/70 rounded hover:bg-black/90 text-white transition-colors"
-                  title={isMuted ? 'Unmute' : 'Mute'}
-                >
-                  {isMuted ? '🔇' : '🔊'}
-                </button>
-                <button 
-                  onClick={() => {
-                    if (trimVideoRef.current) {
-                      if (trimVideoRef.current.requestFullscreen) {
-                        trimVideoRef.current.requestFullscreen();
-                      }
-                    }
-                  }}
-                  className="p-2 bg-black/70 rounded hover:bg-black/90 text-white"
-                >
-                  ⛶
-                </button>
-              </div>
-            </div>
-            
-            {/* Timeline Range Slider - Modern dual handle design */}
-            <div className="px-6 py-4">
-              {/* Time markers */}
-              <div className="flex justify-between text-xs text-slate-500 mb-1">
-                <span>{formatTimeHMS(0)}</span>
-                <span>{formatTimeHMS(videoDuration)}</span>
-              </div>
-              
-              {/* Custom range slider track */}
-              <div 
-                className="relative h-2 bg-slate-600 rounded-full cursor-pointer"
-                onClick={handleRangeSliderClick}
-              >
-                {/* Selected range (cyan/teal color like reference) */}
-                <div 
-                  className="absolute h-full bg-gradient-to-r from-cyan-500 to-teal-400 rounded-full"
-                  style={{
-                    left: `${(trimRange.start / videoDuration) * 100}%`,
-                    width: `${((trimRange.end - trimRange.start) / videoDuration) * 100}%`
-                  }}
-                />
-                
-                {/* Start trim handle - Left edge */}
-                <div
-                  className="absolute top-1/2 -translate-y-1/2 w-6 h-6 bg-cyan-400 rounded-full border-2 border-cyan-300 shadow-lg cursor-ew-resize hover:scale-110 hover:bg-cyan-300 transition-transform flex items-center justify-center group z-10"
-                  style={{ left: `calc(${(trimRange.start / videoDuration) * 100}% - 12px)` }}
-                  onMouseDown={(e) => {
-                    e.preventDefault();
-                    e.stopPropagation();
-                    const slider = e.currentTarget.parentElement;
-                    if (!slider) return;
-                    
-                    const handleDrag = (moveEvent: MouseEvent) => {
-                      const rect = slider.getBoundingClientRect();
-                      const percent = Math.max(0, Math.min((moveEvent.clientX - rect.left) / rect.width, 1));
-                      const newStart = percent * videoDuration;
-                      // Ensure start doesn't go past end - 0.5s minimum
-                      if (newStart < trimRange.end - 0.5) {
-                        handleTrimStartChange(newStart);
-                      }
-                    };
-                    const handleUp = () => {
-                      document.removeEventListener('mousemove', handleDrag);
-                      document.removeEventListener('mouseup', handleUp);
-                    };
-                    document.addEventListener('mousemove', handleDrag);
-                    document.addEventListener('mouseup', handleUp);
-                  }}
-                  onTouchStart={(e) => {
-                    e.stopPropagation();
-                    const slider = e.currentTarget.parentElement;
-                    if (!slider) return;
-                    
-                    const handleDrag = (moveEvent: TouchEvent) => {
-                      const rect = slider.getBoundingClientRect();
-                      const touch = moveEvent.touches[0];
-                      const percent = Math.max(0, Math.min((touch.clientX - rect.left) / rect.width, 1));
-                      const newStart = percent * videoDuration;
-                      if (newStart < trimRange.end - 0.5) {
-                        handleTrimStartChange(newStart);
-                      }
-                    };
-                    const handleUp = () => {
-                      document.removeEventListener('touchmove', handleDrag);
-                      document.removeEventListener('touchend', handleUp);
-                    };
-                    document.addEventListener('touchmove', handleDrag);
-                    document.addEventListener('touchend', handleUp);
-                  }}
-                >
-                  {/* Inner dot indicator */}
-                  <div className="w-2 h-2 bg-slate-800 rounded-full opacity-60 group-hover:opacity-80" />
-                </div>
-                
-                {/* End trim handle - Right edge */}
-                <div
-                  className="absolute top-1/2 -translate-y-1/2 w-6 h-6 bg-cyan-400 rounded-full border-2 border-cyan-300 shadow-lg cursor-ew-resize hover:scale-110 hover:bg-cyan-300 transition-transform flex items-center justify-center group z-10"
-                  style={{ left: `calc(${(trimRange.end / videoDuration) * 100}% - 12px)` }}
-                  onMouseDown={(e) => {
-                    e.preventDefault();
-                    e.stopPropagation();
-                    const slider = e.currentTarget.parentElement;
-                    if (!slider) return;
-                    
-                    const handleDrag = (moveEvent: MouseEvent) => {
-                      const rect = slider.getBoundingClientRect();
-                      const percent = Math.max(0, Math.min((moveEvent.clientX - rect.left) / rect.width, 1));
-                      const newEnd = percent * videoDuration;
-                      // Ensure end doesn't go before start + 0.5s minimum
-                      if (newEnd > trimRange.start + 0.5) {
-                        handleTrimEndChange(newEnd);
-                      }
-                    };
-                    const handleUp = () => {
-                      document.removeEventListener('mousemove', handleDrag);
-                      document.removeEventListener('mouseup', handleUp);
-                    };
-                    document.addEventListener('mousemove', handleDrag);
-                    document.addEventListener('mouseup', handleUp);
-                  }}
-                  onTouchStart={(e) => {
-                    e.stopPropagation();
-                    const slider = e.currentTarget.parentElement;
-                    if (!slider) return;
-                    
-                    const handleDrag = (moveEvent: TouchEvent) => {
-                      const rect = slider.getBoundingClientRect();
-                      const touch = moveEvent.touches[0];
-                      const percent = Math.max(0, Math.min((touch.clientX - rect.left) / rect.width, 1));
-                      const newEnd = percent * videoDuration;
-                      if (newEnd > trimRange.start + 0.5) {
-                        handleTrimEndChange(newEnd);
-                      }
-                    };
-                    const handleUp = () => {
-                      document.removeEventListener('touchmove', handleDrag);
-                      document.removeEventListener('touchend', handleUp);
-                    };
-                    document.addEventListener('touchmove', handleDrag);
-                    document.addEventListener('touchend', handleUp);
-                  }}
-                >
-                  {/* Inner dot indicator */}
-                  <div className="w-2 h-2 bg-slate-800 rounded-full opacity-60 group-hover:opacity-80" />
-                </div>
-                
-                {/* Current playhead - Draggable to scrub freely within trim range */}
-                <div 
-                  className="absolute top-1/2 -translate-y-1/2 w-4 h-8 bg-white rounded shadow-lg cursor-grab active:cursor-grabbing z-20 hover:bg-cyan-100 transition-colors border border-slate-300 select-none"
-                  style={{ left: `calc(${(currentTime / videoDuration) * 100}% - 8px)` }}
-                  onMouseDown={(e) => {
-                    e.preventDefault();
-                    e.stopPropagation();
-                    
-                    // Pause video when scrubbing
-                    if (trimVideoRef.current && isPlaying) {
-                      trimVideoRef.current.pause();
-                      setIsPlaying(false);
-                    }
-                    
-                    const slider = e.currentTarget.parentElement;
-                    if (!slider) return;
-                    const rect = slider.getBoundingClientRect();
-                    
-                    const handleDrag = (moveEvent: MouseEvent) => {
-                      // Calculate position freely
-                      const x = moveEvent.clientX - rect.left;
-                      const percent = x / rect.width;
-                      const clampedPercent = Math.max(0, Math.min(1, percent));
-                      const rawTime = clampedPercent * videoDuration;
-                      
-                      // Constrain within trim range
-                      const newTime = Math.max(trimRange.start, Math.min(trimRange.end, rawTime));
-                      
-                      // Update UI immediately for smooth scrubbing
-                      setCurrentTime(newTime);
-                      
-                      // Update video (may lag slightly but UI is smooth)
-                      if (trimVideoRef.current) {
-                        trimVideoRef.current.currentTime = newTime;
-                      }
-                    };
-                    
-                    const handleUp = () => {
-                      document.removeEventListener('mousemove', handleDrag);
-                      document.removeEventListener('mouseup', handleUp);
-                      document.body.style.cursor = '';
-                    };
-                    
-                    // Change cursor while dragging
-                    document.body.style.cursor = 'grabbing';
-                    document.addEventListener('mousemove', handleDrag);
-                    document.addEventListener('mouseup', handleUp);
-                  }}
-                  onTouchStart={(e) => {
-                    e.stopPropagation();
-                    
-                    // Pause video when scrubbing
-                    if (trimVideoRef.current && isPlaying) {
-                      trimVideoRef.current.pause();
-                      setIsPlaying(false);
-                    }
-                    
-                    const slider = e.currentTarget.parentElement;
-                    if (!slider) return;
-                    const rect = slider.getBoundingClientRect();
-                    
-                    const handleDrag = (moveEvent: TouchEvent) => {
-                      const touch = moveEvent.touches[0];
-                      const x = touch.clientX - rect.left;
-                      const percent = x / rect.width;
-                      const clampedPercent = Math.max(0, Math.min(1, percent));
-                      const rawTime = clampedPercent * videoDuration;
-                      
-                      // Constrain within trim range
-                      const newTime = Math.max(trimRange.start, Math.min(trimRange.end, rawTime));
-                      
-                      // Update UI immediately
-                      setCurrentTime(newTime);
-                      
-                      // Update video
-                      if (trimVideoRef.current) {
-                        trimVideoRef.current.currentTime = newTime;
-                      }
-                    };
-                    
-                    const handleUp = () => {
-                      document.removeEventListener('touchmove', handleDrag);
-                      document.removeEventListener('touchend', handleUp);
-                    };
-                    
-                    document.addEventListener('touchmove', handleDrag, { passive: false });
-                    document.addEventListener('touchend', handleUp);
-                  }}
-                  title="Drag to scrub through video"
-                />
-              </div>
-              
-              {/* Click anywhere on track to seek */}
-              <p className="text-xs text-slate-500 mt-2 text-center">
-                Drag the white playhead to preview • Drag cyan handles to set trim range
-              </p>
-            </div>
-            
-            {/* Time Input Fields - Grid layout like reference */}
-            <div className="grid grid-cols-4 gap-4 px-6 pb-4">
-              <div>
-                <label className="block text-slate-400 text-sm mb-2">Start</label>
-                <input
-                  type="text"
-                  value={formatTimeHMS(trimRange.start)}
-                  onChange={(e) => handleStartTimeInput(e.target.value)}
-                  disabled={isTrimming}
-                  className="w-full px-3 py-2 bg-slate-700 border border-slate-600 rounded-lg text-white text-center font-mono text-sm focus:outline-none focus:ring-2 focus:ring-cyan-500 focus:border-transparent disabled:opacity-50"
-                />
-              </div>
-              <div>
-                <label className="block text-slate-400 text-sm mb-2">End</label>
-                <input
-                  type="text"
-                  value={formatTimeHMS(trimRange.end)}
-                  onChange={(e) => handleEndTimeInput(e.target.value)}
-                  disabled={isTrimming}
-                  className="w-full px-3 py-2 bg-slate-700 border border-slate-600 rounded-lg text-white text-center font-mono text-sm focus:outline-none focus:ring-2 focus:ring-cyan-500 focus:border-transparent disabled:opacity-50"
-                />
-              </div>
-              <div>
-                <label className="block text-slate-400 text-sm mb-2">Duration</label>
-                <div className="w-full px-3 py-2 bg-slate-700/50 border border-slate-600 rounded-lg text-slate-300 text-center font-mono text-sm">
-                  {isFinite(trimRange.end - trimRange.start) ? Math.round(trimRange.end - trimRange.start) : 0}s
-                </div>
-              </div>
-              <div>
-                <label className="block text-slate-400 text-sm mb-2">Output</label>
-                <div className="w-full px-3 py-2 bg-slate-700/50 border border-slate-600 rounded-lg text-slate-300 text-center text-sm">
-                  {(() => {
-                    const isWebm = trimVideo.file.type === 'video/webm' || trimVideo.originalName.toLowerCase().endsWith('.webm');
-                    if (trimVideo.knownDuration) {
-                      return <span className="text-amber-400">webm (re-trim)</span>;
-                    }
-                    return isWebm ? 'webm' : `${trimVideo.file.name.split('.').pop()?.toUpperCase()} → webm`;
-                  })()}
-                </div>
-              </div>
-            </div>
-            
-            {/* Done Button with Progress */}
-            <div className="px-6 pb-6">
-              {isTrimming ? (
-                <div className="space-y-2">
-                  <div className="w-full bg-slate-700 rounded-full h-3 overflow-hidden">
-                    <div 
-                      className="h-full bg-gradient-to-r from-cyan-500 to-teal-400 transition-all duration-300"
-                      style={{ width: `${trimProgress}%` }}
-                    />
-                  </div>
-                  <p className="text-center text-slate-400 text-sm">
-                    Processing video... {Math.round(trimProgress)}%
-                  </p>
-                </div>
-              ) : (() => {
-                // Check if trim range has changed from original
-                const hasRangeChanges = Math.abs(trimRange.start - originalTrimRange.start) > 0.01 || 
-                                        Math.abs(trimRange.end - originalTrimRange.end) > 0.01;
-                // Check if trim duration equals full video duration (no actual trim)
-                const trimDuration = trimRange.end - trimRange.start;
-                const isFullDuration = Math.abs(trimDuration - videoDuration) < 0.05;
-                // Has changes only if range changed AND it's not still the full duration
-                const hasChanges = hasRangeChanges && !isFullDuration;
-                const isValidDuration = trimDuration >= 0.5;
-                const canApplyTrim = hasChanges && isValidDuration;
-                
-                return (
-                  <div className="space-y-2">
-                    <button
-                      onClick={applyTrim}
-                      disabled={!canApplyTrim}
-                      className="w-full py-3 bg-gradient-to-r from-cyan-500 to-teal-400 text-slate-900 font-bold text-lg rounded-xl hover:from-cyan-400 hover:to-teal-300 transition-all disabled:opacity-50 disabled:cursor-not-allowed shadow-lg"
-                    >
-                      Done!
-                    </button>
-                    {!hasChanges && isValidDuration && (
-                      <p className="text-center text-slate-500 text-xs">
-                        Adjust the trim handles to enable processing
-                      </p>
-                    )}
-                  </div>
-                );
-              })()}
             </div>
             
             {/* Close button */}
+            <div className="px-6 py-6">
+              <button
+                onClick={closeTrimModal}
+                className="w-full py-3 bg-gradient-to-r from-cyan-500 to-teal-400 text-slate-900 font-bold text-lg rounded-xl hover:from-cyan-400 hover:to-teal-300 transition-all shadow-lg"
+              >
+                Close
+              </button>
+            </div>
+            
+            {/* X button */}
             <button
               onClick={closeTrimModal}
-              disabled={isTrimming}
-              className="absolute top-4 right-4 w-8 h-8 bg-slate-700 hover:bg-slate-600 rounded-full flex items-center justify-center text-slate-400 hover:text-white transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+              className="absolute top-4 right-4 w-8 h-8 bg-slate-700 hover:bg-slate-600 rounded-full flex items-center justify-center text-slate-400 hover:text-white transition-colors"
             >
               ✕
             </button>

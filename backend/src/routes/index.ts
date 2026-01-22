@@ -28,6 +28,7 @@ import investigationReportRoutes from './investigationReportRoutes';
 import translationRoutes from './translationRoutes';
 import powerpointRoutes from './powerpointRoutes';
 import systemAdminRoutes from './systemAdminRoutes';
+import fmirRoutes from './fmirRoutes';
 
 const router = Router();
 
@@ -137,5 +138,8 @@ router.use('/translation', translationRoutes);
 
 // PowerPoint Generation routes (RCA Reports)
 router.use('/powerpoint', powerpointRoutes);
+
+// Foreign Material Incident Report routes
+router.use('/fmir', fmirRoutes);
 
 export default router;

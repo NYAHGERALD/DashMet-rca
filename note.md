@@ -103,3 +103,34 @@ AI must operate as an assistant and validator, not an automatic decision-maker
 The implementation must maintain compatibility with existing logic, workflows, and data structures
 
 This approach ensures the section supports verification, accountability, continuous improvement, and enterprise-grade learning, while preserving full user control.
+
+
+
+
+
+
+I feel like the Auditing is not thorough, The AI should check the Answers provided by the users if the are good enough if not give recomendations. The Auditor should be thorough so that if any report is to be mark as CLOSED should pass any Audition from regulations. it Also analyse the evident attachment thoroughly to determine if it was enough to back up the report.
+
+
+This does not meet our requirements check the requirement again. Modal should be bigger and resposive on mobile device screen. Implement a dynamic, animated AI validation modal that runs during the FMIR closing process. Behavior & Content
+Display real-time, dynamic messages describing exactly what the AI is validating. These messages must be generated per FMIR report, based on the actual report data (not hardcoded).
+Examples include checks on incident completeness, evidence integrity, category alignment, and compliance thresholds.
+Messages should appear with smooth professional animations (fade, slide, or step-progress transitions) to clearly communicate progress without distracting the user.
+Greeting & Context Section (Top of Modal)
+At the top of the modal, display a personalized greeting:
+“Hello {QA User Name},
+I am your {Organization Name} Internal Auditor.
+Please hang tight while I review your FMIR report to ensure it meets our audit standards.
+This report must achieve a minimum compliance score of 98% to be eligible for closure and marked as Audit-Ready.”
+The QA user name must reflect the current user performing the closing action. The organization name must be pulled dynamically from the active tenant context. Visual Engagement (Non-Static Content) Include a rotating slideshow or visual feed within the modal featuring: Relevant audit insights Real validation steps being performed Context-aware compliance indicators All visuals and messages must be data-driven and generated dynamically, not static or placeholder content.
+
+
+Lets implement adding comments feature to all the sections. The users with role QA/Food Safety will be the ones adding comments for now. the should be a plus icon with the word comment on each section. when the QA user clicks on it a comment box pops down from the icon, and the QA user types the comment and clicks save. the comment is save in the database link to the section the comment will now have a comment icon which when click on it, it displays the comment as a hint,  and can click close button to minimize it back. The save comment should carry the name of the commentor, Date and time the comment was created.
+
+Lets implement adding comments feature to all the sections. all colaborator including owners and QA can add comments on any section of a report. There should be a plus icon with the word comment on each section. when the a user clicks on it a comment slide bar  pops out form the right. The comment section have a select user to view comment dropdown. 1 or multiple users can be selected. the users available to be selected will be coloborators that are already added to the report. the user types the comment and clicks save. the comment is save in the database link to the section. The section with comment will now have a comment icon which when click on it, it displays the comment as a hint box. the hint comment box  will have a next and back arror botton if there are multiple comments for the section and users can click close button on the comment to minimize it back or click outside the comment hint to close it as well. The save comment should carry the name of the commentor when other users are view it, if the user is viewing their own comment it will show as owner then all comments will show Date and time the comment was created. when viewing comment, it show show the user's profile on the right top.
+
+Implement this carefully without breaking other codes.
+keep in mind that everything works in real time and does not need page refreah. do this professional
+
+
+postgresql://postgres:iRvkScpLsNvIyVyastxaKJdmrmgSjZmS@maglev.proxy.rlwy.net:41384/railway

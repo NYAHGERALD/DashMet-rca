@@ -1,6 +1,6 @@
 // API Client Configuration (Firebase)
 
-import axios from 'axios';
+import axios, { AxiosRequestConfig } from 'axios';
 import { auth } from './firebase';
 
 const api = axios.create({
@@ -8,8 +8,57 @@ const api = axios.create({
   headers: {
     'Content-Type': 'application/json',
   },
-  timeout: 30000,
+  timeout: 120000, // 2 minutes for AI-powered operations
 });
+
+/**
+ * Create an axios instance with a custom timeout for long-running AI operations
+ * Used for operations like FMIR lock/close which involve AI audit analysis
+ */
+export function createLongRunningRequest(timeoutMs: number = 180000) {
+  return axios.create({
+    baseURL: process.env.NEXT_PUBLIC_API_URL || 'http://localhost:5002/api',
+    headers: {
+      'Content-Type': 'application/json',
+    },
+    timeout: timeoutMs,
+  });
+}
+
+/**
+ * Make an API request with extended timeout for AI-intensive operations
+ * Automatically adds Firebase authentication token
+ */
+export async function apiWithExtendedTimeout<T = any>(
+  config: AxiosRequestConfig,
+  timeoutMs: number = 180000 // 3 minutes default for AI operations
+): Promise<T> {
+  const firebaseUser = auth.currentUser;
+  let token: string | null = null;
+
+  if (firebaseUser) {
+    try {
+      token = await firebaseUser.getIdToken();
+    } catch (error) {
+      console.error('Failed to get Firebase token:', error);
+      token = localStorage.getItem('firebaseToken');
+    }
+  } else {
+    token = localStorage.getItem('firebaseToken');
+  }
+
+  const instance = axios.create({
+    baseURL: process.env.NEXT_PUBLIC_API_URL || 'http://localhost:5002/api',
+    timeout: timeoutMs,
+    headers: {
+      'Content-Type': 'application/json',
+      ...(token ? { Authorization: `Bearer ${token}` } : {}),
+    },
+  });
+
+  const response = await instance.request<T>(config);
+  return response.data;
+}
 
 // Request interceptor - Add Firebase token
 api.interceptors.request.use(

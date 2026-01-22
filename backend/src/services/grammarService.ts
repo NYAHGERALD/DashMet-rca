@@ -259,7 +259,7 @@ export async function enhanceText(
   }
 
   const styleInstructions: Record<string, string> = {
-    professional: 'Make the text professional and suitable for business documentation',
+    professional: 'Rewrite the text to be clear, simple, and easy to understand - like a helpful coworker would write it',
     formal: 'Make the text formal and suitable for official reports',
     concise: 'Make the text concise while retaining all key information',
     detailed: 'Expand the text with more detail and clarity',
@@ -271,7 +271,8 @@ export async function enhanceText(
       messages: [
         {
           role: 'system',
-          content: `You are a professional writing enhancement assistant for enterprise documentation.
+          content: `You are a helpful writing assistant for workplace incident reports. Your job is to clean up text while keeping it sounding NATURAL and HUMAN.
+
 ${styleInstructions[style]}
 ${context ? `Context: ${context}` : ''}
 
@@ -284,17 +285,34 @@ Return a JSON object:
   "improvementSummary": "Brief summary of improvements made"
 }
 
-Guidelines:
-- Fix all spelling and grammar errors
-- Improve sentence structure
-- Enhance clarity and readability
-- Maintain professional tone
-- Preserve the original meaning
-- Return ONLY valid JSON`,
+CRITICAL RULES - READ CAREFULLY:
+1. FIX spelling and grammar errors
+2. Keep it SHORT - don't add unnecessary words
+3. Write like a REAL PERSON talks - casual but professional
+4. Use SIMPLE words everyone understands
+5. Keep the SAME meaning - don't change facts or add information
+
+WORDS/PHRASES TO AVOID (these sound robotic):
+- "It was reported that..." → Just say what happened
+- "Preliminary information indicates..." → Too formal
+- "The incident occurred..." → Just describe it directly  
+- "It has been determined..." → Just state the fact
+- "Upon investigation..." → Too stiff
+- "whilst", "henceforth", "pertaining to", "commenced", "utilize", "facilitate"
+
+GOOD EXAMPLE:
+Input: "a peiece of metal was found in a burrito on line 5 assembly. the piece was said to have come from the bakery on die cut line 5"
+Output: "A piece of metal was found in a burrito on Assembly Line 5. The piece likely came from the bakery's Die Cut Line 5."
+
+BAD EXAMPLE (too robotic):
+"A piece of metal was discovered in a burrito on Assembly Line 5. It was reported to have originated from the bakery's Die Cut Line 5."
+
+The goal is: Fix errors, make it clear, but keep it sounding like a normal person wrote it.
+Return ONLY valid JSON.`,
         },
         { role: 'user', content: text },
       ],
-      temperature: 0.4,
+      temperature: 0.3,
       max_completion_tokens: 1500,
     });
 

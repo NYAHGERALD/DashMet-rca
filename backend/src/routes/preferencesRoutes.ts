@@ -43,6 +43,7 @@ router.get(
       select: {
         theme: true,
         language: true,
+        autoSaveEnabled: true,
         defaultSiteId: true,
         defaultLineId: true,
       },
@@ -60,7 +61,7 @@ router.patch(
   '/',
   authenticate,
   asyncHandler(async (req: AuthRequest, res: Response): Promise<void> => {
-    const { theme, language, defaultSiteId, defaultLineId } = req.body;
+    const { theme, language, autoSaveEnabled, defaultSiteId, defaultLineId } = req.body;
 
     // Validate theme if provided
     if (theme && !['LIGHT', 'DARK', 'SYSTEM'].includes(theme)) {
@@ -87,6 +88,7 @@ router.patch(
       data: {
         ...(theme && { theme }),
         ...(languageValue && { language: languageValue }),
+        ...(autoSaveEnabled !== undefined && { autoSaveEnabled }),
         ...(defaultSiteId !== undefined && { defaultSiteId }),
         ...(defaultLineId !== undefined && { defaultLineId }),
       },
@@ -99,6 +101,7 @@ router.patch(
         organizationId: true,
         theme: true,
         language: true,
+        autoSaveEnabled: true,
         defaultSiteId: true,
         defaultLineId: true,
       },

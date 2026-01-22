@@ -6,6 +6,7 @@ import { prisma } from '../utils/prisma';
 import { AuthRequest } from '../middleware/auth';
 import { adminStorage } from '../config/firebase-admin';
 import multer from 'multer';
+import { websocketService } from '../services/websocketService';
 
 const router = Router();
 
@@ -431,8 +432,62 @@ router.patch(
         lastName: true,
         role: true,
         isActive: true,
+        organizationId: true,
+        profilePicture: true,
       },
     });
+
+    // If the new role is QA_FOOD_SAFETY, auto-add to all open FMIR reports
+    if (role === 'QA_FOOD_SAFETY' && user.organizationId) {
+      // Get all open FMIR reports (not CLOSED) in the organization
+      const openReports = await prisma.foreignMaterialIncident.findMany({
+        where: {
+          organizationId: user.organizationId,
+          status: {
+            not: 'CLOSED',
+          },
+        },
+        select: {
+          id: true,
+          collaboratorIds: true,
+          createdById: true,
+        },
+      });
+
+      // Add the new QA user to each open report if not already a collaborator or owner
+      const updatedReportIds: string[] = [];
+      for (const report of openReports) {
+        const existingIds = report.collaboratorIds || [];
+        // Don't add if already a collaborator or if they're the owner
+        if (!existingIds.includes(user.id) && report.createdById !== user.id) {
+          await prisma.foreignMaterialIncident.update({
+            where: { id: report.id },
+            data: {
+              collaboratorIds: [...existingIds, user.id],
+            },
+          });
+          updatedReportIds.push(report.id);
+        }
+      }
+
+      // Emit WebSocket event to notify frontends about the new collaborator
+      if (updatedReportIds.length > 0) {
+        websocketService.emitToOrganization(user.organizationId, 'fmir:collaborator-added', {
+          userId: user.id,
+          user: {
+            id: user.id,
+            firstName: user.firstName,
+            lastName: user.lastName,
+            email: user.email,
+            role: user.role,
+            profilePicture: user.profilePicture,
+            isQAFoodSafety: true,
+          },
+          reportIds: updatedReportIds,
+        });
+        console.log(`📤 Emitted fmir:collaborator-added for ${updatedReportIds.length} reports`);
+      }
+    }
 
     res.json({
       success: true,

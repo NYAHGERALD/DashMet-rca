@@ -79,6 +79,13 @@ router.post(
   asyncHandler(authController.changePassword)
 );
 
+// POST /api/auth/verify-password - Verify password for secure actions (authenticated)
+router.post(
+  '/verify-password',
+  authenticate,
+  asyncHandler(authController.verifyPassword)
+);
+
 // GET /api/auth/sessions - Get active sessions
 router.get(
   '/sessions',

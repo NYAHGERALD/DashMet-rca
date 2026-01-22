@@ -189,6 +189,30 @@
   animation: bounceIn 0.6s cubic-bezier(0.68, -0.55, 0.265, 1.55) forwards;
 }
 
+/* Comment glitter animation - continuous attention-grabbing effect */
+@keyframes commentGlitter {
+  0%, 100% {
+    transform: scale(1);
+    box-shadow: 0 0 0 0 rgba(59, 130, 246, 0.7), 0 4px 15px rgba(59, 130, 246, 0.4);
+  }
+  25% {
+    transform: scale(1.05);
+    box-shadow: 0 0 20px 5px rgba(99, 102, 241, 0.6), 0 4px 20px rgba(59, 130, 246, 0.5);
+  }
+  50% {
+    transform: scale(1);
+    box-shadow: 0 0 10px 2px rgba(139, 92, 246, 0.5), 0 4px 15px rgba(99, 102, 241, 0.4);
+  }
+  75% {
+    transform: scale(1.03);
+    box-shadow: 0 0 15px 4px rgba(59, 130, 246, 0.6), 0 4px 18px rgba(139, 92, 246, 0.5);
+  }
+}
+
+.animate-comment-glitter {
+  animation: commentGlitter 1.5s ease-in-out infinite;
+}
+
 /* Shimmer effect for buttons/cards */
 .shimmer {
   position: relative;
@@ -928,3 +952,879 @@ audio::-webkit-media-controls-volume-slider {
 .stagger-4 { animation-delay: 0.4s; }
 .stagger-5 { animation-delay: 0.5s; }
 .stagger-6 { animation-delay: 0.6s; }
+
+/* Enhanced Avatar Animations */
+@layer utilities {
+  /* Avatar hover glow effect */
+  .avatar-glow-hover:hover {
+    filter: drop-shadow(0 0 8px rgba(59, 130, 246, 0.6)) 
+            drop-shadow(0 0 16px rgba(59, 130, 246, 0.4));
+    animation: glowPulse 2s ease-in-out infinite;
+  }
+
+  /* Avatar 3D transform */
+  .avatar-3d {
+    transform-style: preserve-3d;
+    perspective: 1000px;
+  }
+
+  .avatar-3d:hover {
+    transform: rotateY(5deg) rotateX(-5deg) scale(1.1);
+  }
+
+  /* Sparkle effect on hover */
+  .avatar-sparkle {
+    position: relative;
+    overflow: visible;
+  }
+
+  .avatar-sparkle::before {
+    content: '✨';
+    position: absolute;
+    top: -8px;
+    right: -8px;
+    font-size: 14px;
+    opacity: 0;
+    transform: scale(0) rotate(0deg);
+    transition: all 0.3s ease;
+  }
+
+  .avatar-sparkle:hover::before {
+    opacity: 1;
+    transform: scale(1) rotate(180deg);
+    animation: sparkleFloat 2s ease-in-out infinite;
+  }
+
+  /* Rainbow border effect */
+  @keyframes rainbowBorder {
+    0%, 100% { border-color: rgba(239, 68, 68, 0.8); }
+    25% { border-color: rgba(251, 191, 36, 0.8); }
+    50% { border-color: rgba(34, 197, 94, 0.8); }
+    75% { border-color: rgba(59, 130, 246, 0.8); }
+  }
+
+  .avatar-rainbow-border:hover {
+    animation: rainbowBorder 3s linear infinite;
+  }
+
+  /* Floating sparkle effect */
+  @keyframes sparkleFloat {
+    0%, 100% { 
+      transform: translateY(0px) scale(1) rotate(0deg);
+      opacity: 1;
+    }
+    50% { 
+      transform: translateY(-10px) scale(1.2) rotate(180deg);
+      opacity: 0.6;
+    }
+  }
+
+  /* Ripple effect */
+  @keyframes ripple {
+    0% {
+      box-shadow: 0 0 0 0 rgba(59, 130, 246, 0.7),
+                  0 0 0 0 rgba(59, 130, 246, 0.5);
+    }
+    50% {
+      box-shadow: 0 0 0 10px rgba(59, 130, 246, 0),
+                  0 0 0 20px rgba(59, 130, 246, 0);
+    }
+    100% {
+      box-shadow: 0 0 0 0 rgba(59, 130, 246, 0),
+                  0 0 0 0 rgba(59, 130, 246, 0);
+    }
+  }
+
+  .avatar-ripple:hover {
+    animation: ripple 1.5s ease-out infinite;
+  }
+
+  /* Magnetic hover effect */
+  @keyframes magneticPull {
+    0%, 100% { transform: scale(1) translateY(0); }
+    50% { transform: scale(1.05) translateY(-2px); }
+  }
+
+  .avatar-magnetic:hover {
+    animation: magneticPull 0.6s ease-in-out;
+  }
+
+  /* AI Audit Loading Bar Animation */
+  @keyframes loadingBar {
+    0% {
+      width: 5%;
+      margin-left: 0%;
+    }
+    25% {
+      width: 30%;
+      margin-left: 10%;
+    }
+    50% {
+      width: 20%;
+      margin-left: 50%;
+    }
+    75% {
+      width: 40%;
+      margin-left: 30%;
+    }
+    100% {
+      width: 5%;
+      margin-left: 95%;
+    }
+  }
+
+  .animate-loading-bar {
+    animation: loadingBar 2s ease-in-out infinite;
+  }
+
+  /* Shimmer effect for loading states */
+  @keyframes shimmer {
+    0% {
+      background-position: -200% 0;
+    }
+    100% {
+      background-position: 200% 0;
+    }
+  }
+
+  .animate-shimmer {
+    background: linear-gradient(
+      90deg,
+      rgba(255, 255, 255, 0) 0%,
+      rgba(255, 255, 255, 0.3) 50%,
+      rgba(255, 255, 255, 0) 100%
+    );
+    background-size: 200% 100%;
+    animation: shimmer 2s infinite;
+  }
+}
+
+/* ========================================
+   AI AUDIT MODAL ANIMATIONS
+   ======================================== */
+
+/* Typewriter effect for dynamic messages */
+@keyframes typewriter {
+  from {
+    width: 0;
+  }
+  to {
+    width: 100%;
+  }
+}
+
+/* Slide in from left with fade */
+@keyframes slideInFadeLeft {
+  from {
+    opacity: 0;
+    transform: translateX(-20px);
+  }
+  to {
+    opacity: 1;
+    transform: translateX(0);
+  }
+}
+
+.animate-slide-in-left {
+  animation: slideInFadeLeft 0.5s ease-out forwards;
+}
+
+/* Slide in from bottom with fade */
+@keyframes slideInFadeUp {
+  from {
+    opacity: 0;
+    transform: translateY(20px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+.animate-slide-in-up {
+  animation: slideInFadeUp 0.5s ease-out forwards;
+}
+
+/* Validation step progress animation */
+@keyframes stepProgress {
+  0% {
+    transform: scale(0.8);
+    opacity: 0.5;
+  }
+  50% {
+    transform: scale(1.1);
+    opacity: 1;
+  }
+  100% {
+    transform: scale(1);
+    opacity: 1;
+  }
+}
+
+.animate-step-progress {
+  animation: stepProgress 0.4s ease-out forwards;
+}
+
+/* Checkmark completion animation */
+@keyframes checkmarkComplete {
+  0% {
+    transform: scale(0) rotate(-45deg);
+    opacity: 0;
+  }
+  50% {
+    transform: scale(1.2) rotate(0deg);
+  }
+  100% {
+    transform: scale(1) rotate(0deg);
+    opacity: 1;
+  }
+}
+
+.animate-checkmark {
+  animation: checkmarkComplete 0.5s cubic-bezier(0.68, -0.55, 0.265, 1.55) forwards;
+}
+
+/* Rotating glow effect for AI avatar */
+@keyframes rotatingGlow {
+  0% {
+    box-shadow: 0 0 30px rgba(59, 130, 246, 0.6), 0 0 60px rgba(147, 51, 234, 0.4);
+  }
+  33% {
+    box-shadow: 0 0 30px rgba(147, 51, 234, 0.6), 0 0 60px rgba(236, 72, 153, 0.4);
+  }
+  66% {
+    box-shadow: 0 0 30px rgba(236, 72, 153, 0.6), 0 0 60px rgba(59, 130, 246, 0.4);
+  }
+  100% {
+    box-shadow: 0 0 30px rgba(59, 130, 246, 0.6), 0 0 60px rgba(147, 51, 234, 0.4);
+  }
+}
+
+.animate-rotating-glow {
+  animation: rotatingGlow 4s linear infinite;
+}
+
+/* Message fade transition */
+@keyframes messageFade {
+  0% {
+    opacity: 0;
+    transform: translateY(10px);
+  }
+  10% {
+    opacity: 1;
+    transform: translateY(0);
+  }
+  90% {
+    opacity: 1;
+    transform: translateY(0);
+  }
+  100% {
+    opacity: 0;
+    transform: translateY(-10px);
+  }
+}
+
+.animate-message-fade {
+  animation: messageFade 3s ease-in-out;
+}
+
+/* Insight card slide */
+@keyframes insightSlide {
+  0% {
+    opacity: 0;
+    transform: translateX(100%);
+  }
+  10% {
+    opacity: 1;
+    transform: translateX(0);
+  }
+  90% {
+    opacity: 1;
+    transform: translateX(0);
+  }
+  100% {
+    opacity: 0;
+    transform: translateX(-100%);
+  }
+}
+
+.animate-insight-slide {
+  animation: insightSlide 5s ease-in-out;
+}
+
+/* Pulse ring animation */
+@keyframes pulseRing {
+  0% {
+    transform: scale(1);
+    opacity: 0.8;
+  }
+  50% {
+    transform: scale(1.5);
+    opacity: 0;
+  }
+  100% {
+    transform: scale(1.5);
+    opacity: 0;
+  }
+}
+
+.animate-pulse-ring {
+  animation: pulseRing 2s ease-out infinite;
+}
+
+/* Gradient flow animation */
+@keyframes gradientFlow {
+  0% {
+    background-position: 0% 50%;
+  }
+  50% {
+    background-position: 100% 50%;
+  }
+  100% {
+    background-position: 0% 50%;
+  }
+}
+
+.animate-gradient-flow {
+  background-size: 200% 200%;
+  animation: gradientFlow 3s ease infinite;
+}
+
+/* Staggered step entry */
+@keyframes stepEntry {
+  0% {
+    opacity: 0;
+    transform: translateX(-30px);
+  }
+  100% {
+    opacity: 1;
+    transform: translateX(0);
+  }
+}
+
+.animate-step-entry {
+  animation: stepEntry 0.4s ease-out forwards;
+}
+
+/* Floating particle animation */
+@keyframes floatParticle {
+  0%, 100% {
+    transform: translateY(0) translateX(0);
+    opacity: 0.3;
+  }
+  25% {
+    transform: translateY(-20px) translateX(10px);
+    opacity: 0.6;
+  }
+  50% {
+    transform: translateY(-10px) translateX(-10px);
+    opacity: 0.3;
+  }
+  75% {
+    transform: translateY(-30px) translateX(5px);
+    opacity: 0.5;
+  }
+}
+
+.animate-float-particle {
+  animation: floatParticle 6s ease-in-out infinite;
+}
+
+/* Scan line effect */
+@keyframes scanLine {
+  0% {
+    transform: translateY(-100%);
+    opacity: 0;
+  }
+  50% {
+    opacity: 0.5;
+  }
+  100% {
+    transform: translateY(100%);
+    opacity: 0;
+  }
+}
+
+.animate-scan-line {
+  animation: scanLine 2s ease-in-out infinite;
+}
+
+/* =====================================================
+   FMIR Professional Print Styles
+   ===================================================== */
+
+@media print {
+  /* Reset and Base Print Styles */
+  * {
+    -webkit-print-color-adjust: exact !important;
+    print-color-adjust: exact !important;
+    color-adjust: exact !important;
+  }
+
+  html, body {
+    font-size: 11pt !important;
+    line-height: 1.4 !important;
+    background: white !important;
+    color: black !important;
+    margin: 0 !important;
+    padding: 0 !important;
+  }
+
+  /* Page Setup - Remove browser headers/footers */
+  @page {
+    size: letter;
+    margin: 0.5in 0.5in 0.5in 0.5in;
+  }
+
+  /* Remove browser-generated headers and footers */
+  title {
+    display: none !important;
+  }
+
+  /* Hide non-print elements */
+  .print\\:hidden,
+  nav,
+  aside,
+  .sidebar,
+  button:not(.print-include),
+  .modal,
+  .dropdown,
+  .tooltip,
+  [class*="hover:"],
+  .sticky,
+  .fixed:not(.print-header):not(.print-footer),
+  .animate-spin,
+  .loader,
+  video,
+  .video-controls,
+  header:not(.print-header),
+  footer:not(.print-footer) {
+    display: none !important;
+  }
+
+  /* Show print-only elements */
+  .print\\:block {
+    display: block !important;
+  }
+
+  .print\\:flex {
+    display: flex !important;
+  }
+
+  /* Page break controls */
+  .print-page-break-before {
+    page-break-before: always !important;
+    break-before: page !important;
+  }
+
+  .print-page-break-after {
+    page-break-after: always !important;
+    break-after: page !important;
+  }
+
+  .print-avoid-break {
+    page-break-inside: avoid !important;
+    break-inside: avoid !important;
+  }
+
+  /* FMIR Report Container */
+  .fmir-print-container {
+    width: 100% !important;
+    max-width: 100% !important;
+    padding: 0 !important;
+    margin: 0 !important;
+    background: white !important;
+  }
+
+  /* FMIR Print Header */
+  .fmir-print-header {
+    display: flex !important;
+    justify-content: space-between;
+    align-items: flex-start;
+    padding: 12pt 0;
+    border-bottom: 3pt solid #1e3a5f;
+    margin-bottom: 12pt;
+    page-break-inside: avoid;
+    break-inside: avoid;
+  }
+
+  .fmir-print-header-logo {
+    width: 80pt;
+    height: auto;
+  }
+
+  .fmir-print-header-title {
+    text-align: center;
+    flex: 1;
+    padding: 0 20pt;
+  }
+
+  .fmir-print-header-title h1 {
+    font-size: 16pt !important;
+    font-weight: 700 !important;
+    color: #1e3a5f !important;
+    margin: 0 0 4pt 0 !important;
+    text-transform: uppercase;
+    letter-spacing: 1pt;
+  }
+
+  .fmir-print-header-title p {
+    font-size: 10pt !important;
+    color: #555 !important;
+    margin: 0 !important;
+  }
+
+  .fmir-print-header-meta {
+    text-align: right;
+    min-width: 140pt;
+  }
+
+  .fmir-print-header-meta .report-number {
+    font-size: 11pt !important;
+    font-weight: 700 !important;
+    color: #1e3a5f !important;
+    background: #e8f0f8 !important;
+    padding: 4pt 8pt;
+    border: 1pt solid #1e3a5f;
+    margin-bottom: 4pt;
+    display: inline-block;
+  }
+
+  .fmir-print-header-meta .status-badge {
+    font-size: 9pt !important;
+    font-weight: 600 !important;
+    padding: 3pt 8pt;
+    border-radius: 3pt;
+    display: inline-block;
+    text-transform: uppercase;
+  }
+
+  .fmir-print-header-meta .status-badge.closed {
+    background: #d1fae5 !important;
+    color: #065f46 !important;
+    border: 1pt solid #065f46;
+  }
+
+  .fmir-print-header-meta .status-badge.resolved {
+    background: #dbeafe !important;
+    color: #1e40af !important;
+    border: 1pt solid #1e40af;
+  }
+
+  .fmir-print-header-meta .status-badge.under-investigation {
+    background: #fef3c7 !important;
+    color: #92400e !important;
+    border: 1pt solid #92400e;
+  }
+
+  .fmir-print-header-meta .status-badge.submitted {
+    background: #e0e7ff !important;
+    color: #3730a3 !important;
+    border: 1pt solid #3730a3;
+  }
+
+  /* FMIR Section Styles */
+  .fmir-print-section {
+    border: 1.5pt solid #333 !important;
+    margin-bottom: 10pt;
+    page-break-inside: avoid;
+    break-inside: avoid;
+    background: white !important;
+  }
+
+  .fmir-print-section-header {
+    background: #1e3a5f !important;
+    color: white !important;
+    padding: 6pt 10pt !important;
+    display: flex !important;
+    align-items: center;
+    gap: 8pt;
+  }
+
+  .fmir-print-section-header .section-number {
+    background: white !important;
+    color: #1e3a5f !important;
+    width: 18pt;
+    height: 18pt;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-weight: 700;
+    font-size: 10pt;
+    border-radius: 2pt;
+  }
+
+  .fmir-print-section-header h3 {
+    font-size: 11pt !important;
+    font-weight: 700 !important;
+    text-transform: uppercase;
+    letter-spacing: 0.5pt;
+    margin: 0 !important;
+    color: white !important;
+  }
+
+  .fmir-print-section-content {
+    padding: 10pt !important;
+    background: white !important;
+  }
+
+  /* FMIR Data Grid */
+  .fmir-print-grid {
+    display: grid;
+    grid-template-columns: repeat(3, 1fr);
+    gap: 0;
+    border-bottom: 1pt solid #ddd;
+  }
+
+  .fmir-print-grid:last-child {
+    border-bottom: none;
+  }
+
+  .fmir-print-grid-item {
+    padding: 6pt 8pt;
+    border-right: 1pt solid #ddd;
+    page-break-inside: avoid;
+  }
+
+  .fmir-print-grid-item:last-child {
+    border-right: none;
+  }
+
+  .fmir-print-grid-item.full-width {
+    grid-column: 1 / -1;
+    border-right: none;
+  }
+
+  .fmir-print-grid-item.half-width {
+    grid-column: span 2;
+  }
+
+  .fmir-print-label {
+    font-size: 8pt !important;
+    font-weight: 600 !important;
+    color: #666 !important;
+    text-transform: uppercase;
+    letter-spacing: 0.5pt;
+    margin-bottom: 2pt;
+  }
+
+  .fmir-print-value {
+    font-size: 10pt !important;
+    color: #111 !important;
+    line-height: 1.3;
+  }
+
+  .fmir-print-value.description {
+    background: #f8f9fa !important;
+    padding: 8pt;
+    border: 1pt solid #e5e7eb;
+    border-radius: 2pt;
+    white-space: pre-wrap;
+  }
+
+  /* FMIR Signature Block */
+  .fmir-print-signature {
+    display: flex;
+    gap: 20pt;
+    padding: 8pt;
+    background: #f9fafb !important;
+    border: 1pt solid #e5e7eb;
+    margin-top: 8pt;
+  }
+
+  .fmir-print-signature-item {
+    display: flex;
+    align-items: center;
+    gap: 6pt;
+  }
+
+  .fmir-print-signature-label {
+    font-size: 8pt !important;
+    color: #666 !important;
+    text-transform: uppercase;
+  }
+
+  .fmir-print-signature-value {
+    font-size: 10pt !important;
+    font-weight: 600 !important;
+    color: #111 !important;
+    border-bottom: 1pt solid #333;
+    min-width: 60pt;
+    padding: 2pt 4pt;
+  }
+
+  /* FMIR Alert/Warning Box */
+  .fmir-print-alert {
+    background: #fef3c7 !important;
+    border: 1.5pt solid #f59e0b !important;
+    padding: 8pt 10pt;
+    margin: 8pt 0;
+    page-break-inside: avoid;
+  }
+
+  .fmir-print-alert.danger {
+    background: #fee2e2 !important;
+    border-color: #ef4444 !important;
+  }
+
+  .fmir-print-alert.info {
+    background: #dbeafe !important;
+    border-color: #3b82f6 !important;
+  }
+
+  .fmir-print-alert.success {
+    background: #d1fae5 !important;
+    border-color: #10b981 !important;
+  }
+
+  /* FMIR Boolean Badge */
+  .fmir-print-boolean {
+    display: inline-flex;
+    align-items: center;
+    gap: 4pt;
+    padding: 2pt 8pt;
+    font-size: 9pt !important;
+    font-weight: 600 !important;
+    border-radius: 2pt;
+  }
+
+  .fmir-print-boolean.yes {
+    background: #d1fae5 !important;
+    color: #065f46 !important;
+    border: 1pt solid #065f46;
+  }
+
+  .fmir-print-boolean.no {
+    background: #fee2e2 !important;
+    color: #991b1b !important;
+    border: 1pt solid #991b1b;
+  }
+
+  /* FMIR Evidence Grid */
+  .fmir-print-evidence-grid {
+    display: grid;
+    grid-template-columns: repeat(3, 1fr);
+    gap: 8pt;
+    margin-top: 8pt;
+  }
+
+  .fmir-print-evidence-item {
+    border: 1pt solid #ddd;
+    padding: 6pt;
+    text-align: center;
+    page-break-inside: avoid;
+  }
+
+  .fmir-print-evidence-item img {
+    max-width: 100%;
+    max-height: 120pt;
+    object-fit: contain;
+    margin-bottom: 4pt;
+  }
+
+  .fmir-print-evidence-item p {
+    font-size: 8pt !important;
+    color: #666 !important;
+    margin: 0;
+  }
+
+  /* FMIR Footer */
+  .fmir-print-footer {
+    position: fixed;
+    bottom: 0;
+    left: 0;
+    right: 0;
+    padding: 8pt 0.5in;
+    border-top: 1pt solid #ddd;
+    background: white !important;
+    font-size: 8pt !important;
+    color: #666 !important;
+    display: flex;
+    justify-content: space-between;
+  }
+
+  .fmir-print-footer-confidential {
+    font-style: italic;
+  }
+
+  .fmir-print-footer-page::after {
+    content: counter(page);
+  }
+
+  /* FMIR Metadata Block */
+  .fmir-print-metadata {
+    border-top: 2pt solid #1e3a5f;
+    padding-top: 10pt;
+    margin-top: 10pt;
+    font-size: 9pt !important;
+  }
+
+  .fmir-print-metadata-row {
+    display: flex;
+    gap: 20pt;
+    margin-bottom: 4pt;
+  }
+
+  .fmir-print-metadata-item {
+    display: flex;
+    gap: 4pt;
+  }
+
+  .fmir-print-metadata-label {
+    font-weight: 600;
+    color: #555 !important;
+  }
+
+  .fmir-print-metadata-value {
+    color: #111 !important;
+  }
+
+  /* Override existing component styles for print */
+  .border-2 {
+    border-width: 1pt !important;
+  }
+
+  .bg-gray-100,
+  .bg-gray-50,
+  .dark\\:bg-gray-700,
+  .dark\\:bg-gray-800 {
+    background: #f8f9fa !important;
+  }
+
+  .text-gray-900,
+  .dark\\:text-white,
+  .text-gray-700 {
+    color: #111 !important;
+  }
+
+  .text-gray-500,
+  .text-gray-600,
+  .dark\\:text-gray-400 {
+    color: #555 !important;
+  }
+
+  .text-primary-600,
+  .dark\\:text-primary-400 {
+    color: #1e3a5f !important;
+  }
+
+  .bg-primary-600 {
+    background: #1e3a5f !important;
+  }
+
+  /* Ensure images print properly */
+  img {
+    max-width: 100% !important;
+    page-break-inside: avoid;
+  }
+
+  /* Links */
+  a {
+    text-decoration: none !important;
+    color: inherit !important;
+  }
+
+  a[href]::after {
+    content: none !important;
+  }
+}

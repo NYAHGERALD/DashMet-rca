@@ -103,7 +103,8 @@
     "userManagement": "Gestion des Utilisateurs",
     "enterprise": "Entreprise",
     "rca": "RCA",
-    "capa": "CAPA"
+    "capa": "CAPA",
+    "fmir": "Matière Étrangère"
   },
   "auth": {
     "email": "E-mail",

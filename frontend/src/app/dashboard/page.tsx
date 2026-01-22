@@ -180,6 +180,7 @@ function DashboardContent() {
                 { href: '/knowledge', icon: '📚', label: t('nav.knowledgeBase'), show: isSupervisorPlus },
                 { href: '/workplace-report', icon: '📝', label: t('nav.workplaceReport') },
                 { href: '/investigation-report', icon: '🔎', label: t('nav.investigationReport') },
+                { href: '/fmir', icon: '⚠️', label: t('nav.fmir') || 'Foreign Material' },
                 { href: '/settings', icon: '⚙️', label: t('nav.settings') },
               ]}
             />

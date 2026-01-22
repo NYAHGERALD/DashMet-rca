@@ -490,6 +490,48 @@ export const changePassword = async (req: AuthRequest, res: Response) => {
   });
 };
 
+// Verify Password (for secure actions like submission)
+export const verifyPassword = async (req: AuthRequest, res: Response) => {
+  const { password } = req.body;
+  const userId = req.user?.id;
+
+  if (!userId) {
+    throw new AuthenticationError('User not authenticated');
+  }
+
+  if (!password) {
+    throw new ValidationError('Password is required');
+  }
+
+  // Get user with current password
+  const user = await prisma.user.findUnique({
+    where: { id: userId },
+  });
+
+  if (!user || !user.password) {
+    throw new NotFoundError('User not found');
+  }
+
+  // Verify password
+  const isPasswordValid = await bcrypt.compare(password, user.password);
+
+  if (!isPasswordValid) {
+    logger.warn(`Password verification failed for user: ${user.email}`);
+    res.status(401).json({
+      success: false,
+      error: 'Incorrect password',
+    });
+    return;
+  }
+
+  logger.info(`Password verified for user: ${user.email}`);
+
+  res.json({
+    success: true,
+    message: 'Password verified successfully',
+  });
+};
+
 // Get Active Sessions
 export const getActiveSessions = async (req: AuthRequest, res: Response) => {
   const userId = req.user?.id;

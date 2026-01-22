@@ -4,6 +4,7 @@ import { prisma } from '../utils/prisma';
 import { authenticate, authenticateFirebaseOnly, AuthRequest, FirebaseAuthRequest } from '../middleware/auth';
 import { ValidationError } from '../middleware/errorHandler';
 import { adminAuth } from '../config/firebase-admin';
+import { websocketService } from '../services/websocketService';
 
 const router = Router();
 
@@ -266,8 +267,61 @@ router.post('/create-profile', authenticateFirebaseOnly, async (req: FirebaseAut
       theme: true,
       language: true,
       firebaseUid: true,
+      profilePicture: true,
     },
   });
+
+  // If new user has QA_FOOD_SAFETY role, auto-add them to all open FMIR reports
+  if (role === 'QA_FOOD_SAFETY' && finalOrganizationId) {
+    // Get all open FMIR reports (not CLOSED) in the organization
+    const openReports = await prisma.foreignMaterialIncident.findMany({
+      where: {
+        organizationId: finalOrganizationId,
+        status: {
+          not: 'CLOSED',
+        },
+      },
+      select: {
+        id: true,
+        collaboratorIds: true,
+        createdById: true,
+      },
+    });
+
+    // Add the new QA user to each open report
+    const updatedReportIds: string[] = [];
+    for (const report of openReports) {
+      const existingIds = report.collaboratorIds || [];
+      // Don't add if they're the owner (unlikely for new user, but check anyway)
+      if (report.createdById !== user.id) {
+        await prisma.foreignMaterialIncident.update({
+          where: { id: report.id },
+          data: {
+            collaboratorIds: [...existingIds, user.id],
+          },
+        });
+        updatedReportIds.push(report.id);
+      }
+    }
+
+    // Emit WebSocket event to notify frontends about the new collaborator
+    if (updatedReportIds.length > 0) {
+      websocketService.emitToOrganization(finalOrganizationId, 'fmir:collaborator-added', {
+        userId: user.id,
+        user: {
+          id: user.id,
+          firstName: user.firstName,
+          lastName: user.lastName,
+          email: user.email,
+          role: user.role,
+          profilePicture: user.profilePicture,
+          isQAFoodSafety: true,
+        },
+        reportIds: updatedReportIds,
+      });
+      console.log(`📤 New QA user ${user.email} auto-added to ${updatedReportIds.length} open FMIR reports`);
+    }
+  }
 
   res.json({
     success: true,

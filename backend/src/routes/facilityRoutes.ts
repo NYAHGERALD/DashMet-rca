@@ -85,7 +85,7 @@ router.get('/facilities', async (req: any, res) => {
 
 // GET /api/facilities/areas - List areas (filtered by user's organization)
 router.get('/facilities/areas', async (req: any, res) => {
-  const { facilityId } = req.query;
+  const { facilityId, departmentId } = req.query;
   const user = req.user;
   
   // Build filter based on user's organization
@@ -97,6 +97,7 @@ router.get('/facilities/areas', async (req: any, res) => {
     where: {
       ...orgFilter,
       ...(facilityId ? { Department: { facilityId: String(facilityId) } } : {}),
+      ...(departmentId ? { departmentId: String(departmentId) } : {}),
     },
     include: {
       Department: {

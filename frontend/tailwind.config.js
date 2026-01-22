@@ -90,6 +90,11 @@ module.exports = {
         'wiggle': 'wiggle 1s ease-in-out infinite',
         'morph': 'morph 8s ease-in-out infinite',
         'blob': 'blob 7s infinite',
+        'avatar-pop': 'avatarPop 0.5s cubic-bezier(0.68, -0.55, 0.265, 1.55) forwards',
+        'ring-pulse': 'ringPulse 2s ease-in-out infinite',
+        'glow-pulse': 'glowPulse 3s ease-in-out infinite',
+        'slide-in-right': 'slideInRight 0.5s cubic-bezier(0.16, 1, 0.3, 1) forwards',
+        'shrink-width': 'shrinkWidth 5s linear forwards',
       },
       keyframes: {
         float: {
@@ -164,6 +169,38 @@ module.exports = {
           '33%': { transform: 'translate(30px, -50px) scale(1.1)' },
           '66%': { transform: 'translate(-20px, 20px) scale(0.9)' },
           '100%': { transform: 'translate(0px, 0px) scale(1)' },
+        },
+        avatarPop: {
+          '0%': { opacity: '0', transform: 'scale(0) rotate(-180deg)' },
+          '60%': { transform: 'scale(1.2) rotate(10deg)' },
+          '80%': { transform: 'scale(0.95) rotate(-5deg)' },
+          '100%': { opacity: '1', transform: 'scale(1) rotate(0deg)' },
+        },
+        ringPulse: {
+          '0%, 100%': { boxShadow: '0 0 0 0 rgba(59, 130, 246, 0.7)' },
+          '50%': { boxShadow: '0 0 0 10px rgba(59, 130, 246, 0)' },
+        },
+        glowPulse: {
+          '0%, 100%': { 
+            filter: 'drop-shadow(0 0 2px rgba(59, 130, 246, 0.5))',
+          },
+          '50%': { 
+            filter: 'drop-shadow(0 0 8px rgba(59, 130, 246, 0.8)) drop-shadow(0 0 12px rgba(59, 130, 246, 0.4))',
+          },
+        },
+        slideInRight: {
+          '0%': { 
+            opacity: '0', 
+            transform: 'translateX(100%)' 
+          },
+          '100%': { 
+            opacity: '1', 
+            transform: 'translateX(0)' 
+          },
+        },
+        shrinkWidth: {
+          '0%': { width: '100%' },
+          '100%': { width: '0%' },
         },
       },
     },

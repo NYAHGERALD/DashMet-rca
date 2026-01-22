@@ -61,11 +61,15 @@ export default function HomePage() {
           <div className="absolute bottom-1/3 right-1/3 w-96 h-96 bg-cyan-500/15 rounded-full blur-3xl animate-pulse delay-700"></div>
         </div>
         <div className="relative z-10 text-center">
-          <div className="relative w-20 h-20 mx-auto mb-6">
-            <div className="absolute inset-0 rounded-2xl bg-gradient-to-br from-blue-500 to-cyan-500 animate-pulse"></div>
-            <div className="absolute inset-1 rounded-xl bg-slate-900 flex items-center justify-center">
-              <Brain className="w-10 h-10 text-blue-400 animate-pulse" />
-            </div>
+          <div className="relative w-24 h-24 mx-auto mb-6">
+            <Image
+              src="/images/logo.png"
+              alt="DASHMET Logo"
+              width={96}
+              height={96}
+              className="animate-pulse"
+              priority
+            />
           </div>
           <div className="flex items-center gap-2 justify-center">
             <div className="w-2 h-2 rounded-full bg-blue-400 animate-bounce" style={{ animationDelay: '0ms' }}></div>

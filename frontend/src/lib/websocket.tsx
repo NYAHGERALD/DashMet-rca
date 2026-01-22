@@ -87,6 +87,30 @@ interface WebSocketContextType {
   // Pin/Unpin event handlers
   onMessagePinned: (callback: (data: { messageId: string; message: ChatMessage; pinnedBy: { id: string; firstName: string; lastName: string } }) => void) => () => void;
   onMessageUnpinned: (callback: (data: { messageId: string; message: ChatMessage; unpinnedBy: { id: string; firstName: string; lastName: string } }) => void) => () => void;
+  // FMIR collaborator event handler (supports both QA auto-add and manual add)
+  onFmirCollaboratorAdded: (callback: (data: any) => void) => () => void;
+  // FMIR collaborator removed event handler (for real-time removal notification)
+  onFmirCollaboratorRemoved: (callback: (data: { reportId: string; reportNumber: string; removedUserId: string; removedByName: string }) => void) => () => void;
+  // FMIR visibility changed event handler
+  onFmirVisibilityChanged: (callback: (data: { reportId: string; reportNumber: string; isVisible: boolean; ownerId: string }) => void) => () => void;
+  // FMIR visibility off event handler (for immediate modal on collaborators)
+  onFmirVisibilityOff: (callback: (data: { reportId: string; reportNumber: string; ownerId: string; ownerName: string }) => void) => () => void;
+  // FMIR updated event handler (for real-time collaboration sync)
+  onFmirUpdated: (callback: (data: { reportId: string; reportNumber: string; updatedById: string; updatedByName: string; updateType: 'save' | 'submit'; newStatus?: string }) => void) => () => void;
+  // FMIR closed status changed event handler (for real-time lock/unlock by QA)
+  onFmirClosedStatusChanged: (callback: (data: { reportId: string; reportNumber: string; isClosed: boolean; closedById: string | null; closedAt: string | null }) => void) => () => void;
+  // FMIR status changed event handler (for real-time status updates by QA - e.g., SUBMITTED -> UNDER_INVESTIGATION)
+  onFmirStatusChanged: (callback: (data: { reportId: string; reportNumber: string; previousStatus: string; newStatus: string; statusDisplay: string; changedBy: string; changedById: string; notes: string | null; timestamp: string }) => void) => () => void;
+  // FMIR deleted event handler (for real-time deletion notification)
+  onFmirDeleted: (callback: (data: { reportId: string; reportNumber: string; deletedById: string; deletedByName: string }) => void) => () => void;
+  // FMIR evidence updated event handler (for real-time evidence sync)
+  onFmirEvidenceUpdated: (callback: (data: { reportId: string; reportNumber: string; action: 'upload' | 'delete'; evidence?: any[]; evidenceId?: string; updatedById: string; updatedByName: string }) => void) => () => void;
+  // FMIR audit progress event handler (for real-time AI audit validation progress)
+  onFmirAuditProgress: (callback: (data: { reportId: string; reportNumber: string; stepId: string; stepLabel: string; stepDescription: string; status: 'pending' | 'active' | 'completed'; stepIndex: number; totalSteps: number; message?: string }) => void) => () => void;
+  // FMIR comment added event handler (for real-time comment sync)
+  onFmirCommentAdded: (callback: (data: { reportId: string; reportNumber: string; comment: any; addedByName: string }) => void) => () => void;
+  // FMIR comment deleted event handler (for real-time comment sync)
+  onFmirCommentDeleted: (callback: (data: { reportId: string; reportNumber: string; commentId: string; sectionNumber: number; deletedByName: string }) => void) => () => void;
 }
 
 const WebSocketContext = createContext<WebSocketContextType | null>(null);
@@ -117,6 +141,18 @@ export function WebSocketProvider({ children }: { children: React.ReactNode }) {
   const messagePinnedCallbacks = useRef<Set<(data: any) => void>>(new Set());
   const messageUnpinnedCallbacks = useRef<Set<(data: any) => void>>(new Set());
   const messagesReadCallbacks = useRef<Set<(data: { userId: string; incidentId: string }) => void>>(new Set());
+  const fmirCollaboratorAddedCallbacks = useRef<Set<(data: any) => void>>(new Set());
+  const fmirCollaboratorRemovedCallbacks = useRef<Set<(data: any) => void>>(new Set());
+  const fmirVisibilityChangedCallbacks = useRef<Set<(data: any) => void>>(new Set());
+  const fmirVisibilityOffCallbacks = useRef<Set<(data: any) => void>>(new Set());
+  const fmirUpdatedCallbacks = useRef<Set<(data: any) => void>>(new Set());
+  const fmirClosedStatusChangedCallbacks = useRef<Set<(data: any) => void>>(new Set());
+  const fmirStatusChangedCallbacks = useRef<Set<(data: any) => void>>(new Set());
+  const fmirDeletedCallbacks = useRef<Set<(data: any) => void>>(new Set());
+  const fmirEvidenceUpdatedCallbacks = useRef<Set<(data: any) => void>>(new Set());
+  const fmirAuditProgressCallbacks = useRef<Set<(data: any) => void>>(new Set());
+  const fmirCommentAddedCallbacks = useRef<Set<(data: any) => void>>(new Set());
+  const fmirCommentDeletedCallbacks = useRef<Set<(data: any) => void>>(new Set());
 
   const connect = useCallback((userId: string, organizationId: string) => {
     // Prevent multiple connection attempts
@@ -285,6 +321,78 @@ export function WebSocketProvider({ children }: { children: React.ReactNode }) {
       messagesReadCallbacks.current.forEach(cb => cb(data));
     });
 
+    // Handle FMIR collaborator added (when QA/Food Safety user is added to open FMIRs)
+    newSocket.on('fmir:collaborator-added', (data: any) => {
+      console.log('👥 FMIR collaborator added event:', data);
+      fmirCollaboratorAddedCallbacks.current.forEach(cb => cb(data));
+    });
+
+    // Handle FMIR collaborator removed (when owner removes a collaborator)
+    newSocket.on('fmir:collaborator-removed', (data: any) => {
+      console.log('👤 FMIR collaborator removed event:', data);
+      fmirCollaboratorRemovedCallbacks.current.forEach(cb => cb(data));
+    });
+
+    // Handle FMIR visibility changed (when owner toggles visibility)
+    newSocket.on('fmir:visibility-changed', (data: any) => {
+      console.log('👁️ FMIR visibility changed event:', data);
+      fmirVisibilityChangedCallbacks.current.forEach(cb => cb(data));
+    });
+
+    // Handle FMIR visibility OFF (sent directly to collaborators for immediate modal)
+    newSocket.on('fmir:visibility-off', (data: any) => {
+      console.log('🚫 FMIR visibility OFF event:', data);
+      fmirVisibilityOffCallbacks.current.forEach(cb => cb(data));
+    });
+
+    // Handle FMIR updated (real-time collaboration sync)
+    newSocket.on('fmir:updated', (data: any) => {
+      console.log('📝 FMIR updated event:', data);
+      fmirUpdatedCallbacks.current.forEach(cb => cb(data));
+    });
+
+    // Handle FMIR closed status changed (real-time lock/unlock by QA)
+    newSocket.on('fmir:closed-status-changed', (data: any) => {
+      console.log('🔒 FMIR closed status changed event:', data);
+      fmirClosedStatusChangedCallbacks.current.forEach(cb => cb(data));
+    });
+
+    // Handle FMIR status changed (real-time status updates by QA - e.g., investigation toggle)
+    newSocket.on('fmir:status-changed', (data: any) => {
+      console.log('📊 FMIR status changed event:', data);
+      fmirStatusChangedCallbacks.current.forEach(cb => cb(data));
+    });
+
+    // Handle FMIR deleted (real-time deletion notification)
+    newSocket.on('fmir:deleted', (data: any) => {
+      console.log('🗑️ FMIR deleted event:', data);
+      fmirDeletedCallbacks.current.forEach(cb => cb(data));
+    });
+
+    // Handle FMIR evidence updated (real-time evidence sync)
+    newSocket.on('fmir:evidence-updated', (data: any) => {
+      console.log('📎 FMIR evidence updated event:', data);
+      fmirEvidenceUpdatedCallbacks.current.forEach(cb => cb(data));
+    });
+
+    // Handle FMIR audit progress (real-time AI audit validation progress)
+    newSocket.on('fmir:audit-progress', (data: any) => {
+      console.log('🔍 FMIR audit progress event:', data);
+      fmirAuditProgressCallbacks.current.forEach(cb => cb(data));
+    });
+
+    // Handle FMIR comment added (real-time comment sync)
+    newSocket.on('fmir:comment-added', (data: any) => {
+      console.log('💬 FMIR comment added event:', data);
+      fmirCommentAddedCallbacks.current.forEach(cb => cb(data));
+    });
+
+    // Handle FMIR comment deleted (real-time comment sync)
+    newSocket.on('fmir:comment-deleted', (data: any) => {
+      console.log('🗑️ FMIR comment deleted event:', data);
+      fmirCommentDeletedCallbacks.current.forEach(cb => cb(data));
+    });
+
     // Handle incident participants list
     newSocket.on('incident:participants', (data: { incidentId: string; participants: any[] }) => {
       const onlineIds = data.participants.filter(p => p.isOnline).map(p => p.id);
@@ -441,6 +549,66 @@ export function WebSocketProvider({ children }: { children: React.ReactNode }) {
     return () => { messagesReadCallbacks.current.delete(callback); };
   }, []);
 
+  const onFmirCollaboratorAdded = useCallback((callback: (data: any) => void) => {
+    fmirCollaboratorAddedCallbacks.current.add(callback);
+    return () => { fmirCollaboratorAddedCallbacks.current.delete(callback); };
+  }, []);
+
+  const onFmirCollaboratorRemoved = useCallback((callback: (data: any) => void) => {
+    fmirCollaboratorRemovedCallbacks.current.add(callback);
+    return () => { fmirCollaboratorRemovedCallbacks.current.delete(callback); };
+  }, []);
+
+  const onFmirVisibilityChanged = useCallback((callback: (data: any) => void) => {
+    fmirVisibilityChangedCallbacks.current.add(callback);
+    return () => { fmirVisibilityChangedCallbacks.current.delete(callback); };
+  }, []);
+
+  const onFmirVisibilityOff = useCallback((callback: (data: any) => void) => {
+    fmirVisibilityOffCallbacks.current.add(callback);
+    return () => { fmirVisibilityOffCallbacks.current.delete(callback); };
+  }, []);
+
+  const onFmirUpdated = useCallback((callback: (data: any) => void) => {
+    fmirUpdatedCallbacks.current.add(callback);
+    return () => { fmirUpdatedCallbacks.current.delete(callback); };
+  }, []);
+
+  const onFmirClosedStatusChanged = useCallback((callback: (data: any) => void) => {
+    fmirClosedStatusChangedCallbacks.current.add(callback);
+    return () => { fmirClosedStatusChangedCallbacks.current.delete(callback); };
+  }, []);
+
+  const onFmirStatusChanged = useCallback((callback: (data: any) => void) => {
+    fmirStatusChangedCallbacks.current.add(callback);
+    return () => { fmirStatusChangedCallbacks.current.delete(callback); };
+  }, []);
+
+  const onFmirDeleted = useCallback((callback: (data: any) => void) => {
+    fmirDeletedCallbacks.current.add(callback);
+    return () => { fmirDeletedCallbacks.current.delete(callback); };
+  }, []);
+
+  const onFmirEvidenceUpdated = useCallback((callback: (data: any) => void) => {
+    fmirEvidenceUpdatedCallbacks.current.add(callback);
+    return () => { fmirEvidenceUpdatedCallbacks.current.delete(callback); };
+  }, []);
+
+  const onFmirAuditProgress = useCallback((callback: (data: any) => void) => {
+    fmirAuditProgressCallbacks.current.add(callback);
+    return () => { fmirAuditProgressCallbacks.current.delete(callback); };
+  }, []);
+
+  const onFmirCommentAdded = useCallback((callback: (data: any) => void) => {
+    fmirCommentAddedCallbacks.current.add(callback);
+    return () => { fmirCommentAddedCallbacks.current.delete(callback); };
+  }, []);
+
+  const onFmirCommentDeleted = useCallback((callback: (data: any) => void) => {
+    fmirCommentDeletedCallbacks.current.add(callback);
+    return () => { fmirCommentDeletedCallbacks.current.delete(callback); };
+  }, []);
+
   // Cleanup on unmount
   useEffect(() => {
     return () => {
@@ -483,6 +651,18 @@ export function WebSocketProvider({ children }: { children: React.ReactNode }) {
         onMessagePinned,
         onMessageUnpinned,
         onMessagesRead,
+        onFmirCollaboratorAdded,
+        onFmirCollaboratorRemoved,
+        onFmirVisibilityChanged,
+        onFmirVisibilityOff,
+        onFmirUpdated,
+        onFmirClosedStatusChanged,
+        onFmirStatusChanged,
+        onFmirDeleted,
+        onFmirEvidenceUpdated,
+        onFmirAuditProgress,
+        onFmirCommentAdded,
+        onFmirCommentDeleted,
       }}
     >
       {children}
