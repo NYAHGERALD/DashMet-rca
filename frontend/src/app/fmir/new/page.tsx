@@ -3414,27 +3414,6 @@ function FMIRNewPageContent() {
                 context="Cause Identification - FMIR Report"
               />
 
-              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 sm:gap-4">
-                <AIEnhancedTextarea
-                  label="Possible Source"
-                  name="possibleSource"
-                  value={formData.possibleSource}
-                  onChange={handleChange}
-                  placeholder="Where might the FM have come from?"
-                  rows={2}
-                  context="Possible Source - FMIR Report"
-                />
-                <AIEnhancedTextarea
-                  label="How/Why did the incident occur?"
-                  name="howWhyOccurred"
-                  value={formData.howWhyOccurred}
-                  onChange={handleChange}
-                  placeholder="Explain circumstances and contributing factors"
-                  rows={2}
-                  context="How/Why Occurred - FMIR Report"
-                />
-              </div>
-
               <SignatureField
                 label="Section 3"
                 initialsValue={formData.section3Initials}
