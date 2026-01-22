@@ -2364,24 +2364,33 @@ function FMIRNewPageContent() {
   // Load image with authentication (always use download endpoint for Firebase Storage)
   const loadEvidenceImage = useCallback(async (file: Evidence) => {
     if (file.type !== 'PHOTO') return;
-    if (imageUrls[file.id]) return; // Already loaded
     
     const reportId = currentReportId || editId;
     if (!reportId) return;
 
-    try {
-      // Always download through API for authenticated access
-      // Firebase Storage with firebasestorage.app buckets requires signed URLs
-      const response = await api.get(`/fmir/${reportId}/evidence/${file.id}/download`, {
-        responseType: 'blob',
-      });
+    // Check if already loaded (use ref-like check to avoid stale closure)
+    setImageUrls(prev => {
+      if (prev[file.id]) return prev; // Already loaded, skip
       
-      const blobUrl = URL.createObjectURL(response.data);
-      setImageUrls(prev => ({ ...prev, [file.id]: blobUrl }));
-    } catch (err) {
-      console.error('Error loading evidence image:', err);
-    }
-  }, [currentReportId, editId, imageUrls]);
+      // Load in background
+      (async () => {
+        try {
+          // Always download through API for authenticated access
+          // Firebase Storage with firebasestorage.app buckets requires signed URLs
+          const response = await api.get(`/fmir/${reportId}/evidence/${file.id}/download`, {
+            responseType: 'blob',
+          });
+          
+          const blobUrl = URL.createObjectURL(response.data);
+          setImageUrls(p => ({ ...p, [file.id]: blobUrl }));
+        } catch (err) {
+          console.error('Error loading evidence image:', err);
+        }
+      })();
+      
+      return prev;
+    });
+  }, [currentReportId, editId]);
 
   // Load images when evidence changes
   useEffect(() => {
@@ -2405,22 +2414,31 @@ function FMIRNewPageContent() {
   // Load video with authentication
   const loadEvidenceVideo = useCallback(async (file: Evidence) => {
     if (file.type !== 'VIDEO') return;
-    if (videoUrls[file.id]) return; // Already loaded
     
     const reportId = currentReportId || editId;
     if (!reportId) return;
 
-    try {
-      const response = await api.get(`/fmir/${reportId}/evidence/${file.id}/download`, {
-        responseType: 'blob',
-      });
+    // Check if already loaded (use ref-like check to avoid stale closure)
+    setVideoUrls(prev => {
+      if (prev[file.id]) return prev; // Already loaded, skip
       
-      const blobUrl = URL.createObjectURL(response.data);
-      setVideoUrls(prev => ({ ...prev, [file.id]: blobUrl }));
-    } catch (err) {
-      console.error('Error loading evidence video:', err);
-    }
-  }, [currentReportId, editId, videoUrls]);
+      // Load in background
+      (async () => {
+        try {
+          const response = await api.get(`/fmir/${reportId}/evidence/${file.id}/download`, {
+            responseType: 'blob',
+          });
+          
+          const blobUrl = URL.createObjectURL(response.data);
+          setVideoUrls(p => ({ ...p, [file.id]: blobUrl }));
+        } catch (err) {
+          console.error('Error loading evidence video:', err);
+        }
+      })();
+      
+      return prev;
+    });
+  }, [currentReportId, editId]);
 
   // Load videos when evidence changes
   useEffect(() => {

@@ -1611,13 +1611,20 @@ router.get(
           return;
         }
         
-        // Generate a signed URL valid for 1 hour
-        const [signedUrl] = await file.getSignedUrl({
-          action: 'read',
-          expires: Date.now() + 60 * 60 * 1000, // 1 hour
-        });
+        // Stream the file directly to avoid CORS issues with redirects
+        // Set appropriate headers
+        res.setHeader('Content-Type', evidence.mimeType || 'application/octet-stream');
+        res.setHeader('Content-Disposition', `inline; filename="${evidence.fileName}"`);
         
-        res.redirect(signedUrl);
+        // Create a read stream and pipe to response
+        const readStream = file.createReadStream();
+        readStream.on('error', (streamError) => {
+          console.error('Error streaming file:', streamError);
+          if (!res.headersSent) {
+            res.status(500).json({ error: 'Failed to stream file' });
+          }
+        });
+        readStream.pipe(res);
         return;
       } catch (error) {
         console.error('Error accessing Firebase Storage file:', error);
