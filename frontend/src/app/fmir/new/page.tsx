@@ -1164,6 +1164,35 @@ function FMIRNewPageContent() {
     }
   }, [autoSaveEnabled]);
 
+  // Immediate save for QA-only fields (productPlacedOnHold, corporateNotified)
+  // These need instant sync for real-time collaboration - no debounce
+  const saveQAFieldImmediately = useCallback(async (fieldName: string, fieldValue: boolean, updatedFormData: FMIRFormData) => {
+    const reportId = currentReportId || editId;
+    if (!reportId) return; // Can't save if no report exists yet
+    
+    console.log(`🔄 Immediate save for QA field: ${fieldName} = ${fieldValue}`);
+    
+    try {
+      const payload = {
+        ...updatedFormData,
+        [fieldName]: fieldValue,
+      };
+      
+      const response = await api.put(`/fmir/${reportId}`, payload);
+      
+      if (response.data.success) {
+        setLastAutoSaved(new Date());
+        pendingChangesRef.current = false;
+        console.log(`✅ QA field ${fieldName} saved and WebSocket notified`);
+      }
+    } catch (err: any) {
+      console.error('Error saving QA field:', err);
+      // Show error for immediate saves since user expects it to work
+      setError(`Failed to save ${fieldName} change`);
+      setTimeout(() => setError(null), 3000);
+    }
+  }, [currentReportId, editId]);
+
   // Debounced auto-save trigger
   const triggerAutoSave = useCallback((updatedFormData: FMIRFormData) => {
     if (!autoSaveEnabled) return;
@@ -3479,16 +3508,25 @@ function FMIRNewPageContent() {
                     { value: 'Y', label: 'Yes' },
                     { value: 'N', label: 'No' },
                   ]}
-                  onChange={(value) =>
-                    setFormData((prev) => ({ ...prev, maintenanceWorkCompleted: value }))
-                  }
+                  onChange={(value) => {
+                    const updatedFormData = { ...formData, maintenanceWorkCompleted: value };
+                    setFormData(updatedFormData);
+                    // Immediate save for real-time sync with other users
+                    saveQAFieldImmediately('maintenanceWorkCompleted', value === 'Y', updatedFormData);
+                  }}
                   disabled={!canEditRestrictedSections}
                 />
                 <FormToggle
                   label="Sanitation/Clean-up Required"
                   name="sanitationRequired"
                   checked={formData.sanitationRequired}
-                  onChange={handleChange}
+                  onChange={(e) => {
+                    const newValue = e.target.checked;
+                    const updatedFormData = { ...formData, sanitationRequired: newValue };
+                    setFormData(updatedFormData);
+                    // Immediate save for real-time sync with other users
+                    saveQAFieldImmediately('sanitationRequired', newValue, updatedFormData);
+                  }}
                   disabled={!canEditRestrictedSections}
                 />
               </div>
@@ -3542,9 +3580,13 @@ function FMIRNewPageContent() {
                     { value: 'YES', label: 'Yes' },
                     { value: 'NO', label: 'No' },
                   ]}
-                  onChange={(value) =>
-                    setFormData((prev) => ({ ...prev, productPlacedOnHold: value === 'YES' }))
-                  }
+                  onChange={(value) => {
+                    const newValue = value === 'YES';
+                    const updatedFormData = { ...formData, productPlacedOnHold: newValue };
+                    setFormData(updatedFormData);
+                    // Immediate save for real-time sync with other users
+                    saveQAFieldImmediately('productPlacedOnHold', newValue, updatedFormData);
+                  }}
                   disabled={!canEditRestrictedSections}
                 />
                 <FormInput
@@ -3771,9 +3813,13 @@ function FMIRNewPageContent() {
                     { value: 'YES', label: 'Yes' },
                     { value: 'NO', label: 'No' },
                   ]}
-                  onChange={(value) =>
-                    setFormData((prev) => ({ ...prev, corporateNotified: value === 'YES' }))
-                  }
+                  onChange={(value) => {
+                    const newValue = value === 'YES';
+                    const updatedFormData = { ...formData, corporateNotified: newValue };
+                    setFormData(updatedFormData);
+                    // Immediate save for real-time sync with other users
+                    saveQAFieldImmediately('corporateNotified', newValue, updatedFormData);
+                  }}
                   disabled={!canEditRestrictedSections}
                 />
                 <FormInput

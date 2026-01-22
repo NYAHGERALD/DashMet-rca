@@ -1,7 +1,7 @@
 'use client';
 
 import React, { useState, useEffect, useRef, useCallback } from 'react';
-import { X, Plus, Check, Loader2, Send, MessageSquare, Maximize2, Minimize2, GripHorizontal } from 'lucide-react';
+import { X, Plus, Check, Loader2, Send, MessageSquare, Maximize2, Minimize2, GripHorizontal, Sparkles } from 'lucide-react';
 import api from '@/lib/api';
 
 interface Collaborator {
@@ -51,6 +51,8 @@ export default function FMIRCommentModal({
   const [comment, setComment] = useState('');
   const [selectedUsers, setSelectedUsers] = useState<string[]>([]);
   const [isSaving, setIsSaving] = useState(false);
+  const [isEnhancing, setIsEnhancing] = useState(false);
+  const [justEnhanced, setJustEnhanced] = useState(false);
   const [showUserDropdown, setShowUserDropdown] = useState(false);
   const [searchQuery, setSearchQuery] = useState('');
   const [isMaximized, setIsMaximized] = useState(false);
@@ -268,6 +270,35 @@ export default function FMIRCommentModal({
     }
   };
 
+  const handleEnhanceComment = async () => {
+    if (!comment.trim() || comment.trim().length < 10 || isEnhancing) return;
+
+    setIsEnhancing(true);
+    setJustEnhanced(false);
+
+    try {
+      const response = await api.post('/grammar/enhance', {
+        text: comment,
+        style: 'professional',
+        context: `FMIR comment for section: ${sectionTitle}`,
+      });
+
+      if (response.data && response.data.enhancedText) {
+        setComment(response.data.enhancedText);
+        setJustEnhanced(true);
+        
+        // Clear success state after 3 seconds
+        setTimeout(() => {
+          setJustEnhanced(false);
+        }, 3000);
+      }
+    } catch (error) {
+      console.error('Failed to enhance comment:', error);
+    } finally {
+      setIsEnhancing(false);
+    }
+  };
+
   const handleKeyDown = (e: React.KeyboardEvent) => {
     if (e.key === 'Enter' && e.ctrlKey) {
       handleSaveComment();
@@ -449,17 +480,105 @@ export default function FMIRCommentModal({
 
           {/* Comment Textarea */}
           <div className="flex-1 flex flex-col">
-            <label className="block text-sm font-semibold text-gray-700 dark:text-gray-300 mb-2">
-              Comment
-            </label>
-            <textarea
-              ref={textareaRef}
-              value={comment}
-              onChange={(e) => setComment(e.target.value)}
-              onKeyDown={handleKeyDown}
-              placeholder="Type your comment here..."
-              className="flex-1 min-h-[120px] w-full px-4 py-3 border border-gray-300 dark:border-gray-600 rounded-xl bg-white dark:bg-gray-700 text-gray-900 dark:text-white placeholder-gray-400 focus:ring-2 focus:ring-teal-500 focus:border-transparent resize-none transition-shadow"
-            />
+            <div className="flex items-center justify-between mb-2">
+              <label className="block text-sm font-semibold text-gray-700 dark:text-gray-300">
+                Comment
+              </label>
+              
+              {/* AI Enhancement Button */}
+              <div 
+                className={`
+                  transition-all duration-300 ease-out
+                  ${comment.trim().length >= 10 ? 'opacity-100 translate-x-0' : 'opacity-0 translate-x-2 pointer-events-none'}
+                `}
+              >
+                <button
+                  type="button"
+                  onClick={handleEnhanceComment}
+                  disabled={isEnhancing || comment.trim().length < 10}
+                  title={justEnhanced ? 'Text enhanced!' : 'DashMet AI - Enhance text'}
+                  className={`
+                    group/btn relative flex items-center justify-center
+                    h-7 rounded-full overflow-hidden
+                    transition-all duration-300 ease-out
+                    shadow-md hover:shadow-lg hover:shadow-emerald-500/30
+                    transform hover:scale-105 active:scale-95
+                    disabled:cursor-not-allowed
+                    ${justEnhanced
+                      ? 'bg-gradient-to-br from-emerald-400 to-green-600 w-7'
+                      : 'bg-gradient-to-br from-emerald-500 via-green-500 to-teal-600 hover:from-emerald-400 hover:via-green-400 hover:to-teal-500 w-7 hover:w-[85px]'
+                    }
+                    ${isEnhancing ? 'w-7' : ''}
+                  `}
+                >
+                  {/* Glow effect */}
+                  <div className="absolute inset-0 rounded-full bg-gradient-to-br from-emerald-400/50 to-transparent opacity-0 group-hover/btn:opacity-100 transition-opacity duration-300 blur-sm" />
+
+                  {/* Button content */}
+                  <span className="relative z-10 flex items-center justify-center gap-1.5 px-1.5">
+                    {isEnhancing ? (
+                      <Loader2 className="w-4 h-4 text-white animate-spin flex-shrink-0" />
+                    ) : justEnhanced ? (
+                      <Check className="w-4 h-4 text-white flex-shrink-0" />
+                    ) : (
+                      <>
+                        {/* DM Circle */}
+                        <span className="w-4 h-4 rounded-full bg-white/20 flex items-center justify-center flex-shrink-0">
+                          <span className="text-[8px] font-bold text-white tracking-tight select-none">DM</span>
+                        </span>
+                        {/* Enhance text - slides out on hover */}
+                        <span className="text-[10px] font-semibold text-white whitespace-nowrap overflow-hidden w-0 group-hover/btn:w-[45px] transition-all duration-300 ease-out opacity-0 group-hover/btn:opacity-100">
+                          Enhance
+                        </span>
+                      </>
+                    )}
+                  </span>
+
+                  {/* Sparkle decoration */}
+                  {!isEnhancing && !justEnhanced && (
+                    <>
+                      <span className="absolute -top-0.5 -right-0.5 w-1.5 h-1.5 bg-white rounded-full animate-ping opacity-75 group-hover/btn:opacity-0 transition-opacity" />
+                      <span className="absolute -top-0.5 -right-0.5 w-1 h-1 bg-white rounded-full group-hover/btn:opacity-0 transition-opacity" />
+                    </>
+                  )}
+                </button>
+              </div>
+            </div>
+            
+            {/* Textarea with enhancement indicator */}
+            <div className="relative">
+              <textarea
+                ref={textareaRef}
+                value={comment}
+                onChange={(e) => {
+                  setComment(e.target.value);
+                  if (justEnhanced) setJustEnhanced(false);
+                }}
+                onKeyDown={handleKeyDown}
+                disabled={isEnhancing}
+                placeholder="Type your comment here..."
+                className={`
+                  flex-1 min-h-[120px] w-full px-4 py-3 border rounded-xl bg-white dark:bg-gray-700 text-gray-900 dark:text-white placeholder-gray-400 focus:ring-2 focus:ring-teal-500 focus:border-transparent resize-none transition-all
+                  ${justEnhanced ? 'ring-2 ring-green-400 border-green-400' : 'border-gray-300 dark:border-gray-600'}
+                  ${isEnhancing ? 'bg-gradient-to-r from-emerald-50 to-teal-50 dark:from-emerald-900/20 dark:to-teal-900/20 opacity-80' : ''}
+                `}
+              />
+              
+              {/* Enhancement indicator line */}
+              {isEnhancing && (
+                <div className="absolute top-0 left-0 right-0 h-0.5 overflow-hidden rounded-t-xl">
+                  <div className="h-full w-full bg-gradient-to-r from-emerald-500 via-green-500 to-teal-500 animate-pulse" />
+                </div>
+              )}
+              
+              {/* Success indicator line */}
+              {justEnhanced && !isEnhancing && (
+                <div className="absolute top-0 left-0 right-0 h-0.5 overflow-hidden rounded-t-xl">
+                  <div className="h-full w-full bg-gradient-to-r from-green-400 to-emerald-400" />
+                </div>
+              )}
+            </div>
+            
             <p className="mt-1.5 text-xs text-gray-500 dark:text-gray-400">
               Press Ctrl+Enter to save
             </p>
