@@ -1377,16 +1377,16 @@ router.post(
           },
         });
 
-        // Make the file publicly accessible and get the URL
-        await firebaseFile.makePublic();
-        const publicUrl = `https://storage.googleapis.com/${bucket.name}/${uniqueFileName}`;
+        // Store the Firebase Storage path (not public URL - we'll use signed URLs for access)
+        // The path format is: fmir/{fmirId}/{uuid}.{ext}
+        const storagePath = `gs://${bucket.name}/${uniqueFileName}`;
 
         return prisma.fMIREvidence.create({
           data: {
             fmirId: id,
             type: evidenceType,
             fileName: file.originalname,
-            filePath: publicUrl,
+            filePath: storagePath,
             fileSize: file.size,
             mimeType: file.mimetype,
             description: descriptions[index] || null,
@@ -1474,14 +1474,22 @@ router.delete(
       return;
     }
 
-    // Delete file from Firebase Storage if it's a Firebase URL
-    if (evidence.filePath.includes('storage.googleapis.com')) {
+    // Delete file from Firebase Storage if it's a Firebase URL (gs:// or storage.googleapis.com)
+    if (evidence.filePath.startsWith('gs://') || evidence.filePath.includes('storage.googleapis.com')) {
       try {
         const bucket = adminStorage.bucket();
-        // Extract the file path from the URL
-        const urlParts = evidence.filePath.split(`${bucket.name}/`);
-        if (urlParts.length > 1) {
-          const firebaseFilePath = decodeURIComponent(urlParts[1]);
+        let firebaseFilePath: string;
+        
+        if (evidence.filePath.startsWith('gs://')) {
+          // Extract path from gs:// URL: gs://bucket-name/path/to/file
+          firebaseFilePath = evidence.filePath.replace(`gs://${bucket.name}/`, '');
+        } else {
+          // Legacy: Extract from storage.googleapis.com URL
+          const urlParts = evidence.filePath.split(`${bucket.name}/`);
+          firebaseFilePath = urlParts.length > 1 ? decodeURIComponent(urlParts[1]) : '';
+        }
+        
+        if (firebaseFilePath) {
           await bucket.file(firebaseFilePath).delete();
         }
       } catch (error) {
@@ -1577,10 +1585,45 @@ router.get(
       return;
     }
 
-    // If file is stored in Firebase Storage, redirect to the public URL
-    if (evidence.filePath.includes('storage.googleapis.com')) {
-      res.redirect(evidence.filePath);
-      return;
+    // Handle Firebase Storage files (gs:// or storage.googleapis.com URLs)
+    if (evidence.filePath.startsWith('gs://') || evidence.filePath.includes('storage.googleapis.com')) {
+      try {
+        const bucket = adminStorage.bucket();
+        let firebaseFilePath: string;
+        
+        if (evidence.filePath.startsWith('gs://')) {
+          // Extract path from gs:// URL
+          // Format: gs://bucket-name/path/to/file
+          const gsUrl = evidence.filePath.replace(`gs://${bucket.name}/`, '');
+          firebaseFilePath = gsUrl;
+        } else {
+          // Legacy: Extract path from storage.googleapis.com URL
+          const urlParts = evidence.filePath.split(`${bucket.name}/`);
+          firebaseFilePath = urlParts.length > 1 ? decodeURIComponent(urlParts[1]) : '';
+        }
+        
+        const file = bucket.file(firebaseFilePath);
+        
+        // Check if file exists
+        const [exists] = await file.exists();
+        if (!exists) {
+          res.status(404).json({ error: 'File not found in storage' });
+          return;
+        }
+        
+        // Generate a signed URL valid for 1 hour
+        const [signedUrl] = await file.getSignedUrl({
+          action: 'read',
+          expires: Date.now() + 60 * 60 * 1000, // 1 hour
+        });
+        
+        res.redirect(signedUrl);
+        return;
+      } catch (error) {
+        console.error('Error accessing Firebase Storage file:', error);
+        res.status(500).json({ error: 'Failed to access file in storage' });
+        return;
+      }
     }
 
     // Legacy: serve from local disk
@@ -2238,13 +2281,20 @@ router.post(
       return;
     }
 
-    // Delete old file from Firebase Storage if it's a Firebase URL
-    if (evidence.filePath.includes('storage.googleapis.com')) {
+    // Delete old file from Firebase Storage if it's a Firebase URL (gs:// or storage.googleapis.com)
+    if (evidence.filePath.startsWith('gs://') || evidence.filePath.includes('storage.googleapis.com')) {
       try {
         const bucket = adminStorage.bucket();
-        const urlParts = evidence.filePath.split(`${bucket.name}/`);
-        if (urlParts.length > 1) {
-          const firebaseFilePath = decodeURIComponent(urlParts[1]);
+        let firebaseFilePath: string;
+        
+        if (evidence.filePath.startsWith('gs://')) {
+          firebaseFilePath = evidence.filePath.replace(`gs://${bucket.name}/`, '');
+        } else {
+          const urlParts = evidence.filePath.split(`${bucket.name}/`);
+          firebaseFilePath = urlParts.length > 1 ? decodeURIComponent(urlParts[1]) : '';
+        }
+        
+        if (firebaseFilePath) {
           await bucket.file(firebaseFilePath).delete();
         }
       } catch (error) {
@@ -2277,14 +2327,14 @@ router.post(
       },
     });
 
-    await firebaseFile.makePublic();
-    const publicUrl = `https://storage.googleapis.com/${bucket.name}/${uniqueFileName}`;
+    // Store the Firebase Storage path (not public URL)
+    const storagePath = `gs://${bucket.name}/${uniqueFileName}`;
 
     // Update evidence record with new file
     const updatedEvidence = await prisma.fMIREvidence.update({
       where: { id: evidenceId },
       data: {
-        filePath: publicUrl,
+        filePath: storagePath,
         fileSize: req.file.size,
         mimeType: req.file.mimetype,
       },

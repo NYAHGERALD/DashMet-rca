@@ -2361,7 +2361,7 @@ function FMIRNewPageContent() {
     setSelectionEnd({ x: 0, y: 0 });
   };
 
-  // Load image with authentication (or use public URL for Firebase-stored files)
+  // Load image with authentication (always use download endpoint for Firebase Storage)
   const loadEvidenceImage = useCallback(async (file: Evidence) => {
     if (file.type !== 'PHOTO') return;
     if (imageUrls[file.id]) return; // Already loaded
@@ -2370,13 +2370,8 @@ function FMIRNewPageContent() {
     if (!reportId) return;
 
     try {
-      // If the file is stored in Firebase Storage with a public URL, use it directly
-      if (file.filePath && file.filePath.includes('storage.googleapis.com')) {
-        setImageUrls(prev => ({ ...prev, [file.id]: file.filePath }));
-        return;
-      }
-
-      // Legacy: download through API for local files
+      // Always download through API for authenticated access
+      // Firebase Storage with firebasestorage.app buckets requires signed URLs
       const response = await api.get(`/fmir/${reportId}/evidence/${file.id}/download`, {
         responseType: 'blob',
       });
