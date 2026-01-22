@@ -1870,10 +1870,8 @@ function FMIRNewPageContent() {
     formData.foreignMaterialSize.trim() &&
     formData.foreignMaterialHardness.trim() &&
     
-    // Section 3: Cause Identification
+    // Section 3: Cause Identification (possibleSource and howWhyOccurred removed - covered by causeIdentification)
     formData.causeIdentification.trim() &&
-    formData.possibleSource.trim() &&
-    formData.howWhyOccurred.trim() &&
     
     // Section 4: Corrective Action
     formData.correctiveAction.trim() &&
@@ -4217,11 +4215,8 @@ function FMIRNewPageContent() {
       {showSubmitValidationModal && validationData && (
         <div className="fixed inset-0 z-50 overflow-y-auto">
           <div className="flex min-h-full items-center justify-center p-4">
-            {/* Backdrop */}
-            <div
-              className="fixed inset-0 bg-black/60 backdrop-blur-sm"
-              onClick={() => setShowSubmitValidationModal(false)}
-            />
+            {/* Backdrop - no click handler, user must use modal buttons */}
+            <div className="fixed inset-0 bg-black/60 backdrop-blur-sm" />
 
             {/* Modal */}
             <div className="relative bg-white dark:bg-gray-900 rounded-2xl shadow-2xl w-full max-w-2xl max-h-[90vh] overflow-hidden">
@@ -4797,15 +4792,8 @@ function FMIRNewPageContent() {
       {showPasswordModal && (
         <div className="fixed inset-0 z-50 overflow-y-auto">
           <div className="flex min-h-full items-center justify-center p-4">
-            {/* Backdrop */}
-            <div 
-              className="fixed inset-0 bg-black/60 backdrop-blur-sm"
-              onClick={() => {
-                setShowPasswordModal(false);
-                setEnteredPassword('');
-                setPasswordError('');
-              }}
-            />
+            {/* Backdrop - no click handler, user must use modal buttons */}
+            <div className="fixed inset-0 bg-black/60 backdrop-blur-sm" />
 
             {/* Modal */}
             <div className="relative bg-white dark:bg-gray-900 rounded-2xl shadow-2xl w-full max-w-md overflow-hidden">
@@ -4915,11 +4903,8 @@ function FMIRNewPageContent() {
       {showAlreadySubmittedModal && (
         <div className="fixed inset-0 z-50 overflow-y-auto">
           <div className="flex min-h-full items-center justify-center p-4">
-            {/* Backdrop with heavy blur for Apple effect */}
-            <div 
-              className="fixed inset-0 bg-black/40 backdrop-blur-xl"
-              onClick={() => setShowAlreadySubmittedModal(false)}
-            />
+            {/* Backdrop - no click handler, user must use modal buttons */}
+            <div className="fixed inset-0 bg-black/40 backdrop-blur-xl" />
 
             {/* Ultra Glassy Apple-style Modal */}
             <div className="relative bg-white/20 dark:bg-gray-900/25 backdrop-blur-3xl backdrop-saturate-150 rounded-3xl w-full max-w-md overflow-hidden animate-bounce-in border border-white/30 dark:border-white/10 shadow-[0_8px_32px_rgba(0,0,0,0.12),inset_0_0_0_1px_rgba(255,255,255,0.1)]">
@@ -5017,11 +5002,8 @@ function FMIRNewPageContent() {
       {showResubmitWarningModal && (
         <div className="fixed inset-0 z-50 overflow-y-auto">
           <div className="flex min-h-full items-center justify-center p-4">
-            {/* Backdrop with blur */}
-            <div 
-              className="fixed inset-0 bg-black/50 backdrop-blur-sm"
-              onClick={() => setShowResubmitWarningModal(false)}
-            />
+            {/* Backdrop - no click handler, user must use modal buttons */}
+            <div className="fixed inset-0 bg-black/50 backdrop-blur-sm" />
 
             {/* Modal */}
             <div className="relative bg-white dark:bg-gray-800 rounded-2xl shadow-2xl w-full max-w-lg overflow-hidden animate-bounce-in">
@@ -5102,11 +5084,8 @@ function FMIRNewPageContent() {
       {showEvidenceWarning && (
         <div className="fixed inset-0 z-50 overflow-y-auto">
           <div className="flex min-h-full items-center justify-center p-4">
-            {/* Backdrop */}
-            <div 
-              className="fixed inset-0 bg-black/60 backdrop-blur-sm"
-              onClick={() => setShowEvidenceWarning(false)}
-            />
+            {/* Backdrop - no click handler, user must use modal buttons */}
+            <div className="fixed inset-0 bg-black/60 backdrop-blur-sm" />
 
             {/* Modal */}
             <div className="relative bg-white dark:bg-gray-900 rounded-2xl shadow-2xl w-full max-w-md overflow-hidden">
