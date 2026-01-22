@@ -4567,11 +4567,9 @@ export function validateFMIRForLocking(report: any, evidence: any[]): FMIRValida
     { field: 'foreignMaterialHardness', label: 'Hardness', required: true, reason: 'Hardness affects injury potential and disposition decisions' },
   ];
 
-  // Section 3: Cause Identification
+  // Section 3: Cause Identification (possibleSource and howWhyOccurred removed - covered by causeIdentification)
   const section3Fields = [
-    { field: 'causeIdentification', label: 'Cause Identification', required: true, reason: 'Root cause analysis is mandatory for FSMA compliance and audit readiness' },
-    { field: 'possibleSource', label: 'Possible Source', required: true, reason: 'Source identification enables targeted corrective actions' },
-    { field: 'howWhyOccurred', label: 'How/Why It Occurred', required: true, reason: 'Understanding the mechanism prevents recurrence' },
+    { field: 'causeIdentification', label: 'Cause Identification', required: true, reason: 'Root cause analysis is mandatory for FSMA compliance and audit readiness. Include possible source and how/why the incident occurred.' },
   ];
 
   // Section 4: Corrective Action
@@ -4779,9 +4777,7 @@ Foreign Material Details:
 - Hard/Sharp/Large: ${report.isHardSharpOrLarge ? 'Yes' : 'No'}
 
 Cause Analysis:
-- Cause Identification: ${report.causeIdentification || 'Not provided'}
-- Possible Source: ${report.possibleSource || 'Not provided'}
-- How/Why Occurred: ${report.howWhyOccurred || 'Not provided'}
+- Cause Identification (includes possible source and how/why): ${report.causeIdentification || 'Not provided'}
 
 Corrective Action:
 ${report.correctiveAction || 'Not provided'}
@@ -5367,9 +5363,7 @@ Foreign Material Details:
 - FM Source Type: ${report.fmSourceType || 'N/A'}
 
 Cause Analysis:
-- Cause Identification: ${report.causeIdentification || 'N/A'}
-- Possible Source: ${report.possibleSource || 'N/A'}
-- How/Why It Occurred: ${report.howWhyOccurred || 'N/A'}
+- Cause Identification (includes possible source and how/why): ${report.causeIdentification || 'N/A'}
 
 Corrective Action:
 ${report.correctiveAction || 'N/A'}
