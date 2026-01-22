@@ -243,12 +243,16 @@ export default function FMIRDetailPage() {
   const router = useRouter();
   const params = useParams();
   const { user } = useAuth();
-  const { onFmirVisibilityOff } = useWebSocket();
+  const { onFmirVisibilityOff, onFmirUpdated, onFmirStatusChanged, onFmirClosedStatusChanged, onFmirEvidenceUpdated, onFmirDeleted } = useWebSocket();
   const reportId = params.id as string;
 
   const [report, setReport] = useState<FMIRReport | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+
+  // Toast notification state
+  const [toastMessage, setToastMessage] = useState<string | null>(null);
+  const [toastType, setToastType] = useState<'success' | 'info' | 'warning'>('info');
 
   // Status change state
   const [showStatusModal, setShowStatusModal] = useState(false);
@@ -612,6 +616,131 @@ export default function FMIRDetailPage() {
 
     return () => unsubscribe();
   }, [onFmirVisibilityOff, reportId, user?.id]);
+
+  // Listen for real-time FMIR updates (when someone saves the report)
+  useEffect(() => {
+    const unsubscribe = onFmirUpdated((data: { reportId: string; reportNumber: string; updatedById: string; updatedByName: string; updateType: 'save' | 'submit'; newStatus?: string }) => {
+      console.log('📝 FMIR updated event received:', data);
+      
+      // Only update if this is the report we're viewing and we didn't make the change
+      if (reportId && data.reportId === reportId && data.updatedById !== user?.id) {
+        // Show toast notification
+        setToastMessage(`${data.updatedByName} ${data.updateType === 'submit' ? 'submitted' : 'updated'} this report`);
+        setToastType('info');
+        setTimeout(() => setToastMessage(null), 5000);
+        
+        // Refetch the report to get the latest data
+        api.get(`/fmir/${reportId}`)
+          .then((response) => {
+            if (response.data.success) {
+              const updatedData = response.data.data;
+              if (updatedData.FMIREvidence && !updatedData.Evidence) {
+                updatedData.Evidence = updatedData.FMIREvidence;
+              }
+              setReport(updatedData);
+            }
+          })
+          .catch((err) => console.error('Error refetching report:', err));
+      }
+    });
+
+    return () => unsubscribe();
+  }, [onFmirUpdated, reportId, user?.id]);
+
+  // Listen for real-time status changes
+  useEffect(() => {
+    const unsubscribe = onFmirStatusChanged((data: { reportId: string; reportNumber: string; previousStatus: string; newStatus: string; changedById: string; changedBy?: string }) => {
+      console.log('📊 FMIR status changed event received:', data);
+      
+      if (reportId && data.reportId === reportId) {
+        // Show toast notification if we didn't make the change
+        if (data.changedById !== user?.id) {
+          const statusLabel = data.newStatus.replace(/_/g, ' ').toLowerCase().replace(/\b\w/g, l => l.toUpperCase());
+          setToastMessage(`Status changed to ${statusLabel}${data.changedBy ? ` by ${data.changedBy}` : ''}`);
+          setToastType('info');
+          setTimeout(() => setToastMessage(null), 5000);
+        }
+        setReport(prev => prev ? { ...prev, status: data.newStatus as FMIRReport['status'] } : null);
+      }
+    });
+
+    return () => unsubscribe();
+  }, [onFmirStatusChanged, reportId, user?.id]);
+
+  // Listen for real-time closed status changes (lock/unlock by QA)
+  useEffect(() => {
+    const unsubscribe = onFmirClosedStatusChanged((data: { reportId: string; reportNumber: string; isClosed: boolean; closedById: string | null; closedAt: string | null }) => {
+      console.log('🔒 FMIR closed status changed event received:', data);
+      
+      if (reportId && data.reportId === reportId) {
+        // Show toast notification if we didn't make the change
+        if (data.closedById !== user?.id) {
+          setToastMessage(data.isClosed ? 'This report has been locked by QA' : 'This report has been unlocked by QA');
+          setToastType(data.isClosed ? 'warning' : 'info');
+          setTimeout(() => setToastMessage(null), 5000);
+        }
+        
+        // Refetch to get full report data including locked state
+        api.get(`/fmir/${reportId}`)
+          .then((response) => {
+            if (response.data.success) {
+              const updatedData = response.data.data;
+              if (updatedData.FMIREvidence && !updatedData.Evidence) {
+                updatedData.Evidence = updatedData.FMIREvidence;
+              }
+              setReport(updatedData);
+            }
+          })
+          .catch((err) => console.error('Error refetching report:', err));
+      }
+    });
+
+    return () => unsubscribe();
+  }, [onFmirClosedStatusChanged, reportId, user?.id]);
+
+  // Listen for real-time evidence updates
+  useEffect(() => {
+    const unsubscribe = onFmirEvidenceUpdated((data: { reportId: string; action: 'upload' | 'delete'; evidence?: any[]; evidenceId?: string; updatedById: string; updatedByName: string }) => {
+      console.log('📸 FMIR evidence updated event received:', data);
+      
+      if (reportId && data.reportId === reportId && data.updatedById !== user?.id) {
+        // Show toast notification
+        setToastMessage(`${data.updatedByName} ${data.action === 'upload' ? 'added new evidence' : 'removed evidence'}`);
+        setToastType('info');
+        setTimeout(() => setToastMessage(null), 5000);
+        
+        // Refetch to get updated evidence
+        api.get(`/fmir/${reportId}`)
+          .then((response) => {
+            if (response.data.success) {
+              const updatedData = response.data.data;
+              if (updatedData.FMIREvidence && !updatedData.Evidence) {
+                updatedData.Evidence = updatedData.FMIREvidence;
+              }
+              setReport(updatedData);
+            }
+          })
+          .catch((err) => console.error('Error refetching report:', err));
+      }
+    });
+
+    return () => unsubscribe();
+  }, [onFmirEvidenceUpdated, reportId, user?.id]);
+
+  // Listen for real-time FMIR deletion
+  useEffect(() => {
+    const unsubscribe = onFmirDeleted((data: { reportId: string; reportNumber: string; deletedById: string; deletedByName: string }) => {
+      console.log('🗑️ FMIR deleted event received:', data);
+      
+      if (reportId && data.reportId === reportId) {
+        // Report was deleted, redirect to list
+        alert(`This report has been deleted by ${data.deletedByName}`);
+        router.push('/fmir');
+      }
+    });
+
+    return () => unsubscribe();
+  }, [onFmirDeleted, reportId, router]);
 
   // Handle close from visibility off modal (view page doesn't need save)
   const handleCloseFromVisibilityModal = () => {
@@ -2269,6 +2398,46 @@ export default function FMIRDetailPage() {
                 </div>
               </div>
             </div>
+          </div>
+        </div>
+      )}
+
+      {/* Toast Notification */}
+      {toastMessage && (
+        <div className="fixed bottom-4 right-4 z-50 animate-slide-up">
+          <div className={`flex items-center gap-3 px-4 py-3 rounded-xl shadow-lg border ${
+            toastType === 'success' 
+              ? 'bg-green-50 dark:bg-green-900/30 border-green-200 dark:border-green-800' 
+              : toastType === 'warning'
+                ? 'bg-yellow-50 dark:bg-yellow-900/30 border-yellow-200 dark:border-yellow-800'
+                : 'bg-blue-50 dark:bg-blue-900/30 border-blue-200 dark:border-blue-800'
+          }`}>
+            {toastType === 'success' ? (
+              <CheckCircle className="w-5 h-5 text-green-600 dark:text-green-400" />
+            ) : toastType === 'warning' ? (
+              <AlertTriangle className="w-5 h-5 text-yellow-600 dark:text-yellow-400" />
+            ) : (
+              <Info className="w-5 h-5 text-blue-600 dark:text-blue-400" />
+            )}
+            <span className={`text-sm font-medium ${
+              toastType === 'success' 
+                ? 'text-green-800 dark:text-green-200'
+                : toastType === 'warning'
+                  ? 'text-yellow-800 dark:text-yellow-200'
+                  : 'text-blue-800 dark:text-blue-200'
+            }`}>{toastMessage}</span>
+            <button
+              onClick={() => setToastMessage(null)}
+              className={`ml-2 p-1 rounded-full hover:bg-black/10 dark:hover:bg-white/10 transition-colors ${
+                toastType === 'success' 
+                  ? 'text-green-600 dark:text-green-400'
+                  : toastType === 'warning'
+                    ? 'text-yellow-600 dark:text-yellow-400'
+                    : 'text-blue-600 dark:text-blue-400'
+              }`}
+            >
+              <X className="w-4 h-4" />
+            </button>
           </div>
         </div>
       )}

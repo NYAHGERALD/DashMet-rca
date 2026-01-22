@@ -461,6 +461,23 @@ function FMIRListContent() {
     const unsubscribe = onFmirCollaboratorAdded((data: any) => {
       console.log('👥 FMIR collaborator added event received:', data);
       
+      // Handle both event formats:
+      // 1. From QA user role assignment: { reportIds: [...], userId, user, addedBy }
+      // 2. From manual collaborator add: { reportId, reportNumber, addedUserId, addedByName }
+      
+      // For format 2 (single report), just refresh the list
+      if (data.reportId && !data.reportIds) {
+        console.log('📝 Single report collaborator update, refreshing...');
+        fetchReports();
+        return;
+      }
+      
+      // For format 1 (multiple reports), update in-memory state
+      if (!data.reportIds || !Array.isArray(data.reportIds)) {
+        console.log('⚠️ No reportIds in event, skipping');
+        return;
+      }
+      
       // Update reports state to include the new collaborator
       setReports(prevReports => 
         prevReports.map(report => {
@@ -482,7 +499,7 @@ function FMIRListContent() {
       // Also update QA Food Safety users list if not already present
       setQaFoodSafetyUsers(prev => {
         const exists = prev.find(u => u.id === data.userId);
-        if (!exists) {
+        if (!exists && data.user) {
           return [...prev, { ...data.user, isQAFoodSafety: true }];
         }
         return prev;
@@ -490,7 +507,7 @@ function FMIRListContent() {
     });
 
     return () => unsubscribe();
-  }, [onFmirCollaboratorAdded]);
+  }, [onFmirCollaboratorAdded, fetchReports]);
 
   // Listen for real-time visibility changes (when owner toggles visibility switch)
   useEffect(() => {
