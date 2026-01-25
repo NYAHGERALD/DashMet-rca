@@ -473,7 +473,6 @@ function CAPAContent() {
     } catch (err: any) {
       // Check if this is a privilege error (403)
       handlePrivilegeError(err, showAccessDenied, setError, 'Verify Action');
-      }
     } finally {
       setSubmitting(false);
     }
