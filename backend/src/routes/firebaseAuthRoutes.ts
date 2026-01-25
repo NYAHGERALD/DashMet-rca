@@ -391,15 +391,6 @@ router.get('/me', authenticate, async (req: AuthRequest, res) => {
     throw new ValidationError('User not found');
   }
 
-  // SECURITY: System Admins must use the dedicated System Admin portal with Master Key
-  if (user.role === 'SYSTEM_ADMIN') {
-    return res.status(403).json({
-      success: false,
-      error: 'System Administrators must use the dedicated Control Center portal for access.',
-      isSystemAdmin: true,
-    });
-  }
-
   // Update last login timestamp
   await prisma.user.update({
     where: { id: userId },
