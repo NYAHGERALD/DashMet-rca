@@ -49,99 +49,138 @@ function DashboardContent() {
   if (!user) return null;
 
   return (
-    <div className="min-h-screen bg-gray-50 dark:bg-gray-900">
-      <nav className="bg-white dark:bg-gray-800 border-b border-gray-200 dark:border-gray-700">
-        <div className="px-3 sm:px-4 lg:px-8">
-          <div className="flex justify-between h-14 sm:h-16">
-            <div className="flex items-center space-x-3">
-              <div className="relative w-8 h-8 sm:w-10 sm:h-10">
-                <Image 
-                  src="/images/logo.png" 
-                  alt="DASHMET Logo" 
-                  fill 
-                  className="object-contain"
-                />
+    <div className="min-h-screen bg-gradient-to-br from-slate-50 via-blue-50 to-indigo-100 dark:from-gray-950 dark:via-slate-900 dark:to-indigo-950">
+      {/* Glassmorphism Navigation */}
+      <nav className="sticky top-0 z-50 backdrop-blur-xl bg-white/70 dark:bg-gray-900/70 border-b border-white/20 dark:border-gray-700/50 shadow-lg shadow-black/5">
+        <div className="px-4 sm:px-6 lg:px-8">
+          <div className="flex justify-between h-16 sm:h-18">
+            <div className="flex items-center space-x-4">
+              {/* Logo with glow effect */}
+              <div className="relative w-10 h-10 sm:w-11 sm:h-11 rounded-xl bg-gradient-to-br from-blue-500 to-indigo-600 p-0.5 shadow-lg shadow-blue-500/25">
+                <div className="w-full h-full rounded-[10px] bg-white dark:bg-gray-900 flex items-center justify-center overflow-hidden">
+                  <Image 
+                    src="/images/logo.png" 
+                    alt="DASHMET Logo" 
+                    fill 
+                    className="object-contain p-1"
+                  />
+                </div>
               </div>
-              <h1 className="text-lg sm:text-2xl font-bold text-gray-900 dark:text-white">
-                DASHMET <span className="text-sm sm:text-base font-normal text-gray-500 dark:text-gray-400">RCA ENGINE</span>
-              </h1>
-              {/* Organization Name - Hide for SYSTEM_ADMIN */}
+              <div className="flex flex-col">
+                <h1 className="text-lg sm:text-xl font-bold bg-gradient-to-r from-gray-900 via-blue-800 to-indigo-900 dark:from-white dark:via-blue-200 dark:to-indigo-200 bg-clip-text text-transparent">
+                  DASHMET
+                </h1>
+                <span className="text-[10px] sm:text-xs font-medium text-gray-500 dark:text-gray-400 tracking-wider uppercase">
+                  RCA ENGINE
+                </span>
+              </div>
+              {/* Organization Badge - Glassmorphism style */}
               {user.organizationName && !isSystemAdmin && (
-                <div className="hidden sm:flex items-center ml-4 px-3 py-1 bg-gray-100 dark:bg-gray-700 rounded-lg">
-                  <span className="text-sm font-medium text-gray-700 dark:text-gray-300">
+                <div className="hidden sm:flex items-center ml-2 px-3 py-1.5 backdrop-blur-md bg-gradient-to-r from-blue-500/10 to-indigo-500/10 dark:from-blue-400/20 dark:to-indigo-400/20 border border-blue-200/50 dark:border-blue-500/30 rounded-full">
+                  <span className="text-sm font-medium bg-gradient-to-r from-blue-700 to-indigo-700 dark:from-blue-300 dark:to-indigo-300 bg-clip-text text-transparent">
                     {user.organizationName}
                   </span>
                 </div>
               )}
             </div>
-            <div className="flex items-center space-x-2 sm:space-x-4">
-              {/* Browser Notifications - System Admin sees support-focused notifications */}
+            <div className="flex items-center space-x-1 sm:space-x-2">
+              {/* Browser Notifications */}
               <NotificationCenter isSystemAdmin={isSystemAdmin} />
               
+              {/* Settings Button - Glass style */}
               <Link
                 href="/settings"
-                className="p-2 sm:px-3 sm:py-2 text-sm font-medium text-gray-700 dark:text-gray-300 hover:bg-gray-100 dark:hover:bg-gray-700 rounded-md transition-colors"
+                className="group p-2.5 sm:px-4 sm:py-2 text-sm font-medium text-gray-600 dark:text-gray-300 hover:text-gray-900 dark:hover:text-white backdrop-blur-md bg-white/50 dark:bg-gray-800/50 hover:bg-white/80 dark:hover:bg-gray-700/80 border border-gray-200/50 dark:border-gray-600/50 rounded-xl transition-all duration-200 hover:shadow-lg hover:shadow-black/5 hover:scale-105"
               >
-                <span className="hidden sm:inline">⚙️ {t('nav.settings')}</span>
-                <span className="sm:hidden">⚙️</span>
+                <span className="hidden sm:inline flex items-center gap-2">
+                  <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M10.325 4.317c.426-1.756 2.924-1.756 3.35 0a1.724 1.724 0 002.573 1.066c1.543-.94 3.31.826 2.37 2.37a1.724 1.724 0 001.065 2.572c1.756.426 1.756 2.924 0 3.35a1.724 1.724 0 00-1.066 2.573c.94 1.543-.826 3.31-2.37 2.37a1.724 1.724 0 00-2.572 1.065c-.426 1.756-2.924 1.756-3.35 0a1.724 1.724 0 00-2.573-1.066c-1.543.94-3.31-.826-2.37-2.37a1.724 1.724 0 00-1.065-2.572c-1.756-.426-1.756-2.924 0-3.35a1.724 1.724 0 001.066-2.573c-.94-1.543.826-3.31 2.37-2.37.996.608 2.296.07 2.572-1.065z" />
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 12a3 3 0 11-6 0 3 3 0 016 0z" />
+                  </svg>
+                  {t('nav.settings')}
+                </span>
+                <span className="sm:hidden">
+                  <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M10.325 4.317c.426-1.756 2.924-1.756 3.35 0a1.724 1.724 0 002.573 1.066c1.543-.94 3.31.826 2.37 2.37a1.724 1.724 0 001.065 2.572c1.756.426 1.756 2.924 0 3.35a1.724 1.724 0 00-1.066 2.573c.94 1.543-.826 3.31-2.37 2.37a1.724 1.724 0 00-2.572 1.065c-.426 1.756-2.924 1.756-3.35 0a1.724 1.724 0 00-2.573-1.066c-1.543.94-3.31-.826-2.37-2.37a1.724 1.724 0 00-1.065-2.572c-1.756-.426-1.756-2.924 0-3.35a1.724 1.724 0 001.066-2.573c-.94-1.543.826-3.31 2.37-2.37.996.608 2.296.07 2.572-1.065z" />
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 12a3 3 0 11-6 0 3 3 0 016 0z" />
+                  </svg>
+                </span>
               </Link>
               
-              {/* User Dropdown */}
+              {/* User Dropdown - Glass style */}
               <div className="relative" ref={dropdownRef}>
                 <button
                   onClick={() => setShowDropdown(!showDropdown)}
-                  className="flex items-center gap-1 sm:gap-2 p-1.5 sm:px-3 sm:py-2 text-sm font-medium text-gray-700 dark:text-gray-300 hover:bg-gray-100 dark:hover:bg-gray-700 rounded-md transition-colors"
+                  className="flex items-center gap-2 sm:gap-3 p-1.5 sm:px-3 sm:py-2 text-sm font-medium text-gray-700 dark:text-gray-200 backdrop-blur-md bg-white/50 dark:bg-gray-800/50 hover:bg-white/80 dark:hover:bg-gray-700/80 border border-gray-200/50 dark:border-gray-600/50 rounded-xl transition-all duration-200 hover:shadow-lg hover:shadow-black/5"
                 >
-                  <div className="w-7 h-7 sm:w-8 sm:h-8 rounded-full overflow-hidden bg-primary-600 flex items-center justify-center text-white text-xs font-bold">
-                    {user.profilePicture ? (
-                      <img
-                        src={user.profilePicture}
-                        alt={`${user.firstName} ${user.lastName}`}
-                        className="w-full h-full object-cover"
-                      />
-                    ) : (
-                      <span>{user.firstName.charAt(0)}{user.lastName.charAt(0)}</span>
-                    )}
+                  {/* Avatar with gradient ring */}
+                  <div className="relative">
+                    <div className="absolute -inset-0.5 bg-gradient-to-r from-blue-500 to-indigo-500 rounded-full opacity-75 group-hover:opacity-100 blur-sm"></div>
+                    <div className="relative w-8 h-8 sm:w-9 sm:h-9 rounded-full overflow-hidden bg-gradient-to-br from-blue-500 to-indigo-600 ring-2 ring-white dark:ring-gray-800 flex items-center justify-center text-white text-xs font-bold">
+                      {user.profilePicture ? (
+                        <img
+                          src={user.profilePicture}
+                          alt={`${user.firstName} ${user.lastName}`}
+                          className="w-full h-full object-cover"
+                        />
+                      ) : (
+                        <span className="text-sm">{user.firstName.charAt(0)}{user.lastName.charAt(0)}</span>
+                      )}
+                    </div>
                   </div>
-                  <span className="hidden sm:inline">{user.firstName} {user.lastName}</span>
-                  <svg className={`w-3 h-3 sm:w-4 sm:h-4 transition-transform ${showDropdown ? 'rotate-180' : ''}`} fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                  <span className="hidden sm:inline font-medium">{user.firstName} {user.lastName}</span>
+                  <svg className={`w-4 h-4 text-gray-400 transition-transform duration-200 ${showDropdown ? 'rotate-180' : ''}`} fill="none" viewBox="0 0 24 24" stroke="currentColor">
                     <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 9l-7 7-7-7" />
                   </svg>
                 </button>
                 
+                {/* Dropdown Menu - Glassmorphism */}
                 {showDropdown && (
-                  <div className="absolute right-0 mt-2 w-48 bg-white dark:bg-gray-800 rounded-lg shadow-lg border border-gray-200 dark:border-gray-700 py-1 z-50">
-                    <button
-                      onClick={() => {
-                        setShowProfileModal(true);
-                        setShowDropdown(false);
-                      }}
-                      className="w-full text-left px-4 py-2 text-sm text-gray-700 dark:text-gray-300 hover:bg-gray-100 dark:hover:bg-gray-700 flex items-center gap-2"
-                    >
-                      <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M16 7a4 4 0 11-8 0 4 4 0 018 0zM12 14a7 7 0 00-7 7h14a7 7 0 00-7-7z" />
-                      </svg>
-                      {t('nav.profile')}
-                    </button>
-                    <ContactSupportMenuItem />
-                    <hr className="my-1 border-gray-200 dark:border-gray-700" />
-                    <button
-                      onClick={() => {
-                        logout();
-                        setShowDropdown(false);
-                      }}
-                      className="w-full text-left px-4 py-2 text-sm text-danger-600 dark:text-danger-400 hover:bg-gray-100 dark:hover:bg-gray-700 flex items-center gap-2"
-                    >
-                      <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M17 16l4-4m0 0l-4-4m4 4H7m6 4v1a3 3 0 01-3 3H6a3 3 0 01-3-3V7a3 3 0 013-3h4a3 3 0 013 3v1" />
-                      </svg>
-                      {t('nav.logout')}
-                    </button>
+                  <div className="absolute right-0 mt-2 w-56 backdrop-blur-xl bg-white/90 dark:bg-gray-800/90 rounded-2xl shadow-xl shadow-black/10 border border-white/20 dark:border-gray-700/50 py-2 z-50 overflow-hidden">
+                    {/* User info header */}
+                    <div className="px-4 py-3 border-b border-gray-200/50 dark:border-gray-700/50">
+                      <p className="text-sm font-medium text-gray-900 dark:text-white">{user.firstName} {user.lastName}</p>
+                      <p className="text-xs text-gray-500 dark:text-gray-400 truncate">{user.email}</p>
+                    </div>
+                    <div className="py-1">
+                      <button
+                        onClick={() => {
+                          setShowProfileModal(true);
+                          setShowDropdown(false);
+                        }}
+                        className="w-full text-left px-4 py-2.5 text-sm text-gray-700 dark:text-gray-300 hover:bg-gradient-to-r hover:from-blue-50 hover:to-indigo-50 dark:hover:from-blue-900/30 dark:hover:to-indigo-900/30 flex items-center gap-3 transition-colors"
+                      >
+                        <div className="w-8 h-8 rounded-lg bg-blue-100 dark:bg-blue-900/50 flex items-center justify-center">
+                          <svg className="w-4 h-4 text-blue-600 dark:text-blue-400" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M16 7a4 4 0 11-8 0 4 4 0 018 0zM12 14a7 7 0 00-7 7h14a7 7 0 00-7-7z" />
+                          </svg>
+                        </div>
+                        {t('nav.profile')}
+                      </button>
+                      <ContactSupportMenuItem />
+                    </div>
+                    <div className="border-t border-gray-200/50 dark:border-gray-700/50 py-1">
+                      <button
+                        onClick={() => {
+                          logout();
+                          setShowDropdown(false);
+                        }}
+                        className="w-full text-left px-4 py-2.5 text-sm text-red-600 dark:text-red-400 hover:bg-red-50 dark:hover:bg-red-900/30 flex items-center gap-3 transition-colors"
+                      >
+                        <div className="w-8 h-8 rounded-lg bg-red-100 dark:bg-red-900/50 flex items-center justify-center">
+                          <svg className="w-4 h-4 text-red-600 dark:text-red-400" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M17 16l4-4m0 0l-4-4m4 4H7m6 4v1a3 3 0 01-3 3H6a3 3 0 01-3-3V7a3 3 0 013-3h4a3 3 0 013 3v1" />
+                          </svg>
+                        </div>
+                        {t('nav.logout')}
+                      </button>
+                    </div>
                   </div>
                 )}
               </div>
               
-              <span className="hidden sm:inline-flex px-2 py-1 text-xs font-medium rounded-full bg-primary-100 text-primary-800 dark:bg-primary-900 dark:text-primary-200">
+              {/* Role Badge - Gradient style */}
+              <span className="hidden sm:inline-flex px-3 py-1.5 text-xs font-semibold rounded-full bg-gradient-to-r from-blue-500 to-indigo-500 text-white shadow-lg shadow-blue-500/25">
                 {user.role}
               </span>
             </div>
@@ -195,6 +234,7 @@ function DashboardContent() {
                   { href: '/system-admin', icon: '🏢', label: t('nav.systemAdmin') || 'System Admin Portal' },
                   { href: '/admin/policies', icon: '📄', label: t('nav.policies') },
                   { href: '/admin/support', icon: '📨', label: t('nav.supportRequests') },
+                  { href: '/support-inbox', icon: '📬', label: 'Support Inbox' },
                 ] : [
                   // Regular ADMIN sees full organization management within their org
                   { href: '/admin/organizations', icon: '🏢', label: t('nav.organizations') },
@@ -205,7 +245,21 @@ function DashboardContent() {
                   { href: '/admin/shifts', icon: '🕐', label: t('nav.shifts') },
                   { href: '/admin/categories', icon: '🏷️', label: t('nav.categories') },
                   { href: '/admin', icon: '👥', label: t('nav.userManagement') },
+                  { href: '/admin/privileges', icon: '🔐', label: t('nav.privileges') || 'Role Privileges' },
                   { href: '/admin/enterprise', icon: '🛡️', label: t('nav.enterprise') },
+                  { href: '/support-inbox', icon: '📬', label: 'Support Inbox' },
+                ]}
+              />
+            )}
+
+            {/* QC Manager Support Inbox Access */}
+            {user?.role === 'QUALITY_CONTROL_MANAGER' && (
+              <SlidingSidebar
+                title="QC Management"
+                position="right"
+                links={[
+                  { href: '/support-inbox', icon: '📬', label: 'Support Inbox' },
+                  { href: '/fmir/privileges', icon: '🔐', label: 'FMIR Privileges' },
                 ]}
               />
             )}

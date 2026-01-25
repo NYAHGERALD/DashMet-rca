@@ -4,19 +4,22 @@ import { useAuth } from '@/components/providers/AuthProvider';
 import { hasMinimumRole } from '@/lib/rbac';
 import { useRouter } from 'next/navigation';
 import { useEffect } from 'react';
+import FloatingSupportButton from '@/components/support/FloatingSupportButton';
 
 interface ProtectedRouteProps {
   children: React.ReactNode;
   allowedRoles?: string[];
   minRole?: string;
   requireAuth?: boolean;
+  loginRedirect?: string; // Custom login redirect URL
 }
 
 export default function ProtectedRoute({ 
   children, 
   allowedRoles,
   minRole,
-  requireAuth = true 
+  requireAuth = true,
+  loginRedirect = '/login'
 }: ProtectedRouteProps) {
   const { user, loading } = useAuth();
   const router = useRouter();
@@ -25,7 +28,7 @@ export default function ProtectedRoute({
     if (!loading) {
       // Redirect to login if auth is required but user not logged in
       if (requireAuth && !user) {
-        router.push('/login');
+        router.push(loginRedirect);
         return;
       }
 
@@ -43,7 +46,7 @@ export default function ProtectedRoute({
         }
       }
     }
-  }, [user, loading, requireAuth, allowedRoles, minRole, router]);
+  }, [user, loading, requireAuth, allowedRoles, minRole, router, loginRedirect]);
 
   // Show loading state
   if (loading) {
@@ -72,5 +75,11 @@ export default function ProtectedRoute({
     return null;
   }
 
-  return <>{children}</>;
+  return (
+    <>
+      {children}
+      {/* Floating Support Button for non-Admin users */}
+      <FloatingSupportButton />
+    </>
+  );
 }

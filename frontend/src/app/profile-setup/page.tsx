@@ -45,6 +45,10 @@ export default function ProfileSetupPage() {
   const [selectedFacility, setSelectedFacility] = useState('');
   const [availableFacilities, setAvailableFacilities] = useState<Facility[]>([]);
   
+  // Role-specific access code state
+  const [isRoleSpecificCode, setIsRoleSpecificCode] = useState(false);
+  const [orgAccessCodeId, setOrgAccessCodeId] = useState<string | null>(null);
+  
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
   const [loadingData, setLoadingData] = useState(false);
@@ -86,11 +90,23 @@ export default function ProfileSetupPage() {
         // Handle both PascalCase (Organization) and camelCase (organization) response formats
         setValidatedOrganization(response.data.data.Organization || response.data.data.organization);
         setAvailableFacilities(response.data.data.Facility || response.data.data.facilities || []);
+        
+        // Check if this is a role-specific access code
+        if (response.data.data.isRoleSpecific && response.data.data.role) {
+          setIsRoleSpecificCode(true);
+          setRole(response.data.data.role as Role);
+          setOrgAccessCodeId(response.data.data.accessCodeId);
+        } else {
+          setIsRoleSpecificCode(false);
+          setOrgAccessCodeId(null);
+        }
       } else {
-        setError('Invalid organization code. Please check with your administrator.');
+        setError(response.data.data.message || 'Invalid organization code. Please check with your administrator.');
         setOrgCodeValidated(false);
         setValidatedOrganization(null);
         setAvailableFacilities([]);
+        setIsRoleSpecificCode(false);
+        setOrgAccessCodeId(null);
       }
     } catch (err: any) {
       const errorMessage = err.response?.data?.error || 'Failed to validate organization code';
@@ -98,6 +114,8 @@ export default function ProfileSetupPage() {
       setOrgCodeValidated(false);
       setValidatedOrganization(null);
       setAvailableFacilities([]);
+      setIsRoleSpecificCode(false);
+      setOrgAccessCodeId(null);
     } finally {
       setValidatingOrgCode(false);
     }
@@ -208,6 +226,10 @@ export default function ProfileSetupPage() {
         // Other roles use validated organization and selected facility
         payload.organizationId = validatedOrganization!.id;
         payload.facilityId = selectedFacility;
+        // Include orgAccessCodeId if a role-specific code was used
+        if (orgAccessCodeId) {
+          payload.orgAccessCodeId = orgAccessCodeId;
+        }
       }
 
       await api.post('/firebase-auth/create-profile', payload);
@@ -297,43 +319,181 @@ export default function ProfileSetupPage() {
               </div>
             </div>
 
-            {/* Role Selection */}
+            {/* Organization Access Code - SHOWN FIRST */}
             <div>
               <label className="block text-[10px] xs:text-xs sm:text-sm font-medium text-gray-200 mb-1 xs:mb-1.5 sm:mb-2">
-                Role *
+                Organization Access Code *
               </label>
-              <select
-                value={role}
-                onChange={(e) => {
-                  setRole(e.target.value as Role);
-                  setAccessCode('');
-                  setAccessCodeValidated(false);
-                  setNewOrganizationName('');
-                  setNewFacilityName('');
-                  setCreateFacility(false);
-                  setOrgSignupCode('');
-                  setOrgCodeValidated(false);
-                  setValidatedOrganization(null);
-                  setAvailableFacilities([]);
-                  setSelectedFacility('');
-                  setError('');
-                }}
-                required
-                className="w-full px-2.5 xs:px-3 sm:px-4 py-2 xs:py-2.5 sm:py-3 bg-white/5 border border-white/10 rounded-lg text-white text-xs xs:text-sm sm:text-base focus:outline-none focus:ring-2 focus:ring-blue-500/50 focus:border-transparent [&>option]:bg-slate-800 [&>option]:text-white"
-              >
-                <option value="">Select a role</option>
-                <option value="SUPERVISOR">Supervisor</option>
-                <option value="QA_FOOD_SAFETY">QA / Food Safety</option>
-                <option value="MAINTENANCE_ENGINEERING">Maintenance / Engineering</option>
-                <option value="CI_MANAGER">CI / Manager</option>
-                <option value="SAFETY_SECURITY_MANAGER">Safety & Security Manager</option>
-                <option value="ADMIN">Admin</option>
-                <option value="SYSTEM_ADMIN">System Admin</option>
-              </select>
+              <div className="flex flex-col xs:flex-row gap-2 sm:gap-3">
+                <input
+                  type="text"
+                  value={orgSignupCode}
+                  onChange={(e) => {
+                    const value = e.target.value.replace(/\D/g, '').slice(0, 6);
+                    setOrgSignupCode(value);
+                    if (orgCodeValidated) {
+                      setOrgCodeValidated(false);
+                      setValidatedOrganization(null);
+                      setAvailableFacilities([]);
+                      setSelectedFacility('');
+                      setIsRoleSpecificCode(false);
+                      setOrgAccessCodeId(null);
+                      setRole('');
+                    }
+                  }}
+                  maxLength={6}
+                  disabled={orgCodeValidated}
+                  className="flex-1 px-2.5 xs:px-3 sm:px-4 py-2 xs:py-2.5 sm:py-3 bg-white/5 border border-white/10 rounded-lg text-white text-sm xs:text-base sm:text-lg placeholder-gray-400 focus:outline-none focus:ring-2 focus:ring-blue-500/50 focus:border-transparent disabled:opacity-50 font-mono tracking-widest"
+                  placeholder="000000"
+                />
+                <button
+                  type="button"
+                  onClick={validateOrgSignupCode}
+                  disabled={validatingOrgCode || orgCodeValidated || orgSignupCode.length !== 6}
+                  className={`px-3 xs:px-4 sm:px-6 py-2 xs:py-2.5 sm:py-3 rounded-lg font-medium text-xs xs:text-sm sm:text-base transition-colors whitespace-nowrap ${
+                    orgCodeValidated
+                      ? 'bg-green-600 text-white cursor-default'
+                      : 'bg-gradient-to-r from-blue-600 to-blue-500 text-white hover:from-blue-700 hover:to-blue-600 disabled:opacity-50 disabled:cursor-not-allowed'
+                  }`}
+                >
+                  {validatingOrgCode ? 'Validating...' : orgCodeValidated ? '✓ Validated' : 'Validate'}
+                </button>
+              </div>
               <p className="mt-1 xs:mt-1.5 sm:mt-2 text-[9px] xs:text-[10px] sm:text-xs text-gray-400">
-                Your role determines your access level and available features
+                Enter the 6-digit code provided by your organization administrator
               </p>
+              {orgCodeValidated && (
+                <button
+                  type="button"
+                  onClick={() => {
+                    setOrgCodeValidated(false);
+                    setOrgSignupCode('');
+                    setValidatedOrganization(null);
+                    setAvailableFacilities([]);
+                    setSelectedFacility('');
+                    setIsRoleSpecificCode(false);
+                    setOrgAccessCodeId(null);
+                    setRole('');
+                  }}
+                  className="mt-2 text-xs text-blue-400 hover:text-blue-300"
+                >
+                  Use a different code
+                </button>
+              )}
             </div>
+
+            {/* Show validated info after code validation */}
+            {orgCodeValidated && validatedOrganization && (
+              <>
+                {/* Organization Display */}
+                <div>
+                  <label className="block text-[10px] xs:text-xs sm:text-sm font-medium text-gray-200 mb-1 xs:mb-1.5 sm:mb-2">
+                    Organization
+                  </label>
+                  <div className="w-full px-2.5 xs:px-3 sm:px-4 py-2 xs:py-2.5 sm:py-3 rounded-lg border border-green-500/30 bg-green-500/10 text-white">
+                    <div className="flex items-center gap-2">
+                      <svg className="w-4 h-4 sm:w-5 sm:h-5 text-green-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z" />
+                      </svg>
+                      <span className="text-xs xs:text-sm sm:text-base font-medium">{validatedOrganization.name}</span>
+                    </div>
+                  </div>
+                </div>
+
+                {/* Role Display - Auto-assigned */}
+                {isRoleSpecificCode && role && (
+                  <div>
+                    <label className="block text-[10px] xs:text-xs sm:text-sm font-medium text-gray-200 mb-1 xs:mb-1.5 sm:mb-2">
+                      Role
+                    </label>
+                    <div className="w-full px-2.5 xs:px-3 sm:px-4 py-2 xs:py-2.5 sm:py-3 rounded-lg border border-green-500/30 bg-green-500/10 text-white">
+                      <div className="flex items-center gap-2">
+                        <svg className="w-4 h-4 sm:w-5 sm:h-5 text-green-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z" />
+                        </svg>
+                        <span className="text-xs xs:text-sm sm:text-base font-medium">
+                          {role === 'SUPERVISOR' && 'Supervisor'}
+                          {role === 'QA_FOOD_SAFETY' && 'QA / Food Safety'}
+                          {role === 'QUALITY_CONTROL_MANAGER' && 'Quality Control Manager'}
+                          {role === 'MAINTENANCE_ENGINEERING' && 'Maintenance / Engineering'}
+                          {role === 'CI_MANAGER' && 'CI / Manager'}
+                          {role === 'SAFETY_SECURITY_MANAGER' && 'Safety & Security Manager'}
+                        </span>
+                      </div>
+                    </div>
+                    <p className="mt-1 xs:mt-1.5 sm:mt-2 text-[9px] xs:text-[10px] sm:text-xs text-green-400">
+                      ✓ Role automatically assigned based on your access code
+                    </p>
+                  </div>
+                )}
+
+                {/* Facility Selection */}
+                <div>
+                  <label className="block text-[10px] xs:text-xs sm:text-sm font-medium text-gray-200 mb-1 xs:mb-1.5 sm:mb-2">
+                    Facility *
+                  </label>
+                  {availableFacilities.length > 0 ? (
+                    <select
+                      value={selectedFacility}
+                      onChange={(e) => setSelectedFacility(e.target.value)}
+                      required
+                      className="w-full px-2.5 xs:px-3 sm:px-4 py-2 xs:py-2.5 sm:py-3 bg-white/5 border border-white/10 rounded-lg text-white text-xs xs:text-sm sm:text-base focus:outline-none focus:ring-2 focus:ring-blue-500/50 focus:border-transparent [&>option]:bg-slate-800 [&>option]:text-white"
+                    >
+                      <option value="">Select a facility</option>
+                      {availableFacilities.map((f) => (
+                        <option key={f.id} value={f.id}>{f.name}</option>
+                      ))}
+                    </select>
+                  ) : (
+                    <div className="w-full px-3 sm:px-4 py-2.5 sm:py-3 rounded-lg border border-amber-500/30 bg-amber-500/10 text-amber-300 text-xs sm:text-sm">
+                      No facilities available. Please contact your administrator.
+                    </div>
+                  )}
+                </div>
+              </>
+            )}
+
+            {/* Divider for Admin path */}
+            {!orgCodeValidated && (
+              <div className="relative py-2">
+                <div className="absolute inset-0 flex items-center">
+                  <div className="w-full border-t border-white/10"></div>
+                </div>
+                <div className="relative flex justify-center text-xs">
+                  <span className="px-3 bg-slate-800/80 text-gray-400">or for Admin access</span>
+                </div>
+              </div>
+            )}
+
+            {/* Admin Role Selection - Only shown if no org code validated */}
+            {!orgCodeValidated && (
+              <div>
+                <label className="block text-[10px] xs:text-xs sm:text-sm font-medium text-gray-200 mb-1 xs:mb-1.5 sm:mb-2">
+                  Admin Role
+                </label>
+                <select
+                  value={isAdminRole ? role : ''}
+                  onChange={(e) => {
+                    const selectedRole = e.target.value as Role;
+                    setRole(selectedRole);
+                    setAccessCode('');
+                    setAccessCodeValidated(false);
+                    setNewOrganizationName('');
+                    setNewFacilityName('');
+                    setCreateFacility(false);
+                    setError('');
+                  }}
+                  className="w-full px-2.5 xs:px-3 sm:px-4 py-2 xs:py-2.5 sm:py-3 bg-white/5 border border-white/10 rounded-lg text-white text-xs xs:text-sm sm:text-base focus:outline-none focus:ring-2 focus:ring-blue-500/50 focus:border-transparent [&>option]:bg-slate-800 [&>option]:text-white"
+                >
+                  <option value="">Select admin role (if applicable)</option>
+                  <option value="ADMIN">Admin</option>
+                  <option value="SYSTEM_ADMIN">System Admin</option>
+                </select>
+                <p className="mt-1 xs:mt-1.5 sm:mt-2 text-[9px] xs:text-[10px] sm:text-xs text-gray-400">
+                  Only select if you are setting up as an Admin or System Admin
+                </p>
+              </div>
+            )}
 
             {/* Access Code for Admin Roles */}
             {needsAccessCode && (
@@ -438,115 +598,15 @@ export default function ProfileSetupPage() {
               </>
             )}
 
-            {/* Non-Admin Roles - Organization Signup Code */}
-            {isNonAdminRole && (
-              <>
-                <div>
-                  <label className="block text-[10px] xs:text-xs sm:text-sm font-medium text-gray-200 mb-1 xs:mb-1.5 sm:mb-2">
-                    Organization Code *
-                  </label>
-                  <div className="flex flex-col xs:flex-row gap-2 sm:gap-3">
-                    <input
-                      type="text"
-                      value={orgSignupCode}
-                      onChange={(e) => {
-                        const value = e.target.value.replace(/\D/g, '').slice(0, 6);
-                        setOrgSignupCode(value);
-                        if (orgCodeValidated) {
-                          setOrgCodeValidated(false);
-                          setValidatedOrganization(null);
-                          setAvailableFacilities([]);
-                          setSelectedFacility('');
-                        }
-                      }}
-                      maxLength={6}
-                      disabled={orgCodeValidated}
-                      className="flex-1 px-2.5 xs:px-3 sm:px-4 py-2 xs:py-2.5 sm:py-3 bg-white/5 border border-white/10 rounded-lg text-white text-sm xs:text-base sm:text-lg placeholder-gray-400 focus:outline-none focus:ring-2 focus:ring-blue-500/50 focus:border-transparent disabled:opacity-50 font-mono tracking-widest"
-                      placeholder="000000"
-                    />
-                    <button
-                      type="button"
-                      onClick={validateOrgSignupCode}
-                      disabled={validatingOrgCode || orgCodeValidated || orgSignupCode.length !== 6}
-                      className={`px-3 xs:px-4 sm:px-6 py-2 xs:py-2.5 sm:py-3 rounded-lg font-medium text-xs xs:text-sm sm:text-base transition-colors whitespace-nowrap ${
-                        orgCodeValidated
-                          ? 'bg-green-600 text-white cursor-default'
-                          : 'bg-gradient-to-r from-blue-600 to-blue-500 text-white hover:from-blue-700 hover:to-blue-600 disabled:opacity-50 disabled:cursor-not-allowed'
-                      }`}
-                    >
-                      {validatingOrgCode ? 'Validating...' : orgCodeValidated ? '✓ Validated' : 'Validate'}
-                    </button>
-                  </div>
-                  <p className="mt-1 xs:mt-1.5 sm:mt-2 text-[9px] xs:text-[10px] sm:text-xs text-gray-400">
-                    Enter the 6-digit code provided by your organization administrator
-                  </p>
-                  {orgCodeValidated && (
-                    <button
-                      type="button"
-                      onClick={() => {
-                        setOrgCodeValidated(false);
-                        setOrgSignupCode('');
-                        setValidatedOrganization(null);
-                        setAvailableFacilities([]);
-                        setSelectedFacility('');
-                      }}
-                      className="mt-2 text-xs text-blue-400 hover:text-blue-300"
-                    >
-                      Use a different code
-                    </button>
-                  )}
-                </div>
-
-                {/* Show organization name after code validation */}
-                {orgCodeValidated && validatedOrganization && (
-                  <>
-                    <div>
-                      <label className="block text-[10px] xs:text-xs sm:text-sm font-medium text-gray-200 mb-1 xs:mb-1.5 sm:mb-2">
-                        Organization
-                      </label>
-                      <div className="w-full px-2.5 xs:px-3 sm:px-4 py-2 xs:py-2.5 sm:py-3 rounded-lg border border-green-500/30 bg-green-500/10 text-white">
-                        <div className="flex items-center gap-1.5 xs:gap-2">
-                          <svg className="w-3.5 h-3.5 xs:w-4 xs:h-4 sm:w-5 sm:h-5 text-green-400 flex-shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 13l4 4L19 7" />
-                          </svg>
-                          <span className="font-medium text-xs xs:text-sm sm:text-base break-all">{validatedOrganization.name}</span>
-                        </div>
-                      </div>
-                    </div>
-
-                    {/* Facility Selection */}
-                    <div>
-                      <label className="block text-[10px] xs:text-xs sm:text-sm font-medium text-gray-200 mb-1 xs:mb-1.5 sm:mb-2">
-                        Facility *
-                      </label>
-                      <select
-                        value={selectedFacility}
-                        onChange={(e) => setSelectedFacility(e.target.value)}
-                        required
-                        className="w-full px-2.5 xs:px-3 sm:px-4 py-2 xs:py-2.5 sm:py-3 bg-white/5 border border-white/10 rounded-lg text-white text-xs xs:text-sm sm:text-base focus:outline-none focus:ring-2 focus:ring-blue-500/50 focus:border-transparent [&>option]:bg-slate-800 [&>option]:text-white"
-                      >
-                        <option value="">Select a facility</option>
-                        {availableFacilities.map((facility) => (
-                          <option key={facility.id} value={facility.id}>
-                            {facility.name}
-                          </option>
-                        ))}
-                      </select>
-                      {availableFacilities.length === 0 && (
-                        <p className="mt-1 xs:mt-1.5 sm:mt-2 text-[9px] xs:text-[10px] sm:text-xs text-amber-400">
-                          No facilities available. Contact your administrator.
-                        </p>
-                      )}
-                    </div>
-                  </>
-                )}
-              </>
-            )}
-
             <div className="pt-2 xs:pt-3 sm:pt-4">
               <button
                 type="submit"
-                disabled={loading || (needsAccessCode && !accessCodeValidated) || (!!isNonAdminRole && !orgCodeValidated)}
+                disabled={
+                  loading || 
+                  !role || 
+                  (needsAccessCode && !accessCodeValidated) || 
+                  (isRoleSpecificCode && (!orgCodeValidated || !selectedFacility))
+                }
                 className="w-full px-3 xs:px-4 sm:px-6 py-2 xs:py-2.5 sm:py-3 bg-gradient-to-r from-blue-600 to-blue-500 text-white text-xs xs:text-sm sm:text-base rounded-lg hover:from-blue-700 hover:to-blue-600 transition-all disabled:opacity-50 disabled:cursor-not-allowed font-medium shadow-lg"
               >
                 {loading ? 'Creating Profile...' : 'Complete Setup'}

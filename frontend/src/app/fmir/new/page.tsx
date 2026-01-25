@@ -5,6 +5,8 @@ import { useRouter, useSearchParams } from 'next/navigation';
 import Link from 'next/link';
 import { useAuth } from '@/components/providers/AuthProvider';
 import { useWebSocket } from '@/lib/websocket';
+import { usePrivileges, FMIR_PRIVILEGES } from '@/lib/usePrivileges';
+import AccessDeniedModal from '@/components/modals/AccessDeniedModal';
 import ProtectedRoute from '@/components/auth/ProtectedRoute';
 import FMIRVisibilityOffModal from '@/components/fmir/FMIRVisibilityOffModal';
 import FMIRCommentModal from '@/components/fmir/FMIRCommentModal';
@@ -747,14 +749,42 @@ function FMIRNewPageContent() {
     return `${first}${last}`;
   }, [user]);
 
+  // Use privilege-based access control
+  const { hasPrivilege, loading: privilegesLoading } = usePrivileges();
+  
+  // Check create/edit privilege - if not editing and no create privilege, show access denied
+  const canCreateFMIR = hasPrivilege(FMIR_PRIVILEGES.CREATE);
+  const canEditFMIR = hasPrivilege(FMIR_PRIVILEGES.EDIT);
+  const [showAccessDenied, setShowAccessDenied] = useState(false);
+  
+  // Check privilege on mount
+  useEffect(() => {
+    if (!privilegesLoading && !editId && !canCreateFMIR) {
+      setShowAccessDenied(true);
+    } else if (!privilegesLoading && editId && !canEditFMIR) {
+      setShowAccessDenied(true);
+    }
+  }, [privilegesLoading, editId, canCreateFMIR, canEditFMIR]);
+  
   // Permission checks for section editing
-  // QA/Food Safety can edit all sections
-  const isQAFoodSafety = user?.role === 'QA_FOOD_SAFETY';
+  // QA/Food Safety and Quality Control Manager can edit all sections
+  const isQAFoodSafety = user?.role === 'QA_FOOD_SAFETY' || user?.role === 'QUALITY_CONTROL_MANAGER';
+  // Quality Control Manager has additional privileges (Investigation, Close toggles)
+  const isQualityControlManager = user?.role === 'QUALITY_CONTROL_MANAGER';
   // Check if user is the owner of the report
   const isReportOwner = !reportCreatedById || reportCreatedById === user?.id;
-  // Sections 5-10 are restricted to QA/Food Safety only
+  // Sections 5-10 are restricted to QA/Food Safety and Quality Control Manager only
   // Owners and collaborators who are NOT QA/Food Safety can only edit sections 1-4 and upload evidence
   const canEditRestrictedSections = isQAFoodSafety;
+  
+  // Privilege-based checks
+  const canAddComments = hasPrivilege(FMIR_PRIVILEGES.COMMENTS_ADD);
+  const canViewComments = hasPrivilege(FMIR_PRIVILEGES.COMMENTS_VIEW);
+  const canUploadEvidence = hasPrivilege(FMIR_PRIVILEGES.EVIDENCE_UPLOAD);
+  const canDeleteEvidence = hasPrivilege(FMIR_PRIVILEGES.EVIDENCE_DELETE);
+  const canSubmitFMIR = hasPrivilege(FMIR_PRIVILEGES.SUBMIT);
+  const canUseAIValidation = hasPrivilege(FMIR_PRIVILEGES.AI_VALIDATE_SUBMIT);
+  const canUseAITextEnhance = hasPrivilege(FMIR_PRIVILEGES.AI_ENHANCE_TEXT);
 
   // Get current date in YYYY-MM-DD format
   const getCurrentDate = useCallback(() => {
@@ -2944,6 +2974,29 @@ function FMIRNewPageContent() {
           </div>
         </div>
       </div>
+    );
+  }
+
+  // Show access denied modal if user lacks privilege
+  if (showAccessDenied) {
+    return (
+      <ProtectedRoute requireAuth>
+        <AccessDeniedModal
+          isOpen={showAccessDenied}
+          onClose={() => {
+            setShowAccessDenied(false);
+            router.push('/fmir');
+          }}
+          featureName={editId ? 'Edit Foreign Material Report' : 'Create Foreign Material Report'}
+          requiredPrivilege={editId ? FMIR_PRIVILEGES.EDIT : FMIR_PRIVILEGES.CREATE}
+        />
+        <div className="min-h-screen bg-gradient-to-br from-gray-50 via-gray-100 to-gray-50 dark:from-gray-900 dark:via-gray-800 dark:to-gray-900 flex items-center justify-center">
+          <div className="text-center">
+            <Loader2 className="w-8 h-8 animate-spin text-primary-500 mx-auto mb-4" />
+            <p className="text-gray-500 dark:text-gray-400">Checking access permissions...</p>
+          </div>
+        </div>
+      </ProtectedRoute>
     );
   }
 

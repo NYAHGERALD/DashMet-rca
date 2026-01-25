@@ -26,7 +26,7 @@ interface AuthContextType {
   firebaseUser: FirebaseUser | null;
   loading: boolean;
   needsProfileSetup: boolean;
-  logout: () => Promise<void>;
+  logout: (redirectUrl?: string) => Promise<void>;
   refreshUser: () => Promise<void>;
   getIdToken: () => Promise<string | null>;
 }
@@ -235,16 +235,29 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     }
   }, []);
 
-  const logout = async () => {
+  const logout = async (redirectUrl?: string) => {
     try {
-      await signOut(auth);
+      const targetUrl = redirectUrl || '/login';
+      console.log('[AuthProvider] Logout called, redirecting to:', targetUrl);
+      
+      // Clear localStorage first
       localStorage.removeItem('firebaseToken');
+      
+      // Sign out from Firebase
+      await signOut(auth);
+      
+      // Clear React state
       setUser(null);
       setFirebaseUser(null);
       setNeedsProfileSetup(false);
-      router.push('/login');
+      
+      // Use window.location for immediate hard redirect that can't be overridden
+      // This prevents race conditions with ProtectedRoute effects
+      window.location.href = targetUrl;
     } catch (error) {
       console.error('Logout error:', error);
+      // Still try to redirect even on error
+      window.location.href = redirectUrl || '/login';
     }
   };
 

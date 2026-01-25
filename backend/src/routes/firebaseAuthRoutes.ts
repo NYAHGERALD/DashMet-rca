@@ -113,6 +113,7 @@ router.post('/create-profile', authenticateFirebaseOnly, async (req: FirebaseAut
     organizationId, 
     facilityId, 
     accessCode,
+    orgAccessCodeId,      // For role-specific organization access codes
     newOrganizationName,  // For ADMIN/SYSTEM_ADMIN to create new org
     newFacilityName       // For ADMIN/SYSTEM_ADMIN to create new facility
   } = req.body;
@@ -243,6 +244,31 @@ router.post('/create-profile', authenticateFirebaseOnly, async (req: FirebaseAut
       throw new ValidationError('Organization is required for this role');
     }
     finalOrganizationId = organizationId;
+
+    // If a role-specific organization access code was used, increment its usage count
+    if (orgAccessCodeId) {
+      const orgAccessCode = await prisma.organizationAccessCode.findFirst({
+        where: {
+          id: orgAccessCodeId,
+          organizationId: finalOrganizationId,
+          role: role,
+          isActive: true,
+        },
+      });
+
+      if (orgAccessCode) {
+        // Verify the code hasn't exceeded max uses
+        if (orgAccessCode.usedCount >= orgAccessCode.maxUses) {
+          throw new ValidationError('This access code has reached its maximum usage limit');
+        }
+
+        // Increment usage count
+        await prisma.organizationAccessCode.update({
+          where: { id: orgAccessCode.id },
+          data: { usedCount: { increment: 1 } },
+        });
+      }
+    }
   }
 
   // Create user profile in PostgreSQL
@@ -271,8 +297,8 @@ router.post('/create-profile', authenticateFirebaseOnly, async (req: FirebaseAut
     },
   });
 
-  // If new user has QA_FOOD_SAFETY role, auto-add them to all open FMIR reports
-  if (role === 'QA_FOOD_SAFETY' && finalOrganizationId) {
+  // If new user has QA_FOOD_SAFETY or QUALITY_CONTROL_MANAGER role, auto-add them to all open FMIR reports
+  if ((role === 'QA_FOOD_SAFETY' || role === 'QUALITY_CONTROL_MANAGER') && finalOrganizationId) {
     // Get all open FMIR reports (not CLOSED) in the organization
     const openReports = await prisma.foreignMaterialIncident.findMany({
       where: {
@@ -466,8 +492,8 @@ router.get('/public/organizations', async (req, res) => {
   });
 });
 
-// POST /api/firebase-auth/public/validate-org-code - Validate organization signup code
-// Returns organization details and facilities if code is valid
+// POST /api/firebase-auth/public/validate-org-code - Validate organization role-specific signup code
+// Returns organization details, role, and facilities if code is valid
 router.post('/public/validate-org-code', async (req, res) => {
   const { code } = req.body;
 
@@ -478,6 +504,64 @@ router.post('/public/validate-org-code', async (req, res) => {
     });
   }
 
+  // First check the new OrganizationAccessCode table for role-specific codes
+  const accessCode = await prisma.organizationAccessCode.findFirst({
+    where: {
+      code,
+      isActive: true,
+    },
+    include: {
+      Organization: {
+        select: {
+          id: true,
+          name: true,
+          isActive: true,
+          Facility: {
+            select: {
+              id: true,
+              name: true,
+            },
+            orderBy: { name: 'asc' },
+          },
+        },
+      },
+    },
+  });
+
+  if (accessCode) {
+    // Check if organization is active
+    if (!accessCode.Organization.isActive) {
+      return res.json({
+        success: true,
+        data: { valid: false, message: 'Organization is not active' },
+      });
+    }
+
+    // Check if code has reached max uses
+    if (accessCode.usedCount >= accessCode.maxUses) {
+      return res.json({
+        success: true,
+        data: { valid: false, message: 'This access code has reached its maximum usage limit' },
+      });
+    }
+
+    return res.json({
+      success: true,
+      data: {
+        valid: true,
+        isRoleSpecific: true,
+        role: accessCode.role,
+        accessCodeId: accessCode.id,
+        Organization: {
+          id: accessCode.Organization.id,
+          name: accessCode.Organization.name,
+        },
+        Facility: accessCode.Organization.Facility,
+      },
+    });
+  }
+
+  // Fallback: Check the old organization signupCode (for backwards compatibility)
   const organization = await prisma.organization.findFirst({
     where: {
       signupCode: code,
@@ -504,10 +588,12 @@ router.post('/public/validate-org-code', async (req, res) => {
     });
   }
 
+  // Old-style code found - user can choose their role
   res.json({
     success: true,
     data: {
       valid: true,
+      isRoleSpecific: false,
       Organization: {
         id: organization.id,
         name: organization.name,

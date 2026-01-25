@@ -509,4 +509,210 @@ router.delete('/:id', authenticate, requireMinimumRole(UserRole.SYSTEM_ADMIN), a
   }
 });
 
+// ============================================
+// Organization Access Code Management
+// ============================================
+
+// GET /api/organizations/:id/access-codes - List access codes for an organization
+router.get('/:id/access-codes', authenticate, requireMinimumRole(UserRole.ADMIN), async (req: AuthRequest, res) => {
+  const { id } = req.params;
+  const currentUser = req.user!;
+
+  // ADMIN can only view their own organization's codes
+  if (currentUser.role === 'ADMIN' && currentUser.organizationId !== id) {
+    return res.status(403).json({
+      success: false,
+      error: 'You can only view access codes for your own organization',
+    });
+  }
+
+  const accessCodes = await prisma.organizationAccessCode.findMany({
+    where: { organizationId: id },
+    include: {
+      CreatedBy: {
+        select: {
+          id: true,
+          firstName: true,
+          lastName: true,
+        },
+      },
+    },
+    orderBy: [{ isActive: 'desc' }, { createdAt: 'desc' }],
+  });
+
+  res.json({
+    success: true,
+    data: accessCodes,
+  });
+});
+
+// POST /api/organizations/:id/access-codes - Generate a new role-specific access code
+router.post('/:id/access-codes', authenticate, requireMinimumRole(UserRole.ADMIN), async (req: AuthRequest, res) => {
+  const { id } = req.params;
+  const { role, maxUses } = req.body;
+  const currentUser = req.user!;
+
+  // ADMIN can only create codes for their own organization
+  if (currentUser.role === 'ADMIN' && currentUser.organizationId !== id) {
+    return res.status(403).json({
+      success: false,
+      error: 'You can only create access codes for your own organization',
+    });
+  }
+
+  // Validate role
+  const validRoles = [
+    'SUPERVISOR',
+    'QA_FOOD_SAFETY',
+    'QUALITY_CONTROL_MANAGER',
+    'MAINTENANCE_ENGINEERING',
+    'CI_MANAGER',
+    'SAFETY_SECURITY_MANAGER',
+  ];
+
+  if (!role || !validRoles.includes(role)) {
+    return res.status(400).json({
+      success: false,
+      error: `Invalid role. Must be one of: ${validRoles.join(', ')}`,
+    });
+  }
+
+  // Verify organization exists
+  const organization = await prisma.organization.findUnique({
+    where: { id },
+  });
+
+  if (!organization) {
+    return res.status(404).json({
+      success: false,
+      error: 'Organization not found',
+    });
+  }
+
+  // Generate unique 6-digit code
+  let code: string;
+  let isUnique = false;
+  let attempts = 0;
+  const maxAttempts = 10;
+
+  while (!isUnique && attempts < maxAttempts) {
+    code = Math.floor(100000 + Math.random() * 900000).toString();
+    const existing = await prisma.organizationAccessCode.findUnique({
+      where: { code },
+    });
+    if (!existing) {
+      isUnique = true;
+    }
+    attempts++;
+  }
+
+  if (!isUnique) {
+    return res.status(500).json({
+      success: false,
+      error: 'Failed to generate unique code. Please try again.',
+    });
+  }
+
+  const accessCode = await prisma.organizationAccessCode.create({
+    data: {
+      code: code!,
+      role: role as UserRole,
+      organizationId: id,
+      maxUses: maxUses || 100,
+      createdById: currentUser.id,
+    },
+    include: {
+      CreatedBy: {
+        select: {
+          id: true,
+          firstName: true,
+          lastName: true,
+        },
+      },
+    },
+  });
+
+  res.status(201).json({
+    success: true,
+    data: accessCode,
+    message: `Access code generated for ${role.replace(/_/g, ' ')} role`,
+  });
+});
+
+// PATCH /api/organizations/:orgId/access-codes/:codeId/toggle - Toggle access code active status
+router.patch('/:orgId/access-codes/:codeId/toggle', authenticate, requireMinimumRole(UserRole.ADMIN), async (req: AuthRequest, res) => {
+  const { orgId, codeId } = req.params;
+  const currentUser = req.user!;
+
+  // ADMIN can only manage their own organization's codes
+  if (currentUser.role === 'ADMIN' && currentUser.organizationId !== orgId) {
+    return res.status(403).json({
+      success: false,
+      error: 'You can only manage access codes for your own organization',
+    });
+  }
+
+  const accessCode = await prisma.organizationAccessCode.findFirst({
+    where: {
+      id: codeId,
+      organizationId: orgId,
+    },
+  });
+
+  if (!accessCode) {
+    return res.status(404).json({
+      success: false,
+      error: 'Access code not found',
+    });
+  }
+
+  const updatedCode = await prisma.organizationAccessCode.update({
+    where: { id: codeId },
+    data: { isActive: !accessCode.isActive },
+  });
+
+  res.json({
+    success: true,
+    data: updatedCode,
+    message: `Access code ${updatedCode.isActive ? 'activated' : 'deactivated'}`,
+  });
+});
+
+// DELETE /api/organizations/:orgId/access-codes/:codeId - Delete an access code
+router.delete('/:orgId/access-codes/:codeId', authenticate, requireMinimumRole(UserRole.ADMIN), async (req: AuthRequest, res) => {
+  const { orgId, codeId } = req.params;
+  const currentUser = req.user!;
+
+  // ADMIN can only delete their own organization's codes
+  if (currentUser.role === 'ADMIN' && currentUser.organizationId !== orgId) {
+    return res.status(403).json({
+      success: false,
+      error: 'You can only delete access codes for your own organization',
+    });
+  }
+
+  const accessCode = await prisma.organizationAccessCode.findFirst({
+    where: {
+      id: codeId,
+      organizationId: orgId,
+    },
+  });
+
+  if (!accessCode) {
+    return res.status(404).json({
+      success: false,
+      error: 'Access code not found',
+    });
+  }
+
+  await prisma.organizationAccessCode.delete({
+    where: { id: codeId },
+  });
+
+  res.json({
+    success: true,
+    message: 'Access code deleted successfully',
+  });
+});
+
 export default router;

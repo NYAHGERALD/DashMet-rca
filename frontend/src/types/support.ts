@@ -10,12 +10,26 @@ export type SupportCategory =
   | 'ACCOUNT_ASSISTANCE'
   | 'OTHER';
 
+export type SupportRecipientRole = 'ADMIN' | 'QUALITY_CONTROL_MANAGER';
+
+export interface SupportAttachment {
+  id: string;
+  fileName: string;
+  originalName: string;
+  mimeType: string;
+  size: number;
+  url: string;
+  uploadedAt: string;
+}
+
 export interface SupportRequest {
   id: string;
   subject: string;
   description: string;
   category: SupportCategory;
   status: SupportRequestStatus;
+  recipientRole?: SupportRecipientRole | null;
+  attachments?: SupportAttachment[] | null;
   createdAt: string;
   updatedAt: string;
   resolvedAt?: string | null;
@@ -27,6 +41,7 @@ export interface SupportRequest {
     lastName: string;
     email: string;
     role?: string;
+    profilePicture?: string | null;
   } | null;
   organizationId?: string | null;
   organization?: {

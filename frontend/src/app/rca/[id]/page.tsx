@@ -12,6 +12,8 @@ import CommentPanel from '@/components/rca/CommentPanel';
 import { ChatSidebar } from '@/components/team';
 import { useAuth } from '@/components/providers/AuthProvider';
 import { useWebSocket } from '@/lib/websocket';
+import { usePrivileges, RCA_PRIVILEGES } from '@/lib/usePrivileges';
+import { useAccessDeniedModal, handlePrivilegeError } from '@/components/modals/AccessDeniedModal';
 
 interface Participant {
   id: string;
@@ -123,6 +125,12 @@ export default function RCAWorkspacePage() {
   const rcaId = params.id as string;
   const { user } = useAuth();
   const { connect, onlineUsers, onParticipantsUpdated, onParticipantRoleUpdated, isConnected, joinIncident, leaveIncident } = useWebSocket();
+
+  // Privilege-based access control
+  const { hasPrivilege } = usePrivileges();
+  const canEditRCA = hasPrivilege(RCA_PRIVILEGES.EDIT);
+  const canUseAI = hasPrivilege(RCA_PRIVILEGES.AI_FIVE_WHYS) || hasPrivilege(RCA_PRIVILEGES.AI_FISHBONE);
+  const { showAccessDenied, accessDeniedModal } = useAccessDeniedModal();
 
   // Connect to WebSocket when user is available
   useEffect(() => {
@@ -258,13 +266,18 @@ export default function RCAWorkspacePage() {
       await fetchRCA();
       setShowMethodSelector(false);
     } catch (err: any) {
-      setError(err.response?.data?.error || 'Failed to change method');
+      // Check if this is a privilege error (403)
+      handlePrivilegeError(err, showAccessDenied, setError, 'Change Method');
     } finally {
       setSaving(false);
     }
   };
 
   const handleSaveFiveWhys = async (data: any) => {
+    if (!canEditRCA) {
+      showAccessDenied();
+      return;
+    }
     try {
       setSaving(true);
       await api.patch(`/rca/${rcaId}/five-whys`, {
@@ -273,13 +286,18 @@ export default function RCAWorkspacePage() {
       });
       await fetchRCA();
     } catch (err: any) {
-      setError(err.response?.data?.error || 'Failed to save 5 Whys data');
+      // Check if this is a privilege error (403)
+      handlePrivilegeError(err, showAccessDenied, setError, 'Save 5 Whys');
     } finally {
-      setSaving(false);
+      setSaving(true);
     }
   };
 
   const handleSaveFishbone = async (data: any) => {
+    if (!canEditRCA) {
+      showAccessDenied();
+      return;
+    }
     try {
       setSaving(true);
       await api.patch(`/rca/${rcaId}/fishbone`, {
@@ -288,31 +306,42 @@ export default function RCAWorkspacePage() {
       });
       await fetchRCA();
     } catch (err: any) {
-      setError(err.response?.data?.error || 'Failed to save Fishbone data');
+      // Check if this is a privilege error (403)
+      handlePrivilegeError(err, showAccessDenied, setError, 'Save Fishbone');
     } finally {
       setSaving(false);
     }
   };
 
   const handleValidate = async (rootCauseStatement: string) => {
+    if (!canEditRCA) {
+      showAccessDenied();
+      return;
+    }
     try {
       setSaving(true);
       await api.post(`/rca/${rcaId}/validate`, { rootCauseStatement });
       await fetchRCA();
     } catch (err: any) {
-      setError(err.response?.data?.error || 'Failed to validate RCA');
+      // Check if this is a privilege error (403)
+      handlePrivilegeError(err, showAccessDenied, setError, 'Validate RCA');
     } finally {
       setSaving(false);
     }
   };
 
   const handleReopenRCA = async () => {
+    if (!canEditRCA) {
+      showAccessDenied();
+      return;
+    }
     try {
       setSaving(true);
       await api.post(`/rca/${rcaId}/reopen`, { reason: 'Re-opened for corrections' });
       await fetchRCA();
     } catch (err: any) {
-      setError(err.response?.data?.error || 'Failed to re-open RCA');
+      // Check if this is a privilege error (403)
+      handlePrivilegeError(err, showAccessDenied, setError, 'Reopen RCA');
     } finally {
       setSaving(false);
     }
@@ -323,18 +352,27 @@ export default function RCAWorkspacePage() {
       await api.post(`/rca/${rcaId}/comments`, { content });
       await fetchRCA();
     } catch (err: any) {
-      setError(err.response?.data?.error || 'Failed to add comment');
+      // Check if this is a privilege error (403)
+      handlePrivilegeError(err, showAccessDenied, setError, 'Add Comment');
     }
   };
 
   const handleGenerateCAPA = async () => {
+    if (!hasPrivilege('capa.create')) {
+      showAccessDenied();
+      return;
+    }
     try {
       setGeneratingCAPA(true);
       const response = await api.post(`/capa/generate-from-rca/${rcaId}`);
       setCapaGenerated(true);
-      alert(`${response.data.data.message}. View them in the CAPA Board.`);
+      // Show success toast instead of alert
+      setError(''); // Clear any previous error
+      // The CAPA generation was successful - user will be notified
+      router.push('/capa');
     } catch (err: any) {
-      setError(err.response?.data?.error || 'Failed to generate CAPA actions');
+      // Check if this is a privilege error (403)
+      handlePrivilegeError(err, showAccessDenied, setError, 'Generate CAPA');
     } finally {
       setGeneratingCAPA(false);
     }
@@ -1026,6 +1064,9 @@ export default function RCAWorkspacePage() {
           visibility={rca.incident.visibility}
         />
       )}
+
+      {/* Access Denied Modal */}
+      {accessDeniedModal}
     </div>
   );
 }

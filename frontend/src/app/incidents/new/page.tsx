@@ -10,6 +10,8 @@ import api from '@/lib/api';
 import EvidenceUpload, { StagedFile, uploadStagedEvidence } from '@/components/incidents/EvidenceUpload';
 import AIAnalysisModal from '@/components/AIAnalysisModal';
 import IncidentSubmissionModal from '@/components/IncidentSubmissionModal';
+import { usePrivileges, INCIDENTS_PRIVILEGES } from '@/lib/usePrivileges';
+import { useAccessDeniedModal, handlePrivilegeError } from '@/components/modals/AccessDeniedModal';
 
 interface Category {
   id: string;
@@ -123,6 +125,24 @@ function NewIncidentPageContent() {
   const searchParams = useSearchParams();
   const editIncidentId = searchParams.get('edit');
   const sectionParam = searchParams.get('section');
+  
+  // Privilege-based access control
+  const { hasPrivilege, loading: privilegesLoading } = usePrivileges();
+  const canCreateIncident = hasPrivilege(INCIDENTS_PRIVILEGES.CREATE);
+  const canEditIncident = hasPrivilege(INCIDENTS_PRIVILEGES.EDIT);
+  const { modal: accessDeniedModal, showAccessDenied } = useAccessDeniedModal();
+  const [showAccessDeniedLocal, setShowAccessDeniedLocal] = useState(false);
+  
+  // Check privilege on mount
+  useEffect(() => {
+    if (!privilegesLoading && !editIncidentId && !canCreateIncident) {
+      setShowAccessDeniedLocal(true);
+      showAccessDenied('Create Incident Report', INCIDENTS_PRIVILEGES.CREATE);
+    } else if (!privilegesLoading && editIncidentId && !canEditIncident) {
+      setShowAccessDeniedLocal(true);
+      showAccessDenied('Edit Incident Report', INCIDENTS_PRIVILEGES.EDIT);
+    }
+  }, [privilegesLoading, editIncidentId, canCreateIncident, canEditIncident, showAccessDenied]);
   
   // Edit mode state
   const [isEditMode, setIsEditMode] = useState(false);
@@ -1379,7 +1399,10 @@ function NewIncidentPageContent() {
         }
       }
     } catch (err: any) {
-      setError(err.response?.data?.error || 'Failed to create incident');
+      // Check if this is a privilege error (403)
+      if (!handlePrivilegeError(err, showAccessDenied, setError, 'Create Incident')) {
+        // Not a privilege error - already handled by setError fallback
+      }
       setLoading(false);
       setUploadProgress(null);
     }
@@ -1579,7 +1602,8 @@ function NewIncidentPageContent() {
       setIncidentReportSubmitting(false);
       setUploadProgress(null);
     } catch (err: any) {
-      setError(err.response?.data?.error || 'Failed to submit incident report');
+      // Check if this is a privilege error (403)
+      handlePrivilegeError(err, showAccessDenied, setError, 'Submit Incident Report');
       setIncidentReportSubmitting(false);
       setUploadProgress(null);
     }
@@ -1959,6 +1983,9 @@ function NewIncidentPageContent() {
 
   return (
     <ProtectedRoute requireAuth={true}>
+      {/* Access Denied Modal */}
+      {accessDeniedModal}
+      
       {/* AI Analysis Modal */}
       <AIAnalysisModal
         isOpen={aiModalOpen}

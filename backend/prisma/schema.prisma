@@ -832,11 +832,35 @@ model Organization {
   FieldConfiguration      FieldConfiguration[]
   ForeignMaterialIncident ForeignMaterialIncident[]
   Incident                Incident[]
+  OrganizationAccessCode  OrganizationAccessCode[]
+  PrivilegeAuditLog       PrivilegeAuditLog[]
+  RolePrivilege           RolePrivilege[]
   SupportRequest          SupportRequest[]
   User                    User[]
 
   @@index([name])
   @@index([signupCode])
+}
+
+// Role-specific access codes for organizations
+// Each code is linked to a specific role within an organization
+model OrganizationAccessCode {
+  id             String       @id @default(uuid())
+  code           String       @unique
+  role           UserRole
+  organizationId String
+  isActive       Boolean      @default(true)
+  usedCount      Int          @default(0)
+  maxUses        Int          @default(100)
+  createdAt      DateTime     @default(now())
+  updatedAt      DateTime     @updatedAt
+  createdById    String?
+  Organization   Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  CreatedBy      User?        @relation("OrganizationAccessCodeCreator", fields: [createdById], references: [id])
+
+  @@index([code])
+  @@index([organizationId])
+  @@index([role])
 }
 
 model PolicyDocument {
@@ -974,28 +998,66 @@ model ShiftLine {
 }
 
 model SupportRequest {
-  id                                          String               @id @default(uuid())
+  id                                          String                    @id @default(uuid())
   submittedByUserId                           String?
   organizationId                              String?
   category                                    SupportCategory
   description                                 String
-  status                                      SupportRequestStatus @default(OPEN)
+  status                                      SupportRequestStatus      @default(OPEN)
   internalNotes                               String?
-  createdAt                                   DateTime             @default(now())
-  updatedAt                                   DateTime @updatedAt
+  createdAt                                   DateTime                  @default(now())
+  updatedAt                                   DateTime                  @updatedAt
   resolvedAt                                  DateTime?
   resolvedByUserId                            String?
   subject                                     String
   submittedByUserEmail                        String?
-  Organization                                Organization?        @relation(fields: [organizationId], references: [id], onDelete: Cascade)
-  User_SupportRequest_resolvedByUserIdToUser  User?                @relation("SupportRequest_resolvedByUserIdToUser", fields: [resolvedByUserId], references: [id])
-  User_SupportRequest_submittedByUserIdToUser User?                @relation("SupportRequest_submittedByUserIdToUser", fields: [submittedByUserId], references: [id], onDelete: Cascade)
+  recipientRole                               SupportRecipientRole?
+  attachments                                 Json?
+  Organization                                Organization?             @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  User_SupportRequest_resolvedByUserIdToUser  User?                     @relation("SupportRequest_resolvedByUserIdToUser", fields: [resolvedByUserId], references: [id])
+  User_SupportRequest_submittedByUserIdToUser User?                     @relation("SupportRequest_submittedByUserIdToUser", fields: [submittedByUserId], references: [id], onDelete: Cascade)
+  AlertDismissals                             SupportRequestAlertDismissal[]
+  StatusNotificationDismissals                SupportStatusNotificationDismissal[]
 
   @@index([category])
   @@index([organizationId])
   @@index([resolvedByUserId])
   @@index([status])
   @@index([submittedByUserId])
+  @@index([recipientRole])
+}
+
+// Tracks which Admin/QC Manager users have dismissed support request alerts
+// This ensures alerts persist until explicitly dismissed, even across logout/login
+model SupportRequestAlertDismissal {
+  id                String          @id @default(uuid())
+  supportRequestId  String
+  userId            String
+  dismissedAt       DateTime        @default(now())
+  
+  SupportRequest    SupportRequest  @relation(fields: [supportRequestId], references: [id], onDelete: Cascade)
+  User              User            @relation("SupportRequestAlertDismissal_User", fields: [userId], references: [id], onDelete: Cascade)
+  
+  @@unique([supportRequestId, userId])
+  @@index([userId])
+  @@index([supportRequestId])
+}
+
+// Tracks which users have dismissed status update notifications
+// This ensures status notifications persist until explicitly dismissed, even across logout/login
+model SupportStatusNotificationDismissal {
+  id                String          @id @default(uuid())
+  supportRequestId  String
+  userId            String
+  status            String          // The status that was notified (IN_PROGRESS, RESOLVED)
+  dismissedAt       DateTime        @default(now())
+  
+  SupportRequest    SupportRequest  @relation(fields: [supportRequestId], references: [id], onDelete: Cascade)
+  User              User            @relation("SupportStatusNotificationDismissal_User", fields: [userId], references: [id], onDelete: Cascade)
+  
+  @@unique([supportRequestId, userId, status])
+  @@index([userId])
+  @@index([supportRequestId])
 }
 
 model User {
@@ -1049,6 +1111,9 @@ model User {
   RCAAnalysis                                                         RCAAnalysis[]
   SupportRequest_SupportRequest_resolvedByUserIdToUser                SupportRequest[]          @relation("SupportRequest_resolvedByUserIdToUser")
   SupportRequest_SupportRequest_submittedByUserIdToUser               SupportRequest[]          @relation("SupportRequest_submittedByUserIdToUser")
+  SupportRequestAlertDismissals                                       SupportRequestAlertDismissal[] @relation("SupportRequestAlertDismissal_User")
+  SupportStatusNotificationDismissals                                 SupportStatusNotificationDismissal[] @relation("SupportStatusNotificationDismissal_User")
+  OrganizationAccessCode                                              OrganizationAccessCode[]  @relation("OrganizationAccessCodeCreator")
   Organization                                                        Organization?             @relation(fields: [organizationId], references: [id], onDelete: Cascade)
 
   @@index([email])
@@ -1244,6 +1309,130 @@ enum RCAStatus {
   COMPLETED
 }
 
+// ============================================================================
+// PRIVILEGE MANAGEMENT SYSTEM
+// ============================================================================
+
+// Feature modules that can have privileges controlled
+enum FeatureModule {
+  INCIDENTS
+  RCA
+  CAPA
+  FMIR
+  WORKPLACE_REPORT
+  INVESTIGATION_REPORT
+  KNOWLEDGE_BASE
+  ANALYTICS
+  REPORTS
+  ADMIN
+  SYSTEM
+  CHAT
+  NOTIFICATIONS
+}
+
+// Types of actions that can be controlled
+enum PrivilegeAction {
+  VIEW
+  CREATE
+  EDIT
+  DELETE
+  MANAGE
+  APPROVE
+  EXECUTE
+  EXPORT
+}
+
+// Role-based privilege configuration for an organization
+model RolePrivilege {
+  id             String          @id @default(uuid())
+  organizationId String
+  role           UserRole
+  module         FeatureModule
+  featureKey     String          // e.g., "incidents.view_all", "fmir.delete"
+  action         PrivilegeAction
+  isEnabled      Boolean         @default(true)
+  description    String?
+  createdAt      DateTime        @default(now())
+  updatedAt      DateTime        @updatedAt
+  createdById    String?
+  
+  Organization   Organization    @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+
+  @@unique([organizationId, role, featureKey])
+  @@index([organizationId])
+  @@index([role])
+  @@index([module])
+  @@index([featureKey])
+}
+
+// System-wide default privileges (template for new organizations)
+model DefaultPrivilege {
+  id          String          @id @default(uuid())
+  role        UserRole
+  module      FeatureModule
+  featureKey  String          // e.g., "incidents.view_all", "fmir.delete"
+  action      PrivilegeAction
+  isEnabled   Boolean         @default(true)
+  description String?
+  displayName String?         // Human-readable name for UI
+  category    String?         // Grouping category for UI
+  sortOrder   Int             @default(0)
+  createdAt   DateTime        @default(now())
+  updatedAt   DateTime        @updatedAt
+
+  @@unique([role, featureKey])
+  @@index([role])
+  @@index([module])
+  @@index([featureKey])
+}
+
+// Audit log for privilege changes - tracks all modifications for compliance
+model PrivilegeAuditLog {
+  id             String          @id @default(uuid())
+  organizationId String
+  
+  // What was changed
+  role           UserRole
+  module         FeatureModule
+  featureKey     String          // e.g., "fmir.delete_visible"
+  action         PrivilegeAction
+  displayName    String?         // Human-readable name at time of change
+  
+  // The change
+  previousValue  Boolean         // Value before change
+  newValue       Boolean         // Value after change
+  changeType     String          // "enable", "disable", "reset", "bulk_update", "revert"
+  
+  // Who made the change
+  changedById    String
+  changedByName  String          // Store name for historical reference
+  changedByRole  UserRole        // Role of user who made change
+  
+  // When
+  changedAt      DateTime        @default(now())
+  
+  // Revert tracking
+  isReverted     Boolean         @default(false)
+  revertedAt     DateTime?
+  revertedById   String?
+  revertedByName String?
+  revertLogId    String?         // Links to the revert audit log entry
+  
+  // Additional context
+  description    String?         // Optional description of why change was made
+  ipAddress      String?         // IP address of the requester
+  userAgent      String?         // Browser/client info
+  
+  Organization   Organization    @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  
+  @@index([organizationId])
+  @@index([role])
+  @@index([featureKey])
+  @@index([changedById])
+  @@index([changedAt])
+  @@index([isReverted])
+}
+
 enum Region {
   USA
   MEXICO
@@ -1267,6 +1456,11 @@ enum SupportCategory {
   OTHER
 }
 
+enum SupportRecipientRole {
+  ADMIN
+  QUALITY_CONTROL_MANAGER
+}
+
 enum SupportRequestStatus {
   OPEN
   IN_PROGRESS
@@ -1284,6 +1478,7 @@ enum UserRole {
   OPERATOR
   SUPERVISOR
   QA_FOOD_SAFETY
+  QUALITY_CONTROL_MANAGER
   MAINTENANCE_ENGINEERING
   CI_MANAGER
   ADMIN

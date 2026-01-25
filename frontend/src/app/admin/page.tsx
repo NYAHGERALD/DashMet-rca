@@ -31,6 +31,7 @@ interface UserStats {
 const AVAILABLE_ROLES = [
   { value: 'SUPERVISOR', label: 'Supervisor' },
   { value: 'QA_FOOD_SAFETY', label: 'QA / Food Safety' },
+  { value: 'QUALITY_CONTROL_MANAGER', label: 'Quality Control Manager' },
   { value: 'MAINTENANCE_ENGINEERING', label: 'Maintenance / Engineering' },
   { value: 'CI_MANAGER', label: 'CI / Manager' },
   { value: 'SAFETY_SECURITY_MANAGER', label: 'Safety & Security Manager' },

@@ -104,3 +104,16 @@ Thumbs.db
 # Excel files (data exports)
 *.xlsx
 ~$*
+
+# Log files
+*.log
+frontend.log
+backend.log
+dev-output.log
+
+# SQL backup files  
+*.sql
+render_backup.sql
+
+# Build outputs
+dist/

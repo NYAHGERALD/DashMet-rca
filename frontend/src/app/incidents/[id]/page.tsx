@@ -10,6 +10,8 @@ import { useAuth } from '@/components/providers/AuthProvider';
 import { ChatSidebar } from '@/components/team';
 import { useWebSocket } from '@/lib/websocket';
 import AIAnalysisModal from '@/components/AIAnalysisModal';
+import { usePrivileges, INCIDENTS_PRIVILEGES, RCA_PRIVILEGES } from '@/lib/usePrivileges';
+import { useAccessDeniedModal, handlePrivilegeError } from '@/components/modals/AccessDeniedModal';
 
 interface Participant {
   id: string;
@@ -246,6 +248,14 @@ export default function IncidentDetailPage() {
   const router = useRouter();
   const { user } = useAuth();
   const incidentId = params.id as string;
+
+  // Privilege-based access control
+  const { hasPrivilege } = usePrivileges();
+  const canEditIncident = hasPrivilege(INCIDENTS_PRIVILEGES.EDIT);
+  const canDeleteEvidence = hasPrivilege(INCIDENTS_PRIVILEGES.EDIT); // Editing includes evidence management
+  const canCreateRCA = hasPrivilege(RCA_PRIVILEGES.CREATE);
+  const canUseAIAnalysis = hasPrivilege(INCIDENTS_PRIVILEGES.AI_ANALYSIS);
+  const { modal: accessDeniedModal, showAccessDenied } = useAccessDeniedModal();
 
   // WebSocket for team collaboration
   const { connect, isConnected, joinIncident, leaveIncident, onlineUsers, onParticipantsUpdated, onParticipantRoleUpdated, onInvitationDeclined, onVisibilityChanged } = useWebSocket();
@@ -507,10 +517,14 @@ export default function IncidentDetailPage() {
       }
     } catch (err: any) {
       console.error('Failed to regenerate AI insights:', err);
-      if (err.code === 'ECONNABORTED' || err.message?.includes('timeout')) {
-        setError('AI analysis timed out. This can happen with many or complex images. Please try again.');
-      } else {
-        setError(err.response?.data?.error || 'Failed to regenerate AI insights. Please try again.');
+      // Check if this is a privilege error (403)
+      if (!handlePrivilegeError(err, showAccessDenied, undefined, 'AI Analysis')) {
+        // Not a privilege error - show appropriate message
+        if (err.code === 'ECONNABORTED' || err.message?.includes('timeout')) {
+          setError('AI analysis timed out. This can happen with many or complex images. Please try again.');
+        } else {
+          setError(err.response?.data?.error || 'Failed to regenerate AI insights. Please try again.');
+        }
       }
     } finally {
       setRegeneratingAI(false);
@@ -558,7 +572,8 @@ export default function IncidentDetailPage() {
       });
       router.push(`/rca/${response.data.data.id}`);
     } catch (err: any) {
-      setError(err.response?.data?.error || 'Failed to start RCA');
+      // Check if this is a privilege error (403)
+      handlePrivilegeError(err, showAccessDenied, setError, 'Start RCA');
       setStartingRCA(false);
     }
   };
@@ -660,7 +675,8 @@ export default function IncidentDetailPage() {
         Evidence: prev.Evidence.filter((ev: any) => ev.id !== evidenceId)
       } : null);
     } catch (err: any) {
-      setError(err.response?.data?.error || 'Failed to delete evidence');
+      // Check if this is a privilege error (403)
+      handlePrivilegeError(err, showAccessDenied, setError, 'Delete Evidence');
     } finally {
       setDeletingEvidenceId(null);
     }
@@ -768,6 +784,9 @@ export default function IncidentDetailPage() {
 
   return (
     <div className="min-h-screen bg-gray-50 dark:bg-gray-900">
+      {/* Access Denied Modal */}
+      {accessDeniedModal}
+      
       {/* AI Analysis Modal for Regeneration */}
       <AIAnalysisModal
         isOpen={aiModalOpen}

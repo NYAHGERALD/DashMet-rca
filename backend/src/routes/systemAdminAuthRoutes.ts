@@ -1,7 +1,11 @@
-import { Router, Response, Request } from 'express';
+/**
+ * Public System Admin Authentication Routes
+ * These routes do NOT require authentication - they are used to verify
+ * credentials before login
+ */
+import { Router, Request, Response } from 'express';
 import { PrismaClient } from '@prisma/client';
-import { authenticate, AuthRequest } from '../middleware/auth';
-import { auth } from '../config/firebase-admin';
+import { adminAuth } from '../config/firebase-admin';
 import crypto from 'crypto';
 
 const router = Router();
@@ -19,7 +23,6 @@ function isAccountLocked(identifier: string): { locked: boolean; remainingMinute
   
   const now = new Date();
   if (now >= attempts.lockedUntil) {
-    // Lockout expired, reset
     loginAttempts.delete(identifier);
     return { locked: false };
   }
@@ -61,7 +64,7 @@ async function logSecurityEvent(
   try {
     await prisma.auditLog.create({
       data: {
-        action: success ? 'VIEW' : 'UPDATE', // Reuse existing AuditAction enum
+        action: success ? 'VIEW' : 'UPDATE',
         entity: 'SYSTEM_ADMIN_AUTH',
         entityId: 'system-admin-portal',
         changes: {
@@ -80,7 +83,7 @@ async function logSecurityEvent(
   }
 }
 
-// Verify master key matches environment variable
+// Verify master key matches environment variable - PUBLIC endpoint
 router.post('/verify-master-key', async (req: Request, res: Response) => {
   try {
     const { masterKey, email } = req.body;
@@ -151,14 +154,19 @@ router.post('/verify-master-key', async (req: Request, res: Response) => {
   }
 });
 
-// Full System Admin authentication
+// Full System Admin authentication - PUBLIC endpoint
 router.post('/authenticate', async (req: Request, res: Response) => {
   try {
     const { firebaseToken, masterKey } = req.body;
     const ipAddress = req.headers['x-forwarded-for']?.toString() || req.socket.remoteAddress || 'unknown';
     const userAgent = req.headers['user-agent'] || 'unknown';
 
+    console.log('[System Admin Auth] Starting authentication...');
+    console.log('[System Admin Auth] Firebase token length:', firebaseToken?.length || 0);
+    console.log('[System Admin Auth] Master key length:', masterKey?.length || 0);
+
     if (!firebaseToken || !masterKey) {
+      console.log('[System Admin Auth] Missing credentials');
       return res.status(400).json({
         success: false,
         error: 'Missing required authentication credentials',
@@ -168,8 +176,10 @@ router.post('/authenticate', async (req: Request, res: Response) => {
     // Verify Firebase token first
     let decodedToken;
     try {
-      decodedToken = await auth.verifyIdToken(firebaseToken);
+      decodedToken = await adminAuth.verifyIdToken(firebaseToken);
+      console.log('[System Admin Auth] Firebase token verified for:', decodedToken.email);
     } catch (error) {
+      console.log('[System Admin Auth] Firebase token verification failed:', error);
       await logSecurityEvent('AUTH_INVALID_TOKEN', 'unknown', false, ipAddress, userAgent);
       return res.status(401).json({
         success: false,
@@ -196,6 +206,10 @@ router.post('/authenticate', async (req: Request, res: Response) => {
 
     // Verify master key
     const systemMasterKey = process.env.SYSTEM_ADMIN_MASTER_KEY;
+    console.log('[System Admin Auth] System master key configured:', !!systemMasterKey);
+    console.log('[System Admin Auth] Provided master key length:', masterKey.length);
+    console.log('[System Admin Auth] System master key length:', systemMasterKey?.length || 0);
+    
     if (!systemMasterKey) {
       return res.status(500).json({
         success: false,
@@ -209,6 +223,8 @@ router.post('/authenticate', async (req: Request, res: Response) => {
     const isValidMasterKey = masterKeyBuffer.length === systemKeyBuffer.length && 
                             crypto.timingSafeEqual(masterKeyBuffer, systemKeyBuffer);
 
+    console.log('[System Admin Auth] Master key valid:', isValidMasterKey);
+
     if (!isValidMasterKey) {
       const attemptResult = recordFailedAttempt(identifier);
       await logSecurityEvent('AUTH_INVALID_MASTER_KEY', email || 'unknown', false, ipAddress, userAgent);
@@ -220,6 +236,7 @@ router.post('/authenticate', async (req: Request, res: Response) => {
     }
 
     // Check user exists and is SYSTEM_ADMIN
+    console.log('[System Admin Auth] Looking for user with email:', email, 'or firebaseUid:', firebaseUid);
     const user = await prisma.user.findFirst({
       where: {
         OR: [
@@ -231,11 +248,21 @@ router.post('/authenticate', async (req: Request, res: Response) => {
       },
     });
 
+    console.log('[System Admin Auth] User found:', !!user, user?.role);
+
     if (!user) {
       await logSecurityEvent('AUTH_NOT_SYSTEM_ADMIN', email || 'unknown', false, ipAddress, userAgent);
       return res.status(403).json({
         success: false,
         error: 'Access denied. This portal is restricted to System Administrators.',
+      });
+    }
+
+    // Update firebaseUid if not set
+    if (!user.firebaseUid && firebaseUid) {
+      await prisma.user.update({
+        where: { id: user.id },
+        data: { firebaseUid },
       });
     }
 
@@ -248,7 +275,7 @@ router.post('/authenticate', async (req: Request, res: Response) => {
     // Update last login
     await prisma.user.update({
       where: { id: user.id },
-      data: { lastLogin: new Date() },
+      data: { lastLoginAt: new Date() },
     });
 
     res.json({
@@ -266,229 +293,6 @@ router.post('/authenticate', async (req: Request, res: Response) => {
     res.status(500).json({
       success: false,
       error: 'Authentication failed',
-    });
-  }
-});
-
-// Get recent access logs (protected, SYSTEM_ADMIN only)
-router.get('/access-logs', authenticate, async (req: AuthRequest, res: Response) => {
-  try {
-    const currentUser = req.user!;
-    
-    if (currentUser.role !== 'SYSTEM_ADMIN') {
-      return res.status(403).json({
-        success: false,
-        error: 'Access denied',
-      });
-    }
-
-    const logs = await prisma.auditLog.findMany({
-      where: {
-        entity: 'SYSTEM_ADMIN_AUTH',
-      },
-      orderBy: {
-        createdAt: 'desc',
-      },
-      take: 100,
-    });
-
-    res.json({
-      success: true,
-      data: logs,
-    });
-  } catch (error) {
-    console.error('Error fetching access logs:', error);
-    res.status(500).json({
-      success: false,
-      error: 'Failed to fetch access logs',
-    });
-  }
-});
-
-// System Admin Dashboard Stats - SYSTEM_ADMIN only
-router.get('/dashboard/stats', authenticate, async (req: AuthRequest, res: Response) => {
-  try {
-    const currentUser = req.user!;
-    
-    // Only SYSTEM_ADMIN can access this endpoint
-    if (currentUser.role !== 'SYSTEM_ADMIN') {
-      return res.status(403).json({
-        success: false,
-        error: 'Access denied. System Administrator access required.',
-      });
-    }
-
-    // Get date ranges
-    const now = new Date();
-    const startOfMonth = new Date(now.getFullYear(), now.getMonth(), 1);
-    const thirtyDaysAgo = new Date(now.getTime() - 30 * 24 * 60 * 60 * 1000);
-    
-    // Fetch all stats in parallel
-    const [
-      totalOrganizations,
-      activeOrganizations,
-      totalUsers,
-      activeUsers,
-      newUsersThisMonth,
-      openSupportRequests,
-      totalSupportRequests,
-      totalAccessCodes,
-      usedAccessCodes,
-      usersByRole,
-      supportByCategory,
-    ] = await Promise.all([
-      // Total organizations
-      prisma.organization.count(),
-      
-      // Active organizations (has at least one user)
-      prisma.organization.count({
-        where: {
-          User: {
-            some: {},
-          },
-        },
-      }),
-      
-      // Total users
-      prisma.user.count(),
-      
-      // Active users (logged in within last 30 days - approximate by checking recent incidents or just count all for now)
-      prisma.user.count({
-        where: {
-          isActive: true,
-        },
-      }),
-      
-      // New users this month
-      prisma.user.count({
-        where: {
-          createdAt: {
-            gte: startOfMonth,
-          },
-        },
-      }),
-      
-      // Open support requests
-      prisma.supportRequest.count({
-        where: {
-          status: 'OPEN',
-        },
-      }),
-      
-      // Total support requests
-      prisma.supportRequest.count(),
-      
-      // Total access codes
-      prisma.accessCode.count(),
-      
-      // Used access codes
-      prisma.accessCode.count({
-        where: {
-          usedCount: {
-            gt: 0,
-          },
-        },
-      }),
-      
-      // Users grouped by role
-      prisma.user.groupBy({
-        by: ['role'],
-        _count: {
-          id: true,
-        },
-      }),
-      
-      // Support requests by category
-      prisma.supportRequest.groupBy({
-        by: ['category'],
-        _count: {
-          id: true,
-        },
-      }),
-    ]);
-
-    // Generate user growth trend (last 6 months)
-    const userGrowth = [];
-    for (let i = 5; i >= 0; i--) {
-      const monthStart = new Date(now.getFullYear(), now.getMonth() - i, 1);
-      const monthEnd = new Date(now.getFullYear(), now.getMonth() - i + 1, 0);
-      const monthName = monthStart.toLocaleString('default', { month: 'short' });
-      
-      const [usersCount, orgsCount] = await Promise.all([
-        prisma.user.count({
-          where: {
-            createdAt: {
-              lte: monthEnd,
-            },
-          },
-        }),
-        prisma.organization.count({
-          where: {
-            createdAt: {
-              lte: monthEnd,
-            },
-          },
-        }),
-      ]);
-      
-      userGrowth.push({
-        name: monthName,
-        users: usersCount,
-        orgs: orgsCount,
-      });
-    }
-
-    // Format users by role for pie chart
-    const usersByRoleFormatted = usersByRole.map(item => ({
-      name: item.role.replace(/_/g, ' '),
-      value: item._count.id,
-    }));
-
-    // Format support by category for bar chart
-    const supportRequestsByCategory = supportByCategory.map(item => ({
-      name: item.category || 'Other',
-      value: item._count.id,
-    }));
-
-    // Organizations by status (using user count as proxy for active)
-    const organizationsByStatus = [
-      { name: 'Active', value: activeOrganizations },
-      { name: 'Inactive', value: totalOrganizations - activeOrganizations },
-    ].filter(item => item.value > 0);
-
-    const stats = {
-      // Platform overview
-      totalOrganizations,
-      activeOrganizations,
-      totalUsers,
-      activeUsers,
-      newUsersThisMonth,
-      
-      // Support
-      openSupportRequests,
-      totalSupportRequests,
-      avgResponseTime: 0, // Would need more complex calculation
-      
-      // Access codes
-      totalAccessCodes,
-      usedAccessCodes,
-      
-      // Trends
-      userGrowth,
-      organizationsByStatus,
-      supportRequestsByCategory,
-      usersByRole: usersByRoleFormatted,
-    };
-
-    res.json({
-      success: true,
-      data: stats,
-    });
-  } catch (error) {
-    console.error('Error fetching system admin dashboard stats:', error);
-    res.status(500).json({
-      success: false,
-      error: 'Failed to fetch system admin dashboard stats',
     });
   }
 });

@@ -5,7 +5,7 @@
 
 import { Router, Response } from 'express';
 import { authenticate, AuthRequest } from '../middleware/auth';
-import { requireMinimumRole, requireRoles } from '../middleware/rbac';
+import { requireMinimumRole, requireRoles, requirePrivilege } from '../middleware/rbac';
 import { UserRole, ActionStatus, ActionType, ActionPriority } from '@prisma/client';
 import { prisma } from '../utils/prisma';
 import { ValidationError } from '../middleware/errorHandler';
@@ -274,7 +274,7 @@ router.get('/:id', async (req: AuthRequest, res: Response) => {
  * POST /api/capa
  * Create a new CAPA action
  */
-router.post('/', async (req: AuthRequest, res: Response) => {
+router.post('/', requirePrivilege('capa.create'), async (req: AuthRequest, res: Response) => {
   try {
     const {
       rcaAnalysisId,
@@ -385,7 +385,7 @@ router.post('/', async (req: AuthRequest, res: Response) => {
  * PATCH /api/capa/:id
  * Update a CAPA action
  */
-router.patch('/:id', async (req: AuthRequest, res: Response) => {
+router.patch('/:id', requirePrivilege('capa.edit'), async (req: AuthRequest, res: Response) => {
   try {
     const { id } = req.params;
     const {

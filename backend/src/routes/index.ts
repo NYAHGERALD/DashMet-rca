@@ -28,7 +28,9 @@ import investigationReportRoutes from './investigationReportRoutes';
 import translationRoutes from './translationRoutes';
 import powerpointRoutes from './powerpointRoutes';
 import systemAdminRoutes from './systemAdminRoutes';
+import systemAdminAuthRoutes from './systemAdminAuthRoutes';
 import fmirRoutes from './fmirRoutes';
+import privilegeRoutes from './privilegeRoutes';
 
 const router = Router();
 
@@ -71,6 +73,10 @@ router.use('/grammar', grammarRoutes);
 
 // Public policy routes (Privacy/Terms/Cookie/Security)
 router.use('/policies', policyRoutes);
+
+// System Admin Authentication - PUBLIC, no auth required
+// MUST be defined early before any authenticated routes
+router.use('/system-admin-auth', systemAdminAuthRoutes);
 
 // Support request routes
 router.use('/support', supportRoutes);
@@ -141,5 +147,8 @@ router.use('/powerpoint', powerpointRoutes);
 
 // Foreign Material Incident Report routes
 router.use('/fmir', fmirRoutes);
+
+// Privilege Management routes (Role-based access control)
+router.use('/privileges', privilegeRoutes);
 
 export default router;

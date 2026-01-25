@@ -113,6 +113,12 @@ interface WebSocketContextType {
   onFmirCommentAdded: (callback: (data: { reportId: string; reportNumber: string; comment: any; addedByName: string }) => void) => () => void;
   // FMIR comment deleted event handler (for real-time comment sync)
   onFmirCommentDeleted: (callback: (data: { reportId: string; reportNumber: string; commentId: string; sectionNumber: number; deletedByName: string }) => void) => () => void;
+  // Privilege changed event handler (for real-time privilege updates)
+  onPrivilegeChanged: (callback: (data: { organizationId: string; changedBy: string; changedAt: string; affectedRoles?: string[]; affectedUsers?: string[]; changes?: any }) => void) => () => void;
+  // Support request notification (for Admin/QC Manager real-time alerts)
+  onSupportNewRequest: (callback: (data: { id: string; subject: string; description: string; category: string; recipientRole: string | null; status: string; createdAt: string; submittedByUser: any; submittedByUserEmail: string; hasAttachments: boolean }) => void) => () => void;
+  // Support request status changed notification (for users who submitted requests)
+  onSupportStatusChanged: (callback: (data: { id: string; subject: string; status: string; previousStatus: string; message: string; resolvedBy: { id: string; firstName: string; lastName: string } | null; updatedAt: string }) => void) => () => void;
 }
 
 const WebSocketContext = createContext<WebSocketContextType | null>(null);
@@ -156,6 +162,9 @@ export function WebSocketProvider({ children }: { children: React.ReactNode }) {
   const fmirAuditProgressCallbacks = useRef<Set<(data: any) => void>>(new Set());
   const fmirCommentAddedCallbacks = useRef<Set<(data: any) => void>>(new Set());
   const fmirCommentDeletedCallbacks = useRef<Set<(data: any) => void>>(new Set());
+  const privilegeChangedCallbacks = useRef<Set<(data: any) => void>>(new Set());
+  const supportNewRequestCallbacks = useRef<Set<(data: any) => void>>(new Set());
+  const supportStatusChangedCallbacks = useRef<Set<(data: any) => void>>(new Set());
 
   const connect = useCallback((userId: string, organizationId: string) => {
     // Prevent multiple connection attempts
@@ -402,6 +411,24 @@ export function WebSocketProvider({ children }: { children: React.ReactNode }) {
       fmirCommentDeletedCallbacks.current.forEach(cb => cb(data));
     });
 
+    // Handle privilege changed (real-time privilege updates)
+    newSocket.on('privilege:changed', (data: any) => {
+      console.log('🔐 Privilege changed event:', data);
+      privilegeChangedCallbacks.current.forEach(cb => cb(data));
+    });
+
+    // Handle new support request (real-time notification for Admin/QC Manager)
+    newSocket.on('support:new-request', (data: any) => {
+      console.log('📬 New support request event:', data);
+      supportNewRequestCallbacks.current.forEach(cb => cb(data));
+    });
+
+    // Handle support request status changed (real-time notification for user who submitted)
+    newSocket.on('support:status-changed', (data: any) => {
+      console.log('📬 Support request status changed event:', data);
+      supportStatusChangedCallbacks.current.forEach(cb => cb(data));
+    });
+
     // Handle incident participants list
     newSocket.on('incident:participants', (data: { incidentId: string; participants: any[] }) => {
       const onlineIds = data.participants.filter(p => p.isOnline).map(p => p.id);
@@ -623,6 +650,21 @@ export function WebSocketProvider({ children }: { children: React.ReactNode }) {
     return () => { fmirCommentDeletedCallbacks.current.delete(callback); };
   }, []);
 
+  const onPrivilegeChanged = useCallback((callback: (data: any) => void) => {
+    privilegeChangedCallbacks.current.add(callback);
+    return () => { privilegeChangedCallbacks.current.delete(callback); };
+  }, []);
+
+  const onSupportNewRequest = useCallback((callback: (data: any) => void) => {
+    supportNewRequestCallbacks.current.add(callback);
+    return () => { supportNewRequestCallbacks.current.delete(callback); };
+  }, []);
+
+  const onSupportStatusChanged = useCallback((callback: (data: any) => void) => {
+    supportStatusChangedCallbacks.current.add(callback);
+    return () => { supportStatusChangedCallbacks.current.delete(callback); };
+  }, []);
+
   // Cleanup on unmount
   useEffect(() => {
     return () => {
@@ -678,6 +720,9 @@ export function WebSocketProvider({ children }: { children: React.ReactNode }) {
         onFmirAuditProgress,
         onFmirCommentAdded,
         onFmirCommentDeleted,
+        onPrivilegeChanged,
+        onSupportNewRequest,
+        onSupportStatusChanged,
       }}
     >
       {children}

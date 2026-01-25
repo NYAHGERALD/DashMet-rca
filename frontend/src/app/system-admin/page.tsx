@@ -7,6 +7,7 @@ import api from '@/lib/api';
 import { formatDate } from '@/lib/dateUtils';
 import Link from 'next/link';
 import Image from 'next/image';
+import SlidingSidebar from '@/components/ui/SlidingSidebar';
 
 interface Organization {
   id: string;
@@ -37,7 +38,7 @@ interface AccessCode {
 }
 
 function SystemAdminContent() {
-  const { user } = useAuth();
+  const { user, logout } = useAuth();
   const [organizations, setOrganizations] = useState<Organization[]>([]);
   const [stats, setStats] = useState<SystemStats | null>(null);
   const [accessCodes, setAccessCodes] = useState<AccessCode[]>([]);
@@ -141,6 +142,28 @@ function SystemAdminContent() {
 
   return (
     <div className="min-h-screen bg-gray-50 dark:bg-gray-900">
+      {/* Left Sidebar - Quick Navigation */}
+      <SlidingSidebar
+        title="Quick Navigation"
+        position="left"
+        links={[
+          { href: '/dashboard', icon: '🏠', label: 'Dashboard' },
+          { href: '/system-admin', icon: '🏢', label: 'System Admin Portal' },
+          { href: '/settings', icon: '⚙️', label: 'Settings' },
+        ]}
+      />
+
+      {/* Right Sidebar - System Management */}
+      <SlidingSidebar
+        title="System Management"
+        position="right"
+        links={[
+          { href: '/admin/policies', icon: '📄', label: 'Policies Management' },
+          { href: '/admin/support', icon: '📨', label: 'Support Requests' },
+          { href: '/support-inbox', icon: '📬', label: 'Support Inbox' },
+        ]}
+      />
+
       <nav className="bg-white dark:bg-gray-800 border-b border-gray-200 dark:border-gray-700">
         <div className="px-4 sm:px-6 lg:px-8">
           <div className="flex justify-between h-16">
@@ -148,17 +171,20 @@ function SystemAdminContent() {
               <div className="relative w-8 h-8">
                 <Image src="/images/logo.png" alt="DASHMET Logo" fill className="object-contain" />
               </div>
-              <Link href="/dashboard" className="text-gray-600 dark:text-gray-400 hover:text-gray-900 dark:hover:text-white">
-                ← Back
-              </Link>
               <h1 className="text-2xl font-bold text-gray-900 dark:text-white">
                 System Administration
               </h1>
             </div>
-            <div className="flex items-center">
+            <div className="flex items-center space-x-4">
               <span className="px-2 py-1 text-xs font-medium rounded-full bg-purple-100 text-purple-800 dark:bg-purple-900 dark:text-purple-200">
                 SYSTEM ADMIN ACCESS
               </span>
+              <button
+                onClick={() => logout('/dashmet-control/login')}
+                className="px-3 py-1.5 text-sm font-medium text-gray-600 dark:text-gray-300 hover:text-gray-900 dark:hover:text-white hover:bg-gray-100 dark:hover:bg-gray-700 rounded-md transition-colors"
+              >
+                Logout
+              </button>
             </div>
           </div>
         </div>
@@ -448,7 +474,11 @@ function SystemAdminContent() {
 
 export default function SystemAdminPage() {
   return (
-    <ProtectedRoute requireAuth={true} allowedRoles={['SYSTEM_ADMIN']}>
+    <ProtectedRoute 
+      requireAuth={true} 
+      allowedRoles={['SYSTEM_ADMIN']}
+      loginRedirect="/dashmet-control/login"
+    >
       <SystemAdminContent />
     </ProtectedRoute>
   );

@@ -3,6 +3,9 @@
 import { Response, NextFunction } from 'express';
 import { AuthRequest } from './auth';
 import { ForbiddenError } from './errorHandler';
+import { PrismaClient, UserRole, FeatureModule } from '@prisma/client';
+
+const prisma = new PrismaClient();
 
 // Role hierarchy for permission checking
 export const ROLE_HIERARCHY: Record<string, number> = {
@@ -122,4 +125,254 @@ export function addOrganizationFilter(req: AuthRequest): { organizationId?: stri
 
   // Others only see their organization's data
   return { organizationId: req.user.organizationId };
+}
+
+// ============================================================================
+// PRIVILEGE-BASED ACCESS CONTROL
+// ============================================================================
+
+// Default privilege settings for roles that haven't been customized
+// Maps privilege key to array of roles that have it by default
+// MUST match PRIVILEGE_DEFINITIONS in privilegeRoutes.ts
+const DEFAULT_PRIVILEGES: Record<string, UserRole[]> = {
+  // ============================================================================
+  // INCIDENTS MODULE
+  // ============================================================================
+  'incidents.view': ['OPERATOR', 'SUPERVISOR', 'QA_FOOD_SAFETY', 'QUALITY_CONTROL_MANAGER', 'MAINTENANCE_ENGINEERING', 'SAFETY_SECURITY_MANAGER', 'CI_MANAGER', 'ADMIN', 'SYSTEM_ADMIN'],
+  'incidents.view_all': ['QA_FOOD_SAFETY', 'QUALITY_CONTROL_MANAGER', 'CI_MANAGER', 'ADMIN', 'SYSTEM_ADMIN'],
+  'incidents.create': ['OPERATOR', 'SUPERVISOR', 'QA_FOOD_SAFETY', 'QUALITY_CONTROL_MANAGER', 'MAINTENANCE_ENGINEERING', 'SAFETY_SECURITY_MANAGER', 'CI_MANAGER', 'ADMIN', 'SYSTEM_ADMIN'],
+  'incidents.edit': ['OPERATOR', 'SUPERVISOR', 'QA_FOOD_SAFETY', 'QUALITY_CONTROL_MANAGER', 'MAINTENANCE_ENGINEERING', 'SAFETY_SECURITY_MANAGER', 'CI_MANAGER', 'ADMIN', 'SYSTEM_ADMIN'],
+  'incidents.edit_any': ['CI_MANAGER', 'ADMIN', 'SYSTEM_ADMIN'],
+  'incidents.delete': ['CI_MANAGER', 'ADMIN', 'SYSTEM_ADMIN'],
+  'incidents.assign': ['SUPERVISOR', 'QA_FOOD_SAFETY', 'QUALITY_CONTROL_MANAGER', 'CI_MANAGER', 'ADMIN', 'SYSTEM_ADMIN'],
+  'incidents.change_status': ['SUPERVISOR', 'QA_FOOD_SAFETY', 'QUALITY_CONTROL_MANAGER', 'MAINTENANCE_ENGINEERING', 'CI_MANAGER', 'ADMIN', 'SYSTEM_ADMIN'],
+  'incidents.manage_team': ['SUPERVISOR', 'QA_FOOD_SAFETY', 'QUALITY_CONTROL_MANAGER', 'CI_MANAGER', 'ADMIN', 'SYSTEM_ADMIN'],
+  'incidents.ai_analysis': ['SUPERVISOR', 'QA_FOOD_SAFETY', 'QUALITY_CONTROL_MANAGER', 'MAINTENANCE_ENGINEERING', 'SAFETY_SECURITY_MANAGER', 'CI_MANAGER', 'ADMIN', 'SYSTEM_ADMIN'],
+  'incidents.ai.auto_categorize': ['SUPERVISOR', 'QA_FOOD_SAFETY', 'QUALITY_CONTROL_MANAGER', 'CI_MANAGER', 'ADMIN', 'SYSTEM_ADMIN'],
+  'incidents.ai.suggest_actions': ['SUPERVISOR', 'QA_FOOD_SAFETY', 'QUALITY_CONTROL_MANAGER', 'MAINTENANCE_ENGINEERING', 'SAFETY_SECURITY_MANAGER', 'CI_MANAGER', 'ADMIN', 'SYSTEM_ADMIN'],
+  'incidents.ai.summarize': ['SUPERVISOR', 'QA_FOOD_SAFETY', 'QUALITY_CONTROL_MANAGER', 'CI_MANAGER', 'ADMIN', 'SYSTEM_ADMIN'],
+  'incidents.ai.predict_impact': ['QA_FOOD_SAFETY', 'QUALITY_CONTROL_MANAGER', 'CI_MANAGER', 'ADMIN', 'SYSTEM_ADMIN'],
+
+  // ============================================================================
+  // RCA MODULE
+  // ============================================================================
+  'rca.view': ['SUPERVISOR', 'QA_FOOD_SAFETY', 'QUALITY_CONTROL_MANAGER', 'MAINTENANCE_ENGINEERING', 'SAFETY_SECURITY_MANAGER', 'CI_MANAGER', 'ADMIN', 'SYSTEM_ADMIN'],
+  'rca.create': ['SUPERVISOR', 'QA_FOOD_SAFETY', 'QUALITY_CONTROL_MANAGER', 'MAINTENANCE_ENGINEERING', 'SAFETY_SECURITY_MANAGER', 'CI_MANAGER', 'ADMIN', 'SYSTEM_ADMIN'],
+  'rca.edit': ['SUPERVISOR', 'QA_FOOD_SAFETY', 'QUALITY_CONTROL_MANAGER', 'MAINTENANCE_ENGINEERING', 'SAFETY_SECURITY_MANAGER', 'CI_MANAGER', 'ADMIN', 'SYSTEM_ADMIN'],
+  'rca.validate': ['QA_FOOD_SAFETY', 'QUALITY_CONTROL_MANAGER', 'CI_MANAGER', 'ADMIN', 'SYSTEM_ADMIN'],
+  'rca.ai_analysis': ['SUPERVISOR', 'QA_FOOD_SAFETY', 'QUALITY_CONTROL_MANAGER', 'MAINTENANCE_ENGINEERING', 'SAFETY_SECURITY_MANAGER', 'CI_MANAGER', 'ADMIN', 'SYSTEM_ADMIN'],
+  'rca.ai.five_whys': ['SUPERVISOR', 'QA_FOOD_SAFETY', 'QUALITY_CONTROL_MANAGER', 'MAINTENANCE_ENGINEERING', 'SAFETY_SECURITY_MANAGER', 'CI_MANAGER', 'ADMIN', 'SYSTEM_ADMIN'],
+  'rca.ai.fishbone': ['SUPERVISOR', 'QA_FOOD_SAFETY', 'QUALITY_CONTROL_MANAGER', 'MAINTENANCE_ENGINEERING', 'SAFETY_SECURITY_MANAGER', 'CI_MANAGER', 'ADMIN', 'SYSTEM_ADMIN'],
+  'rca.ai.suggest_causes': ['SUPERVISOR', 'QA_FOOD_SAFETY', 'QUALITY_CONTROL_MANAGER', 'CI_MANAGER', 'ADMIN', 'SYSTEM_ADMIN'],
+  'rca.ai.validation': ['QA_FOOD_SAFETY', 'QUALITY_CONTROL_MANAGER', 'CI_MANAGER', 'ADMIN', 'SYSTEM_ADMIN'],
+  'rca.ai.generate_report': ['SUPERVISOR', 'QA_FOOD_SAFETY', 'QUALITY_CONTROL_MANAGER', 'CI_MANAGER', 'ADMIN', 'SYSTEM_ADMIN'],
+
+  // ============================================================================
+  // CAPA MODULE
+  // ============================================================================
+  'capa.view': ['SUPERVISOR', 'QA_FOOD_SAFETY', 'QUALITY_CONTROL_MANAGER', 'MAINTENANCE_ENGINEERING', 'SAFETY_SECURITY_MANAGER', 'CI_MANAGER', 'ADMIN', 'SYSTEM_ADMIN'],
+  'capa.create': ['SUPERVISOR', 'QA_FOOD_SAFETY', 'QUALITY_CONTROL_MANAGER', 'MAINTENANCE_ENGINEERING', 'SAFETY_SECURITY_MANAGER', 'CI_MANAGER', 'ADMIN', 'SYSTEM_ADMIN'],
+  'capa.edit': ['SUPERVISOR', 'QA_FOOD_SAFETY', 'QUALITY_CONTROL_MANAGER', 'MAINTENANCE_ENGINEERING', 'SAFETY_SECURITY_MANAGER', 'CI_MANAGER', 'ADMIN', 'SYSTEM_ADMIN'],
+  'capa.delete': ['CI_MANAGER', 'ADMIN', 'SYSTEM_ADMIN'],
+  'capa.verify': ['QA_FOOD_SAFETY', 'QUALITY_CONTROL_MANAGER', 'CI_MANAGER', 'ADMIN', 'SYSTEM_ADMIN'],
+  'capa.ai.suggest_actions': ['SUPERVISOR', 'QA_FOOD_SAFETY', 'QUALITY_CONTROL_MANAGER', 'MAINTENANCE_ENGINEERING', 'SAFETY_SECURITY_MANAGER', 'CI_MANAGER', 'ADMIN', 'SYSTEM_ADMIN'],
+  'capa.ai.prioritize': ['SUPERVISOR', 'QA_FOOD_SAFETY', 'QUALITY_CONTROL_MANAGER', 'CI_MANAGER', 'ADMIN', 'SYSTEM_ADMIN'],
+  'capa.ai.effectiveness_prediction': ['QA_FOOD_SAFETY', 'QUALITY_CONTROL_MANAGER', 'CI_MANAGER', 'ADMIN', 'SYSTEM_ADMIN'],
+  'capa.ai.similar_actions': ['SUPERVISOR', 'QA_FOOD_SAFETY', 'QUALITY_CONTROL_MANAGER', 'CI_MANAGER', 'ADMIN', 'SYSTEM_ADMIN'],
+  'capa.ai.generate_report': ['SUPERVISOR', 'QA_FOOD_SAFETY', 'QUALITY_CONTROL_MANAGER', 'CI_MANAGER', 'ADMIN', 'SYSTEM_ADMIN'],
+
+  // ============================================================================
+  // FMIR MODULE - Core Operations
+  // ============================================================================
+  'fmir.view': ['OPERATOR', 'SUPERVISOR', 'QA_FOOD_SAFETY', 'QUALITY_CONTROL_MANAGER', 'MAINTENANCE_ENGINEERING', 'SAFETY_SECURITY_MANAGER', 'CI_MANAGER', 'ADMIN', 'SYSTEM_ADMIN'],
+  'fmir.view_all': ['QA_FOOD_SAFETY', 'QUALITY_CONTROL_MANAGER', 'CI_MANAGER', 'ADMIN', 'SYSTEM_ADMIN'],
+  'fmir.create': ['OPERATOR', 'SUPERVISOR', 'QA_FOOD_SAFETY', 'QUALITY_CONTROL_MANAGER', 'MAINTENANCE_ENGINEERING', 'SAFETY_SECURITY_MANAGER', 'CI_MANAGER', 'ADMIN', 'SYSTEM_ADMIN'],
+  'fmir.edit': ['OPERATOR', 'SUPERVISOR', 'QA_FOOD_SAFETY', 'QUALITY_CONTROL_MANAGER', 'MAINTENANCE_ENGINEERING', 'SAFETY_SECURITY_MANAGER', 'CI_MANAGER', 'ADMIN', 'SYSTEM_ADMIN'],
+  'fmir.edit_any': ['QUALITY_CONTROL_MANAGER', 'CI_MANAGER', 'ADMIN', 'SYSTEM_ADMIN'],
+  'fmir.delete': ['OPERATOR', 'SUPERVISOR', 'QA_FOOD_SAFETY', 'QUALITY_CONTROL_MANAGER', 'MAINTENANCE_ENGINEERING', 'SAFETY_SECURITY_MANAGER', 'CI_MANAGER', 'ADMIN', 'SYSTEM_ADMIN'],
+  'fmir.delete_visible': ['QUALITY_CONTROL_MANAGER', 'ADMIN', 'SYSTEM_ADMIN'],
+
+  // FMIR - Status Management
+  'fmir.submit': ['OPERATOR', 'SUPERVISOR', 'QA_FOOD_SAFETY', 'QUALITY_CONTROL_MANAGER', 'MAINTENANCE_ENGINEERING', 'SAFETY_SECURITY_MANAGER', 'CI_MANAGER', 'ADMIN', 'SYSTEM_ADMIN'],
+  'fmir.change_status': ['QUALITY_CONTROL_MANAGER', 'CI_MANAGER', 'ADMIN', 'SYSTEM_ADMIN'],
+  'fmir.toggle_investigation': ['QUALITY_CONTROL_MANAGER', 'SAFETY_SECURITY_MANAGER', 'ADMIN', 'SYSTEM_ADMIN'],
+  'fmir.close': ['QUALITY_CONTROL_MANAGER', 'SYSTEM_ADMIN'],
+  'fmir.toggle_visibility': ['OPERATOR', 'SUPERVISOR', 'QA_FOOD_SAFETY', 'QUALITY_CONTROL_MANAGER', 'MAINTENANCE_ENGINEERING', 'SAFETY_SECURITY_MANAGER', 'CI_MANAGER', 'ADMIN', 'SYSTEM_ADMIN'],
+
+  // FMIR - Evidence Management
+  'fmir.evidence.upload': ['OPERATOR', 'SUPERVISOR', 'QA_FOOD_SAFETY', 'QUALITY_CONTROL_MANAGER', 'MAINTENANCE_ENGINEERING', 'SAFETY_SECURITY_MANAGER', 'CI_MANAGER', 'ADMIN', 'SYSTEM_ADMIN'],
+  'fmir.evidence.download': ['OPERATOR', 'SUPERVISOR', 'QA_FOOD_SAFETY', 'QUALITY_CONTROL_MANAGER', 'MAINTENANCE_ENGINEERING', 'SAFETY_SECURITY_MANAGER', 'CI_MANAGER', 'ADMIN', 'SYSTEM_ADMIN'],
+  'fmir.evidence.delete': ['OPERATOR', 'SUPERVISOR', 'QA_FOOD_SAFETY', 'QUALITY_CONTROL_MANAGER', 'MAINTENANCE_ENGINEERING', 'SAFETY_SECURITY_MANAGER', 'CI_MANAGER', 'ADMIN', 'SYSTEM_ADMIN'],
+  'fmir.evidence.edit': ['OPERATOR', 'SUPERVISOR', 'QA_FOOD_SAFETY', 'QUALITY_CONTROL_MANAGER', 'MAINTENANCE_ENGINEERING', 'SAFETY_SECURITY_MANAGER', 'CI_MANAGER', 'ADMIN', 'SYSTEM_ADMIN'],
+
+  // FMIR - Collaborator Management
+  'fmir.collaborators.view': ['OPERATOR', 'SUPERVISOR', 'QA_FOOD_SAFETY', 'QUALITY_CONTROL_MANAGER', 'MAINTENANCE_ENGINEERING', 'SAFETY_SECURITY_MANAGER', 'CI_MANAGER', 'ADMIN', 'SYSTEM_ADMIN'],
+  'fmir.collaborators.add': ['OPERATOR', 'SUPERVISOR', 'QA_FOOD_SAFETY', 'QUALITY_CONTROL_MANAGER', 'MAINTENANCE_ENGINEERING', 'SAFETY_SECURITY_MANAGER', 'CI_MANAGER', 'ADMIN', 'SYSTEM_ADMIN'],
+  'fmir.collaborators.remove': ['OPERATOR', 'SUPERVISOR', 'QA_FOOD_SAFETY', 'QUALITY_CONTROL_MANAGER', 'MAINTENANCE_ENGINEERING', 'SAFETY_SECURITY_MANAGER', 'CI_MANAGER', 'ADMIN', 'SYSTEM_ADMIN'],
+
+  // FMIR - AI Features
+  'fmir.ai.validate_submit': ['OPERATOR', 'SUPERVISOR', 'QA_FOOD_SAFETY', 'QUALITY_CONTROL_MANAGER', 'MAINTENANCE_ENGINEERING', 'SAFETY_SECURITY_MANAGER', 'CI_MANAGER', 'ADMIN', 'SYSTEM_ADMIN'],
+  'fmir.ai.validate_lock': ['QA_FOOD_SAFETY', 'QUALITY_CONTROL_MANAGER', 'ADMIN', 'SYSTEM_ADMIN'],
+  'fmir.ai.explain_regulation': ['OPERATOR', 'SUPERVISOR', 'QA_FOOD_SAFETY', 'QUALITY_CONTROL_MANAGER', 'MAINTENANCE_ENGINEERING', 'SAFETY_SECURITY_MANAGER', 'CI_MANAGER', 'ADMIN', 'SYSTEM_ADMIN'],
+  'fmir.ai.enhance_text': ['OPERATOR', 'SUPERVISOR', 'QA_FOOD_SAFETY', 'QUALITY_CONTROL_MANAGER', 'MAINTENANCE_ENGINEERING', 'SAFETY_SECURITY_MANAGER', 'CI_MANAGER', 'ADMIN', 'SYSTEM_ADMIN'],
+  'fmir.ai.generate_audit': ['QUALITY_CONTROL_MANAGER', 'ADMIN', 'SYSTEM_ADMIN'],
+
+  // FMIR - Comments
+  'fmir.comments.view': ['OPERATOR', 'SUPERVISOR', 'QA_FOOD_SAFETY', 'QUALITY_CONTROL_MANAGER', 'MAINTENANCE_ENGINEERING', 'SAFETY_SECURITY_MANAGER', 'CI_MANAGER', 'ADMIN', 'SYSTEM_ADMIN'],
+  'fmir.comments.add': ['QA_FOOD_SAFETY', 'QUALITY_CONTROL_MANAGER', 'CI_MANAGER', 'ADMIN', 'SYSTEM_ADMIN'],
+  'fmir.comments.delete': ['QA_FOOD_SAFETY', 'QUALITY_CONTROL_MANAGER', 'CI_MANAGER', 'ADMIN', 'SYSTEM_ADMIN'],
+  'fmir.comments.delete_any': ['QUALITY_CONTROL_MANAGER', 'ADMIN', 'SYSTEM_ADMIN'],
+
+  // FMIR - Audit History
+  'fmir.audit.view': ['SUPERVISOR', 'QA_FOOD_SAFETY', 'QUALITY_CONTROL_MANAGER', 'CI_MANAGER', 'ADMIN', 'SYSTEM_ADMIN'],
+  'fmir.audit.view_org': ['QUALITY_CONTROL_MANAGER', 'CI_MANAGER', 'ADMIN', 'SYSTEM_ADMIN'],
+
+  // FMIR - Export Features
+  'fmir.export.print': ['SUPERVISOR', 'QA_FOOD_SAFETY', 'QUALITY_CONTROL_MANAGER', 'MAINTENANCE_ENGINEERING', 'SAFETY_SECURITY_MANAGER', 'CI_MANAGER', 'ADMIN', 'SYSTEM_ADMIN'],
+  'fmir.export.pdf': ['SUPERVISOR', 'QA_FOOD_SAFETY', 'QUALITY_CONTROL_MANAGER', 'MAINTENANCE_ENGINEERING', 'SAFETY_SECURITY_MANAGER', 'CI_MANAGER', 'ADMIN', 'SYSTEM_ADMIN'],
+
+  // FMIR - Assignment Features
+  'fmir.assign.line': ['OPERATOR', 'SUPERVISOR', 'QA_FOOD_SAFETY', 'QUALITY_CONTROL_MANAGER', 'CI_MANAGER', 'ADMIN', 'SYSTEM_ADMIN'],
+  'fmir.assign.area': ['OPERATOR', 'SUPERVISOR', 'QA_FOOD_SAFETY', 'QUALITY_CONTROL_MANAGER', 'CI_MANAGER', 'ADMIN', 'SYSTEM_ADMIN'],
+  'fmir.assign.qa_user': ['SUPERVISOR', 'QA_FOOD_SAFETY', 'QUALITY_CONTROL_MANAGER', 'CI_MANAGER', 'ADMIN', 'SYSTEM_ADMIN'],
+
+  // FMIR - RCA Integration
+  'fmir.link_rca': ['SUPERVISOR', 'QA_FOOD_SAFETY', 'QUALITY_CONTROL_MANAGER', 'CI_MANAGER', 'ADMIN', 'SYSTEM_ADMIN'],
+
+  // ============================================================================
+  // WORKPLACE REPORT MODULE
+  // ============================================================================
+  'workplace_report.view': ['SUPERVISOR', 'QA_FOOD_SAFETY', 'QUALITY_CONTROL_MANAGER', 'MAINTENANCE_ENGINEERING', 'SAFETY_SECURITY_MANAGER', 'CI_MANAGER', 'ADMIN', 'SYSTEM_ADMIN'],
+  'workplace_report.generate': ['SUPERVISOR', 'QA_FOOD_SAFETY', 'QUALITY_CONTROL_MANAGER', 'MAINTENANCE_ENGINEERING', 'SAFETY_SECURITY_MANAGER', 'CI_MANAGER', 'ADMIN', 'SYSTEM_ADMIN'],
+
+  // ============================================================================
+  // INVESTIGATION REPORT MODULE
+  // ============================================================================
+  'investigation_report.view': ['SUPERVISOR', 'QA_FOOD_SAFETY', 'QUALITY_CONTROL_MANAGER', 'MAINTENANCE_ENGINEERING', 'SAFETY_SECURITY_MANAGER', 'CI_MANAGER', 'ADMIN', 'SYSTEM_ADMIN'],
+  'investigation_report.generate': ['SUPERVISOR', 'QA_FOOD_SAFETY', 'QUALITY_CONTROL_MANAGER', 'MAINTENANCE_ENGINEERING', 'SAFETY_SECURITY_MANAGER', 'CI_MANAGER', 'ADMIN', 'SYSTEM_ADMIN'],
+
+  // ============================================================================
+  // KNOWLEDGE BASE MODULE
+  // ============================================================================
+  'knowledge.view': ['SUPERVISOR', 'QA_FOOD_SAFETY', 'QUALITY_CONTROL_MANAGER', 'MAINTENANCE_ENGINEERING', 'SAFETY_SECURITY_MANAGER', 'CI_MANAGER', 'ADMIN', 'SYSTEM_ADMIN'],
+  'knowledge.create': ['QA_FOOD_SAFETY', 'QUALITY_CONTROL_MANAGER', 'CI_MANAGER', 'ADMIN', 'SYSTEM_ADMIN'],
+  'knowledge.edit': ['QA_FOOD_SAFETY', 'QUALITY_CONTROL_MANAGER', 'CI_MANAGER', 'ADMIN', 'SYSTEM_ADMIN'],
+  'knowledge.delete': ['CI_MANAGER', 'ADMIN', 'SYSTEM_ADMIN'],
+  'knowledge.ai.generate_summary': ['SUPERVISOR', 'QA_FOOD_SAFETY', 'QUALITY_CONTROL_MANAGER', 'CI_MANAGER', 'ADMIN', 'SYSTEM_ADMIN'],
+  'knowledge.ai.suggest_related': ['SUPERVISOR', 'QA_FOOD_SAFETY', 'QUALITY_CONTROL_MANAGER', 'CI_MANAGER', 'ADMIN', 'SYSTEM_ADMIN'],
+
+  // ============================================================================
+  // ANALYTICS MODULE
+  // ============================================================================
+  'analytics.view_dashboard': ['SUPERVISOR', 'QA_FOOD_SAFETY', 'QUALITY_CONTROL_MANAGER', 'CI_MANAGER', 'ADMIN', 'SYSTEM_ADMIN'],
+  'analytics.view_trends': ['SUPERVISOR', 'QA_FOOD_SAFETY', 'QUALITY_CONTROL_MANAGER', 'CI_MANAGER', 'ADMIN', 'SYSTEM_ADMIN'],
+  'analytics.export_reports': ['SUPERVISOR', 'QA_FOOD_SAFETY', 'QUALITY_CONTROL_MANAGER', 'CI_MANAGER', 'ADMIN', 'SYSTEM_ADMIN'],
+  'analytics.ai.generate_insights': ['QA_FOOD_SAFETY', 'QUALITY_CONTROL_MANAGER', 'CI_MANAGER', 'ADMIN', 'SYSTEM_ADMIN'],
+  'analytics.ai.predict_trends': ['QUALITY_CONTROL_MANAGER', 'CI_MANAGER', 'ADMIN', 'SYSTEM_ADMIN'],
+};
+
+/**
+ * Check if a user has a specific privilege
+ * First checks the database for organization-specific overrides, then falls back to defaults
+ */
+export async function hasPrivilege(
+  organizationId: string,
+  userRole: UserRole,
+  privilegeKey: string
+): Promise<boolean> {
+  // System admins always have all privileges
+  if (userRole === 'SYSTEM_ADMIN') {
+    return true;
+  }
+
+  try {
+    // Check for organization-specific privilege override
+    const privilegeOverride = await prisma.rolePrivilege.findFirst({
+      where: {
+        organizationId,
+        role: userRole,
+        featureKey: privilegeKey,
+      },
+    });
+
+    if (privilegeOverride) {
+      return privilegeOverride.isEnabled;
+    }
+
+    // Fall back to default privileges
+    const defaultRoles = DEFAULT_PRIVILEGES[privilegeKey];
+    if (defaultRoles) {
+      return defaultRoles.includes(userRole);
+    }
+
+    // If no default defined, deny access
+    return false;
+  } catch (error) {
+    console.error('Error checking privilege:', error);
+    // On error, fall back to default privileges
+    const defaultRoles = DEFAULT_PRIVILEGES[privilegeKey];
+    if (defaultRoles) {
+      return defaultRoles.includes(userRole);
+    }
+    return false;
+  }
+}
+
+/**
+ * Middleware factory to require a specific privilege
+ */
+export function requirePrivilege(privilegeKey: string) {
+  return async (req: AuthRequest, res: Response, next: NextFunction) => {
+    if (!req.user) {
+      throw new ForbiddenError('Authentication required');
+    }
+
+    const hasAccess = await hasPrivilege(
+      req.user.organizationId,
+      req.user.role as UserRole,
+      privilegeKey
+    );
+
+    if (!hasAccess) {
+      res.status(403).json({
+        success: false,
+        error: 'Access denied',
+        message: `You do not have permission to perform this action. Required privilege: ${privilegeKey}`,
+        privilegeKey,
+      });
+      return;
+    }
+
+    next();
+  };
+}
+
+/**
+ * Middleware factory to require any of the specified privileges
+ */
+export function requireAnyPrivilege(...privilegeKeys: string[]) {
+  return async (req: AuthRequest, res: Response, next: NextFunction) => {
+    if (!req.user) {
+      throw new ForbiddenError('Authentication required');
+    }
+
+    for (const privilegeKey of privilegeKeys) {
+      const hasAccess = await hasPrivilege(
+        req.user.organizationId,
+        req.user.role as UserRole,
+        privilegeKey
+      );
+
+      if (hasAccess) {
+        return next();
+      }
+    }
+
+    res.status(403).json({
+      success: false,
+      error: 'Access denied',
+      message: `You do not have permission to perform this action. Required one of: ${privilegeKeys.join(', ')}`,
+      privilegeKeys,
+    });
+  };
 }

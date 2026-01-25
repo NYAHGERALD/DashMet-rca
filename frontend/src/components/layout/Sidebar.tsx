@@ -19,6 +19,7 @@ import {
   FileText,
   ClipboardList,
   AlertTriangle,
+  Inbox,
 } from 'lucide-react';
 
 export default function Sidebar() {
@@ -88,6 +89,12 @@ export default function Sidebar() {
 
   // Admin-only items
   const adminItems = [
+    {
+      name: 'Support Inbox',
+      href: '/support-inbox',
+      icon: Inbox,
+      roles: ['ADMIN', 'SYSTEM_ADMIN', 'QUALITY_CONTROL_MANAGER'],
+    },
     {
       name: t('profile.organization'),
       href: '/organization',

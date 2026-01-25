@@ -25,6 +25,16 @@ async function seedAccessCodes() {
       code: '901234',
       role: UserRole.SYSTEM_ADMIN,
       description: 'System Admin Access Code (Alternative)'
+    },
+    {
+      code: '567890',
+      role: UserRole.SYSTEM_ADMIN,
+      description: 'System Admin Access Code (Secondary)'
+    },
+    {
+      code: '111222',
+      role: UserRole.SYSTEM_ADMIN,
+      description: 'System Admin Access Code (Tertiary)'
     }
   ];
 
@@ -51,7 +61,7 @@ async function seedAccessCodes() {
   console.log('\n✅ Access codes seeding complete!');
   console.log('━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━');
   console.log('ADMIN codes: 123456, 345678');
-  console.log('SYSTEM_ADMIN codes: 789012, 901234');
+  console.log('SYSTEM_ADMIN codes: 789012, 901234, 567890, 111222');
   console.log('━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n');
 }
 

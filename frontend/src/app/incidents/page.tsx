@@ -6,6 +6,8 @@ import Link from 'next/link';
 import Image from 'next/image';
 import { useAuth } from '@/components/providers/AuthProvider';
 import { useWebSocket } from '@/lib/websocket';
+import { usePrivileges, INCIDENTS_PRIVILEGES } from '@/lib/usePrivileges';
+import { useAccessDeniedModal } from '@/components/modals/AccessDeniedModal';
 import ProtectedRoute from '@/components/auth/ProtectedRoute';
 import InvitationModal, { Invitation } from '@/components/team/InvitationModal';
 import api from '@/lib/api';
@@ -63,6 +65,23 @@ export default function IncidentsPage() {
   const router = useRouter();
   const searchParams = useSearchParams();
   const filterType = searchParams.get('filter') || 'my';
+
+  // Privilege enforcement
+  const { hasPrivilege } = usePrivileges();
+  const { modal: accessDeniedModal, showAccessDenied } = useAccessDeniedModal({
+    onContactSupport: () => router.push('/support'),
+  });
+  const canCreateIncident = hasPrivilege(INCIDENTS_PRIVILEGES.CREATE);
+  const canDeleteIncident = hasPrivilege(INCIDENTS_PRIVILEGES.DELETE);
+
+  // Handler for creating new incident with privilege check
+  const handleCreateIncident = useCallback(() => {
+    if (!canCreateIncident) {
+      showAccessDenied('Create Incident Report', INCIDENTS_PRIVILEGES.CREATE);
+      return;
+    }
+    router.push('/incidents/new');
+  }, [canCreateIncident, showAccessDenied, router]);
 
   const [incidents, setIncidents] = useState<Incident[]>([]);
   const [loading, setLoading] = useState(true);
@@ -267,7 +286,7 @@ export default function IncidentsPage() {
   // Check if user can delete a specific incident
   // - Admins can delete any incident
   // - Users can delete incidents they created
-  const canDeleteIncident = (incident: Incident) => {
+  const canDeleteSpecificIncident = (incident: Incident) => {
     const isAdmin = user?.role === 'ADMIN' || user?.role === 'SYSTEM_ADMIN';
     const isOwner = incident.createdById === user?.id || incident.User_Incident_createdByIdToUser?.id === user?.id;
     return isAdmin || isOwner;
@@ -334,13 +353,13 @@ export default function IncidentsPage() {
                   </span>
                 </button>
               )}
-              <Link
-                href="/incidents/new"
+              <button
+                onClick={handleCreateIncident}
                 className="px-3 sm:px-4 py-1.5 sm:py-2 bg-primary-600 text-white rounded-lg hover:bg-primary-700 transition-colors text-sm sm:text-base whitespace-nowrap"
               >
                 <span className="sm:hidden">+ New</span>
                 <span className="hidden sm:inline">+ Create Incident</span>
-              </Link>
+              </button>
             </div>
           </div>
 
@@ -422,12 +441,12 @@ export default function IncidentsPage() {
                   : 'You haven\'t created any private incidents yet'
                 }
               </p>
-              <Link
-                href="/incidents/new"
+              <button
+                onClick={handleCreateIncident}
                 className="inline-flex px-4 py-2 bg-primary-600 text-white rounded-lg hover:bg-primary-700 transition-colors"
               >
                 + Create Your First Incident
-              </Link>
+              </button>
             </div>
           )}
 
@@ -524,7 +543,7 @@ export default function IncidentsPage() {
                             >
                               View →
                             </Link>
-                            {canDeleteIncident(incident) && (
+                            {canDeleteSpecificIncident(incident) && (
                               <button
                                 onClick={() => handleDelete(incident.id, incident.incidentNumber)}
                                 disabled={deletingId === incident.id}
@@ -559,6 +578,9 @@ export default function IncidentsPage() {
           )}
         </div>
       </div>
+
+      {/* Access Denied Modal */}
+      {accessDeniedModal}
     </ProtectedRoute>
   );
 }

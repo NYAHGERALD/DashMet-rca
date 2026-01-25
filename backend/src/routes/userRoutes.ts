@@ -362,7 +362,7 @@ router.patch(
     const { role } = req.body;
 
     // Valid roles
-    const validRoles = ['SUPERVISOR', 'QA_FOOD_SAFETY', 'MAINTENANCE_ENGINEERING', 'CI_MANAGER', 'SAFETY_SECURITY_MANAGER', 'ADMIN', 'SYSTEM_ADMIN'];
+    const validRoles = ['SUPERVISOR', 'QA_FOOD_SAFETY', 'QUALITY_CONTROL_MANAGER', 'MAINTENANCE_ENGINEERING', 'CI_MANAGER', 'SAFETY_SECURITY_MANAGER', 'ADMIN', 'SYSTEM_ADMIN'];
     
     if (!role || !validRoles.includes(role)) {
       res.status(400).json({
@@ -437,8 +437,8 @@ router.patch(
       },
     });
 
-    // If the new role is QA_FOOD_SAFETY, auto-add to all open FMIR reports
-    if (role === 'QA_FOOD_SAFETY' && user.organizationId) {
+    // If the new role is QA_FOOD_SAFETY or QUALITY_CONTROL_MANAGER, auto-add to all open FMIR reports
+    if ((role === 'QA_FOOD_SAFETY' || role === 'QUALITY_CONTROL_MANAGER') && user.organizationId) {
       // Get all open FMIR reports (not CLOSED) in the organization
       const openReports = await prisma.foreignMaterialIncident.findMany({
         where: {

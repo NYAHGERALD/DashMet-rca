@@ -134,3 +134,71 @@ keep in mind that everything works in real time and does not need page refreah. 
 
 
 postgresql://postgres:iRvkScpLsNvIyVyastxaKJdmrmgSjZmS@maglev.proxy.rlwy.net:41384/railway
+
+
+
+You see where code are being generated for Access to complete user profile. instead of generating code for all role except the Admin and System Admin, lets make the feature to be more secure by selecting the role we want to generate the 6 number code for and generate the Access Code that is link to that particullar role and can't be used for other roles within the organization.
+
+
+users with Supervisor role from creating a foreign material report, but still the supervisor user still went ahead to click on the create foreign material button and they were allowed to perform that action. that is a security issue right there. We should have a standard modal that we can use each time a feature is triggered it checks whether that feature has previlege access if not it will trigger that our standard modal. the modal should contain user freindly message that respectectfull letting the user know that they do not have the previlege to perform that action and they can contact their Admin for access granting and a link for a support modal. or if there is a quicker and more effective approach that is more proffeissinal, you can do it as long it is not going to cause any  damage to our already working Application.
+Do you understand?
+
+Now lets implement a support feature for all user role sessions except the Admin and System Admin. the support link will be a floating Message button that is on the left below conner of the screen. it is always there no mather the page the user opens. the floating button should be bigger and visible. use green color. on the other end of the QC manager and QC manager is the recieving end. when user wants to sent a support request, they click on the button and the resizable and movable message modal opens up and the user either select the Admin or QC manager to sent their request in a from of a message. the message area accepts pasting of images like screen shot taken.
+
+Please implement this with integrety, professionalism, carefulness, no rush to avoid mistakes, code written must be 100% know that it will work, no room for errors, dont't break existing logics and frow, dont't distroy our database. be extra careful. Implementation must be top professional level because this s an enterprice level app.
+
+Make these more beautiful and user friendly. add effects and animation. Also make the modals more like a glassy transparent type. be extral care nopt to break any thing please.
+
+Now. we will take a big step into making this App enterprise grade.
+
+We will implement Microsoft login.
+Our App Login Flow still maintains. we are just adding another Login Options.
+users can use,
+Microsoft Work email or School email, 
+Personal Microsoft email.
+
+maintain security.
+
+Please Implement this with high level of carefulness and caution. do not break existing login flow.
+
+
+
+
+What You Need to Configure
+Step 1: Firebase Console
+Go to Firebase Console → Your project → Authentication → Sign-in method
+Enable Microsoft provider
+Note the callback URL shown (you'll need it for Azure)
+Step 2: Azure Portal
+Go to Azure Portal → App registrations → New registration
+Name: DASHMET RCA Engine
+Account types: "Accounts in any organizational directory AND personal Microsoft accounts"
+Register the app
+Step 3: Configure Azure App
+Copy the Application (client) ID
+Go to Authentication → Add platform Web → Enter Firebase callback URL
+Go to Certificates & secrets → Create new secret → Copy the Value immediately
+Step 4: Complete Firebase Setup
+Back in Firebase Console, enter:
+Application (client) ID
+Client secret value
+Save
+🔐 Security Features Implemented
+Multi-tenant support: Works with personal, work, and school Microsoft accounts
+Account picker: Always shows account selection (prompt: 'select_account')
+Proper scopes: Requests openid, profile, email, User.Read
+Comprehensive error handling: Graceful handling for popup blocks, cancellations, credential conflicts
+No backend changes needed: Firebase token verification works automatically
+🎯 User Experience
+Users now see on the login page:
+
+Continue with Google button
+Continue with Microsoft button (new!)
+Email/password option
+Microsoft login supports:
+
+Personal accounts (outlook.com, hotmail.com, live.com)
+Work accounts (any Azure AD organization)
+School accounts (Microsoft 365 Education)
+The detailed step-by-step Azure/Firebase configuration instructions are in MICROSOFT_LOGIN_SETUP.md.
+

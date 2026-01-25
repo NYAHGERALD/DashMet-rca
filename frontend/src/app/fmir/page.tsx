@@ -4,6 +4,8 @@ import { useState, useEffect, useCallback, useRef } from 'react';
 import { useRouter } from 'next/navigation';
 import { useAuth } from '@/components/providers/AuthProvider';
 import { useWebSocket } from '@/lib/websocket';
+import { usePrivileges, FMIR_PRIVILEGES } from '@/lib/usePrivileges';
+import { useAccessDeniedModal, handlePrivilegeError } from '@/components/modals/AccessDeniedModal';
 import ProtectedRoute from '@/components/auth/ProtectedRoute';
 import api, { apiWithExtendedTimeout } from '@/lib/api';
 import {
@@ -57,6 +59,7 @@ import {
   Package,
   Building,
   Unlock,
+  Settings,
 } from 'lucide-react';
 import { format } from 'date-fns';
 import Link from 'next/link';
@@ -350,8 +353,39 @@ function FMIRListContent() {
     recommendation: string;
   } | null>(null);
 
-  // Check if current user is QA/Food Safety
-  const isQAFoodSafety = user?.role === 'QA_FOOD_SAFETY';
+  // Use privilege system for access control
+  const { hasPrivilege, loading: privilegesLoading } = usePrivileges();
+  
+  // Access denied modal for privilege enforcement
+  const { modal: accessDeniedModal, showAccessDenied } = useAccessDeniedModal({
+    onContactSupport: () => {
+      // Navigate to support or show support modal
+      router.push('/support');
+    }
+  });
+  
+  // Legacy role checks (kept for backward compatibility, will be phased out)
+  const isQAFoodSafety = user?.role === 'QA_FOOD_SAFETY' || user?.role === 'QUALITY_CONTROL_MANAGER';
+  const isQualityControlManager = user?.role === 'QUALITY_CONTROL_MANAGER';
+  
+  // Privilege-based access checks
+  const canViewAllFMIR = hasPrivilege(FMIR_PRIVILEGES.VIEW_ALL);
+  const canCreateFMIR = hasPrivilege(FMIR_PRIVILEGES.CREATE);
+  const canDeleteVisible = hasPrivilege(FMIR_PRIVILEGES.DELETE_VISIBLE);
+  const canToggleInvestigation = hasPrivilege(FMIR_PRIVILEGES.TOGGLE_INVESTIGATION);
+  const canCloseFMIR = hasPrivilege(FMIR_PRIVILEGES.CLOSE);
+  const canAddComments = hasPrivilege(FMIR_PRIVILEGES.COMMENTS_ADD);
+  const canExportPDF = hasPrivilege(FMIR_PRIVILEGES.EXPORT_PDF);
+  const canPrint = hasPrivilege(FMIR_PRIVILEGES.EXPORT_PRINT);
+
+  // Handler for creating new FMIR with privilege check
+  const handleCreateFMIR = useCallback(() => {
+    if (!canCreateFMIR) {
+      showAccessDenied('Create Foreign Material Report', FMIR_PRIVILEGES.CREATE);
+      return;
+    }
+    router.push('/fmir/new');
+  }, [canCreateFMIR, showAccessDenied, router]);
 
   // Fetch organization users for collaborator dropdown (excludes QA/Food Safety)
   const fetchOrganizationUsers = useCallback(async () => {
@@ -862,7 +896,8 @@ function FMIRListContent() {
       }
     } catch (err: any) {
       console.error('Error adding collaborator:', err);
-      setError(err.response?.data?.error || 'Failed to add collaborator');
+      // Check if this is a privilege error (403)
+      handlePrivilegeError(err, showAccessDenied, setError, 'Add Collaborator');
     } finally {
       setAddingCollaborator(null);
     }
@@ -887,7 +922,8 @@ function FMIRListContent() {
       }
     } catch (err: any) {
       console.error('Error removing collaborator:', err);
-      setError(err.response?.data?.error || 'Failed to remove collaborator');
+      // Check if this is a privilege error (403)
+      handlePrivilegeError(err, showAccessDenied, setError, 'Remove Collaborator');
     } finally {
       setRemovingCollaborator(null);
     }
@@ -934,6 +970,17 @@ function FMIRListContent() {
   };
 
   const handleDelete = async (id: string) => {
+    // Check privilege before showing confirmation
+    const report = reports.find(r => r.id === id);
+    if (!report) return;
+    
+    // Check if user has appropriate privilege
+    const hasDeletePrivilege = canDeleteVisible || report.isOwner;
+    if (!hasDeletePrivilege) {
+      showAccessDenied('Delete FMIR Report', FMIR_PRIVILEGES.DELETE);
+      return;
+    }
+    
     if (!confirm('Are you sure you want to delete this report? This action cannot be undone.')) {
       return;
     }
@@ -944,6 +991,11 @@ function FMIRListContent() {
       setReports(reports.filter(r => r.id !== id));
     } catch (err: any) {
       console.error('Error deleting report:', err);
+      // Check if it's a privilege error
+      if (err.response?.status === 403) {
+        showAccessDenied('Delete FMIR Report', err.response?.data?.privilegeKey || FMIR_PRIVILEGES.DELETE);
+        return;
+      }
       // Show the detailed message from backend if available as toast
       const errorMessage = err.response?.data?.message || err.response?.data?.error || 'Failed to delete report';
       setToastType('error');
@@ -956,17 +1008,20 @@ function FMIRListContent() {
   };
 
   // Helper function to check if user can see the delete button
-  // QA/Food Safety can delete any report
-  // Owners can see delete button - backend will validate if deletion is allowed
-  // (based on visibility, collaborators with initials, etc.)
+  // Uses privilege-based access control
   const canDeleteReport = (report: FMIRReport) => {
-    // QA/Food Safety can delete any report
-    if (user?.role === 'QA_FOOD_SAFETY') {
+    // Users with DELETE_VISIBLE privilege can delete any visible report
+    if (canDeleteVisible && report.isVisible === true) {
       return true;
     }
     
-    // Owners can see delete button - backend validates restrictions
-    // (report must be NOT visible AND have NO section initials from other users)
+    // Admin roles (SYSTEM_ADMIN has all privileges) can delete any report
+    if (user?.role === 'ADMIN' || user?.role === 'SYSTEM_ADMIN') {
+      return true;
+    }
+    
+    // All other users can only delete their own reports
+    // Backend validates additional restrictions (visibility, section initials, etc.)
     return report.isOwner === true;
   };
 
@@ -985,7 +1040,8 @@ function FMIRListContent() {
       }
     } catch (err: any) {
       console.error('Error toggling visibility:', err);
-      setError(err.response?.data?.error || 'Failed to update visibility');
+      // Check if this is a privilege error (403)
+      handlePrivilegeError(err, showAccessDenied, setError, 'Toggle Visibility');
     } finally {
       setTogglingVisibility(null);
     }
@@ -1075,7 +1131,8 @@ function FMIRListContent() {
         setError('Request timed out. The AI audit is taking longer than expected. Please try again.');
       }
       else {
-        setError(err.response?.data?.error || 'Failed to update closed status');
+        // Check if this is a privilege error (403)
+        handlePrivilegeError(err, showAccessDenied, setError, 'Lock/Unlock Report');
       }
     } finally {
       setTogglingClosedStatus(null);
@@ -1135,7 +1192,8 @@ function FMIRListContent() {
       }
     } catch (err: any) {
       console.error('Error overriding and closing:', err);
-      setError(err.response?.data?.error || 'Failed to override and close');
+      // Check if this is a privilege error (403)
+      handlePrivilegeError(err, showAccessDenied, setError, 'Override and Close');
       setShowOverrideConfirm(false);
     } finally {
       setIsOverriding(false);
@@ -1165,7 +1223,8 @@ function FMIRListContent() {
       }
     } catch (err: any) {
       console.error('Error toggling investigation status:', err);
-      setError(err.response?.data?.error || 'Failed to update investigation status');
+      // Check if this is a privilege error (403)
+      handlePrivilegeError(err, showAccessDenied, setError, 'Toggle Investigation');
     } finally {
       setTogglingInvestigationStatus(null);
     }
@@ -1257,13 +1316,24 @@ function FMIRListContent() {
                 </p>
               </div>
             </div>
-            <Link
-              href="/fmir/new"
-              className="inline-flex items-center gap-2 px-4 py-2.5 bg-primary-600 hover:bg-primary-700 text-white font-medium rounded-lg transition-colors shadow-sm"
-            >
-              <Plus className="w-5 h-5" />
-              <span>New Report</span>
-            </Link>
+            <div className="flex items-center gap-3">
+              {(isQualityControlManager || user?.role === 'ADMIN' || user?.role === 'SYSTEM_ADMIN') && (
+                <Link
+                  href="/fmir/privileges"
+                  className="inline-flex items-center gap-2 px-4 py-2.5 bg-gray-100 dark:bg-gray-700 hover:bg-gray-200 dark:hover:bg-gray-600 text-gray-700 dark:text-gray-300 font-medium rounded-lg transition-colors"
+                >
+                  <Settings className="w-5 h-5" />
+                  <span>Manage Privileges</span>
+                </Link>
+              )}
+              <button
+                onClick={handleCreateFMIR}
+                className="inline-flex items-center gap-2 px-4 py-2.5 bg-primary-600 hover:bg-primary-700 text-white font-medium rounded-lg transition-colors shadow-sm"
+              >
+                <Plus className="w-5 h-5" />
+                <span>New Report</span>
+              </button>
+            </div>
           </div>
         </div>
 
@@ -1366,13 +1436,13 @@ function FMIRListContent() {
               <AlertTriangle className="w-16 h-16 mb-4 opacity-50" />
               <p className="text-lg font-medium">No FMIR reports found</p>
               <p className="text-sm mt-1">Create your first Foreign Material Incident Report</p>
-              <Link
-                href="/fmir/new"
+              <button
+                onClick={handleCreateFMIR}
                 className="mt-4 inline-flex items-center gap-2 px-4 py-2 bg-primary-600 hover:bg-primary-700 text-white font-medium rounded-lg transition-colors"
               >
                 <Plus className="w-4 h-4" />
                 Create Report
-              </Link>
+              </button>
             </div>
           ) : (
             <div className="divide-y divide-gray-100 dark:divide-gray-700">
@@ -1406,8 +1476,8 @@ function FMIRListContent() {
                           {getStatusBadge(report.status)}
                           {getOpenClosedBadge(report.isClosed || false)}
                           
-                          {/* Closed Status Toggle - Only visible to QA/Food Safety users */}
-                          {isQAFoodSafety && (
+                          {/* Closed Status Toggle - Requires fmir.close privilege */}
+                          {canCloseFMIR && (
                             <div className="flex items-center gap-2 ml-2 pl-2 border-l border-gray-300 dark:border-gray-600">
                               <button
                                 onClick={() => toggleClosedStatus(report.id, report.isClosed || false)}
@@ -1434,8 +1504,8 @@ function FMIRListContent() {
                             </div>
                           )}
                           
-                          {/* Investigation Toggle - Only visible to QA/Food Safety users when status is SUBMITTED */}
-                          {isQAFoodSafety && report.status === 'SUBMITTED' && !report.isClosed && (
+                          {/* Investigation Toggle - Requires fmir.toggle_investigation privilege, only when status is SUBMITTED */}
+                          {canToggleInvestigation && report.status === 'SUBMITTED' && !report.isClosed && (
                             <div className="flex items-center gap-2 ml-2 pl-2 border-l border-gray-300 dark:border-gray-600">
                               <button
                                 onClick={() => toggleInvestigationStatus(report.id, report.status)}
@@ -1568,9 +1638,11 @@ function FMIRListContent() {
                             disabled={deleting === report.id}
                             className="inline-flex items-center gap-1.5 px-3 py-2 text-sm font-medium text-red-700 dark:text-red-400 bg-red-100 dark:bg-red-900/30 hover:bg-red-200 dark:hover:bg-red-900/50 rounded-lg transition-colors disabled:opacity-50"
                             title={
-                              user?.role === 'QA_FOOD_SAFETY' || user?.role === 'ADMIN' || user?.role === 'SYSTEM_ADMIN'
-                                ? 'Delete report'
-                                : 'Delete your report'
+                              canDeleteVisible
+                                ? 'Delete visible report'
+                                : user?.role === 'ADMIN' || user?.role === 'SYSTEM_ADMIN'
+                                  ? 'Delete report'
+                                  : 'Delete your report'
                             }
                           >
                             {deleting === report.id ? (
@@ -3172,6 +3244,9 @@ function FMIRListContent() {
           </div>
         </div>
       )}
+
+      {/* Access Denied Modal */}
+      {accessDeniedModal}
     </div>
   );
 }

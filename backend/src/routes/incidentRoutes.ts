@@ -1,7 +1,7 @@
 import { Router, Request, Response, NextFunction } from 'express';
 import asyncHandler from 'express-async-handler';
 import { authenticate } from '../middleware/auth';
-import { requireMinimumRole } from '../middleware/rbac';
+import { requireMinimumRole, requirePrivilege, hasPrivilege } from '../middleware/rbac';
 import { UserRole } from '@prisma/client';
 import { prisma } from '../utils/prisma';
 import { ValidationError } from '../middleware/errorHandler';
@@ -474,7 +474,7 @@ router.get('/:id', asyncHandler(async (req: Request, res: Response) => {
 }));
 
 // POST /api/incidents - Create incident
-router.post('/', async (req, res) => {
+router.post('/', requirePrivilege('incidents.create'), async (req, res) => {
   const {
     type,
     categoryId,
@@ -811,7 +811,7 @@ router.post('/', async (req, res) => {
 });
 
 // PATCH /api/incidents/:id - Update incident
-router.patch('/:id', async (req: Request, res: Response, next: NextFunction) => {
+router.patch('/:id', requirePrivilege('incidents.edit'), async (req: Request, res: Response, next: NextFunction) => {
   try {
     const { id } = req.params;
     const {
@@ -1072,7 +1072,7 @@ router.patch('/:id', async (req: Request, res: Response, next: NextFunction) => 
 
 // DELETE /api/incidents/:id - Delete incident (Owner or ADMIN)
 // Users can delete their own incidents, Admins can delete any incident
-router.delete('/:id', async (req: Request, res: Response, next: NextFunction) => {
+router.delete('/:id', requirePrivilege('incidents.delete'), async (req: Request, res: Response, next: NextFunction) => {
   try {
     const { id } = req.params;
     const user = (req as any).user;
@@ -1614,7 +1614,7 @@ router.patch('/:id/investigation', async (req: Request, res: Response, next: Nex
 });
 
 // POST /api/incidents/:id/submit - Submit draft incident
-router.post('/:id/submit', async (req: Request, res: Response, next: NextFunction) => {
+router.post('/:id/submit', requirePrivilege('incidents.change_status'), async (req: Request, res: Response, next: NextFunction) => {
   try {
     const { id } = req.params;
     const { autoTriage = true } = req.body; // Option to auto-triage on submit
@@ -1730,7 +1730,7 @@ router.post('/:id/submit', async (req: Request, res: Response, next: NextFunctio
 });
 
 // POST /api/incidents/:id/assign - Manually assign incident
-router.post('/:id/assign', requireMinimumRole(UserRole.CI_MANAGER), async (req: Request, res: Response, next: NextFunction) => {
+router.post('/:id/assign', requirePrivilege('incidents.assign'), async (req: Request, res: Response, next: NextFunction) => {
   try {
     const { id } = req.params;
     const { assignToUserId } = req.body;
@@ -1993,7 +1993,7 @@ router.patch('/:incidentId/evidence/:evidenceId', async (req, res) => {
 });
 
 // POST /api/incidents/:id/ai-summary - Generate AI summary for incident
-router.post('/:id/ai-summary', async (req: Request, res: Response, next: NextFunction) => {
+router.post('/:id/ai-summary', requirePrivilege('incidents.ai_analysis'), async (req: Request, res: Response, next: NextFunction) => {
   try {
     const { id } = req.params;
     const user = (req as any).user;

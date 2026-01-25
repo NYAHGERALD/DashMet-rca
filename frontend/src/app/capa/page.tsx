@@ -16,6 +16,8 @@ import api from '@/lib/api';
 import { formatDate, formatDateTime } from '@/lib/dateUtils';
 import PowerPointGenerator from '@/components/powerpoint';
 import { SavedReportsModal } from '@/components/powerpoint/SavedReportsList';
+import { usePrivileges, CAPA_PRIVILEGES } from '@/lib/usePrivileges';
+import { useAccessDeniedModal, handlePrivilegeError } from '@/components/modals/AccessDeniedModal';
 
 type ActionStatus = 'PLANNED' | 'IN_PROGRESS' | 'COMPLETED' | 'VERIFIED' | 'INEFFECTIVE';
 type ActionType = 'CORRECTIVE' | 'PREVENTIVE';
@@ -105,6 +107,12 @@ const priorityColors: Record<ActionPriority, string> = {
 function CAPAContent() {
   const { user } = useAuth();
   const router = useRouter();
+  
+  // Privilege-based access control
+  const { hasPrivilege } = usePrivileges();
+  const canEditCAPA = hasPrivilege(CAPA_PRIVILEGES.EDIT);
+  const { showAccessDenied, accessDeniedModal } = useAccessDeniedModal();
+  
   const [actions, setActions] = useState<CAPAction[]>([]);
   const [stats, setStats] = useState<CAPAStats | null>(null);
   const [loading, setLoading] = useState(true);
@@ -385,6 +393,10 @@ function CAPAContent() {
 
   const handleStartAction = async () => {
     if (!workflowAction) return;
+    if (!canEditCAPA) {
+      showAccessDenied();
+      return;
+    }
     if (!implementationPlan.trim()) {
       setError('Implementation plan is required to start an action');
       return;
@@ -402,7 +414,8 @@ function CAPAContent() {
       setWorkflowAction(null);
       loadData();
     } catch (err: any) {
-      setError(err.response?.data?.error || 'Failed to start action');
+      // Check if this is a privilege error (403)
+      handlePrivilegeError(err, showAccessDenied, setError, 'Start Action');
     } finally {
       setSubmitting(false);
     }
@@ -410,6 +423,10 @@ function CAPAContent() {
 
   const handleCompleteAction = async () => {
     if (!workflowAction) return;
+    if (!canEditCAPA) {
+      showAccessDenied();
+      return;
+    }
     if (!completionEvidence.trim() && !completionNotes.trim()) {
       setError('Completion evidence or notes required');
       return;
@@ -426,7 +443,8 @@ function CAPAContent() {
       setWorkflowAction(null);
       loadData();
     } catch (err: any) {
-      setError(err.response?.data?.error || 'Failed to complete action');
+      // Check if this is a privilege error (403)
+      handlePrivilegeError(err, showAccessDenied, setError, 'Complete Action');
     } finally {
       setSubmitting(false);
     }
@@ -434,6 +452,10 @@ function CAPAContent() {
 
   const handleVerifyAction = async () => {
     if (!workflowAction) return;
+    if (!canEditCAPA) {
+      showAccessDenied();
+      return;
+    }
     if (!verificationNotes.trim()) {
       setError('Verification notes required');
       return;
@@ -449,7 +471,9 @@ function CAPAContent() {
       setWorkflowAction(null);
       loadData();
     } catch (err: any) {
-      setError(err.response?.data?.error || 'Failed to verify action');
+      // Check if this is a privilege error (403)
+      handlePrivilegeError(err, showAccessDenied, setError, 'Verify Action');
+      }
     } finally {
       setSubmitting(false);
     }
@@ -457,6 +481,10 @@ function CAPAContent() {
 
   const handleMarkIneffective = async () => {
     if (!workflowAction) return;
+    if (!canEditCAPA) {
+      showAccessDenied();
+      return;
+    }
     if (!ineffectiveNotes.trim()) {
       setError('Explanation notes required for ineffective actions');
       return;
@@ -472,7 +500,8 @@ function CAPAContent() {
       setWorkflowAction(null);
       loadData();
     } catch (err: any) {
-      setError(err.response?.data?.error || 'Failed to update action');
+      // Check if this is a privilege error (403)
+      handlePrivilegeError(err, showAccessDenied, setError, 'Mark Ineffective');
     } finally {
       setSubmitting(false);
     }
@@ -524,6 +553,10 @@ function CAPAContent() {
 
   const handleEffectivenessReview = async () => {
     if (!workflowAction) return;
+    if (!canEditCAPA) {
+      showAccessDenied();
+      return;
+    }
     if (!effectivenessNotes.trim()) {
       setError('Effectiveness review notes are required');
       return;
@@ -543,7 +576,11 @@ function CAPAContent() {
         loadData();
       }
     } catch (err: any) {
-      setError(err.response?.data?.error || 'Effectiveness review failed');
+      if (err.response?.status === 403) {
+        showAccessDenied();
+      } else {
+        setError(err.response?.data?.error || 'Effectiveness review failed');
+      }
     } finally {
       setSubmitting(false);
     }
@@ -2017,6 +2054,9 @@ function CAPAContent() {
           rcaId={savedReportsRcaId}
           incidentNumber={savedReportsIncidentNumber}
         />
+
+        {/* Access Denied Modal */}
+        {accessDeniedModal}
       </main>
     </div>
   );

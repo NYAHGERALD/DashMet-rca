@@ -5,6 +5,8 @@ import { useRouter, useParams } from 'next/navigation';
 import Link from 'next/link';
 import { useAuth } from '@/components/providers/AuthProvider';
 import { useWebSocket } from '@/lib/websocket';
+import { usePrivileges, FMIR_PRIVILEGES } from '@/lib/usePrivileges';
+import { useAccessDeniedModal, handlePrivilegeError } from '@/components/modals/AccessDeniedModal';
 import ProtectedRoute from '@/components/auth/ProtectedRoute';
 import FMIRVisibilityOffModal from '@/components/fmir/FMIRVisibilityOffModal';
 import api from '@/lib/api';
@@ -747,8 +749,15 @@ export default function FMIRDetailPage() {
     router.push('/fmir');
   };
 
-  // Check if user can change status (QA/Food Safety workflow)
-  const canChangeStatus = user?.role === 'QA_FOOD_SAFETY' || user?.role === 'SAFETY_SECURITY_MANAGER' || user?.role === 'ADMIN';
+  // Use privilege-based access control
+  const { hasPrivilege } = usePrivileges();
+  const canChangeStatus = hasPrivilege(FMIR_PRIVILEGES.CHANGE_STATUS);
+  const canExportPDF = hasPrivilege(FMIR_PRIVILEGES.EXPORT_PDF);
+  const canPrint = hasPrivilege(FMIR_PRIVILEGES.EXPORT_PRINT);
+  const canViewAudit = hasPrivilege(FMIR_PRIVILEGES.AUDIT_VIEW);
+
+  // Access denied modal
+  const { showAccessDenied, accessDeniedModal } = useAccessDeniedModal();
 
   // Get next valid status transitions
   const getNextStatuses = (currentStatus: string): { value: string; label: string; color: string }[] => {
@@ -790,7 +799,12 @@ export default function FMIRDetailPage() {
       }
     } catch (err: any) {
       console.error('Error changing status:', err);
-      alert(err.response?.data?.error || 'Failed to change status');
+      // Check if this is a privilege error (403)
+      if (!handlePrivilegeError(err, showAccessDenied, undefined, 'Change Status')) {
+        // Not a privilege error - show toast message
+        setToastMessage(err.response?.data?.error || 'Failed to change status');
+        setToastType('error');
+      }
     } finally {
       setStatusChanging(false);
     }
@@ -976,37 +990,41 @@ export default function FMIRDetailPage() {
                 </div>
 
                 <div className="flex items-center gap-2 flex-wrap">
-                  <button
-                    onClick={handleDownloadPdf}
-                    disabled={generatingPdf}
-                    className="inline-flex items-center gap-2 px-4 py-2 bg-primary-600 hover:bg-primary-700 disabled:bg-primary-400 text-white font-medium rounded-lg transition-colors"
-                  >
-                    {generatingPdf ? (
-                      <>
-                        <Loader2 className="w-4 h-4 animate-spin" />
-                        Generating...
-                      </>
-                    ) : (
-                      <>
-                        <Download className="w-4 h-4" />
-                        Download PDF
-                      </>
-                    )}
-                  </button>
-                  <button
-                    onClick={() => window.print()}
-                    className="inline-flex items-center gap-2 px-4 py-2 bg-gray-100 dark:bg-gray-700 hover:bg-gray-200 dark:hover:bg-gray-600 text-gray-700 dark:text-gray-300 font-medium rounded-lg transition-colors"
-                  >
-                    <Printer className="w-4 h-4" />
-                    Print
-                  </button>
+                  {canExportPDF && (
+                    <button
+                      onClick={handleDownloadPdf}
+                      disabled={generatingPdf}
+                      className="inline-flex items-center gap-2 px-4 py-2 bg-primary-600 hover:bg-primary-700 disabled:bg-primary-400 text-white font-medium rounded-lg transition-colors"
+                    >
+                      {generatingPdf ? (
+                        <>
+                          <Loader2 className="w-4 h-4 animate-spin" />
+                          Generating...
+                        </>
+                      ) : (
+                        <>
+                          <Download className="w-4 h-4" />
+                          Download PDF
+                        </>
+                      )}
+                    </button>
+                  )}
+                  {canPrint && (
+                    <button
+                      onClick={() => window.print()}
+                      className="inline-flex items-center gap-2 px-4 py-2 bg-gray-100 dark:bg-gray-700 hover:bg-gray-200 dark:hover:bg-gray-600 text-gray-700 dark:text-gray-300 font-medium rounded-lg transition-colors"
+                    >
+                      <Printer className="w-4 h-4" />
+                      Print
+                    </button>
+                  )}
                 </div>
               </div>
             </div>
           </div>
 
           {/* Status Change Modal */}
-          {showStatusModal && report && (
+          {showStatusModal && report && canChangeStatus && (
             <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
               <div 
                 className="absolute inset-0 bg-black/50 backdrop-blur-sm"
@@ -2441,6 +2459,9 @@ export default function FMIRDetailPage() {
           </div>
         </div>
       )}
+
+      {/* Access Denied Modal */}
+      {accessDeniedModal}
     </ProtectedRoute>
   );
 }

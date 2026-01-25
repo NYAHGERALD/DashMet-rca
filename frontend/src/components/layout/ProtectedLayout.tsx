@@ -7,6 +7,7 @@ import { useRouter } from 'next/navigation';
 import { useEffect } from 'react';
 import Navigation from '@/components/layout/Navigation';
 import Sidebar from '@/components/layout/Sidebar';
+import FloatingSupportButton from '@/components/support/FloatingSupportButton';
 
 interface ProtectedLayoutProps {
   children: React.ReactNode;
@@ -46,6 +47,8 @@ export default function ProtectedLayout({ children }: ProtectedLayoutProps) {
           {children}
         </main>
       </div>
+      {/* Floating Support Button for non-Admin users */}
+      <FloatingSupportButton />
     </div>
   );
 }

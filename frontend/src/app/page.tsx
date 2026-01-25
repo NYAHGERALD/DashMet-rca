@@ -20,7 +20,7 @@ import {
   sendPasswordResetEmail,
   fetchSignInMethodsForEmail,
 } from 'firebase/auth';
-import { auth, googleProvider } from '@/lib/firebase';
+import { auth, googleProvider, microsoftProvider } from '@/lib/firebase';
 import api from '@/lib/api';
 import SupportModal from '@/components/support/SupportModal';
 
@@ -214,6 +214,49 @@ export default function HomePage() {
     }
   };
 
+  // Microsoft OAuth Login Handler (Work, School, and Personal Microsoft accounts)
+  const handleMicrosoftLogin = async () => {
+    setLoading(true);
+    setError('');
+
+    try {
+      const result = await signInWithPopup(auth, microsoftProvider);
+      const user = result.user;
+
+      const response = await api.post('/firebase-auth/check-user', { email: user.email });
+      const { existsInDatabase, hasProfile } = response.data.data;
+
+      if (existsInDatabase && hasProfile) {
+        router.push('/dashboard');
+      } else {
+        router.push('/profile-setup');
+      }
+    } catch (err: any) {
+      console.error('Microsoft login error:', err);
+      if (err.code === 'auth/popup-closed-by-user') {
+        setError('Sign-in cancelled. Please try again.');
+      } else if (err.code === 'auth/popup-blocked') {
+        setError('Popup was blocked. Please allow popups for this site.');
+      } else if (err.code === 'auth/cancelled-popup-request') {
+        return;
+      } else if (err.code === 'auth/network-request-failed') {
+        setError('Network error. Please check your connection.');
+      } else if (err.code === 'auth/account-exists-with-different-credential') {
+        setError('An account already exists with this email. Please sign in using Google or email/password.');
+      } else if (err.code === 'auth/invalid-credential') {
+        setError('Invalid credentials. Please try again.');
+      } else if (err.code === 'auth/operation-not-allowed') {
+        setError('Microsoft sign-in is not enabled. Please contact support.');
+      } else if (err.code === 'auth/user-disabled') {
+        setError('This account has been disabled. Please contact support.');
+      } else {
+        setError(err.message || 'Microsoft login failed. Please try again.');
+      }
+    } finally {
+      setLoading(false);
+    }
+  };
+
   const handleForgotPassword = async () => {
     setShowForgotPasswordModal(true);
     setResetEmail(email || '');
@@ -354,7 +397,7 @@ export default function HomePage() {
                 <div className="text-center mb-4 sm:mb-6">
                   <h2 className="text-lg sm:text-xl md:text-2xl font-bold text-white mb-1 sm:mb-2">Welcome</h2>
                   <p className="text-xs sm:text-sm md:text-base text-blue-200/70">Sign in to access your dashboard</p>
-                  <p className="text-[10px] sm:text-xs text-slate-400 mt-1 sm:mt-2">Sign in or register instantly with Google, or use your email address to login or create a new account.</p>
+                  <p className="text-[10px] sm:text-xs text-slate-400 mt-1 sm:mt-2">Sign in or register with Google, Microsoft (Work/School/Personal), or your email.</p>
                 </div>
 
                 <div className="space-y-4">
@@ -383,6 +426,22 @@ export default function HomePage() {
                       <path fill="#EA4335" d="M12 5.38c1.62 0 3.06.56 4.21 1.64l3.15-3.15C17.45 2.09 14.97 1 12 1 7.7 1 3.99 3.47 2.18 7.07l3.66 2.84c.87-2.6 3.3-4.53 6.16-4.53z"/>
                     </svg>
                     Continue with Google
+                  </button>
+
+                  {/* Microsoft Sign In - Enterprise SSO */}
+                  <button
+                    onClick={handleMicrosoftLogin}
+                    disabled={loading}
+                    className="w-full flex items-center justify-center gap-2 sm:gap-3 px-4 sm:px-6 py-2.5 sm:py-3 bg-[#2F2F2F] text-white rounded-lg hover:bg-[#404040] transition-all duration-200 font-medium text-sm sm:text-base disabled:opacity-50 disabled:cursor-not-allowed border border-white/10"
+                  >
+                    {/* Microsoft Logo */}
+                    <svg className="w-4 h-4 sm:w-5 sm:h-5" viewBox="0 0 21 21">
+                      <rect x="1" y="1" width="9" height="9" fill="#F25022"/>
+                      <rect x="11" y="1" width="9" height="9" fill="#7FBA00"/>
+                      <rect x="1" y="11" width="9" height="9" fill="#00A4EF"/>
+                      <rect x="11" y="11" width="9" height="9" fill="#FFB900"/>
+                    </svg>
+                    Continue with Microsoft
                   </button>
 
                   <div className="relative">

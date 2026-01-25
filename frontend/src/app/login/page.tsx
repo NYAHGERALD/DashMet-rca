@@ -1,4 +1,4 @@
-// Phase 1.1: Firebase Email-First Login + Google OAuth
+// Phase 1.1: Firebase Email-First Login + Google OAuth + Microsoft OAuth
 'use client';
 
 import { useState, useEffect } from 'react';
@@ -11,13 +11,16 @@ import {
   signInWithPopup,
   sendPasswordResetEmail,
   fetchSignInMethodsForEmail,
-  onAuthStateChanged
+  linkWithCredential,
+  OAuthCredential
 } from 'firebase/auth';
-import { auth, googleProvider } from '@/lib/firebase';
+import { auth, googleProvider, microsoftProvider } from '@/lib/firebase';
+import { useAuth } from '@/components/providers/AuthProvider';
 import api from '@/lib/api';
 
 export default function LoginPage() {
   const router = useRouter();
+  const { user, loading: authLoading, needsProfileSetup: authNeedsProfileSetup } = useAuth();
   const [step, setStep] = useState<'email' | 'password' | 'register'>('email');
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
@@ -26,7 +29,6 @@ export default function LoginPage() {
   const [error, setError] = useState('');
   const [message, setMessage] = useState('');
   const [needsProfileSetup, setNeedsProfileSetup] = useState(false);
-  const [initializing, setInitializing] = useState(true);
   
   // Forgot password modal state
   const [showForgotPasswordModal, setShowForgotPasswordModal] = useState(false);
@@ -35,40 +37,38 @@ export default function LoginPage() {
   const [resetSuccess, setResetSuccess] = useState(false);
   const [resetError, setResetError] = useState('');
 
-  // Check if user is already logged in
+  // Redirect if user is already logged in (using AuthProvider)
   useEffect(() => {
-    const unsubscribe = onAuthStateChanged(auth, async (user) => {
+    if (!authLoading) {
       if (user) {
-        // User is already logged in, check if they have a profile
-        try {
-          const response = await api.post('/firebase-auth/check-user', { email: user.email });
-          const { existsInDatabase, hasProfile } = response.data.data;
-          
-          if (existsInDatabase && hasProfile) {
-            router.push('/dashboard');
-            return;
-          } else {
-            router.push('/profile-setup');
-            return;
-          }
-        } catch (err) {
-          // If check fails, stay on login page
-          console.error('Auth check error:', err);
-        }
+        // User has complete profile, redirect to dashboard
+        router.push('/dashboard');
+      } else if (authNeedsProfileSetup) {
+        // User needs to complete profile setup
+        router.push('/profile-setup');
       }
-      setInitializing(false);
-    });
-
-    return () => unsubscribe();
-  }, [router]);
+    }
+  }, [user, authLoading, authNeedsProfileSetup, router]);
 
   // Show loading spinner while checking auth state
-  if (initializing) {
+  if (authLoading) {
     return (
       <div className="min-h-screen flex items-center justify-center bg-gradient-to-br from-primary-50 to-primary-100 dark:from-gray-900 dark:to-gray-800">
         <div className="text-center">
           <div className="animate-spin rounded-full h-12 w-12 border-t-2 border-b-2 border-primary-600 mx-auto mb-4"></div>
           <p className="text-gray-600 dark:text-gray-400">Loading...</p>
+        </div>
+      </div>
+    );
+  }
+
+  // If user exists or needs profile setup, show loading while redirecting
+  if (user || authNeedsProfileSetup) {
+    return (
+      <div className="min-h-screen flex items-center justify-center bg-gradient-to-br from-primary-50 to-primary-100 dark:from-gray-900 dark:to-gray-800">
+        <div className="text-center">
+          <div className="animate-spin rounded-full h-12 w-12 border-t-2 border-b-2 border-primary-600 mx-auto mb-4"></div>
+          <p className="text-gray-600 dark:text-gray-400">Redirecting...</p>
         </div>
       </div>
     );
@@ -217,6 +217,64 @@ export default function LoginPage() {
     }
   };
 
+  // Microsoft OAuth Login Handler (Work, School, and Personal Microsoft accounts)
+  const handleMicrosoftLogin = async () => {
+    setLoading(true);
+    setError('');
+
+    try {
+      const result = await signInWithPopup(auth, microsoftProvider);
+      const user = result.user;
+
+      const response = await api.post('/firebase-auth/check-user', { email: user.email });
+      const { existsInDatabase, hasProfile } = response.data.data;
+
+      if (existsInDatabase && hasProfile) {
+        router.push('/dashboard');
+      } else {
+        router.push('/profile-setup');
+      }
+    } catch (err: any) {
+      console.error('Microsoft login error:', err);
+      // Handle specific Firebase/Microsoft auth errors
+      if (err.code === 'auth/popup-closed-by-user') {
+        setError('Sign-in cancelled. Please try again.');
+      } else if (err.code === 'auth/popup-blocked') {
+        setError('Popup was blocked. Please allow popups for this site.');
+      } else if (err.code === 'auth/cancelled-popup-request') {
+        // User clicked button multiple times, ignore
+        return;
+      } else if (err.code === 'auth/network-request-failed') {
+        setError('Network error. Please check your connection.');
+      } else if (err.code === 'auth/account-exists-with-different-credential') {
+        // Get the email and existing sign-in methods
+        const email = err.customData?.email;
+        if (email) {
+          const methods = await fetchSignInMethodsForEmail(auth, email);
+          if (methods.includes('google.com')) {
+            setError('This email is linked to Google. Please sign in with Google first, then you can link Microsoft in your profile settings.');
+          } else if (methods.includes('password')) {
+            setError('This email is linked to email/password. Please sign in with your email and password.');
+          } else {
+            setError('An account already exists with this email. Please sign in using your original method.');
+          }
+        } else {
+          setError('An account already exists with this email. Please sign in using Google or email/password.');
+        }
+      } else if (err.code === 'auth/invalid-credential') {
+        setError('Invalid credentials. Please try again.');
+      } else if (err.code === 'auth/operation-not-allowed') {
+        setError('Microsoft sign-in is not enabled. Please contact support.');
+      } else if (err.code === 'auth/user-disabled') {
+        setError('This account has been disabled. Please contact support.');
+      } else {
+        setError(err.message || 'Microsoft login failed. Please try again.');
+      }
+    } finally {
+      setLoading(false);
+    }
+  };
+
   const handleForgotPassword = async () => {
     setShowForgotPasswordModal(true);
     setResetEmail(email || '');
@@ -326,7 +384,7 @@ export default function LoginPage() {
             <p className="text-sm sm:text-base text-gray-300">
               Enterprise Root Cause Analysis Platform
             </p>
-            <p className="text-xs text-gray-400 mt-3">Sign in or register instantly with Google, or use your email address to login or create a new account.</p>
+            <p className="text-xs text-gray-400 mt-3">Sign in instantly with Google or Microsoft (Work, School, or Personal), or use your email address to login or create a new account.</p>
           </div>
 
           {error && (
@@ -344,7 +402,7 @@ export default function LoginPage() {
           <button
             onClick={handleGoogleLogin}
             disabled={loading}
-            className="w-full mb-4 sm:mb-6 px-4 sm:px-6 py-2.5 sm:py-3 bg-white/5 border border-white/20 text-white rounded-lg hover:bg-white/10 transition-colors disabled:opacity-50 disabled:cursor-not-allowed font-medium flex items-center justify-center gap-2 sm:gap-3 text-sm sm:text-base"
+            className="w-full mb-3 px-4 sm:px-6 py-2.5 sm:py-3 bg-white/5 border border-white/20 text-white rounded-lg hover:bg-white/10 transition-colors disabled:opacity-50 disabled:cursor-not-allowed font-medium flex items-center justify-center gap-2 sm:gap-3 text-sm sm:text-base"
           >
             <svg className="w-5 h-5" viewBox="0 0 24 24">
               <path fill="#4285F4" d="M22.56 12.25c0-.78-.07-1.53-.2-2.25H12v4.26h5.92c-.26 1.37-1.04 2.53-2.21 3.31v2.77h3.57c2.08-1.92 3.28-4.74 3.28-8.09z"/>
@@ -353,6 +411,22 @@ export default function LoginPage() {
               <path fill="#EA4335" d="M12 5.38c1.62 0 3.06.56 4.21 1.64l3.15-3.15C17.45 2.09 14.97 1 12 1 7.7 1 3.99 3.47 2.18 7.07l3.66 2.84c.87-2.6 3.3-4.53 6.16-4.53z"/>
             </svg>
             Continue with Google
+          </button>
+
+          {/* Microsoft Login Button - Enterprise SSO */}
+          <button
+            onClick={handleMicrosoftLogin}
+            disabled={loading}
+            className="w-full mb-4 sm:mb-6 px-4 sm:px-6 py-2.5 sm:py-3 bg-white/5 border border-white/20 text-white rounded-lg hover:bg-white/10 transition-colors disabled:opacity-50 disabled:cursor-not-allowed font-medium flex items-center justify-center gap-2 sm:gap-3 text-sm sm:text-base"
+          >
+            {/* Microsoft Logo */}
+            <svg className="w-5 h-5" viewBox="0 0 21 21">
+              <rect x="1" y="1" width="9" height="9" fill="#F25022"/>
+              <rect x="11" y="1" width="9" height="9" fill="#7FBA00"/>
+              <rect x="1" y="11" width="9" height="9" fill="#00A4EF"/>
+              <rect x="11" y="11" width="9" height="9" fill="#FFB900"/>
+            </svg>
+            Continue with Microsoft
           </button>
 
           <div className="relative mb-6">

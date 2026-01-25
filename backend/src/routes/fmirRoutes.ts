@@ -2,6 +2,7 @@ import { Router, Request, Response, NextFunction } from 'express';
 import asyncHandler from 'express-async-handler';
 import { PrismaClient, FMIRStatus } from '@prisma/client';
 import { authenticate, AuthRequest } from '../middleware/auth';
+import { requirePrivilege, hasPrivilege } from '../middleware/rbac';
 import multer from 'multer';
 import path from 'path';
 import fs from 'fs';
@@ -44,12 +45,14 @@ const upload = multer({
   },
 });
 
-// Get all QA/Food Safety users in an organization
+// Get all QA/Food Safety and Quality Control Manager users in an organization
 async function getQAFoodSafetyUsers(organizationId: string): Promise<string[]> {
   const qaUsers = await prisma.user.findMany({
     where: {
       organizationId,
-      role: 'QA_FOOD_SAFETY',
+      role: {
+        in: ['QA_FOOD_SAFETY', 'QUALITY_CONTROL_MANAGER'],
+      },
       isActive: true,
     },
     select: { id: true },
@@ -113,13 +116,13 @@ router.get(
       return;
     }
 
-    // Exclude QA_FOOD_SAFETY users - they are automatically added to all FMIR reports
+    // Exclude QA_FOOD_SAFETY and QUALITY_CONTROL_MANAGER users - they are automatically added to all FMIR reports
     const users = await prisma.user.findMany({
       where: {
         organizationId: userOrgId,
         isActive: true,
         role: {
-          not: 'QA_FOOD_SAFETY',
+          notIn: ['QA_FOOD_SAFETY', 'QUALITY_CONTROL_MANAGER'],
         },
       },
       select: {
@@ -145,7 +148,7 @@ router.get(
 
 /**
  * @route   GET /api/fmir/qa-users
- * @desc    Get all QA/Food Safety users in the organization (for display purposes)
+ * @desc    Get all QA/Food Safety and Quality Control Manager users in the organization (for display purposes)
  * @access  Private
  */
 router.get(
@@ -165,7 +168,9 @@ router.get(
       where: {
         organizationId: userOrgId,
         isActive: true,
-        role: 'QA_FOOD_SAFETY',
+        role: {
+          in: ['QA_FOOD_SAFETY', 'QUALITY_CONTROL_MANAGER'],
+        },
       },
       select: {
         id: true,
@@ -411,11 +416,12 @@ router.get(
 /**
  * @route   POST /api/fmir
  * @desc    Create a new FMIR report
- * @access  Private
+ * @access  Private - Requires fmir.create privilege
  */
 router.post(
   '/',
   authenticate,
+  requirePrivilege('fmir.create'),
   asyncHandler(async (req: Request, res: Response, next: NextFunction) => {
     const authReq = req as AuthRequest;
     const userId = authReq.user?.id;
@@ -589,11 +595,12 @@ router.post(
 /**
  * @route   PUT /api/fmir/:id
  * @desc    Update an FMIR report
- * @access  Private (Owner or Collaborator)
+ * @access  Private (Owner or Collaborator) - Requires fmir.edit privilege
  */
 router.put(
   '/:id',
   authenticate,
+  requirePrivilege('fmir.edit'),
   asyncHandler(async (req: Request, res: Response, next: NextFunction) => {
     const authReq = req as AuthRequest;
     const { id } = req.params;
@@ -765,7 +772,7 @@ router.put(
 /**
  * @route   POST /api/fmir/:id/validate-for-submit
  * @desc    Validate an FMIR for submission with AI analysis
- * @access  Private (Report owner or collaborator)
+ * @access  Private (Report owner or collaborator) - Requires fmir.ai.validate_submit privilege
  * 
  * This endpoint validates:
  * 1. Required description fields are filled
@@ -776,6 +783,7 @@ router.put(
 router.post(
   '/:id/validate-for-submit',
   authenticate,
+  requirePrivilege('fmir.ai.validate_submit'),
   asyncHandler(async (req: Request, res: Response, next: NextFunction) => {
     const authReq = req as AuthRequest;
     const { id } = req.params;
@@ -868,11 +876,12 @@ router.post(
 /**
  * @route   POST /api/fmir/:id/submit
  * @desc    Submit an FMIR report
- * @access  Private
+ * @access  Private - Requires fmir.submit privilege
  */
 router.post(
   '/:id/submit',
   authenticate,
+  requirePrivilege('fmir.submit'),
   asyncHandler(async (req: Request, res: Response, next: NextFunction) => {
     const authReq = req as AuthRequest;
     const { id } = req.params;
@@ -997,7 +1006,7 @@ router.post(
 /**
  * @route   PATCH /api/fmir/:id/status
  * @desc    Change FMIR report status (QA/Food Safety workflow)
- * @access  Private (QA_FOOD_SAFETY, SAFETY_SECURITY_MANAGER, ADMIN only)
+ * @access  Private (QUALITY_CONTROL_MANAGER, SAFETY_SECURITY_MANAGER, ADMIN only)
  * 
  * Valid transitions:
  * - SUBMITTED -> UNDER_INVESTIGATION (Start investigation)
@@ -1021,10 +1030,10 @@ router.patch(
       return;
     }
 
-    // Only QA/Food Safety, Safety/Security Manager, or Admin can change status
-    const allowedRoles = ['QA_FOOD_SAFETY', 'SAFETY_SECURITY_MANAGER', 'ADMIN'];
+    // Only Quality Control Manager, Safety/Security Manager, or Admin can change status
+    const allowedRoles = ['QUALITY_CONTROL_MANAGER', 'SAFETY_SECURITY_MANAGER', 'ADMIN'];
     if (!allowedRoles.includes(userRole || '')) {
-      res.status(403).json({ error: 'Only QA/Food Safety personnel can change report status' });
+      res.status(403).json({ error: 'Only Quality Control Manager can change report status' });
       return;
     }
 
@@ -1160,11 +1169,12 @@ router.patch(
 /**
  * @route   DELETE /api/fmir/:id
  * @desc    Delete an FMIR report
- * @access  Private (QA_FOOD_SAFETY can delete any, Owners can only delete non-visible reports without participants)
+ * @access  Private (QA_FOOD_SAFETY can delete any, Owners can only delete non-visible reports without participants) - Requires fmir.delete privilege
  */
 router.delete(
   '/:id',
   authenticate,
+  requirePrivilege('fmir.delete'),
   asyncHandler(async (req: Request, res: Response, next: NextFunction) => {
     const authReq = req as AuthRequest;
     const { id } = req.params;
@@ -1189,14 +1199,27 @@ router.delete(
       return;
     }
 
-    // QA/Food Safety and Admin roles can delete any report
+    // Role-based delete permissions:
+    // - QUALITY_CONTROL_MANAGER: Can delete any VISIBLE report in their organization
+    // - QA_FOOD_SAFETY: Can only delete reports they created (same restrictions as regular owners)
+    // - ADMIN/SYSTEM_ADMIN: Can delete any report
+    const isQualityControlManager = userRole === 'QUALITY_CONTROL_MANAGER';
     const isQAFoodSafety = userRole === 'QA_FOOD_SAFETY';
     const isAdmin = ['ADMIN', 'SYSTEM_ADMIN'].includes(userRole || '');
     const isCreator = report.createdById === userId;
 
-    // QA/Food Safety and Admins can delete any report
-    if (isQAFoodSafety || isAdmin) {
-      // Proceed with deletion
+    // Quality Control Manager can delete any visible report
+    if (isQualityControlManager) {
+      if (!report.isVisible) {
+        res.status(403).json({ 
+          error: 'Cannot delete this report',
+          message: 'This report is not visible. Only visible reports can be deleted by Quality Control Manager.'
+        });
+        return;
+      }
+      // Proceed with deletion for visible reports
+    } else if (isAdmin) {
+      // Admins can delete any report - proceed with deletion
     } else if (isCreator) {
       // Owners can only delete reports that:
       // 1. Are NOT visible
@@ -1306,11 +1329,12 @@ router.delete(
 /**
  * @route   POST /api/fmir/:id/evidence
  * @desc    Upload evidence to an FMIR report
- * @access  Private
+ * @access  Private - Requires fmir.evidence.upload privilege
  */
 router.post(
   '/:id/evidence',
   authenticate,
+  requirePrivilege('fmir.evidence.upload'),
   upload.array('files', 10),
   asyncHandler(async (req: Request, res: Response, next: NextFunction) => {
     const authReq = req as AuthRequest;
@@ -1433,11 +1457,12 @@ router.post(
 /**
  * @route   DELETE /api/fmir/:id/evidence/:evidenceId
  * @desc    Delete evidence from an FMIR report
- * @access  Private
+ * @access  Private - Requires fmir.evidence.delete privilege
  */
 router.delete(
   '/:id/evidence/:evidenceId',
   authenticate,
+  requirePrivilege('fmir.evidence.delete'),
   asyncHandler(async (req: Request, res: Response, next: NextFunction) => {
     const authReq = req as AuthRequest;
     const { id, evidenceId } = req.params;
@@ -1709,11 +1734,12 @@ router.patch(
 /**
  * @route   PATCH /api/fmir/:id/visibility
  * @desc    Toggle visibility of an FMIR report (owner only)
- * @access  Private
+ * @access  Private - Requires fmir.toggle_visibility privilege
  */
 router.patch(
   '/:id/visibility',
   authenticate,
+  requirePrivilege('fmir.toggle_visibility'),
   asyncHandler(async (req: Request, res: Response, next: NextFunction) => {
     const authReq = req as AuthRequest;
     const { id } = req.params;
@@ -1770,6 +1796,67 @@ router.patch(
 
     console.log(`📡 FMIR ${report.reportNumber} visibility changed to ${isVisible ? 'VISIBLE' : 'HIDDEN'} by owner`);
 
+    // When visibility is turned ON, auto-add all Quality Control Manager users to the report
+    if (isVisible) {
+      // Get all Quality Control Manager users in the organization
+      const qcmUsers = await prisma.user.findMany({
+        where: {
+          organizationId: userOrgId,
+          isActive: true,
+          role: 'QUALITY_CONTROL_MANAGER',
+        },
+        select: {
+          id: true,
+          firstName: true,
+          lastName: true,
+          email: true,
+          profilePicture: true,
+          role: true,
+        },
+      });
+
+      // Add QCM users to the report if not already collaborators or owner
+      const existingCollaboratorIds = report.collaboratorIds || [];
+      const newCollaboratorIds: string[] = [];
+      const addedUsers: any[] = [];
+      
+      for (const qcmUser of qcmUsers) {
+        // Don't add if already a collaborator, or if they're the owner
+        if (!existingCollaboratorIds.includes(qcmUser.id) && qcmUser.id !== userId) {
+          newCollaboratorIds.push(qcmUser.id);
+          addedUsers.push({
+            id: qcmUser.id,
+            firstName: qcmUser.firstName,
+            lastName: qcmUser.lastName,
+            email: qcmUser.email,
+            profilePicture: qcmUser.profilePicture,
+            role: qcmUser.role,
+            isQAFoodSafety: true, // Treat QCM as QA for display purposes
+          });
+        }
+      }
+
+      // Update the report with new collaborator IDs if any were added
+      if (newCollaboratorIds.length > 0) {
+        await prisma.foreignMaterialIncident.update({
+          where: { id },
+          data: {
+            collaboratorIds: [...existingCollaboratorIds, ...newCollaboratorIds],
+          },
+        });
+        console.log(`📤 Auto-added ${newCollaboratorIds.length} Quality Control Manager(s) to FMIR ${report.reportNumber}`);
+
+        // Emit WebSocket event to notify about new collaborators
+        for (const addedUser of addedUsers) {
+          websocketService.emitToOrganization(userOrgId, 'fmir:collaborator-added', {
+            userId: addedUser.id,
+            user: addedUser,
+            reportIds: [id],
+          });
+        }
+      }
+    }
+
     // Emit WebSocket event to all users in the organization so they refresh their FMIR list
     websocketService.emitToOrganization(userOrgId, 'fmir:visibility-changed', {
       reportId: id,
@@ -1805,11 +1892,12 @@ router.patch(
 /**
  * @route   GET /api/fmir/:id/validate-for-lock
  * @desc    Validate an FMIR for locking and get AI compliance analysis
- * @access  Private (QA_FOOD_SAFETY role only)
+ * @access  Private (QA_FOOD_SAFETY or QUALITY_CONTROL_MANAGER role only) - Requires fmir.ai.validate_lock privilege
  */
 router.get(
   '/:id/validate-for-lock',
   authenticate,
+  requirePrivilege('fmir.ai.validate_lock'),
   asyncHandler(async (req: Request, res: Response, next: NextFunction) => {
     const authReq = req as AuthRequest;
     const { id } = req.params;
@@ -1822,9 +1910,9 @@ router.get(
       return;
     }
 
-    // Only QA/Food Safety users can validate for locking
-    if (userRole !== 'QA_FOOD_SAFETY') {
-      res.status(403).json({ error: 'Only QA/Food Safety users can validate for locking' });
+    // Only QA/Food Safety or Quality Control Manager users can validate for locking
+    if (userRole !== 'QA_FOOD_SAFETY' && userRole !== 'QUALITY_CONTROL_MANAGER') {
+      res.status(403).json({ error: 'Only QA/Food Safety or Quality Control Manager users can validate for locking' });
       return;
     }
 
@@ -1873,11 +1961,12 @@ router.get(
 /**
  * @route   POST /api/fmir/explain-regulation
  * @desc    Get AI explanation of a food safety regulation in plain English
- * @access  Private
+ * @access  Private - Requires fmir.ai.enhance_text privilege
  */
 router.post(
   '/explain-regulation',
   authenticate,
+  requirePrivilege('fmir.ai.enhance_text'),
   asyncHandler(async (req: Request, res: Response, next: NextFunction) => {
     const authReq = req as AuthRequest;
     const userId = authReq.user?.id;
@@ -1910,12 +1999,13 @@ router.post(
 
 /**
  * @route   PATCH /api/fmir/:id/closed-status
- * @desc    Toggle closed status of an FMIR report (QA/Food Safety only)
- * @access  Private (QA_FOOD_SAFETY role only)
+ * @desc    Toggle closed status of an FMIR report (Quality Control Manager only)
+ * @access  Private (QUALITY_CONTROL_MANAGER role only) - Requires fmir.close privilege
  */
 router.patch(
   '/:id/closed-status',
   authenticate,
+  requirePrivilege('fmir.close'),
   asyncHandler(async (req: Request, res: Response, next: NextFunction) => {
     const authReq = req as AuthRequest;
     const { id } = req.params;
@@ -1929,9 +2019,9 @@ router.patch(
       return;
     }
 
-    // Only QA/Food Safety users can toggle closed status
-    if (userRole !== 'QA_FOOD_SAFETY') {
-      res.status(403).json({ error: 'Only QA/Food Safety users can change closed status' });
+    // Only Quality Control Manager can toggle closed status
+    if (userRole !== 'QUALITY_CONTROL_MANAGER') {
+      res.status(403).json({ error: 'Only Quality Control Manager can change closed status' });
       return;
     }
 
@@ -2357,11 +2447,12 @@ router.post(
 /**
  * @route   POST /api/fmir/:id/collaborators
  * @desc    Add collaborators to a report (owner only)
- * @access  Private
+ * @access  Private - Requires fmir.collaborators.add privilege
  */
 router.post(
   '/:id/collaborators',
   authenticate,
+  requirePrivilege('fmir.collaborators.add'),
   asyncHandler(async (req: Request, res: Response, next: NextFunction) => {
     const authReq = req as AuthRequest;
     const { id } = req.params;
@@ -2498,11 +2589,12 @@ router.post(
 /**
  * @route   DELETE /api/fmir/:id/collaborators/:collaboratorId
  * @desc    Remove a collaborator from a report (owner only)
- * @access  Private
+ * @access  Private - Requires fmir.collaborators.remove privilege
  */
 router.delete(
   '/:id/collaborators/:collaboratorId',
   authenticate,
+  requirePrivilege('fmir.collaborators.remove'),
   asyncHandler(async (req: Request, res: Response, next: NextFunction) => {
     const authReq = req as AuthRequest;
     const { id, collaboratorId } = req.params;
@@ -2857,7 +2949,7 @@ router.get(
 
     const isOwner = fmir.createdById === userId;
     const isCollaborator = fmir.collaboratorIds.includes(userId);
-    const isQA = user?.role === 'QA_FOOD_SAFETY';
+    const isQA = user?.role === 'QA_FOOD_SAFETY' || user?.role === 'QUALITY_CONTROL_MANAGER';
     const sameOrg = user?.organizationId === fmir.organizationId;
 
     if (!isOwner && !isCollaborator && !(isQA && sameOrg)) {
@@ -2935,7 +3027,7 @@ router.get(
 
     const isOwner = fmir.createdById === userId;
     const isCollaborator = fmir.collaboratorIds.includes(userId);
-    const isQA = user?.role === 'QA_FOOD_SAFETY';
+    const isQA = user?.role === 'QA_FOOD_SAFETY' || user?.role === 'QUALITY_CONTROL_MANAGER';
     const sameOrg = user?.organizationId === fmir.organizationId;
 
     if (!isOwner && !isCollaborator && !(isQA && sameOrg)) {
@@ -2976,6 +3068,7 @@ router.get(
 router.post(
   '/:id/comments',
   authenticate,
+  requirePrivilege('fmir.comments.add'),
   asyncHandler(async (req: AuthRequest, res: Response) => {
     const { id } = req.params;
     const { sectionNumber, content, visibleToIds } = req.body;
@@ -3021,7 +3114,7 @@ router.post(
 
     const isOwner = fmir.createdById === userId;
     const isCollaborator = fmir.collaboratorIds.includes(userId);
-    const isQA = user?.role === 'QA_FOOD_SAFETY';
+    const isQA = user?.role === 'QA_FOOD_SAFETY' || user?.role === 'QUALITY_CONTROL_MANAGER';
     const sameOrg = user?.organizationId === fmir.organizationId;
 
     if (!isOwner && !isCollaborator && !(isQA && sameOrg)) {
@@ -3080,6 +3173,7 @@ router.post(
 router.delete(
   '/:id/comments/:commentId',
   authenticate,
+  requirePrivilege('fmir.comments.delete'),
   asyncHandler(async (req: AuthRequest, res: Response) => {
     const { id, commentId } = req.params;
     const userId = req.user?.id;
@@ -3189,7 +3283,7 @@ router.get(
 
     const isOwner = fmir.createdById === userId;
     const isCollaborator = fmir.collaboratorIds.includes(userId);
-    const isQA = user?.role === 'QA_FOOD_SAFETY';
+    const isQA = user?.role === 'QA_FOOD_SAFETY' || user?.role === 'QUALITY_CONTROL_MANAGER';
     const sameOrg = user?.organizationId === fmir.organizationId;
 
     if (!isOwner && !isCollaborator && !(isQA && sameOrg)) {

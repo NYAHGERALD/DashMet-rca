@@ -5,7 +5,7 @@
 
 import { Router, Request, Response } from 'express';
 import { authenticate, AuthRequest } from '../middleware/auth';
-import { requireRoles } from '../middleware/rbac';
+import { requireRoles, requirePrivilege } from '../middleware/rbac';
 import { UserRole } from '@prisma/client';
 import { prisma } from '../utils/prisma';
 import rcaService from '../services/rcaService';
@@ -266,7 +266,7 @@ router.get('/:rcaId', async (req: AuthRequest, res: Response) => {
  * POST /api/rca/incidents/:incidentId
  * Create a new RCA analysis for an incident
  */
-router.post('/incidents/:incidentId', async (req: AuthRequest, res: Response) => {
+router.post('/incidents/:incidentId', requirePrivilege('rca.create'), async (req: AuthRequest, res: Response) => {
   try {
     const { incidentId } = req.params;
     const { method } = req.body;
@@ -387,7 +387,7 @@ router.post('/incidents/:incidentId/comments', async (req: AuthRequest, res: Res
  * PATCH /api/rca/:rcaId/method
  * Update the RCA method
  */
-router.patch('/:rcaId/method', async (req: AuthRequest, res: Response) => {
+router.patch('/:rcaId/method', requirePrivilege('rca.edit'), async (req: AuthRequest, res: Response) => {
   try {
     const { rcaId } = req.params;
     const { method } = req.body;
@@ -641,7 +641,7 @@ router.post('/:rcaId/fishbone/to-text', async (req: AuthRequest, res: Response) 
  * POST /api/rca/:rcaId/ai/generate-five-whys
  * Generate complete 5 Whys analysis using AI
  */
-router.post('/:rcaId/ai/generate-five-whys', async (req: AuthRequest, res: Response) => {
+router.post('/:rcaId/ai/generate-five-whys', requirePrivilege('rca.ai.five_whys'), async (req: AuthRequest, res: Response) => {
   try {
     const { rcaId } = req.params;
     const userId = req.user!.id;
@@ -702,7 +702,7 @@ router.post('/:rcaId/ai/generate-five-whys', async (req: AuthRequest, res: Respo
  * POST /api/rca/:rcaId/ai/generate-fishbone
  * Generate complete Fishbone analysis using AI
  */
-router.post('/:rcaId/ai/generate-fishbone', async (req: AuthRequest, res: Response) => {
+router.post('/:rcaId/ai/generate-fishbone', requirePrivilege('rca.ai.fishbone'), async (req: AuthRequest, res: Response) => {
   try {
     const { rcaId } = req.params;
     const userId = req.user!.id;
