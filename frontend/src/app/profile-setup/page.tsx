@@ -8,7 +8,7 @@ import { signOut } from 'firebase/auth';
 import { auth } from '@/lib/firebase';
 import api from '@/lib/api';
 
-type Role = 'SUPERVISOR' | 'QA_FOOD_SAFETY' | 'MAINTENANCE_ENGINEERING' | 'CI_MANAGER' | 'SAFETY_SECURITY_MANAGER' | 'ADMIN' | 'SYSTEM_ADMIN';
+type Role = 'SUPERVISOR' | 'QA_FOOD_SAFETY' | 'MAINTENANCE_ENGINEERING' | 'CI_MANAGER' | 'SAFETY_SECURITY_MANAGER' | 'ADMIN';
 
 interface Organization {
   id: string;
@@ -53,7 +53,7 @@ export default function ProfileSetupPage() {
   const [error, setError] = useState('');
   const [loadingData, setLoadingData] = useState(false);
 
-  const isAdminRole = role === 'ADMIN' || role === 'SYSTEM_ADMIN';
+  const isAdminRole = role === 'ADMIN';
   const needsAccessCode = isAdminRole;
   const isNonAdminRole = role && !isAdminRole;
 
@@ -265,33 +265,33 @@ export default function ProfileSetupPage() {
       </div>
 
       {/* Content */}
-      <div className="relative z-10 w-full max-w-[calc(100vw-1.5rem)] xs:max-w-sm sm:max-w-md md:max-w-lg lg:max-w-2xl">
-        <div className="bg-white/10 backdrop-blur-xl border border-white/20 rounded-xl sm:rounded-2xl shadow-2xl p-3 xs:p-4 sm:p-6 md:p-8">
-          <div className="text-center mb-3 xs:mb-4 sm:mb-6 md:mb-8">
-            <h1 className="text-lg xs:text-xl sm:text-2xl md:text-3xl font-bold text-white mb-1 sm:mb-2">
+      <div className="relative z-10 w-full max-w-[calc(100vw-1.5rem)] xs:max-w-sm sm:max-w-md">
+        <div className="bg-white/10 backdrop-blur-xl border border-white/20 rounded-xl sm:rounded-2xl shadow-2xl p-3 xs:p-4 sm:p-5">
+          <div className="text-center mb-3 xs:mb-4 sm:mb-5">
+            <h1 className="text-lg xs:text-xl sm:text-2xl font-bold text-white mb-1">
               Complete Your Profile
             </h1>
-            <p className="text-xs xs:text-sm sm:text-base text-gray-300">
+            <p className="text-xs xs:text-sm text-gray-300">
               Tell us a bit about yourself to get started
             </p>
             {firebaseUser && (
-              <p className="text-[10px] xs:text-xs sm:text-sm text-gray-400 mt-1 sm:mt-2">
+              <p className="text-[10px] xs:text-xs text-gray-400 mt-1">
                 Signed in as: <span className="font-medium text-white break-all">{firebaseUser.email}</span>
               </p>
             )}
           </div>
 
           {error && (
-            <div className="mb-4 sm:mb-6 p-3 sm:p-4 bg-red-500/10 border border-red-500/30 rounded-lg text-red-300 text-xs sm:text-sm">
+            <div className="mb-3 sm:mb-4 p-2.5 sm:p-3 bg-red-500/10 border border-red-500/30 rounded-lg text-red-300 text-xs">
               {error}
             </div>
           )}
 
-          <form onSubmit={handleSubmit} className="space-y-3 xs:space-y-4 sm:space-y-5 md:space-y-6">
+          <form onSubmit={handleSubmit} className="space-y-3 xs:space-y-3.5 sm:space-y-4">
             {/* Name Fields */}
-            <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 xs:gap-4 sm:gap-5 md:gap-6">
+            <div className="grid grid-cols-2 gap-2 xs:gap-3 sm:gap-4">
               <div>
-                <label className="block text-[10px] xs:text-xs sm:text-sm font-medium text-gray-200 mb-1 xs:mb-1.5 sm:mb-2">
+                <label className="block text-[10px] xs:text-xs font-medium text-gray-200 mb-1">
                   First Name *
                 </label>
                 <input
@@ -299,13 +299,13 @@ export default function ProfileSetupPage() {
                   value={firstName}
                   onChange={(e) => setFirstName(e.target.value)}
                   required
-                  className="w-full px-2.5 xs:px-3 sm:px-4 py-2 xs:py-2.5 sm:py-3 bg-white/5 border border-white/10 rounded-lg text-white text-xs xs:text-sm sm:text-base placeholder-gray-400 focus:outline-none focus:ring-2 focus:ring-blue-500/50 focus:border-transparent"
+                  className="w-full px-2.5 xs:px-3 py-2 xs:py-2.5 bg-white/5 border border-white/10 rounded-lg text-white text-xs xs:text-sm placeholder-gray-400 focus:outline-none focus:ring-2 focus:ring-blue-500/50 focus:border-transparent"
                   placeholder="John"
                 />
               </div>
 
               <div>
-                <label className="block text-[10px] xs:text-xs sm:text-sm font-medium text-gray-200 mb-1 xs:mb-1.5 sm:mb-2">
+                <label className="block text-[10px] xs:text-xs font-medium text-gray-200 mb-1">
                   Last Name *
                 </label>
                 <input
@@ -313,7 +313,7 @@ export default function ProfileSetupPage() {
                   value={lastName}
                   onChange={(e) => setLastName(e.target.value)}
                   required
-                  className="w-full px-2.5 xs:px-3 sm:px-4 py-2 xs:py-2.5 sm:py-3 bg-white/5 border border-white/10 rounded-lg text-white text-xs xs:text-sm sm:text-base placeholder-gray-400 focus:outline-none focus:ring-2 focus:ring-blue-500/50 focus:border-transparent"
+                  className="w-full px-2.5 xs:px-3 py-2 xs:py-2.5 bg-white/5 border border-white/10 rounded-lg text-white text-xs xs:text-sm placeholder-gray-400 focus:outline-none focus:ring-2 focus:ring-blue-500/50 focus:border-transparent"
                   placeholder="Doe"
                 />
               </div>
@@ -321,10 +321,10 @@ export default function ProfileSetupPage() {
 
             {/* Organization Access Code - SHOWN FIRST */}
             <div>
-              <label className="block text-[10px] xs:text-xs sm:text-sm font-medium text-gray-200 mb-1 xs:mb-1.5 sm:mb-2">
+              <label className="block text-[10px] xs:text-xs font-medium text-gray-200 mb-1">
                 Organization Access Code *
               </label>
-              <div className="flex flex-col xs:flex-row gap-2 sm:gap-3">
+              <div className="flex gap-2">
                 <input
                   type="text"
                   value={orgSignupCode}
@@ -343,14 +343,14 @@ export default function ProfileSetupPage() {
                   }}
                   maxLength={6}
                   disabled={orgCodeValidated}
-                  className="flex-1 px-2.5 xs:px-3 sm:px-4 py-2 xs:py-2.5 sm:py-3 bg-white/5 border border-white/10 rounded-lg text-white text-sm xs:text-base sm:text-lg placeholder-gray-400 focus:outline-none focus:ring-2 focus:ring-blue-500/50 focus:border-transparent disabled:opacity-50 font-mono tracking-widest"
+                  className="flex-1 px-2.5 xs:px-3 py-2 xs:py-2.5 bg-white/5 border border-white/10 rounded-lg text-white text-sm xs:text-base placeholder-gray-400 focus:outline-none focus:ring-2 focus:ring-blue-500/50 focus:border-transparent disabled:opacity-50 font-mono tracking-widest"
                   placeholder="000000"
                 />
                 <button
                   type="button"
                   onClick={validateOrgSignupCode}
                   disabled={validatingOrgCode || orgCodeValidated || orgSignupCode.length !== 6}
-                  className={`px-3 xs:px-4 sm:px-6 py-2 xs:py-2.5 sm:py-3 rounded-lg font-medium text-xs xs:text-sm sm:text-base transition-colors whitespace-nowrap ${
+                  className={`px-3 xs:px-4 py-2 xs:py-2.5 rounded-lg font-medium text-xs xs:text-sm transition-colors whitespace-nowrap ${
                     orgCodeValidated
                       ? 'bg-green-600 text-white cursor-default'
                       : 'bg-gradient-to-r from-blue-600 to-blue-500 text-white hover:from-blue-700 hover:to-blue-600 disabled:opacity-50 disabled:cursor-not-allowed'
@@ -359,7 +359,7 @@ export default function ProfileSetupPage() {
                   {validatingOrgCode ? 'Validating...' : orgCodeValidated ? '✓ Validated' : 'Validate'}
                 </button>
               </div>
-              <p className="mt-1 xs:mt-1.5 sm:mt-2 text-[9px] xs:text-[10px] sm:text-xs text-gray-400">
+              <p className="mt-1 text-[9px] xs:text-[10px] text-gray-400">
                 Enter the 6-digit code provided by your organization administrator
               </p>
               {orgCodeValidated && (
@@ -375,7 +375,7 @@ export default function ProfileSetupPage() {
                     setOrgAccessCodeId(null);
                     setRole('');
                   }}
-                  className="mt-2 text-xs text-blue-400 hover:text-blue-300"
+                  className="mt-1.5 text-[10px] xs:text-xs text-blue-400 hover:text-blue-300"
                 >
                   Use a different code
                 </button>
@@ -387,15 +387,15 @@ export default function ProfileSetupPage() {
               <>
                 {/* Organization Display */}
                 <div>
-                  <label className="block text-[10px] xs:text-xs sm:text-sm font-medium text-gray-200 mb-1 xs:mb-1.5 sm:mb-2">
+                  <label className="block text-[10px] xs:text-xs font-medium text-gray-200 mb-1">
                     Organization
                   </label>
-                  <div className="w-full px-2.5 xs:px-3 sm:px-4 py-2 xs:py-2.5 sm:py-3 rounded-lg border border-green-500/30 bg-green-500/10 text-white">
+                  <div className="w-full px-2.5 xs:px-3 py-2 xs:py-2.5 rounded-lg border border-green-500/30 bg-green-500/10 text-white">
                     <div className="flex items-center gap-2">
-                      <svg className="w-4 h-4 sm:w-5 sm:h-5 text-green-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                      <svg className="w-4 h-4 text-green-400 flex-shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                         <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z" />
                       </svg>
-                      <span className="text-xs xs:text-sm sm:text-base font-medium">{validatedOrganization.name}</span>
+                      <span className="text-xs xs:text-sm font-medium">{validatedOrganization.name}</span>
                     </div>
                   </div>
                 </div>
@@ -403,15 +403,15 @@ export default function ProfileSetupPage() {
                 {/* Role Display - Auto-assigned */}
                 {isRoleSpecificCode && role && (
                   <div>
-                    <label className="block text-[10px] xs:text-xs sm:text-sm font-medium text-gray-200 mb-1 xs:mb-1.5 sm:mb-2">
+                    <label className="block text-[10px] xs:text-xs font-medium text-gray-200 mb-1">
                       Role
                     </label>
-                    <div className="w-full px-2.5 xs:px-3 sm:px-4 py-2 xs:py-2.5 sm:py-3 rounded-lg border border-green-500/30 bg-green-500/10 text-white">
+                    <div className="w-full px-2.5 xs:px-3 py-2 xs:py-2.5 rounded-lg border border-green-500/30 bg-green-500/10 text-white">
                       <div className="flex items-center gap-2">
-                        <svg className="w-4 h-4 sm:w-5 sm:h-5 text-green-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                        <svg className="w-4 h-4 text-green-400 flex-shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                           <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z" />
                         </svg>
-                        <span className="text-xs xs:text-sm sm:text-base font-medium">
+                        <span className="text-xs xs:text-sm font-medium">
                           {role === 'SUPERVISOR' && 'Supervisor'}
                           {role === 'QA_FOOD_SAFETY' && 'QA / Food Safety'}
                           {role === 'QUALITY_CONTROL_MANAGER' && 'Quality Control Manager'}
@@ -421,7 +421,7 @@ export default function ProfileSetupPage() {
                         </span>
                       </div>
                     </div>
-                    <p className="mt-1 xs:mt-1.5 sm:mt-2 text-[9px] xs:text-[10px] sm:text-xs text-green-400">
+                    <p className="mt-1 text-[9px] xs:text-[10px] text-green-400">
                       ✓ Role automatically assigned based on your access code
                     </p>
                   </div>
@@ -429,7 +429,7 @@ export default function ProfileSetupPage() {
 
                 {/* Facility Selection */}
                 <div>
-                  <label className="block text-[10px] xs:text-xs sm:text-sm font-medium text-gray-200 mb-1 xs:mb-1.5 sm:mb-2">
+                  <label className="block text-[10px] xs:text-xs font-medium text-gray-200 mb-1">
                     Facility *
                   </label>
                   {availableFacilities.length > 0 ? (
@@ -437,7 +437,7 @@ export default function ProfileSetupPage() {
                       value={selectedFacility}
                       onChange={(e) => setSelectedFacility(e.target.value)}
                       required
-                      className="w-full px-2.5 xs:px-3 sm:px-4 py-2 xs:py-2.5 sm:py-3 bg-white/5 border border-white/10 rounded-lg text-white text-xs xs:text-sm sm:text-base focus:outline-none focus:ring-2 focus:ring-blue-500/50 focus:border-transparent [&>option]:bg-slate-800 [&>option]:text-white"
+                      className="w-full px-2.5 xs:px-3 py-2 xs:py-2.5 bg-white/5 border border-white/10 rounded-lg text-white text-xs xs:text-sm focus:outline-none focus:ring-2 focus:ring-blue-500/50 focus:border-transparent [&>option]:bg-slate-800 [&>option]:text-white"
                     >
                       <option value="">Select a facility</option>
                       {availableFacilities.map((f) => (
@@ -445,7 +445,7 @@ export default function ProfileSetupPage() {
                       ))}
                     </select>
                   ) : (
-                    <div className="w-full px-3 sm:px-4 py-2.5 sm:py-3 rounded-lg border border-amber-500/30 bg-amber-500/10 text-amber-300 text-xs sm:text-sm">
+                    <div className="w-full px-2.5 xs:px-3 py-2 xs:py-2.5 rounded-lg border border-amber-500/30 bg-amber-500/10 text-amber-300 text-xs">
                       No facilities available. Please contact your administrator.
                     </div>
                   )}
@@ -455,12 +455,12 @@ export default function ProfileSetupPage() {
 
             {/* Divider for Admin path */}
             {!orgCodeValidated && (
-              <div className="relative py-2">
+              <div className="relative py-1.5">
                 <div className="absolute inset-0 flex items-center">
                   <div className="w-full border-t border-white/10"></div>
                 </div>
-                <div className="relative flex justify-center text-xs">
-                  <span className="px-3 bg-slate-800/80 text-gray-400">or for Admin access</span>
+                <div className="relative flex justify-center text-[10px] xs:text-xs">
+                  <span className="px-2 bg-slate-800/80 text-gray-400">or for Admin access</span>
                 </div>
               </div>
             )}
@@ -468,7 +468,7 @@ export default function ProfileSetupPage() {
             {/* Admin Role Selection - Only shown if no org code validated */}
             {!orgCodeValidated && (
               <div>
-                <label className="block text-[10px] xs:text-xs sm:text-sm font-medium text-gray-200 mb-1 xs:mb-1.5 sm:mb-2">
+                <label className="block text-[10px] xs:text-xs font-medium text-gray-200 mb-1">
                   Admin Role
                 </label>
                 <select
@@ -483,14 +483,13 @@ export default function ProfileSetupPage() {
                     setCreateFacility(false);
                     setError('');
                   }}
-                  className="w-full px-2.5 xs:px-3 sm:px-4 py-2 xs:py-2.5 sm:py-3 bg-white/5 border border-white/10 rounded-lg text-white text-xs xs:text-sm sm:text-base focus:outline-none focus:ring-2 focus:ring-blue-500/50 focus:border-transparent [&>option]:bg-slate-800 [&>option]:text-white"
+                  className="w-full px-2.5 xs:px-3 py-2 xs:py-2.5 bg-white/5 border border-white/10 rounded-lg text-white text-xs xs:text-sm focus:outline-none focus:ring-2 focus:ring-blue-500/50 focus:border-transparent [&>option]:bg-slate-800 [&>option]:text-white"
                 >
                   <option value="">Select admin role (if applicable)</option>
                   <option value="ADMIN">Admin</option>
-                  <option value="SYSTEM_ADMIN">System Admin</option>
                 </select>
-                <p className="mt-1 xs:mt-1.5 sm:mt-2 text-[9px] xs:text-[10px] sm:text-xs text-gray-400">
-                  Only select if you are setting up as an Admin or System Admin
+                <p className="mt-1 text-[9px] xs:text-[10px] text-gray-400">
+                  Only select if you are setting up as an Organization Admin
                 </p>
               </div>
             )}
@@ -498,10 +497,10 @@ export default function ProfileSetupPage() {
             {/* Access Code for Admin Roles */}
             {needsAccessCode && (
               <div>
-                <label className="block text-[10px] xs:text-xs sm:text-sm font-medium text-gray-200 mb-1 xs:mb-1.5 sm:mb-2">
+                <label className="block text-[10px] xs:text-xs font-medium text-gray-200 mb-1">
                   Access Code *
                 </label>
-                <div className="flex flex-col xs:flex-row gap-2 sm:gap-3">
+                <div className="flex gap-2">
                   <input
                     type="text"
                     value={accessCode}
@@ -511,14 +510,14 @@ export default function ProfileSetupPage() {
                     }}
                     required
                     disabled={accessCodeValidated}
-                    className="flex-1 px-2.5 xs:px-3 sm:px-4 py-2 xs:py-2.5 sm:py-3 bg-white/5 border border-white/10 rounded-lg text-white text-xs xs:text-sm sm:text-base placeholder-gray-400 focus:outline-none focus:ring-2 focus:ring-blue-500/50 focus:border-transparent disabled:opacity-50"
+                    className="flex-1 px-2.5 xs:px-3 py-2 xs:py-2.5 bg-white/5 border border-white/10 rounded-lg text-white text-xs xs:text-sm placeholder-gray-400 focus:outline-none focus:ring-2 focus:ring-blue-500/50 focus:border-transparent disabled:opacity-50"
                     placeholder="Enter 6-digit code"
                   />
                   <button
                     type="button"
                     onClick={validateAccessCode}
                     disabled={validatingCode || accessCodeValidated || !accessCode.trim()}
-                    className={`px-3 xs:px-4 sm:px-6 py-2 xs:py-2.5 sm:py-3 rounded-lg font-medium text-xs xs:text-sm sm:text-base transition-colors whitespace-nowrap ${
+                    className={`px-3 xs:px-4 py-2 xs:py-2.5 rounded-lg font-medium text-xs xs:text-sm transition-colors whitespace-nowrap ${
                       accessCodeValidated
                         ? 'bg-green-600 text-white cursor-default'
                         : 'bg-gradient-to-r from-blue-600 to-blue-500 text-white hover:from-blue-700 hover:to-blue-600 disabled:opacity-50 disabled:cursor-not-allowed'
@@ -527,38 +526,35 @@ export default function ProfileSetupPage() {
                     {validatingCode ? 'Validating...' : accessCodeValidated ? '✓ Validated' : 'Validate'}
                   </button>
                 </div>
-                <p className="mt-1 xs:mt-1.5 sm:mt-2 text-[9px] xs:text-[10px] sm:text-xs text-gray-400">
-                  Admin and System Admin roles require a valid access code
+                <p className="mt-1 text-[9px] xs:text-[10px] text-gray-400">
+                  Admin role requires a valid access code
                 </p>
               </div>
             )}
 
-            {/* ADMIN/SYSTEM_ADMIN - Create Organization (shown after access code validation) */}
+            {/* ADMIN - Create Organization (shown after access code validation) */}
             {isAdminRole && accessCodeValidated && (
               <>
                 <div>
-                  <label className="block text-xs sm:text-sm font-medium text-gray-200 mb-1.5 sm:mb-2">
-                    Organization Name {role === 'ADMIN' ? '*' : '(Optional)'}
+                  <label className="block text-[10px] xs:text-xs font-medium text-gray-200 mb-1">
+                    Organization Name *
                   </label>
                   <input
                     type="text"
                     value={newOrganizationName}
                     onChange={(e) => setNewOrganizationName(e.target.value)}
-                    required={role === 'ADMIN'}
-                    className="w-full px-3 sm:px-4 py-2.5 sm:py-3 bg-white/5 border border-white/10 rounded-lg text-white text-sm sm:text-base placeholder-gray-400 focus:outline-none focus:ring-2 focus:ring-blue-500/50 focus:border-transparent"
+                    required
+                    className="w-full px-2.5 xs:px-3 py-2 xs:py-2.5 bg-white/5 border border-white/10 rounded-lg text-white text-xs xs:text-sm placeholder-gray-400 focus:outline-none focus:ring-2 focus:ring-blue-500/50 focus:border-transparent"
                     placeholder="Enter organization name"
                   />
-                  <p className="mt-1.5 sm:mt-2 text-[10px] sm:text-xs text-gray-400">
-                    {role === 'SYSTEM_ADMIN' 
-                      ? 'As System Admin, you can create an organization now or later from the portal'
-                      : 'Create a new organization for your team'
-                    }
+                  <p className="mt-1 text-[9px] xs:text-[10px] text-gray-400">
+                    Create a new organization for your team
                   </p>
                 </div>
 
                 {/* Optional Facility Creation */}
-                <div className="border border-white/10 rounded-lg p-3 sm:p-4 bg-white/5">
-                  <div className="flex items-center gap-2 sm:gap-3">
+                <div className="border border-white/10 rounded-lg p-2.5 xs:p-3 bg-white/5">
+                  <div className="flex items-center gap-2">
                     <input
                       type="checkbox"
                       id="createFacility"
@@ -569,19 +565,19 @@ export default function ProfileSetupPage() {
                           setNewFacilityName('');
                         }
                       }}
-                      className="w-4 h-4 sm:w-5 sm:h-5 rounded border-white/20 bg-white/5 text-blue-600 focus:ring-blue-500/50"
+                      className="w-4 h-4 rounded border-white/20 bg-white/5 text-blue-600 focus:ring-blue-500/50"
                     />
-                    <label htmlFor="createFacility" className="text-xs sm:text-sm font-medium text-gray-200">
+                    <label htmlFor="createFacility" className="text-[10px] xs:text-xs font-medium text-gray-200">
                       Also create a facility now
                     </label>
                   </div>
-                  <p className="mt-1.5 sm:mt-2 text-[10px] sm:text-xs text-gray-400 ml-6 sm:ml-8">
+                  <p className="mt-1 text-[9px] xs:text-[10px] text-gray-400 ml-6">
                     You can always create facilities later from the admin portal
                   </p>
 
                   {createFacility && (
-                    <div className="mt-3 sm:mt-4">
-                      <label className="block text-xs sm:text-sm font-medium text-gray-200 mb-1.5 sm:mb-2">
+                    <div className="mt-2.5">
+                      <label className="block text-[10px] xs:text-xs font-medium text-gray-200 mb-1">
                         Facility Name *
                       </label>
                       <input
@@ -589,7 +585,7 @@ export default function ProfileSetupPage() {
                         value={newFacilityName}
                         onChange={(e) => setNewFacilityName(e.target.value)}
                         required={createFacility}
-                        className="w-full px-3 sm:px-4 py-2.5 sm:py-3 bg-white/5 border border-white/10 rounded-lg text-white text-sm sm:text-base placeholder-gray-400 focus:outline-none focus:ring-2 focus:ring-blue-500/50 focus:border-transparent"
+                        className="w-full px-2.5 xs:px-3 py-2 xs:py-2.5 bg-white/5 border border-white/10 rounded-lg text-white text-xs xs:text-sm placeholder-gray-400 focus:outline-none focus:ring-2 focus:ring-blue-500/50 focus:border-transparent"
                         placeholder="Enter facility name"
                       />
                     </div>
@@ -598,7 +594,7 @@ export default function ProfileSetupPage() {
               </>
             )}
 
-            <div className="pt-2 xs:pt-3 sm:pt-4">
+            <div className="pt-1.5 xs:pt-2">
               <button
                 type="submit"
                 disabled={
@@ -607,15 +603,15 @@ export default function ProfileSetupPage() {
                   (needsAccessCode && !accessCodeValidated) || 
                   (isRoleSpecificCode && (!orgCodeValidated || !selectedFacility))
                 }
-                className="w-full px-3 xs:px-4 sm:px-6 py-2 xs:py-2.5 sm:py-3 bg-gradient-to-r from-blue-600 to-blue-500 text-white text-xs xs:text-sm sm:text-base rounded-lg hover:from-blue-700 hover:to-blue-600 transition-all disabled:opacity-50 disabled:cursor-not-allowed font-medium shadow-lg"
+                className="w-full px-3 xs:px-4 py-2 xs:py-2.5 bg-gradient-to-r from-blue-600 to-blue-500 text-white text-xs xs:text-sm rounded-lg hover:from-blue-700 hover:to-blue-600 transition-all disabled:opacity-50 disabled:cursor-not-allowed font-medium shadow-lg"
               >
                 {loading ? 'Creating Profile...' : 'Complete Setup'}
               </button>
             </div>
           </form>
 
-          <div className="mt-3 xs:mt-4 sm:mt-6 text-center space-y-1.5 xs:space-y-2 sm:space-y-3">
-            <p className="text-[10px] xs:text-xs sm:text-sm text-gray-400">
+          <div className="mt-3 xs:mt-4 text-center space-y-1.5">
+            <p className="text-[10px] xs:text-xs text-gray-400">
               Need help? Contact your system administrator
             </p>
             <button
@@ -629,7 +625,7 @@ export default function ProfileSetupPage() {
                   console.error('Failed to sign out:', err);
                 }
               }}
-              className="text-[10px] xs:text-xs sm:text-sm text-blue-400 hover:text-blue-300 underline"
+              className="text-[10px] xs:text-xs text-blue-400 hover:text-blue-300 underline"
             >
               Use a different account? Sign out
             </button>
