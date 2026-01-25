@@ -3,15 +3,17 @@
 'use client';
 
 import { useState, useEffect } from 'react';
-import { useRouter } from 'next/navigation';
+import { useRouter, useSearchParams } from 'next/navigation';
 import Image from 'next/image';
 import { signInWithEmailAndPassword } from 'firebase/auth';
 import { auth } from '@/lib/firebase';
 import { useAuth } from '@/components/providers/AuthProvider';
 import api from '@/lib/api';
+import SystemAdminWarningModal from '@/components/modals/SystemAdminWarningModal';
 
 export default function SystemAdminLoginPage() {
   const router = useRouter();
+  const searchParams = useSearchParams();
   const { user, loading: authLoading } = useAuth();
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
@@ -24,6 +26,17 @@ export default function SystemAdminLoginPage() {
   const [lockTimer, setLockTimer] = useState(0);
   const [loginSuccess, setLoginSuccess] = useState(false);
   const [isRedirecting, setIsRedirecting] = useState(false);
+  
+  // Show warning modal if blocked=true query param is present
+  const [showBlockedWarning, setShowBlockedWarning] = useState(false);
+  
+  useEffect(() => {
+    if (searchParams.get('blocked') === 'true') {
+      setShowBlockedWarning(true);
+      // Clean up the URL
+      router.replace('/dashmet-control/login');
+    }
+  }, [searchParams, router]);
 
   // Redirect if already logged in as System Admin
   useEffect(() => {
@@ -349,6 +362,13 @@ export default function SystemAdminLoginPage() {
           </p>
         </div>
       </div>
+
+      {/* System Admin Blocked Warning Modal */}
+      <SystemAdminWarningModal
+        isOpen={showBlockedWarning}
+        onClose={() => setShowBlockedWarning(false)}
+        onRedirect={() => setShowBlockedWarning(false)}
+      />
     </div>
   );
 }

@@ -17,6 +17,7 @@ import {
 import { auth, googleProvider, microsoftProvider } from '@/lib/firebase';
 import { useAuth } from '@/components/providers/AuthProvider';
 import api from '@/lib/api';
+import SystemAdminWarningModal from '@/components/modals/SystemAdminWarningModal';
 
 export default function LoginPage() {
   const router = useRouter();
@@ -29,6 +30,9 @@ export default function LoginPage() {
   const [error, setError] = useState('');
   const [message, setMessage] = useState('');
   const [needsProfileSetup, setNeedsProfileSetup] = useState(false);
+  
+  // System Admin warning modal state
+  const [showSystemAdminWarning, setShowSystemAdminWarning] = useState(false);
   
   // Forgot password modal state
   const [showForgotPasswordModal, setShowForgotPasswordModal] = useState(false);
@@ -102,6 +106,12 @@ export default function LoginPage() {
         setStep('register');
       }
     } catch (err: any) {
+      // Handle System Admin trying to use regular login
+      if (err.response?.data?.isSystemAdmin) {
+        setShowSystemAdminWarning(true);
+        setLoading(false);
+        return;
+      }
       const errorMsg = typeof err.response?.data?.error === 'string' 
         ? err.response.data.error 
         : err.message || 'Failed to verify email';
@@ -130,6 +140,14 @@ export default function LoginPage() {
         router.push('/profile-setup');
       }
     } catch (err: any) {
+      // Handle System Admin trying to use regular login
+      if (err.response?.data?.isSystemAdmin) {
+        // Sign out from Firebase to clear the session
+        await auth.signOut();
+        setShowSystemAdminWarning(true);
+        setLoading(false);
+        return;
+      }
       if (err.code === 'auth/wrong-password' || err.code === 'auth/invalid-credential') {
         setError('Invalid email or password');
       } else {
@@ -199,6 +217,15 @@ export default function LoginPage() {
       }
     } catch (err: any) {
       console.error('Google login error:', err);
+      // Handle System Admin trying to use regular login
+      if (err.response?.data?.isSystemAdmin) {
+        // Sign out from Firebase to clear the session
+        await auth.signOut();
+        // Show the warning modal
+        setShowSystemAdminWarning(true);
+        setLoading(false);
+        return;
+      }
       // Handle specific Firebase auth errors
       if (err.code === 'auth/popup-closed-by-user') {
         setError('Sign-in cancelled. Please try again.');
@@ -236,6 +263,15 @@ export default function LoginPage() {
       }
     } catch (err: any) {
       console.error('Microsoft login error:', err);
+      // Handle System Admin trying to use regular login
+      if (err.response?.data?.isSystemAdmin) {
+        // Sign out from Firebase to clear the session
+        await auth.signOut();
+        // Show the warning modal
+        setShowSystemAdminWarning(true);
+        setLoading(false);
+        return;
+      }
       // Handle specific Firebase/Microsoft auth errors
       if (err.code === 'auth/popup-closed-by-user') {
         setError('Sign-in cancelled. Please try again.');
@@ -688,6 +724,16 @@ export default function LoginPage() {
           </div>
         </div>
       )}
+
+      {/* System Admin Warning Modal */}
+      <SystemAdminWarningModal
+        isOpen={showSystemAdminWarning}
+        onClose={() => setShowSystemAdminWarning(false)}
+        onRedirect={() => {
+          setShowSystemAdminWarning(false);
+          router.push('/dashmet-control/login');
+        }}
+      />
     </div>
   );
 }

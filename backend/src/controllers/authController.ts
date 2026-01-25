@@ -150,6 +150,12 @@ export const login = async (req: AuthRequest, res: Response) => {
     throw new AuthenticationError('Invalid email or password');
   }
 
+  // SECURITY: System Admins must use the dedicated System Admin portal with Master Key
+  if (user.role === 'SYSTEM_ADMIN') {
+    logger.warn(`System Admin login attempt blocked on regular login: ${email}`);
+    throw new AuthenticationError('System Administrators must use the dedicated Control Center portal for access.');
+  }
+
   // Check if account is locked
   if (user.lockedUntil && user.lockedUntil > new Date()) {
     const remainingTime = Math.ceil((user.lockedUntil.getTime() - Date.now()) / 1000 / 60);

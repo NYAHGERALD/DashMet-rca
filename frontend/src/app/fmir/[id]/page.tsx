@@ -6,7 +6,7 @@ import Link from 'next/link';
 import { useAuth } from '@/components/providers/AuthProvider';
 import { useWebSocket } from '@/lib/websocket';
 import { usePrivileges, FMIR_PRIVILEGES } from '@/lib/usePrivileges';
-import { useAccessDeniedModal, handlePrivilegeError } from '@/components/modals/AccessDeniedModal';
+import AccessDeniedModal, { useAccessDeniedModal, handlePrivilegeError } from '@/components/modals/AccessDeniedModal';
 import ProtectedRoute from '@/components/auth/ProtectedRoute';
 import FMIRVisibilityOffModal from '@/components/fmir/FMIRVisibilityOffModal';
 import api from '@/lib/api';
@@ -750,7 +750,8 @@ export default function FMIRDetailPage() {
   };
 
   // Use privilege-based access control
-  const { hasPrivilege } = usePrivileges();
+  const { hasPrivilege, loading: privilegesLoading } = usePrivileges();
+  const canViewFMIR = hasPrivilege(FMIR_PRIVILEGES.VIEW);
   const canChangeStatus = hasPrivilege(FMIR_PRIVILEGES.CHANGE_STATUS);
   const canExportPDF = hasPrivilege(FMIR_PRIVILEGES.EXPORT_PDF);
   const canPrint = hasPrivilege(FMIR_PRIVILEGES.EXPORT_PRINT);
@@ -758,6 +759,9 @@ export default function FMIRDetailPage() {
 
   // Access denied modal
   const { showAccessDenied, accessDeniedModal } = useAccessDeniedModal();
+  
+  // Check if user lacks VIEW privilege (inline check to prevent flash)
+  const shouldShowAccessDenied = !privilegesLoading && !canViewFMIR;
 
   // Get next valid status transitions
   const getNextStatuses = (currentStatus: string): { value: string; label: string; color: string }[] => {
@@ -869,7 +873,8 @@ export default function FMIRDetailPage() {
     );
   };
 
-  if (loading) {
+  // Show loading state while report or privileges are loading
+  if (loading || privilegesLoading) {
     return (
       <div className="min-h-screen bg-gradient-to-br from-gray-50 via-gray-100 to-gray-50 dark:from-gray-900 dark:via-gray-800 dark:to-gray-900 flex items-center justify-center">
         {/* Animated background elements */}
@@ -929,8 +934,29 @@ export default function FMIRDetailPage() {
     );
   }
 
+  // Show access denied modal if user lacks VIEW privilege
+  if (shouldShowAccessDenied) {
+    return (
+      <ProtectedRoute requireAuth>
+        <AccessDeniedModal
+          isOpen={shouldShowAccessDenied}
+          onClose={() => {
+            router.push('/fmir');
+          }}
+          featureName="View Foreign Material Report"
+          requiredPrivilege={FMIR_PRIVILEGES.VIEW}
+        />
+        {/* Empty background - modal is the only content */}
+        <div className="min-h-screen bg-gradient-to-br from-gray-50 via-gray-100 to-gray-50 dark:from-gray-900 dark:via-gray-800 dark:to-gray-900" />
+      </ProtectedRoute>
+    );
+  }
+
   return (
     <ProtectedRoute requireAuth>
+      {/* Access Denied Modal for API privilege errors */}
+      {accessDeniedModal}
+      
       {/* Screen View - Hidden when printing */}
       <div className="min-h-screen bg-gray-50 dark:bg-gray-900 print:hidden">
         <div className="w-full px-4 sm:px-6 lg:px-8 py-6 sm:py-8">

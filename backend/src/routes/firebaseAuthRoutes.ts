@@ -46,6 +46,15 @@ router.post('/check-user', async (req, res) => {
     },
   });
 
+  // SECURITY: System Admins must use the dedicated System Admin portal with Master Key
+  if (dbUser && dbUser.role === 'SYSTEM_ADMIN') {
+    return res.status(403).json({
+      success: false,
+      error: 'System Administrators must use the dedicated Control Center portal for access.',
+      isSystemAdmin: true,
+    });
+  }
+
   const existsInDatabase = !!dbUser;
   const hasProfile = existsInDatabase && !!dbUser.firstName && !!dbUser.lastName;
 
@@ -380,6 +389,15 @@ router.get('/me', authenticate, async (req: AuthRequest, res) => {
 
   if (!user) {
     throw new ValidationError('User not found');
+  }
+
+  // SECURITY: System Admins must use the dedicated System Admin portal with Master Key
+  if (user.role === 'SYSTEM_ADMIN') {
+    return res.status(403).json({
+      success: false,
+      error: 'System Administrators must use the dedicated Control Center portal for access.',
+      isSystemAdmin: true,
+    });
   }
 
   // Update last login timestamp

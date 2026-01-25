@@ -493,7 +493,16 @@ function SettingsContent() {
                     {['LIGHT', 'DARK', 'SYSTEM'].map((theme) => (
                       <button
                         key={theme}
-                        onClick={() => setPreferences({ ...preferences, theme: theme as any })}
+                        onClick={() => {
+                          setPreferences({ ...preferences, theme: theme as any });
+                          // Apply theme immediately when selected
+                          const themeMap: Record<string, 'light' | 'dark'> = {
+                            'LIGHT': 'light',
+                            'DARK': 'dark',
+                            'SYSTEM': window.matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light'
+                          };
+                          setAppTheme(themeMap[theme]);
+                        }}
                         className={`${
                           preferences.theme === theme
                             ? 'border-primary-500 bg-primary-50 dark:bg-primary-900/20 text-primary-700 dark:text-primary-300'

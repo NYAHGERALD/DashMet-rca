@@ -1,7 +1,7 @@
 'use client';
 
 import { useState } from 'react';
-import { ShieldX, Mail, MessageSquare, X, ExternalLink, AlertCircle } from 'lucide-react';
+import { ShieldX, X, AlertCircle } from 'lucide-react';
 
 // ============================================================================
 // Helper to detect if an API error is a privilege/access denied error
@@ -72,7 +72,6 @@ interface AccessDeniedModalProps {
   onClose: () => void;
   featureName?: string;
   requiredPrivilege?: string;
-  onContactSupport?: () => void;
 }
 
 export default function AccessDeniedModal({
@@ -80,7 +79,6 @@ export default function AccessDeniedModal({
   onClose,
   featureName = 'this feature',
   requiredPrivilege,
-  onContactSupport,
 }: AccessDeniedModalProps) {
   if (!isOpen) return null;
 
@@ -138,24 +136,12 @@ export default function AccessDeniedModal({
           </div>
 
           {/* Actions */}
-          <div className="flex flex-col sm:flex-row gap-3">
+          <div className="flex justify-center">
             <button
               onClick={onClose}
-              className="flex-1 px-4 py-2.5 text-sm font-medium text-gray-700 dark:text-gray-300 bg-gray-100 dark:bg-gray-700 hover:bg-gray-200 dark:hover:bg-gray-600 rounded-xl transition-colors"
+              className="px-6 py-2.5 text-sm font-medium text-gray-700 dark:text-gray-300 bg-gray-100 dark:bg-gray-700 hover:bg-gray-200 dark:hover:bg-gray-600 rounded-xl transition-colors"
             >
               Go Back
-            </button>
-            <button
-              onClick={() => {
-                if (onContactSupport) {
-                  onContactSupport();
-                }
-                onClose();
-              }}
-              className="flex-1 px-4 py-2.5 text-sm font-medium text-white bg-primary-600 hover:bg-primary-700 rounded-xl transition-colors flex items-center justify-center gap-2"
-            >
-              <MessageSquare className="w-4 h-4" />
-              Contact Support
             </button>
           </div>
 

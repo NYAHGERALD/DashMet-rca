@@ -11,7 +11,7 @@ import { ChatSidebar } from '@/components/team';
 import { useWebSocket } from '@/lib/websocket';
 import AIAnalysisModal from '@/components/AIAnalysisModal';
 import { usePrivileges, INCIDENTS_PRIVILEGES, RCA_PRIVILEGES } from '@/lib/usePrivileges';
-import { useAccessDeniedModal, handlePrivilegeError } from '@/components/modals/AccessDeniedModal';
+import AccessDeniedModal, { useAccessDeniedModal, handlePrivilegeError } from '@/components/modals/AccessDeniedModal';
 
 interface Participant {
   id: string;
@@ -249,13 +249,17 @@ export default function IncidentDetailPage() {
   const { user } = useAuth();
   const incidentId = params.id as string;
 
-  // Privilege-based access control
-  const { hasPrivilege } = usePrivileges();
+  // Privilege-based access control - include version for real-time updates
+  const { hasPrivilege, loading: privilegesLoading, version: privilegeVersion } = usePrivileges();
+  const canViewIncident = hasPrivilege(INCIDENTS_PRIVILEGES.VIEW);
   const canEditIncident = hasPrivilege(INCIDENTS_PRIVILEGES.EDIT);
   const canDeleteEvidence = hasPrivilege(INCIDENTS_PRIVILEGES.EDIT); // Editing includes evidence management
   const canCreateRCA = hasPrivilege(RCA_PRIVILEGES.CREATE);
   const canUseAIAnalysis = hasPrivilege(INCIDENTS_PRIVILEGES.AI_ANALYSIS);
   const { modal: accessDeniedModal, showAccessDenied } = useAccessDeniedModal();
+  
+  // Check if user lacks VIEW privilege (inline check to prevent flash)
+  const shouldShowAccessDenied = !privilegesLoading && !canViewIncident;
 
   // WebSocket for team collaboration
   const { connect, isConnected, joinIncident, leaveIncident, onlineUsers, onParticipantsUpdated, onParticipantRoleUpdated, onInvitationDeclined, onVisibilityChanged } = useWebSocket();
@@ -727,11 +731,29 @@ export default function IncidentDetailPage() {
     }
   };
 
-  if (loading) {
+  // Show loading while data or privileges are loading
+  if (loading || privilegesLoading) {
     return (
       <div className="min-h-screen bg-gray-50 dark:bg-gray-900 flex items-center justify-center">
         <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-blue-600"></div>
       </div>
+    );
+  }
+
+  // Show access denied modal if user lacks VIEW privilege
+  if (shouldShowAccessDenied) {
+    return (
+      <>
+        <AccessDeniedModal
+          isOpen={shouldShowAccessDenied}
+          onClose={() => {
+            router.push('/incidents');
+          }}
+          featureName="View Incident Report"
+          requiredPrivilege={INCIDENTS_PRIVILEGES.VIEW}
+        />
+        <div className="min-h-screen bg-gray-50 dark:bg-gray-900" />
+      </>
     );
   }
 

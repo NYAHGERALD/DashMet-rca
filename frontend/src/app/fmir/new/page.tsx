@@ -6,7 +6,7 @@ import Link from 'next/link';
 import { useAuth } from '@/components/providers/AuthProvider';
 import { useWebSocket } from '@/lib/websocket';
 import { usePrivileges, FMIR_PRIVILEGES } from '@/lib/usePrivileges';
-import AccessDeniedModal from '@/components/modals/AccessDeniedModal';
+import AccessDeniedModal, { useAccessDeniedModal, handlePrivilegeError } from '@/components/modals/AccessDeniedModal';
 import ProtectedRoute from '@/components/auth/ProtectedRoute';
 import FMIRVisibilityOffModal from '@/components/fmir/FMIRVisibilityOffModal';
 import FMIRCommentModal from '@/components/fmir/FMIRCommentModal';
@@ -589,11 +589,15 @@ function FMIRNewPageContent() {
   const [reportNumber, setReportNumber] = useState<string | null>(null);
   const [reportCreatedById, setReportCreatedById] = useState<string | null>(null);
 
-  // UI state
-  const [loading, setLoading] = useState(false);
+  // UI state - start loading as true if editing to prevent flash
+  const [loading, setLoading] = useState(!!editId);
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [success, setSuccess] = useState<string | null>(null);
+  
+  // Access denied modal for privilege errors from API calls
+  const { showAccessDenied, modal: accessDeniedModal } = useAccessDeniedModal();
+  
   const [showSOPModal, setShowSOPModal] = useState(false);
   const [showSuccessModal, setShowSuccessModal] = useState(false);
   const [showEvidenceWarning, setShowEvidenceWarning] = useState(false);
@@ -755,16 +759,6 @@ function FMIRNewPageContent() {
   // Check create/edit privilege - if not editing and no create privilege, show access denied
   const canCreateFMIR = hasPrivilege(FMIR_PRIVILEGES.CREATE);
   const canEditFMIR = hasPrivilege(FMIR_PRIVILEGES.EDIT);
-  const [showAccessDenied, setShowAccessDenied] = useState(false);
-  
-  // Check privilege on mount
-  useEffect(() => {
-    if (!privilegesLoading && !editId && !canCreateFMIR) {
-      setShowAccessDenied(true);
-    } else if (!privilegesLoading && editId && !canEditFMIR) {
-      setShowAccessDenied(true);
-    }
-  }, [privilegesLoading, editId, canCreateFMIR, canEditFMIR]);
   
   // Permission checks for section editing
   // QA/Food Safety and Quality Control Manager can edit all sections
@@ -1141,7 +1135,10 @@ function FMIRNewPageContent() {
         }
       } catch (err: any) {
         console.error('Error fetching report:', err);
-        setError(err.response?.data?.error || 'Failed to load report');
+        // Check if this is a privilege error (403) - show modal instead of error toast
+        if (!handlePrivilegeError(err, showAccessDenied, setError, 'Edit Foreign Material Report')) {
+          setError(err.response?.data?.error || 'Failed to load report');
+        }
       } finally {
         setLoading(false);
       }
@@ -1217,11 +1214,13 @@ function FMIRNewPageContent() {
       }
     } catch (err: any) {
       console.error('Error saving QA field:', err);
-      // Show error for immediate saves since user expects it to work
-      setError(`Failed to save ${fieldName} change`);
-      setTimeout(() => setError(null), 3000);
+      // Check if this is a privilege error (403) - show modal instead of error toast
+      if (!handlePrivilegeError(err, showAccessDenied, undefined, 'Edit Foreign Material Report')) {
+        setError(`Failed to save ${fieldName} change`);
+        setTimeout(() => setError(null), 3000);
+      }
     }
-  }, [currentReportId, editId]);
+  }, [currentReportId, editId, showAccessDenied]);
 
   // Debounced auto-save trigger
   const triggerAutoSave = useCallback((updatedFormData: FMIRFormData) => {
@@ -1729,11 +1728,14 @@ function FMIRNewPageContent() {
       router.push('/fmir');
     } catch (err: any) {
       console.error('Error saving before close:', err);
-      setError(err.response?.data?.error || 'Failed to save. Redirecting anyway...');
-      // Even if save fails, redirect after a short delay
-      setTimeout(() => {
-        router.push('/fmir');
-      }, 1500);
+      // Check if this is a privilege error (403) - show modal instead of error toast
+      if (!handlePrivilegeError(err, showAccessDenied, undefined, 'Edit Foreign Material Report')) {
+        setError(err.response?.data?.error || 'Failed to save. Redirecting anyway...');
+        // Even if save fails, redirect after a short delay
+        setTimeout(() => {
+          router.push('/fmir');
+        }, 1500);
+      }
     } finally {
       setSavingBeforeClose(false);
     }
@@ -1869,7 +1871,10 @@ function FMIRNewPageContent() {
       }
     } catch (err: any) {
       console.error('Error saving draft:', err);
-      setError(err.response?.data?.error || 'Failed to save draft');
+      // Check if this is a privilege error (403) - show modal instead of error toast
+      if (!handlePrivilegeError(err, showAccessDenied, setError, 'Save Foreign Material Report')) {
+        setError(err.response?.data?.error || 'Failed to save draft');
+      }
     } finally {
       setAutoSaving(false);
     }
@@ -2019,6 +2024,11 @@ function FMIRNewPageContent() {
       setShowSuccessModal(true);
     } catch (err: any) {
       console.error('Error submitting report:', err);
+      // Check if this is a privilege error (403) - show modal instead of error toast
+      if (handlePrivilegeError(err, showAccessDenied, undefined, 'Submit Foreign Material Report')) {
+        return;
+      }
+      
       const errorMessage = err.response?.data?.error || 'Failed to submit report';
       
       // Check if error is "already submitted" and show special modal
@@ -2167,7 +2177,10 @@ function FMIRNewPageContent() {
       }
     } catch (err: any) {
       console.error('Error uploading files:', err);
-      setError(err.response?.data?.error || 'Failed to upload files');
+      // Check if this is a privilege error (403) - show modal instead of error toast
+      if (!handlePrivilegeError(err, showAccessDenied, setError, 'Upload Evidence')) {
+        setError(err.response?.data?.error || 'Failed to upload files');
+      }
     } finally {
       setUploadingFiles(false);
       e.target.value = '';
@@ -2189,7 +2202,10 @@ function FMIRNewPageContent() {
       }
     } catch (err: any) {
       console.error('Error deleting evidence:', err);
-      setError(err.response?.data?.error || 'Failed to delete file');
+      // Check if this is a privilege error (403) - show modal instead of error toast
+      if (!handlePrivilegeError(err, showAccessDenied, setError, 'Delete Evidence')) {
+        setError(err.response?.data?.error || 'Failed to delete file');
+      }
     }
   };
 
@@ -2937,7 +2953,13 @@ function FMIRNewPageContent() {
     return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
   };
 
-  if (loading) {
+  // Check privilege inline (not just via useEffect) to prevent flash of content
+  const shouldShowAccessDenied = !privilegesLoading && (
+    (editId && !canEditFMIR) || (!editId && !canCreateFMIR)
+  );
+
+  // Show loading state while privileges are still loading
+  if (loading || privilegesLoading) {
     return (
       <div className="min-h-screen bg-gradient-to-br from-gray-50 via-gray-100 to-gray-50 dark:from-gray-900 dark:via-gray-800 dark:to-gray-900 flex items-center justify-center">
         {/* Animated background elements */}
@@ -2964,7 +2986,7 @@ function FMIRNewPageContent() {
           
           {/* Text with shimmer effect */}
           <div className="flex flex-col items-center gap-2">
-            <span className="text-gray-700 dark:text-gray-200 font-semibold text-xl">Loading report...</span>
+            <span className="text-gray-700 dark:text-gray-200 font-semibold text-xl">{privilegesLoading ? 'Checking permissions...' : 'Loading report...'}</span>
             <span className="text-gray-500 dark:text-gray-400 text-sm flex items-center gap-2">
               <span className="inline-block w-1.5 h-1.5 bg-primary-500 rounded-full animate-bounce" style={{ animationDelay: '0ms' }} />
               <span className="inline-block w-1.5 h-1.5 bg-primary-500 rounded-full animate-bounce" style={{ animationDelay: '150ms' }} />
@@ -2977,31 +2999,29 @@ function FMIRNewPageContent() {
     );
   }
 
-  // Show access denied modal if user lacks privilege
-  if (showAccessDenied) {
+  // Show access denied modal if user lacks privilege (using inline check to prevent flash)
+  if (shouldShowAccessDenied) {
     return (
       <ProtectedRoute requireAuth>
         <AccessDeniedModal
-          isOpen={showAccessDenied}
+          isOpen={shouldShowAccessDenied}
           onClose={() => {
-            setShowAccessDenied(false);
             router.push('/fmir');
           }}
           featureName={editId ? 'Edit Foreign Material Report' : 'Create Foreign Material Report'}
           requiredPrivilege={editId ? FMIR_PRIVILEGES.EDIT : FMIR_PRIVILEGES.CREATE}
         />
-        <div className="min-h-screen bg-gradient-to-br from-gray-50 via-gray-100 to-gray-50 dark:from-gray-900 dark:via-gray-800 dark:to-gray-900 flex items-center justify-center">
-          <div className="text-center">
-            <Loader2 className="w-8 h-8 animate-spin text-primary-500 mx-auto mb-4" />
-            <p className="text-gray-500 dark:text-gray-400">Checking access permissions...</p>
-          </div>
-        </div>
+        {/* Empty background - modal is the only content */}
+        <div className="min-h-screen bg-gradient-to-br from-gray-50 via-gray-100 to-gray-50 dark:from-gray-900 dark:via-gray-800 dark:to-gray-900" />
       </ProtectedRoute>
     );
   }
 
   return (
     <ProtectedRoute requireAuth>
+      {/* Access Denied Modal for API privilege errors */}
+      {accessDeniedModal}
+      
       <div className="min-h-screen bg-gradient-to-br from-gray-50 via-gray-100 to-gray-50 dark:from-gray-900 dark:via-gray-800 dark:to-gray-900">
         <div className="w-full px-4 sm:px-6 lg:px-8 py-6 sm:py-8">
           {/* Header */}

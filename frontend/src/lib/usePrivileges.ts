@@ -38,6 +38,12 @@ export function usePrivileges() {
   const [error, setError] = useState<string | null>(null);
   const [version, setVersion] = useState(privilegeVersion);
   const isFetching = useRef(false);
+  
+  // Keep a ref to the latest user for use in callbacks
+  const userRef = useRef(user);
+  useEffect(() => {
+    userRef.current = user;
+  }, [user]);
 
   // Fetch user privileges
   const fetchPrivileges = useCallback(async (forceRefresh = false) => {
@@ -98,6 +104,8 @@ export function usePrivileges() {
   useEffect(() => {
     if (!onPrivilegeChanged || !user) return;
 
+    console.log('🔐 Setting up privilege change listener for user:', user.id, 'role:', user.role);
+
     const unsubscribe = onPrivilegeChanged((data: { 
       organizationId: string; 
       changedBy: string; 
@@ -108,17 +116,24 @@ export function usePrivileges() {
     }) => {
       console.log('🔐 Privilege changed event received:', data);
       
+      // Use ref to get the latest user value
+      const currentUser = userRef.current;
+      if (!currentUser) {
+        console.log('🔐 No current user, skipping privilege refresh');
+        return;
+      }
+      
       // Check if this privilege change affects the current user
       const affectsCurrentUser = 
         // If no specific roles/users are specified, refresh for all
         (!data.affectedRoles && !data.affectedUsers) ||
         // If affectedRoles includes the current user's role
-        (data.affectedRoles && data.affectedRoles.includes(user.role)) ||
+        (data.affectedRoles && data.affectedRoles.includes(currentUser.role)) ||
         // If affectedUsers includes the current user's ID
-        (data.affectedUsers && data.affectedUsers.includes(user.id));
+        (data.affectedUsers && data.affectedUsers.includes(currentUser.id));
       
       if (affectsCurrentUser) {
-        console.log('🔐 Privilege change affects current user (role:', user.role, ', id:', user.id, ') - refreshing privileges in real-time');
+        console.log('🔐 Privilege change affects current user (role:', currentUser.role, ', id:', currentUser.id, ') - refreshing privileges in real-time');
         
         // Invalidate cache immediately
         privilegeCache = null;
@@ -127,7 +142,7 @@ export function usePrivileges() {
         // Force refresh privileges
         fetchPrivileges(true);
       } else {
-        console.log('🔐 Privilege change does not affect current user - skipping refresh');
+        console.log('🔐 Privilege change does not affect current user (role:', currentUser.role, ') - expected roles:', data.affectedRoles);
       }
     });
 
@@ -186,6 +201,7 @@ export function usePrivileges() {
     privileges,
     loading,
     error,
+    version, // Include version to trigger re-renders when privileges change
     hasPrivilege,
     hasAnyPrivilege,
     hasAllPrivileges,

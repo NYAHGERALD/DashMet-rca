@@ -413,8 +413,12 @@ export function WebSocketProvider({ children }: { children: React.ReactNode }) {
 
     // Handle privilege changed (real-time privilege updates)
     newSocket.on('privilege:changed', (data: any) => {
-      console.log('🔐 Privilege changed event:', data);
-      privilegeChangedCallbacks.current.forEach(cb => cb(data));
+      console.log('🔐 Privilege changed event received from server:', data);
+      console.log('🔐 Number of registered callbacks:', privilegeChangedCallbacks.current.size);
+      privilegeChangedCallbacks.current.forEach(cb => {
+        console.log('🔐 Executing callback');
+        cb(data);
+      });
     });
 
     // Handle new support request (real-time notification for Admin/QC Manager)
@@ -651,8 +655,13 @@ export function WebSocketProvider({ children }: { children: React.ReactNode }) {
   }, []);
 
   const onPrivilegeChanged = useCallback((callback: (data: any) => void) => {
+    console.log('🔐 WebSocket: Registering privilege change callback, current count:', privilegeChangedCallbacks.current.size);
     privilegeChangedCallbacks.current.add(callback);
-    return () => { privilegeChangedCallbacks.current.delete(callback); };
+    console.log('🔐 WebSocket: After registration, callback count:', privilegeChangedCallbacks.current.size);
+    return () => { 
+      privilegeChangedCallbacks.current.delete(callback); 
+      console.log('🔐 WebSocket: Unregistered privilege callback, remaining:', privilegeChangedCallbacks.current.size);
+    };
   }, []);
 
   const onSupportNewRequest = useCallback((callback: (data: any) => void) => {

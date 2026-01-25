@@ -354,7 +354,7 @@ function FMIRListContent() {
   } | null>(null);
 
   // Use privilege system for access control
-  const { hasPrivilege, loading: privilegesLoading } = usePrivileges();
+  const { hasPrivilege, loading: privilegesLoading, version: privilegeVersion } = usePrivileges();
   
   // Access denied modal for privilege enforcement
   const { modal: accessDeniedModal, showAccessDenied } = useAccessDeniedModal({
@@ -369,6 +369,7 @@ function FMIRListContent() {
   const isQualityControlManager = user?.role === 'QUALITY_CONTROL_MANAGER';
   
   // Privilege-based access checks
+  const canViewFMIR = hasPrivilege(FMIR_PRIVILEGES.VIEW);
   const canViewAllFMIR = hasPrivilege(FMIR_PRIVILEGES.VIEW_ALL);
   const canCreateFMIR = hasPrivilege(FMIR_PRIVILEGES.CREATE);
   const canDeleteVisible = hasPrivilege(FMIR_PRIVILEGES.DELETE_VISIBLE);
@@ -1288,6 +1289,18 @@ function FMIRListContent() {
     );
   };
 
+  // Show loading while checking privileges
+  if (privilegesLoading) {
+    return (
+      <div className="min-h-screen bg-gray-50 dark:bg-gray-900 flex items-center justify-center">
+        <div className="text-center">
+          <Loader2 className="w-8 h-8 animate-spin text-primary-500 mx-auto mb-4" />
+          <p className="text-gray-500 dark:text-gray-400">Checking access permissions...</p>
+        </div>
+      </div>
+    );
+  }
+
   return (
     <div className="min-h-screen bg-gray-50 dark:bg-gray-900">
       <div className="w-full px-4 sm:px-6 lg:px-8 py-6 sm:py-8">
@@ -1595,13 +1608,24 @@ function FMIRListContent() {
                       
                       {/* Action buttons */}
                       <div className="flex items-center gap-2 flex-shrink-0">
-                        <Link
-                          href={`/fmir/${report.id}`}
-                          className="inline-flex items-center gap-1.5 px-3 py-2 text-sm font-medium text-gray-700 dark:text-gray-300 bg-gray-100 dark:bg-gray-700 hover:bg-gray-200 dark:hover:bg-gray-600 rounded-lg transition-colors"
-                        >
-                          <Eye className="w-4 h-4" />
-                          View
-                        </Link>
+                        {canViewFMIR ? (
+                          <Link
+                            href={`/fmir/${report.id}`}
+                            className="inline-flex items-center gap-1.5 px-3 py-2 text-sm font-medium text-gray-700 dark:text-gray-300 bg-gray-100 dark:bg-gray-700 hover:bg-gray-200 dark:hover:bg-gray-600 rounded-lg transition-colors"
+                          >
+                            <Eye className="w-4 h-4" />
+                            View
+                          </Link>
+                        ) : (
+                          <button
+                            onClick={() => showAccessDenied('View Foreign Material Report', FMIR_PRIVILEGES.VIEW)}
+                            className="inline-flex items-center gap-1.5 px-3 py-2 text-sm font-medium text-gray-400 dark:text-gray-500 bg-gray-100 dark:bg-gray-700 rounded-lg cursor-not-allowed opacity-60"
+                            title="You don't have permission to view reports"
+                          >
+                            <Eye className="w-4 h-4" />
+                            View
+                          </button>
+                        )}
                         {/* Edit button - Show when status is DRAFT or UNDER_INVESTIGATION (and not closed) */}
                         {(report.isOwner || report.Collaborators?.some(c => c.id === user?.id)) && !report.isClosed && report.status !== 'SUBMITTED' && (
                           <Link

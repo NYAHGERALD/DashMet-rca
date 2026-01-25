@@ -110,9 +110,25 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
           // Check if it's a rate limit error (429) or authentication error (401)
           const isRateLimited = error?.response?.status === 429;
           const isAuthError = error?.response?.status === 401;
+          const isForbidden = error?.response?.status === 403;
           const isNetworkError = !error?.response;
           const rawErrorMessage = error?.response?.data?.error;
           const errorMessage = typeof rawErrorMessage === 'string' ? rawErrorMessage : '';
+          
+          // SECURITY: Check if user is a System Admin trying to access via regular login
+          const isSystemAdmin = error?.response?.data?.isSystemAdmin === true;
+          
+          if (isSystemAdmin) {
+            // System Admin detected - sign out and redirect to proper portal
+            console.log('System Admin detected - blocking access via regular login');
+            setUser(null);
+            setNeedsProfileSetup(false);
+            localStorage.removeItem('firebaseToken');
+            await auth.signOut();
+            // Redirect to system admin login page
+            router.push('/dashmet-control/login?blocked=true');
+            return;
+          }
           
           // Check if user needs to set up profile (has Firebase auth but no PostgreSQL profile)
           const isUserNotFoundInDb = errorMessage.includes('User not found in database') || 

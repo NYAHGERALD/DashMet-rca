@@ -11,7 +11,7 @@ import EvidenceUpload, { StagedFile, uploadStagedEvidence } from '@/components/i
 import AIAnalysisModal from '@/components/AIAnalysisModal';
 import IncidentSubmissionModal from '@/components/IncidentSubmissionModal';
 import { usePrivileges, INCIDENTS_PRIVILEGES } from '@/lib/usePrivileges';
-import { useAccessDeniedModal, handlePrivilegeError } from '@/components/modals/AccessDeniedModal';
+import AccessDeniedModal, { useAccessDeniedModal, handlePrivilegeError } from '@/components/modals/AccessDeniedModal';
 
 interface Category {
   id: string;
@@ -126,23 +126,16 @@ function NewIncidentPageContent() {
   const editIncidentId = searchParams.get('edit');
   const sectionParam = searchParams.get('section');
   
-  // Privilege-based access control
-  const { hasPrivilege, loading: privilegesLoading } = usePrivileges();
+  // Privilege-based access control - include version for real-time updates
+  const { hasPrivilege, loading: privilegesLoading, version: privilegeVersion } = usePrivileges();
   const canCreateIncident = hasPrivilege(INCIDENTS_PRIVILEGES.CREATE);
   const canEditIncident = hasPrivilege(INCIDENTS_PRIVILEGES.EDIT);
   const { modal: accessDeniedModal, showAccessDenied } = useAccessDeniedModal();
-  const [showAccessDeniedLocal, setShowAccessDeniedLocal] = useState(false);
   
-  // Check privilege on mount
-  useEffect(() => {
-    if (!privilegesLoading && !editIncidentId && !canCreateIncident) {
-      setShowAccessDeniedLocal(true);
-      showAccessDenied('Create Incident Report', INCIDENTS_PRIVILEGES.CREATE);
-    } else if (!privilegesLoading && editIncidentId && !canEditIncident) {
-      setShowAccessDeniedLocal(true);
-      showAccessDenied('Edit Incident Report', INCIDENTS_PRIVILEGES.EDIT);
-    }
-  }, [privilegesLoading, editIncidentId, canCreateIncident, canEditIncident, showAccessDenied]);
+  // Inline check for access denied - prevents flash of content
+  const shouldShowAccessDenied = !privilegesLoading && (
+    (!editIncidentId && !canCreateIncident) || (editIncidentId && !canEditIncident)
+  );
   
   // Edit mode state
   const [isEditMode, setIsEditMode] = useState(false);
@@ -1981,9 +1974,29 @@ function NewIncidentPageContent() {
   const filteredAreas = areas;
   const filteredLines = lines;
 
+  // Show access denied modal if user lacks privilege (using inline check to prevent flash)
+  // This redirects to dashboard when coming from Quick Navigation
+  if (shouldShowAccessDenied) {
+    return (
+      <ProtectedRoute requireAuth={true}>
+        <AccessDeniedModal
+          isOpen={shouldShowAccessDenied}
+          onClose={() => {
+            // Always redirect to dashboard - this handles Quick Navigation case
+            router.push('/dashboard');
+          }}
+          featureName={editIncidentId ? 'Edit Incident Report' : 'Create Incident Report'}
+          requiredPrivilege={editIncidentId ? INCIDENTS_PRIVILEGES.EDIT : INCIDENTS_PRIVILEGES.CREATE}
+        />
+        {/* Empty background - modal is the only content */}
+        <div className="min-h-screen bg-gray-50 dark:bg-gray-900" />
+      </ProtectedRoute>
+    );
+  }
+
   return (
     <ProtectedRoute requireAuth={true}>
-      {/* Access Denied Modal */}
+      {/* Access Denied Modal for API privilege errors */}
       {accessDeniedModal}
       
       {/* AI Analysis Modal */}

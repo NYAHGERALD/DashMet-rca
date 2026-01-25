@@ -66,11 +66,12 @@ export default function IncidentsPage() {
   const searchParams = useSearchParams();
   const filterType = searchParams.get('filter') || 'my';
 
-  // Privilege enforcement
-  const { hasPrivilege } = usePrivileges();
+  // Privilege enforcement - include version for real-time updates
+  const { hasPrivilege, loading: privilegesLoading, version: privilegeVersion } = usePrivileges();
   const { modal: accessDeniedModal, showAccessDenied } = useAccessDeniedModal({
     onContactSupport: () => router.push('/support'),
   });
+  const canViewIncident = hasPrivilege(INCIDENTS_PRIVILEGES.VIEW);
   const canCreateIncident = hasPrivilege(INCIDENTS_PRIVILEGES.CREATE);
   const canDeleteIncident = hasPrivilege(INCIDENTS_PRIVILEGES.DELETE);
 
@@ -537,12 +538,22 @@ export default function IncidentsPage() {
                         </td>
                         <td className="px-3 sm:px-4 py-3 sm:py-4 min-w-[80px]">
                           <div className="flex items-center gap-2">
-                            <Link
-                              href={`/incidents/${incident.id}`}
-                              className="text-primary-600 dark:text-primary-400 hover:text-primary-700 dark:hover:text-primary-300 text-sm font-medium whitespace-nowrap"
-                            >
-                              View →
-                            </Link>
+                            {canViewIncident ? (
+                              <Link
+                                href={`/incidents/${incident.id}`}
+                                className="text-primary-600 dark:text-primary-400 hover:text-primary-700 dark:hover:text-primary-300 text-sm font-medium whitespace-nowrap"
+                              >
+                                View →
+                              </Link>
+                            ) : (
+                              <button
+                                onClick={() => showAccessDenied('View Incident Report', INCIDENTS_PRIVILEGES.VIEW)}
+                                className="text-gray-400 dark:text-gray-500 text-sm font-medium whitespace-nowrap cursor-not-allowed opacity-60"
+                                title="You don't have permission to view incidents"
+                              >
+                                View →
+                              </button>
+                            )}
                             {canDeleteSpecificIncident(incident) && (
                               <button
                                 onClick={() => handleDelete(incident.id, incident.incidentNumber)}
