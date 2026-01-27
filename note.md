@@ -202,3 +202,4 @@ Work accounts (any Azure AD organization)
 School accounts (Microsoft 365 Education)
 The detailed step-by-step Azure/Firebase configuration instructions are in MICROSOFT_LOGIN_SETUP.md.
 
+Do this with extreme professionalism, precision and care and not breaking working logic and flow. also with no mistake. this would the best colaborative App out there.

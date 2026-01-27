@@ -66,6 +66,7 @@ export async function archiveChatMessages(
     // Create archived messages
     await tx.archivedChatMessage.createMany({
       data: messages.map((msg) => ({
+        id: uuidv4(),
         originalMessageId: msg.id,
         incidentId: msg.incidentId,
         userId: msg.userId,

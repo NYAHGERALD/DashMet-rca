@@ -49,15 +49,81 @@ interface SystemHealth {
 
 interface RegulatoryCheck {
   regulationType: string;
-  readinessScore: string;
-  readinessLevel: string;
-  summary: {
+  regulationName?: string;
+  regulationDescription?: string;
+  readinessScore: string | null;
+  readinessLevel: string | null;
+  trackingStatus?: 'active' | 'inactive' | 'not_started';
+  message?: string;
+  summary?: {
     openCriticalIncidents: number;
     pendingRegulatoryActions: number;
     rcaValidationRate: string;
     slaBreaches: number;
   };
-  checklist: Array<{ item: string; status: boolean; priority: string }>;
+  detailedMetrics?: {
+    rca: {
+      total: number;
+      validated: number;
+      completed: number;
+      validationRate: string;
+    };
+    capa: {
+      total: number;
+      completed: number;
+      pending: number;
+      overdue: number;
+      withEvidence: number;
+      evidenceRate: string;
+    };
+    fmir: {
+      total: number;
+      closed: number;
+      withEvidence: number;
+      auditPassed: number;
+    };
+    evidence: {
+      incidentsWithEvidence: number;
+      totalIncidents: number;
+      coverageRate: string;
+    };
+  };
+  checklist?: Array<{ item: string; status: boolean; priority: string; details?: string }>;
+  timeWindow?: {
+    start: string;
+    end: string;
+  };
+  scope?: {
+    type: 'facility' | 'organization';
+    facilityId: string | null;
+    facilityName: string | null;
+    totalFacilities: number;
+  };
+  tracking?: {
+    id: string;
+    status: 'active' | 'inactive' | 'not_started';
+    startDate: string;
+    windowDays: number;
+    daysActive: number;
+  } | null;
+}
+
+interface RegulatorySnapshot {
+  id: string;
+  periodStart: string;
+  periodEnd: string;
+  periodLabel: string;
+  readinessScore: number;
+  readinessLevel: string;
+  totalIncidents: number;
+  criticalIncidents: number;
+  rcasCompleted: number;
+  capasCompleted: number;
+}
+
+interface Facility {
+  id: string;
+  name: string;
 }
 
 function EnterpriseAdminContent() {
@@ -71,10 +137,15 @@ function EnterpriseAdminContent() {
   const [auditLogs, setAuditLogs] = useState<AuditLog[]>([]);
   const [auditPagination, setAuditPagination] = useState({ page: 1, total: 0, pages: 1 });
   const [regulatoryCheck, setRegulatoryCheck] = useState<RegulatoryCheck | null>(null);
+  const [facilities, setFacilities] = useState<Facility[]>([]);
+  const [trackingHistory, setTrackingHistory] = useState<RegulatorySnapshot[]>([]);
+  const [showHistory, setShowHistory] = useState(false);
+  const [trackingAction, setTrackingAction] = useState<'idle' | 'starting' | 'resetting'>('idle');
 
   // Filters
   const [auditFilters, setAuditFilters] = useState({ entity: '', action: '' });
   const [regulationType, setRegulationType] = useState('FSMA');
+  const [selectedFacility, setSelectedFacility] = useState<string>('all');
 
   const apiUrl = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:5002/api';
 
@@ -114,7 +185,19 @@ function EnterpriseAdminContent() {
             break;
 
           case 'regulatory':
-            const regRes = await fetch(`${apiUrl}/admin/regulatory-check?regulationType=${regulationType}`, { headers });
+            // Fetch facilities if not already loaded
+            if (facilities.length === 0) {
+              const facilitiesRes = await fetch(`${apiUrl}/facilities`, { headers });
+              if (facilitiesRes.ok) {
+                const facilitiesData = await facilitiesRes.json();
+                setFacilities(facilitiesData.data?.Facility || []);
+              }
+            }
+            const regParams = new URLSearchParams({
+              regulationType,
+              ...(selectedFacility !== 'all' && { facilityId: selectedFacility }),
+            });
+            const regRes = await fetch(`${apiUrl}/admin/regulatory-check?${regParams}`, { headers });
             if (!regRes.ok) throw new Error('Failed to fetch regulatory check');
             const regData = await regRes.json();
             setRegulatoryCheck(regData.data);
@@ -129,13 +212,117 @@ function EnterpriseAdminContent() {
     };
 
     fetchData();
-  }, [activeTab, auditPagination.page, auditFilters, regulationType, getIdToken, apiUrl]);
+  }, [activeTab, auditPagination.page, auditFilters, regulationType, selectedFacility, getIdToken, apiUrl, facilities.length]);
 
   const formatUptime = (seconds: number) => {
     const days = Math.floor(seconds / 86400);
     const hours = Math.floor((seconds % 86400) / 3600);
     const minutes = Math.floor((seconds % 3600) / 60);
     return `${days}d ${hours}h ${minutes}m`;
+  };
+
+  // Start tracking function
+  const handleStartTracking = async () => {
+    setTrackingAction('starting');
+    try {
+      const token = await getIdToken();
+      const res = await fetch(`${apiUrl}/admin/regulatory-tracking/start`, {
+        method: 'POST',
+        headers: {
+          'Authorization': `Bearer ${token}`,
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({
+          facilityId: selectedFacility !== 'all' ? selectedFacility : null,
+          regulationType,
+          windowDays: 30,
+        }),
+      });
+      
+      if (!res.ok) throw new Error('Failed to start tracking');
+      
+      // Refresh the regulatory check data
+      const regParams = new URLSearchParams({
+        regulationType,
+        ...(selectedFacility !== 'all' && { facilityId: selectedFacility }),
+      });
+      const regRes = await fetch(`${apiUrl}/admin/regulatory-check?${regParams}`, {
+        headers: { 'Authorization': `Bearer ${token}` },
+      });
+      if (regRes.ok) {
+        const regData = await regRes.json();
+        setRegulatoryCheck(regData.data);
+      }
+    } catch (err: any) {
+      setError(err.message || 'Failed to start tracking');
+    } finally {
+      setTrackingAction('idle');
+    }
+  };
+
+  // Reset tracking function
+  const handleResetTracking = async () => {
+    if (!regulatoryCheck?.tracking?.id) return;
+    
+    if (!confirm('Reset tracking? This will archive the current period and start fresh.')) return;
+    
+    setTrackingAction('resetting');
+    try {
+      const token = await getIdToken();
+      const res = await fetch(`${apiUrl}/admin/regulatory-tracking/reset`, {
+        method: 'POST',
+        headers: {
+          'Authorization': `Bearer ${token}`,
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({
+          trackingId: regulatoryCheck.tracking.id,
+          createSnapshot: true,
+        }),
+      });
+      
+      if (!res.ok) throw new Error('Failed to reset tracking');
+      
+      // Refresh the regulatory check data
+      const regParams = new URLSearchParams({
+        regulationType,
+        ...(selectedFacility !== 'all' && { facilityId: selectedFacility }),
+      });
+      const regRes = await fetch(`${apiUrl}/admin/regulatory-check?${regParams}`, {
+        headers: { 'Authorization': `Bearer ${token}` },
+      });
+      if (regRes.ok) {
+        const regData = await regRes.json();
+        setRegulatoryCheck(regData.data);
+      }
+    } catch (err: any) {
+      setError(err.message || 'Failed to reset tracking');
+    } finally {
+      setTrackingAction('idle');
+    }
+  };
+
+  // Fetch history
+  const handleViewHistory = async () => {
+    setShowHistory(!showHistory);
+    if (!showHistory) {
+      try {
+        const token = await getIdToken();
+        const historyParams = new URLSearchParams({
+          regulationType,
+          ...(selectedFacility !== 'all' && { facilityId: selectedFacility }),
+        });
+        const res = await fetch(`${apiUrl}/admin/regulatory-tracking/history?${historyParams}`, {
+          headers: { 'Authorization': `Bearer ${token}` },
+        });
+        if (res.ok) {
+          const data = await res.json();
+          setTrackingHistory(data.data.snapshots || []);
+        }
+      } catch (err) {
+        console.error('Failed to fetch history:', err);
+      }
+    }
   };
 
   return (
@@ -438,103 +625,350 @@ function EnterpriseAdminContent() {
             {/* Regulatory Readiness Tab */}
             {activeTab === 'regulatory' && (
               <div className="space-y-6">
-                {/* Regulation Type Selector */}
+                {/* Regulation Type & Facility Selector */}
                 <div className="bg-white dark:bg-gray-800 rounded-lg shadow-sm border border-gray-200 dark:border-gray-700 p-4">
-                  <div className="flex items-center space-x-4">
-                    <label className="font-medium text-gray-700 dark:text-gray-300">Regulation Type:</label>
-                    <select
-                      value={regulationType}
-                      onChange={(e) => setRegulationType(e.target.value)}
-                      className="px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-700 text-gray-900 dark:text-white"
-                    >
-                      <option value="FSMA">FSMA (Food Safety Modernization Act)</option>
-                      <option value="HACCP">HACCP</option>
-                      <option value="FDA">FDA</option>
-                      <option value="OSHA">OSHA</option>
-                    </select>
+                  <div className="flex flex-wrap items-center gap-4">
+                    <div className="flex items-center space-x-2">
+                      <label className="font-medium text-gray-700 dark:text-gray-300">Regulation:</label>
+                      <select
+                        value={regulationType}
+                        onChange={(e) => setRegulationType(e.target.value)}
+                        className="px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-700 text-gray-900 dark:text-white"
+                      >
+                        <option value="FSMA">FSMA (Food Safety Modernization Act)</option>
+                        <option value="HACCP">HACCP</option>
+                        <option value="FDA">FDA</option>
+                        <option value="OSHA">OSHA</option>
+                      </select>
+                    </div>
+                    <div className="flex items-center space-x-2">
+                      <label className="font-medium text-gray-700 dark:text-gray-300">Scope:</label>
+                      <select
+                        value={selectedFacility}
+                        onChange={(e) => setSelectedFacility(e.target.value)}
+                        className="px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-700 text-gray-900 dark:text-white min-w-[200px]"
+                      >
+                        <option value="all">🏢 All Facilities (Organization)</option>
+                        {Array.isArray(facilities) && facilities.map((facility) => (
+                          <option key={facility.id} value={facility.id}>
+                            🏭 {facility.name}
+                          </option>
+                        ))}
+                      </select>
+                    </div>
+                    {regulatoryCheck?.scope && (
+                      <div className="ml-auto text-sm text-gray-500 dark:text-gray-400">
+                        {regulatoryCheck.scope.type === 'facility' 
+                          ? `📍 Viewing: ${regulatoryCheck.scope.facilityName}`
+                          : `📊 Aggregated across ${regulatoryCheck.scope.totalFacilities} facility(ies)`
+                        }
+                      </div>
+                    )}
                   </div>
                 </div>
 
                 {regulatoryCheck && (
                   <>
-                    {/* Readiness Score */}
-                    <div className={`p-6 rounded-lg border ${
-                      regulatoryCheck.readinessLevel === 'EXCELLENT' ? 'bg-success-50 dark:bg-success-900/20 border-success-200 dark:border-success-800' :
-                      regulatoryCheck.readinessLevel === 'GOOD' ? 'bg-blue-50 dark:bg-blue-900/20 border-blue-200 dark:border-blue-800' :
-                      regulatoryCheck.readinessLevel === 'FAIR' ? 'bg-warning-50 dark:bg-warning-900/20 border-warning-200 dark:border-warning-800' :
-                      'bg-danger-50 dark:bg-danger-900/20 border-danger-200 dark:border-danger-800'
-                    }`}>
-                      <div className="flex items-center justify-between">
-                        <div>
-                          <h2 className="text-2xl font-bold text-gray-900 dark:text-white">
-                            {regulatoryCheck.regulationType} Readiness Score: {regulatoryCheck.readinessScore}%
+                    {/* Tracking Not Started State */}
+                    {regulatoryCheck.trackingStatus === 'not_started' && (
+                      <div className="bg-white dark:bg-gray-800 rounded-lg shadow-sm border border-gray-200 dark:border-gray-700 p-8 text-center">
+                        <div className="max-w-md mx-auto">
+                          <div className="w-20 h-20 mx-auto mb-4 rounded-full bg-gray-100 dark:bg-gray-700 flex items-center justify-center">
+                            <span className="text-4xl">📊</span>
+                          </div>
+                          <h2 className="text-xl font-bold text-gray-900 dark:text-white mb-2">
+                            {regulatoryCheck.regulationType} Compliance Tracking
                           </h2>
-                          <p className={`text-lg font-medium ${
-                            regulatoryCheck.readinessLevel === 'EXCELLENT' ? 'text-success-600 dark:text-success-400' :
-                            regulatoryCheck.readinessLevel === 'GOOD' ? 'text-blue-600 dark:text-blue-400' :
-                            regulatoryCheck.readinessLevel === 'FAIR' ? 'text-warning-600 dark:text-warning-400' :
-                            'text-danger-600 dark:text-danger-400'
-                          }`}>
-                            {regulatoryCheck.readinessLevel}
+                          <p className="text-gray-600 dark:text-gray-400 mb-6">
+                            {regulatoryCheck.message || 'Start tracking to monitor your regulatory compliance readiness. Scores are calculated based on a 30-day rolling window.'}
                           </p>
+                          <button
+                            onClick={handleStartTracking}
+                            disabled={trackingAction === 'starting'}
+                            className="px-6 py-3 bg-primary-600 hover:bg-primary-700 text-white rounded-lg font-medium transition-colors disabled:opacity-50"
+                          >
+                            {trackingAction === 'starting' ? '⏳ Starting...' : '▶️ Start Tracking'}
+                          </button>
                         </div>
-                        <div className="text-right">
-                          <div className="w-24 h-24 rounded-full border-8 flex items-center justify-center" style={{
-                            borderColor: regulatoryCheck.readinessLevel === 'EXCELLENT' ? '#22c55e' :
-                              regulatoryCheck.readinessLevel === 'GOOD' ? '#3b82f6' :
-                              regulatoryCheck.readinessLevel === 'FAIR' ? '#eab308' : '#ef4444'
-                          }}>
-                            <span className="text-3xl font-bold text-gray-900 dark:text-white">{regulatoryCheck.readinessScore}</span>
+                      </div>
+                    )}
+
+                    {/* Active Tracking - Show Score and Data */}
+                    {regulatoryCheck.trackingStatus !== 'not_started' && regulatoryCheck.readinessScore !== null && (
+                      <>
+                        {/* Tracking Status Bar */}
+                        {regulatoryCheck.tracking && (
+                          <div className="bg-white dark:bg-gray-800 rounded-lg shadow-sm border border-gray-200 dark:border-gray-700 p-4">
+                            <div className="flex flex-wrap items-center justify-between gap-4">
+                              <div className="flex items-center space-x-3">
+                                <span className={`w-3 h-3 rounded-full ${
+                                  regulatoryCheck.tracking.status === 'active' ? 'bg-success-500 animate-pulse' : 'bg-gray-400'
+                                }`}></span>
+                                <span className="text-sm font-medium text-gray-700 dark:text-gray-300">
+                                  {regulatoryCheck.tracking.status === 'active' ? 'Tracking Active' : 'Tracking Paused'}
+                                </span>
+                                <span className="text-sm text-gray-500 dark:text-gray-400">
+                                  Started: {new Date(regulatoryCheck.tracking.startDate).toLocaleDateString()}
+                                </span>
+                                <span className="text-sm text-gray-500 dark:text-gray-400">
+                                  • Day {regulatoryCheck.tracking.daysActive} of {regulatoryCheck.tracking.windowDays}
+                                </span>
+                              </div>
+                              <div className="flex items-center space-x-2">
+                                <button
+                                  onClick={handleViewHistory}
+                                  className="px-3 py-1.5 text-sm bg-gray-100 dark:bg-gray-700 hover:bg-gray-200 dark:hover:bg-gray-600 text-gray-700 dark:text-gray-300 rounded-lg transition-colors"
+                                >
+                                  📜 {showHistory ? 'Hide' : 'View'} History
+                                </button>
+                                <button
+                                  onClick={handleResetTracking}
+                                  disabled={trackingAction === 'resetting'}
+                                  className="px-3 py-1.5 text-sm bg-orange-100 dark:bg-orange-900/30 hover:bg-orange-200 dark:hover:bg-orange-900/50 text-orange-700 dark:text-orange-300 rounded-lg transition-colors disabled:opacity-50"
+                                >
+                                  {trackingAction === 'resetting' ? '⏳ Resetting...' : '🔄 Reset Tracking'}
+                                </button>
+                              </div>
+                            </div>
+                          </div>
+                        )}
+
+                        {/* Historical Snapshots */}
+                        {showHistory && trackingHistory.length > 0 && (
+                          <div className="bg-white dark:bg-gray-800 rounded-lg shadow-sm border border-gray-200 dark:border-gray-700 p-6">
+                            <h3 className="font-semibold text-gray-900 dark:text-white mb-4">📅 Historical Performance</h3>
+                            <div className="grid grid-cols-2 md:grid-cols-4 lg:grid-cols-6 gap-3">
+                              {trackingHistory.map((snapshot) => (
+                                <div key={snapshot.id} className="p-3 bg-gray-50 dark:bg-gray-900 rounded-lg text-center">
+                                  <p className="text-xs text-gray-500 dark:text-gray-400 mb-1">{snapshot.periodLabel}</p>
+                                  <p className={`text-2xl font-bold ${
+                                    snapshot.readinessLevel === 'EXCELLENT' ? 'text-success-600 dark:text-success-400' :
+                                    snapshot.readinessLevel === 'GOOD' ? 'text-blue-600 dark:text-blue-400' :
+                                    snapshot.readinessLevel === 'FAIR' ? 'text-warning-600 dark:text-warning-400' :
+                                    'text-danger-600 dark:text-danger-400'
+                                  }`}>{snapshot.readinessScore.toFixed(0)}%</p>
+                                  <p className="text-xs text-gray-400 dark:text-gray-500">{snapshot.totalIncidents} incidents</p>
+                                </div>
+                              ))}
+                            </div>
+                          </div>
+                        )}
+
+                        {showHistory && trackingHistory.length === 0 && (
+                          <div className="bg-white dark:bg-gray-800 rounded-lg shadow-sm border border-gray-200 dark:border-gray-700 p-6 text-center">
+                            <p className="text-gray-500 dark:text-gray-400">No historical snapshots yet. History is created when you reset tracking.</p>
+                          </div>
+                        )}
+
+                        {/* Readiness Score */}
+                        <div className={`p-6 rounded-lg border ${
+                          regulatoryCheck.readinessLevel === 'EXCELLENT' ? 'bg-success-50 dark:bg-success-900/20 border-success-200 dark:border-success-800' :
+                          regulatoryCheck.readinessLevel === 'GOOD' ? 'bg-blue-50 dark:bg-blue-900/20 border-blue-200 dark:border-blue-800' :
+                          regulatoryCheck.readinessLevel === 'FAIR' ? 'bg-warning-50 dark:bg-warning-900/20 border-warning-200 dark:border-warning-800' :
+                          'bg-danger-50 dark:bg-danger-900/20 border-danger-200 dark:border-danger-800'
+                        }`}>
+                          <div className="flex items-center justify-between">
+                            <div>
+                              <h2 className="text-2xl font-bold text-gray-900 dark:text-white">
+                                {regulatoryCheck.regulationType} Readiness Score: {regulatoryCheck.readinessScore}%
+                              </h2>
+                              <p className={`text-lg font-medium ${
+                                regulatoryCheck.readinessLevel === 'EXCELLENT' ? 'text-success-600 dark:text-success-400' :
+                                regulatoryCheck.readinessLevel === 'GOOD' ? 'text-blue-600 dark:text-blue-400' :
+                                regulatoryCheck.readinessLevel === 'FAIR' ? 'text-warning-600 dark:text-warning-400' :
+                                'text-danger-600 dark:text-danger-400'
+                              }`}>
+                                {regulatoryCheck.readinessLevel}
+                              </p>
+                              {regulatoryCheck.regulationName && (
+                                <p className="text-sm text-gray-500 dark:text-gray-400 mt-1">
+                                  {regulatoryCheck.regulationName}
+                                </p>
+                              )}
+                            </div>
+                            <div className="text-right">
+                              <div className="w-24 h-24 rounded-full border-8 flex items-center justify-center" style={{
+                                borderColor: regulatoryCheck.readinessLevel === 'EXCELLENT' ? '#22c55e' :
+                                  regulatoryCheck.readinessLevel === 'GOOD' ? '#3b82f6' :
+                                  regulatoryCheck.readinessLevel === 'FAIR' ? '#eab308' : '#ef4444'
+                              }}>
+                                <span className="text-3xl font-bold text-gray-900 dark:text-white">{regulatoryCheck.readinessScore}</span>
+                              </div>
+                            </div>
+                          </div>
+                        </div>
+
+                        {/* Summary Metrics */}
+                        {regulatoryCheck.summary && (
+                          <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
+                            <div className="bg-white dark:bg-gray-800 rounded-lg shadow-sm border border-gray-200 dark:border-gray-700 p-4 text-center">
+                              <p className="text-2xl font-bold text-danger-600 dark:text-danger-400">{regulatoryCheck.summary.openCriticalIncidents}</p>
+                              <p className="text-sm text-gray-600 dark:text-gray-400">Critical Incidents Open</p>
+                            </div>
+                            <div className="bg-white dark:bg-gray-800 rounded-lg shadow-sm border border-gray-200 dark:border-gray-700 p-4 text-center">
+                              <p className="text-2xl font-bold text-orange-600 dark:text-orange-400">{regulatoryCheck.summary.pendingRegulatoryActions}</p>
+                              <p className="text-sm text-gray-600 dark:text-gray-400">Pending Regulatory Actions</p>
+                            </div>
+                            <div className="bg-white dark:bg-gray-800 rounded-lg shadow-sm border border-gray-200 dark:border-gray-700 p-4 text-center">
+                              <p className="text-2xl font-bold text-blue-600 dark:text-blue-400">{regulatoryCheck.summary.rcaValidationRate}</p>
+                              <p className="text-sm text-gray-600 dark:text-gray-400">RCA Validation Rate</p>
+                            </div>
+                            <div className="bg-white dark:bg-gray-800 rounded-lg shadow-sm border border-gray-200 dark:border-gray-700 p-4 text-center">
+                              <p className="text-2xl font-bold text-warning-600 dark:text-warning-400">{regulatoryCheck.summary.slaBreaches}</p>
+                              <p className="text-sm text-gray-600 dark:text-gray-400">SLA Breaches</p>
+                            </div>
+                          </div>
+                        )}
+
+                        {/* Detailed Metrics (Expandable) */}
+                        {regulatoryCheck.detailedMetrics && (
+                          <div className="bg-white dark:bg-gray-800 rounded-lg shadow-sm border border-gray-200 dark:border-gray-700 p-6">
+                            <h3 className="font-semibold text-gray-900 dark:text-white mb-4">📊 Detailed Compliance Metrics</h3>
+                            <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
+                              {/* RCA Metrics */}
+                              <div className="p-4 bg-gray-50 dark:bg-gray-900 rounded-lg">
+                                <h4 className="text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">Root Cause Analysis</h4>
+                                <div className="space-y-1 text-sm">
+                                  <div className="flex justify-between">
+                                    <span className="text-gray-600 dark:text-gray-400">Completed</span>
+                                    <span className="font-medium text-gray-900 dark:text-white">{regulatoryCheck.detailedMetrics.rca.completed}/{regulatoryCheck.detailedMetrics.rca.total}</span>
+                                  </div>
+                                  <div className="flex justify-between">
+                                    <span className="text-gray-600 dark:text-gray-400">Validated</span>
+                                    <span className="font-medium text-gray-900 dark:text-white">{regulatoryCheck.detailedMetrics.rca.validated}/{regulatoryCheck.detailedMetrics.rca.total}</span>
+                                  </div>
+                                  <div className="flex justify-between">
+                                    <span className="text-gray-600 dark:text-gray-400">Validation Rate</span>
+                                    <span className={`font-medium ${
+                                      parseFloat(regulatoryCheck.detailedMetrics.rca.validationRate) >= 90 
+                                    ? 'text-success-600 dark:text-success-400' 
+                                    : 'text-warning-600 dark:text-warning-400'
+                                }`}>{regulatoryCheck.detailedMetrics.rca.validationRate}%</span>
+                              </div>
+                            </div>
+                          </div>
+
+                          {/* CAPA Metrics */}
+                          <div className="p-4 bg-gray-50 dark:bg-gray-900 rounded-lg">
+                            <h4 className="text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">CAPA Actions</h4>
+                            <div className="space-y-1 text-sm">
+                              <div className="flex justify-between">
+                                <span className="text-gray-600 dark:text-gray-400">Completed</span>
+                                <span className="font-medium text-success-600 dark:text-success-400">{regulatoryCheck.detailedMetrics.capa.completed}</span>
+                              </div>
+                              <div className="flex justify-between">
+                                <span className="text-gray-600 dark:text-gray-400">Pending</span>
+                                <span className="font-medium text-warning-600 dark:text-warning-400">{regulatoryCheck.detailedMetrics.capa.pending}</span>
+                              </div>
+                              <div className="flex justify-between">
+                                <span className="text-gray-600 dark:text-gray-400">Overdue</span>
+                                <span className={`font-medium ${
+                                  regulatoryCheck.detailedMetrics.capa.overdue === 0 
+                                    ? 'text-success-600 dark:text-success-400' 
+                                    : 'text-danger-600 dark:text-danger-400'
+                                }`}>{regulatoryCheck.detailedMetrics.capa.overdue}</span>
+                              </div>
+                              <div className="flex justify-between">
+                                <span className="text-gray-600 dark:text-gray-400">Evidence Rate</span>
+                                <span className="font-medium text-gray-900 dark:text-white">{regulatoryCheck.detailedMetrics.capa.evidenceRate}%</span>
+                              </div>
+                            </div>
+                          </div>
+
+                          {/* FMIR Metrics (for food safety regulations) */}
+                          {['FSMA', 'HACCP', 'FDA'].includes(regulatoryCheck.regulationType) && (
+                            <div className="p-4 bg-gray-50 dark:bg-gray-900 rounded-lg">
+                              <h4 className="text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">FMIR Reports</h4>
+                              <div className="space-y-1 text-sm">
+                                <div className="flex justify-between">
+                                  <span className="text-gray-600 dark:text-gray-400">Total</span>
+                                  <span className="font-medium text-gray-900 dark:text-white">{regulatoryCheck.detailedMetrics.fmir.total}</span>
+                                </div>
+                                <div className="flex justify-between">
+                                  <span className="text-gray-600 dark:text-gray-400">Closed</span>
+                                  <span className="font-medium text-success-600 dark:text-success-400">{regulatoryCheck.detailedMetrics.fmir.closed}</span>
+                                </div>
+                                <div className="flex justify-between">
+                                  <span className="text-gray-600 dark:text-gray-400">With Evidence</span>
+                                  <span className="font-medium text-gray-900 dark:text-white">{regulatoryCheck.detailedMetrics.fmir.withEvidence}</span>
+                                </div>
+                                <div className="flex justify-between">
+                                  <span className="text-gray-600 dark:text-gray-400">Audit Passed</span>
+                                  <span className="font-medium text-success-600 dark:text-success-400">{regulatoryCheck.detailedMetrics.fmir.auditPassed}</span>
+                                </div>
+                              </div>
+                            </div>
+                          )}
+
+                          {/* Evidence Coverage */}
+                          <div className="p-4 bg-gray-50 dark:bg-gray-900 rounded-lg">
+                            <h4 className="text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">Evidence Coverage</h4>
+                            <div className="space-y-1 text-sm">
+                              <div className="flex justify-between">
+                                <span className="text-gray-600 dark:text-gray-400">With Evidence</span>
+                                <span className="font-medium text-gray-900 dark:text-white">{regulatoryCheck.detailedMetrics.evidence.incidentsWithEvidence}</span>
+                              </div>
+                              <div className="flex justify-between">
+                                <span className="text-gray-600 dark:text-gray-400">Total Incidents</span>
+                                <span className="font-medium text-gray-900 dark:text-white">{regulatoryCheck.detailedMetrics.evidence.totalIncidents}</span>
+                              </div>
+                              <div className="flex justify-between">
+                                <span className="text-gray-600 dark:text-gray-400">Coverage Rate</span>
+                                <span className={`font-medium ${
+                                  parseFloat(regulatoryCheck.detailedMetrics.evidence.coverageRate) >= 80 
+                                    ? 'text-success-600 dark:text-success-400' 
+                                    : 'text-warning-600 dark:text-warning-400'
+                                }`}>{regulatoryCheck.detailedMetrics.evidence.coverageRate}%</span>
+                              </div>
+                            </div>
                           </div>
                         </div>
                       </div>
-                    </div>
-
-                    {/* Summary Metrics */}
-                    <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
-                      <div className="bg-white dark:bg-gray-800 rounded-lg shadow-sm border border-gray-200 dark:border-gray-700 p-4 text-center">
-                        <p className="text-2xl font-bold text-danger-600 dark:text-danger-400">{regulatoryCheck.summary.openCriticalIncidents}</p>
-                        <p className="text-sm text-gray-600 dark:text-gray-400">Critical Incidents Open</p>
-                      </div>
-                      <div className="bg-white dark:bg-gray-800 rounded-lg shadow-sm border border-gray-200 dark:border-gray-700 p-4 text-center">
-                        <p className="text-2xl font-bold text-orange-600 dark:text-orange-400">{regulatoryCheck.summary.pendingRegulatoryActions}</p>
-                        <p className="text-sm text-gray-600 dark:text-gray-400">Pending Regulatory Actions</p>
-                      </div>
-                      <div className="bg-white dark:bg-gray-800 rounded-lg shadow-sm border border-gray-200 dark:border-gray-700 p-4 text-center">
-                        <p className="text-2xl font-bold text-blue-600 dark:text-blue-400">{regulatoryCheck.summary.rcaValidationRate}</p>
-                        <p className="text-sm text-gray-600 dark:text-gray-400">RCA Validation Rate</p>
-                      </div>
-                      <div className="bg-white dark:bg-gray-800 rounded-lg shadow-sm border border-gray-200 dark:border-gray-700 p-4 text-center">
-                        <p className="text-2xl font-bold text-warning-600 dark:text-warning-400">{regulatoryCheck.summary.slaBreaches}</p>
-                        <p className="text-sm text-gray-600 dark:text-gray-400">SLA Breaches</p>
-                      </div>
-                    </div>
+                    )}
 
                     {/* Compliance Checklist */}
-                    <div className="bg-white dark:bg-gray-800 rounded-lg shadow-sm border border-gray-200 dark:border-gray-700 p-6">
-                      <h3 className="font-semibold text-gray-900 dark:text-white mb-4">📋 Compliance Checklist</h3>
-                      <div className="space-y-3">
-                        {regulatoryCheck.checklist.map((item, index) => (
-                          <div key={index} className="flex items-center justify-between p-3 bg-gray-50 dark:bg-gray-900 rounded-lg">
-                            <div className="flex items-center space-x-3">
-                              <span className="text-xl">
-                                {item.status ? '✅' : '❌'}
-                              </span>
-                              <span className={`${item.status ? 'text-gray-700 dark:text-gray-300' : 'text-danger-700 dark:text-danger-300'}`}>
-                                {item.item}
+                    {regulatoryCheck.checklist && regulatoryCheck.checklist.length > 0 && (
+                      <div className="bg-white dark:bg-gray-800 rounded-lg shadow-sm border border-gray-200 dark:border-gray-700 p-6">
+                        <h3 className="font-semibold text-gray-900 dark:text-white mb-4">📋 Compliance Checklist</h3>
+                        <div className="space-y-3">
+                          {regulatoryCheck.checklist.map((item, index) => (
+                            <div key={index} className="flex items-center justify-between p-3 bg-gray-50 dark:bg-gray-900 rounded-lg">
+                              <div className="flex-1">
+                              <div className="flex items-center space-x-3">
+                                <span className="text-xl">
+                                  {item.status ? '✅' : '❌'}
+                                </span>
+                                <span className={`${item.status ? 'text-gray-700 dark:text-gray-300' : 'text-danger-700 dark:text-danger-300'}`}>
+                                  {item.item}
+                                </span>
+                              </div>
+                              {item.details && (
+                                <p className="text-xs text-gray-500 dark:text-gray-400 ml-9 mt-1">
+                                  {item.details}
+                                </p>
+                              )}
+                              </div>
+                              <span className={`px-2 py-1 rounded text-xs font-medium flex-shrink-0 ${
+                                item.priority === 'HIGH' ? 'bg-danger-100 dark:bg-danger-900/30 text-danger-800 dark:text-danger-300' :
+                                item.priority === 'MEDIUM' ? 'bg-warning-100 dark:bg-warning-900/30 text-warning-800 dark:text-warning-300' :
+                                'bg-gray-100 dark:bg-gray-700 text-gray-800 dark:text-gray-300'
+                              }`}>
+                                {item.priority}
                               </span>
                             </div>
-                            <span className={`px-2 py-1 rounded text-xs font-medium ${
-                              item.priority === 'HIGH' ? 'bg-danger-100 dark:bg-danger-900/30 text-danger-800 dark:text-danger-300' :
-                              item.priority === 'MEDIUM' ? 'bg-warning-100 dark:bg-warning-900/30 text-warning-800 dark:text-warning-300' :
-                              'bg-gray-100 dark:bg-gray-700 text-gray-800 dark:text-gray-300'
-                            }`}>
-                              {item.priority}
-                            </span>
-                          </div>
-                        ))}
+                          ))}
+                        </div>
                       </div>
-                    </div>
+                    )}
+
+                    {/* Time Window Info */}
+                    {regulatoryCheck.timeWindow && (
+                      <div className="text-center text-sm text-gray-500 dark:text-gray-400">
+                        Data from: {new Date(regulatoryCheck.timeWindow.start).toLocaleDateString()} - {new Date(regulatoryCheck.timeWindow.end).toLocaleDateString()}
+                      </div>
+                    )}
+                      </>
+                    )}
                   </>
                 )}
               </div>

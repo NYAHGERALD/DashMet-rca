@@ -4,6 +4,7 @@ import { requireMinimumRole } from '../middleware/rbac';
 import { UserRole } from '@prisma/client';
 import { prisma } from '../utils/prisma';
 import { ValidationError } from '../middleware/errorHandler';
+import { v4 as uuidv4 } from 'uuid';
 
 const router = Router();
 
@@ -168,6 +169,8 @@ router.post('/facilities/areas', requireMinimumRole(UserRole.ADMIN), async (req,
 
   const area = await prisma.area.create({
     data: {
+      id: uuidv4(),
+      updatedAt: new Date(),
       name,
       departmentId,
       description,
@@ -321,6 +324,8 @@ router.post('/facilities/lines', requireMinimumRole(UserRole.ADMIN), async (req,
 
   const line = await prisma.line.create({
     data: {
+      id: uuidv4(),
+      updatedAt: new Date(),
       name,
       lineNumber,
       areaId,
@@ -536,12 +541,15 @@ router.post('/facilities/shifts', requireMinimumRole(UserRole.ADMIN), async (req
 
   const shift = await prisma.shift.create({
     data: {
+      id: uuidv4(),
+      updatedAt: new Date(),
       name,
       startTime,
       endTime,
       facilityId,
       ShiftLine: {
         create: lineIds.map((lineId: string) => ({
+          id: uuidv4(),
           lineId,
         })),
       },
@@ -704,6 +712,8 @@ router.post('/facilities', requireMinimumRole(UserRole.ADMIN), async (req, res) 
 
   const facility = await prisma.facility.create({
     data: {
+      id: uuidv4(),
+      updatedAt: new Date(),
       name,
       organizationId,
       timezone: timezone || 'America/New_York',

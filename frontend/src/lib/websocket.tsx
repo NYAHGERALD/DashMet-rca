@@ -119,6 +119,128 @@ interface WebSocketContextType {
   onSupportNewRequest: (callback: (data: { id: string; subject: string; description: string; category: string; recipientRole: string | null; status: string; createdAt: string; submittedByUser: any; submittedByUserEmail: string; hasAttachments: boolean }) => void) => () => void;
   // Support request status changed notification (for users who submitted requests)
   onSupportStatusChanged: (callback: (data: { id: string; subject: string; status: string; previousStatus: string; message: string; resolvedBy: { id: string; firstName: string; lastName: string } | null; updatedAt: string }) => void) => () => void;
+  // RCA created event handler (for real-time RCA started notification)
+  onRCACreated: (callback: (data: { incidentId: string; rcaId: string; method: string; status: string; createdBy: { id: string; firstName: string; lastName: string } }) => void) => () => void;
+  // RCA methodology analysis started (for real-time team sync)
+  onRCAMethodologyAnalysisStarted: (callback: (data: { incidentId: string; analyzedBy: { id: string; firstName: string; lastName: string }; startedAt: string }) => void) => () => void;
+  // RCA methodology analysis complete (for real-time team sync)
+  onRCAMethodologyAnalysisComplete: (callback: (data: { incidentId: string; recommendation: any }) => void) => () => void;
+  // RCA modal state changes (for real-time modal sync)
+  onRCAModalState: (callback: (data: { incidentId: string; userId: string; userName: string; action: 'opened' | 'closed' | 'method-selected' | 'visibility-changed' | 'analyzing'; selectedMethod?: string; visibility?: string }) => void) => () => void;
+  // RCA data updated (for real-time fishbone/5-whys sync)
+  onRCADataUpdated: (callback: (data: { rcaId: string; type: 'fishbone' | 'five-whys'; updatedBy: { id: string; firstName: string; lastName: string }; timestamp: string; data: any }) => void) => () => void;
+  // RCA method changed (for real-time method sync)
+  onRCAMethodChanged: (callback: (data: { rcaId: string; method: string; updatedBy: { id: string; firstName: string; lastName: string }; timestamp: string }) => void) => () => void;
+  // RCA validated (for real-time validation sync)
+  onRCAValidated: (callback: (data: { rcaId: string; rootCauseStatement: string; isValidated: boolean; validatedBy: { id: string; firstName: string; lastName: string }; timestamp: string }) => void) => () => void;
+  // RCA reopened (for real-time reopen sync)
+  onRCAReopened: (callback: (data: { rcaId: string; reason: string; isValidated: boolean; reopenedBy: { id: string; firstName: string; lastName: string }; timestamp: string }) => void) => () => void;
+  // RCA AI generation started (for real-time AI progress sync)
+  onRCAAIGenerationStarted: (callback: (data: { rcaId: string; type: 'fishbone' | 'five-whys'; startedBy: { id: string; firstName: string; lastName: string }; timestamp: string }) => void) => () => void;
+  // RCA AI generation complete (for real-time AI result sync)
+  onRCAAIGenerationComplete: (callback: (data: { rcaId: string; type: 'fishbone' | 'five-whys'; generatedBy: { id: string; firstName: string; lastName: string }; autoSaved: boolean; timestamp: string }) => void) => () => void;
+  // RCA AI suggestions started (for real-time collaborative review)
+  onRCAAISuggestionsStarted: (callback: (data: { rcaId: string; type: string; startedBy: { id: string; firstName: string; lastName: string }; timestamp: string }) => void) => () => void;
+  // RCA AI suggestions received (for real-time collaborative review)
+  onRCAAISuggestionsReceived: (callback: (data: { rcaId: string; type: string; analysis: any; generatedBy: { id: string; firstName: string; lastName: string }; timestamp: string }) => void) => () => void;
+  // RCA AI validation started (for real-time problem validation sync)
+  onRCAAIValidationStarted: (callback: (data: { rcaId: string; type: string; problem: string; startedBy: { id: string; firstName: string; lastName: string }; timestamp: string }) => void) => () => void;
+  // RCA AI validation complete (for real-time problem validation sync)
+  onRCAAIValidationComplete: (callback: (data: { rcaId: string; type: string; validation: any; validatedBy: { id: string; firstName: string; lastName: string }; timestamp: string }) => void) => () => void;
+  // RCA clarification answer update (for real-time collaborative input)
+  onRCAClarificationAnswer: (callback: (data: { incidentId: string; rcaId: string; questionIndex: number; answer: string; userId: string; userName: string; timestamp: string }) => void) => () => void;
+  // RCA problem statement update (for real-time collaborative editing)
+  onRCAProblemUpdate: (callback: (data: { incidentId: string; rcaId: string; problem: string; userId: string; userName: string; timestamp: string }) => void) => () => void;
+  // RCA categories update (for real-time fishbone diagram sync)
+  onRCACategoriesUpdated: (callback: (data: { incidentId: string; rcaId: string; categories: any[]; problem: string; userId: string; userName: string; timestamp: string }) => void) => () => void;
+  // RCA corrective actions update (for real-time action plans sync)
+  onRCACorrectiveActionsUpdated: (callback: (data: { incidentId: string; rcaId: string; actionPlans: any; preventiveControls: any[]; userId: string; userName: string; timestamp: string }) => void) => () => void;
+  // RCA cause input typing (for real-time typing indicator in "Add a cause" input)
+  onRCACauseInputTyping: (callback: (data: { incidentId: string; rcaId: string; categoryId: string; text: string; userId: string; userName: string; timestamp: string }) => void) => () => void;
+  // RCA 5 Whys modal opened (for real-time modal sync across team)
+  onRCAFiveWhysModalOpened: (callback: (data: { incidentId: string; rcaId: string; causeId: string; causeText: string; categoryName: string; openedBy: { id: string; firstName: string; lastName: string }; timestamp: string }) => void) => () => void;
+  // RCA 5 Whys modal closed (for real-time modal sync across team)
+  onRCAFiveWhysModalClosed: (callback: (data: { incidentId: string; rcaId: string; closedBy: { id: string; firstName: string; lastName: string }; timestamp: string }) => void) => () => void;
+  // RCA 5 Whys mode changed (for real-time mode sync across team)
+  onRCAFiveWhysModeChanged: (callback: (data: { incidentId: string; rcaId: string; mode: 'choose' | 'manual' | 'ai'; changedBy: { id: string; firstName: string; lastName: string }; timestamp: string }) => void) => () => void;
+  // Emit RCA modal state change
+  emitRCAModalState: (incidentId: string, action: 'opened' | 'closed' | 'method-selected' | 'visibility-changed' | 'analyzing', data?: { selectedMethod?: string; visibility?: string }) => void;
+  // Emit RCA clarification answer update
+  emitRCAClarificationAnswer: (incidentId: string, rcaId: string, questionIndex: number, answer: string) => void;
+  // Emit RCA problem statement update
+  emitRCAProblemUpdate: (incidentId: string, rcaId: string, problem: string) => void;
+  // Emit RCA categories update
+  emitRCACategoriesUpdated: (incidentId: string, rcaId: string, categories: any[], problem: string) => void;
+  // Emit RCA corrective actions update
+  emitRCACorrectiveActionsUpdated: (incidentId: string, rcaId: string, actionPlans: any, preventiveControls: any[]) => void;
+  // Emit RCA cause input typing
+  emitRCACauseInputTyping: (incidentId: string, rcaId: string, categoryId: string, text: string) => void;
+  // Emit RCA 5 Whys modal opened
+  emitRCAFiveWhysModalOpened: (incidentId: string, rcaId: string, causeId: string, causeText: string, categoryName: string, mode: 'choose' | 'continue-or-restart' | 'manual' | 'ai', hasAnswers: boolean, answerCount: number, steps: Array<{ stepNumber: number; question: string; answer: string }>, rootCause?: string) => void;
+  // Emit RCA 5 Whys modal closed
+  emitRCAFiveWhysModalClosed: (incidentId: string, rcaId: string) => void;
+  // Emit RCA 5 Whys mode changed (with optional reset data for Start Fresh scenarios)
+  emitRCAFiveWhysModeChanged: (incidentId: string, rcaId: string, mode: 'choose' | 'manual' | 'ai', resetData?: { causeId: string; causeText: string; steps: Array<{ stepNumber: number; question: string; answer: string }>; hasAnswers: boolean; answerCount: number }) => void;
+  // RCA 5 Whys field typing (for real-time typing indicator)
+  onRCAFiveWhysFieldTyping: (callback: (data: { incidentId: string; rcaId: string; fieldType: 'why' | 'rootCause'; stepNumber?: number; isTyping: boolean; userId: string; userName: string; timestamp: string }) => void) => () => void;
+  // RCA 5 Whys field content update (for real-time text sync, includes nextQuestion for dynamic question updates)
+  onRCAFiveWhysFieldUpdate: (callback: (data: { incidentId: string; rcaId: string; fieldType: 'why' | 'rootCause'; stepNumber?: number; text: string; nextQuestion?: string; userId: string; userName: string; timestamp: string }) => void) => () => void;
+  // RCA 5 Whys analysis status changed (for real-time color indicator sync)
+  onRCAFiveWhysStatusChanged: (callback: (data: { incidentId: string; rcaId: string; causeId: string; hasAnswers: boolean; answerCount: number; userId: string; userName: string; timestamp: string }) => void) => () => void;
+  // RCA 5 Whys AI analyzing state (for real-time loading spinner sync)
+  onRCAFiveWhysAIAnalyzing: (callback: (data: { incidentId: string; rcaId: string; causeId: string; isAnalyzing: boolean; userId: string; userName: string; timestamp: string }) => void) => () => void;
+  // RCA 5 Whys AI result (for real-time AI analysis result sync)
+  onRCAFiveWhysAIResult: (callback: (data: { incidentId: string; rcaId: string; causeId: string; result: any; userId: string; userName: string; timestamp: string }) => void) => () => void;
+  // RCA 5 Whys AI Edit mode state (for real-time edit mode sync)
+  onRCAFiveWhysAIEditMode: (callback: (data: { incidentId: string; rcaId: string; causeId: string; isEditing: boolean; editedSteps: Array<{ stepNumber: number; question: string; answer: string }>; editedRootCause: string; userId: string; userName: string; timestamp: string }) => void) => () => void;
+  // RCA 5 Whys AI Edit field typing (for real-time typing indicator)
+  onRCAFiveWhysAIEditTyping: (callback: (data: { incidentId: string; rcaId: string; fieldType: 'why' | 'rootCause'; stepNumber?: number; isTyping: boolean; userId: string; userName: string; timestamp: string }) => void) => () => void;
+  // RCA 5 Whys AI Edit field update (for real-time content sync)
+  onRCAFiveWhysAIEditUpdate: (callback: (data: { incidentId: string; rcaId: string; fieldType: 'why' | 'rootCause'; stepNumber?: number; text: string; userId: string; userName: string; timestamp: string }) => void) => () => void;
+  // Emit RCA 5 Whys field typing
+  emitRCAFiveWhysFieldTyping: (incidentId: string, rcaId: string, fieldType: 'why' | 'rootCause', isTyping: boolean, stepNumber?: number) => void;
+  // Emit RCA 5 Whys field content update (includes optional nextQuestion for dynamic question updates)
+  emitRCAFiveWhysFieldUpdate: (incidentId: string, rcaId: string, fieldType: 'why' | 'rootCause', text: string, stepNumber?: number, nextQuestion?: string) => void;
+  // Emit RCA 5 Whys analysis status changed (for real-time color indicator sync)
+  emitRCAFiveWhysStatusChanged: (incidentId: string, rcaId: string, causeId: string, hasAnswers: boolean, answerCount: number) => void;
+  // Emit RCA 5 Whys AI analyzing state (for real-time loading spinner sync)
+  emitRCAFiveWhysAIAnalyzing: (incidentId: string, rcaId: string, causeId: string, isAnalyzing: boolean) => void;
+  // Emit RCA 5 Whys AI result (for real-time AI analysis result sync)
+  emitRCAFiveWhysAIResult: (incidentId: string, rcaId: string, causeId: string, result: any) => void;
+  // Emit RCA 5 Whys AI Edit mode state (for real-time edit mode sync)
+  emitRCAFiveWhysAIEditMode: (incidentId: string, rcaId: string, causeId: string, isEditing: boolean, editedSteps: Array<{ stepNumber: number; question: string; answer: string }>, editedRootCause: string) => void;
+  // Emit RCA 5 Whys AI Edit field typing (for real-time typing indicator)
+  emitRCAFiveWhysAIEditTyping: (incidentId: string, rcaId: string, fieldType: 'why' | 'rootCause', isTyping: boolean, stepNumber?: number) => void;
+  // Emit RCA 5 Whys AI Edit field update (for real-time content sync)
+  emitRCAFiveWhysAIEditUpdate: (incidentId: string, rcaId: string, fieldType: 'why' | 'rootCause', text: string, stepNumber?: number) => void;
+  // RCA 5 Whys Manual validation state (for real-time validation sync)
+  onRCAFiveWhysManualValidating: (callback: (data: { incidentId: string; rcaId: string; causeId: string; isValidating: boolean; userId: string; userName: string; timestamp: string }) => void) => () => void;
+  // RCA 5 Whys Manual validation result (for real-time validation result sync)
+  onRCAFiveWhysManualValidationResult: (callback: (data: { incidentId: string; rcaId: string; causeId: string; result: any; userId: string; userName: string; timestamp: string }) => void) => () => void;
+  // RCA 5 Whys Manual correction applied (for real-time fix application sync)
+  onRCAFiveWhysManualCorrectionApplied: (callback: (data: { incidentId: string; rcaId: string; causeId: string; stepNumber: number; correctedText: string; userId: string; userName: string; timestamp: string }) => void) => () => void;
+  // Emit RCA 5 Whys Manual validation state
+  emitRCAFiveWhysManualValidating: (incidentId: string, rcaId: string, causeId: string, isValidating: boolean) => void;
+  // Emit RCA 5 Whys Manual validation result
+  emitRCAFiveWhysManualValidationResult: (incidentId: string, rcaId: string, causeId: string, result: any) => void;
+  // Emit RCA 5 Whys Manual correction applied
+  emitRCAFiveWhysManualCorrectionApplied: (incidentId: string, rcaId: string, causeId: string, stepNumber: number, correctedText: string) => void;
+  // RCA 5 Whys AI Edit validation state (for real-time AI edit validation sync)
+  onRCAFiveWhysAIEditValidating: (callback: (data: { incidentId: string; rcaId: string; causeId: string; isValidating: boolean; userId: string; userName: string; timestamp: string }) => void) => () => void;
+  // RCA 5 Whys AI Edit validation result (for real-time AI edit validation result sync)
+  onRCAFiveWhysAIEditValidationResult: (callback: (data: { incidentId: string; rcaId: string; causeId: string; result: any; userId: string; userName: string; timestamp: string }) => void) => () => void;
+  // Emit RCA 5 Whys AI Edit validation state
+  emitRCAFiveWhysAIEditValidating: (incidentId: string, rcaId: string, causeId: string, isValidating: boolean) => void;
+  // Emit RCA 5 Whys AI Edit validation result
+  emitRCAFiveWhysAIEditValidationResult: (incidentId: string, rcaId: string, causeId: string, result: any) => void;
+  // RCA 5 Whys AI Edit fix applied (for real-time Apply Fix sync)
+  onRCAFiveWhysAIEditFixApplied: (callback: (data: { incidentId: string; rcaId: string; causeId: string; stepNumber: number; correctedText: string; userId: string; userName: string; timestamp: string }) => void) => () => void;
+  // Emit RCA 5 Whys AI Edit fix applied
+  emitRCAFiveWhysAIEditFixApplied: (incidentId: string, rcaId: string, causeId: string, stepNumber: number, correctedText: string) => void;
+  // RCA 5 Whys cause recommendation (keep/eliminate for real-time sync)
+  onRCAFiveWhysCauseRecommendation: (callback: (data: { incidentId: string; rcaId: string; causeId: string; categoryName: string; recommendation: 'keep' | 'eliminate'; fiveWhysAnalysis?: any; userId: string; userName: string; timestamp: string }) => void) => () => void;
+  // Emit RCA 5 Whys cause recommendation
+  emitRCAFiveWhysCauseRecommendation: (incidentId: string, rcaId: string, causeId: string, categoryName: string, recommendation: 'keep' | 'eliminate', fiveWhysAnalysis?: any) => void;
 }
 
 const WebSocketContext = createContext<WebSocketContextType | null>(null);
@@ -165,6 +287,43 @@ export function WebSocketProvider({ children }: { children: React.ReactNode }) {
   const privilegeChangedCallbacks = useRef<Set<(data: any) => void>>(new Set());
   const supportNewRequestCallbacks = useRef<Set<(data: any) => void>>(new Set());
   const supportStatusChangedCallbacks = useRef<Set<(data: any) => void>>(new Set());
+  const rcaCreatedCallbacks = useRef<Set<(data: any) => void>>(new Set());
+  const rcaMethodologyAnalysisStartedCallbacks = useRef<Set<(data: any) => void>>(new Set());
+  const rcaMethodologyAnalysisCompleteCallbacks = useRef<Set<(data: any) => void>>(new Set());
+  const rcaModalStateCallbacks = useRef<Set<(data: any) => void>>(new Set());
+  const rcaDataUpdatedCallbacks = useRef<Set<(data: any) => void>>(new Set());
+  const rcaMethodChangedCallbacks = useRef<Set<(data: any) => void>>(new Set());
+  const rcaValidatedCallbacks = useRef<Set<(data: any) => void>>(new Set());
+  const rcaReopenedCallbacks = useRef<Set<(data: any) => void>>(new Set());
+  const rcaAIGenerationStartedCallbacks = useRef<Set<(data: any) => void>>(new Set());
+  const rcaAIGenerationCompleteCallbacks = useRef<Set<(data: any) => void>>(new Set());
+  const rcaAISuggestionsStartedCallbacks = useRef<Set<(data: any) => void>>(new Set());
+  const rcaAISuggestionsReceivedCallbacks = useRef<Set<(data: any) => void>>(new Set());
+  const rcaAIValidationStartedCallbacks = useRef<Set<(data: any) => void>>(new Set());
+  const rcaAIValidationCompleteCallbacks = useRef<Set<(data: any) => void>>(new Set());
+  const rcaClarificationAnswerCallbacks = useRef<Set<(data: any) => void>>(new Set());
+  const rcaProblemUpdateCallbacks = useRef<Set<(data: any) => void>>(new Set());
+  const rcaCategoriesUpdatedCallbacks = useRef<Set<(data: any) => void>>(new Set());
+  const rcaCorrectiveActionsUpdatedCallbacks = useRef<Set<(data: any) => void>>(new Set());
+  const rcaCauseInputTypingCallbacks = useRef<Set<(data: any) => void>>(new Set());
+  const rcaFiveWhysModalOpenedCallbacks = useRef<Set<(data: any) => void>>(new Set());
+  const rcaFiveWhysModalClosedCallbacks = useRef<Set<(data: any) => void>>(new Set());
+  const rcaFiveWhysModeChangedCallbacks = useRef<Set<(data: any) => void>>(new Set());
+  const rcaFiveWhysFieldTypingCallbacks = useRef<Set<(data: any) => void>>(new Set());
+  const rcaFiveWhysFieldUpdateCallbacks = useRef<Set<(data: any) => void>>(new Set());
+  const rcaFiveWhysStatusChangedCallbacks = useRef<Set<(data: any) => void>>(new Set());
+  const rcaFiveWhysAIAnalyzingCallbacks = useRef<Set<(data: any) => void>>(new Set());
+  const rcaFiveWhysAIResultCallbacks = useRef<Set<(data: any) => void>>(new Set());
+  const rcaFiveWhysAIEditModeCallbacks = useRef<Set<(data: any) => void>>(new Set());
+  const rcaFiveWhysAIEditTypingCallbacks = useRef<Set<(data: any) => void>>(new Set());
+  const rcaFiveWhysAIEditUpdateCallbacks = useRef<Set<(data: any) => void>>(new Set());
+  const rcaFiveWhysManualValidatingCallbacks = useRef<Set<(data: any) => void>>(new Set());
+  const rcaFiveWhysManualValidationResultCallbacks = useRef<Set<(data: any) => void>>(new Set());
+  const rcaFiveWhysManualCorrectionAppliedCallbacks = useRef<Set<(data: any) => void>>(new Set());
+  const rcaFiveWhysAIEditValidatingCallbacks = useRef<Set<(data: any) => void>>(new Set());
+  const rcaFiveWhysAIEditValidationResultCallbacks = useRef<Set<(data: any) => void>>(new Set());
+  const rcaFiveWhysAIEditFixAppliedCallbacks = useRef<Set<(data: any) => void>>(new Set());
+  const rcaFiveWhysCauseRecommendationCallbacks = useRef<Set<(data: any) => void>>(new Set());
 
   const connect = useCallback((userId: string, organizationId: string) => {
     // Prevent multiple connection attempts
@@ -433,6 +592,227 @@ export function WebSocketProvider({ children }: { children: React.ReactNode }) {
       supportStatusChangedCallbacks.current.forEach(cb => cb(data));
     });
 
+    // Handle RCA created (real-time notification for team members)
+    newSocket.on('rca:created', (data: any) => {
+      console.log('🔬 RCA created event:', data);
+      rcaCreatedCallbacks.current.forEach(cb => cb(data));
+    });
+
+    // Handle RCA methodology analysis started (real-time sync for team members)
+    newSocket.on('rca:methodology-analysis-started', (data: any) => {
+      console.log('🔬 RCA methodology analysis started:', data);
+      rcaMethodologyAnalysisStartedCallbacks.current.forEach(cb => cb(data));
+    });
+
+    // Handle RCA methodology analysis complete (real-time sync for team members)
+    newSocket.on('rca:methodology-analysis-complete', (data: any) => {
+      console.log('🔬 RCA methodology analysis complete:', data);
+      rcaMethodologyAnalysisCompleteCallbacks.current.forEach(cb => cb(data));
+    });
+
+    // Handle RCA modal state changes (real-time sync for team collaboration)
+    newSocket.on('rca:modal-state', (data: any) => {
+      console.log('🔬 RCA modal state event:', data);
+      rcaModalStateCallbacks.current.forEach(cb => cb(data));
+    });
+
+    // Handle RCA data updated (real-time fishbone/5-whys sync)
+    newSocket.on('rca:data-updated', (data: any) => {
+      console.log('🔬 RCA data updated event:', data);
+      rcaDataUpdatedCallbacks.current.forEach(cb => cb(data));
+    });
+
+    // Handle RCA method changed (real-time method sync)
+    newSocket.on('rca:method-changed', (data: any) => {
+      console.log('🔬 RCA method changed event:', data);
+      rcaMethodChangedCallbacks.current.forEach(cb => cb(data));
+    });
+
+    // Handle RCA validated (real-time validation sync)
+    newSocket.on('rca:validated', (data: any) => {
+      console.log('🔬 RCA validated event:', data);
+      rcaValidatedCallbacks.current.forEach(cb => cb(data));
+    });
+
+    // Handle RCA reopened (real-time reopen sync)
+    newSocket.on('rca:reopened', (data: any) => {
+      console.log('🔬 RCA reopened event:', data);
+      rcaReopenedCallbacks.current.forEach(cb => cb(data));
+    });
+
+    // Handle RCA AI generation started (real-time AI progress sync)
+    newSocket.on('rca:ai-generation-started', (data: any) => {
+      console.log('🔬 RCA AI generation started event:', data);
+      rcaAIGenerationStartedCallbacks.current.forEach(cb => cb(data));
+    });
+
+    // Handle RCA AI generation complete (real-time AI result sync)
+    newSocket.on('rca:ai-generation-complete', (data: any) => {
+      console.log('🔬 RCA AI generation complete event:', data);
+      rcaAIGenerationCompleteCallbacks.current.forEach(cb => cb(data));
+    });
+
+    // Handle RCA AI suggestions started (for collaborative review)
+    newSocket.on('rca:ai-suggestions-started', (data: any) => {
+      console.log('🔬 RCA AI suggestions started event:', data);
+      rcaAISuggestionsStartedCallbacks.current.forEach(cb => cb(data));
+    });
+
+    // Handle RCA AI suggestions received (for collaborative review)
+    newSocket.on('rca:ai-suggestions-received', (data: any) => {
+      console.log('🔬 RCA AI suggestions received event:', data);
+      rcaAISuggestionsReceivedCallbacks.current.forEach(cb => cb(data));
+    });
+
+    // Handle RCA AI validation started (problem statement validation)
+    newSocket.on('rca:ai-validation-started', (data: any) => {
+      console.log('🔬 RCA AI validation started event:', data);
+      rcaAIValidationStartedCallbacks.current.forEach(cb => cb(data));
+    });
+
+    // Handle RCA AI validation complete (problem statement validation)
+    newSocket.on('rca:ai-validation-complete', (data: any) => {
+      console.log('🔬 RCA AI validation complete event:', data);
+      rcaAIValidationCompleteCallbacks.current.forEach(cb => cb(data));
+    });
+
+    // Handle RCA clarification answer updates (real-time collaborative input)
+    newSocket.on('rca:clarification-answer', (data: any) => {
+      console.log('📝 RCA clarification answer event:', data);
+      rcaClarificationAnswerCallbacks.current.forEach(cb => cb(data));
+    });
+
+    // Handle RCA problem statement updates (real-time collaborative editing)
+    newSocket.on('rca:problem-update', (data: any) => {
+      console.log('📝 RCA problem update event:', data);
+      rcaProblemUpdateCallbacks.current.forEach(cb => cb(data));
+    });
+
+    // Handle RCA categories updates (real-time fishbone diagram sync)
+    newSocket.on('rca:categories-updated', (data: any) => {
+      console.log('📊 RCA categories updated event:', data);
+      rcaCategoriesUpdatedCallbacks.current.forEach(cb => cb(data));
+    });
+
+    // Handle RCA corrective actions updates (real-time action plans sync)
+    newSocket.on('rca:corrective-actions-updated', (data: any) => {
+      console.log('🛠️ RCA corrective actions updated event:', data);
+      rcaCorrectiveActionsUpdatedCallbacks.current.forEach(cb => cb(data));
+    });
+
+    // Handle RCA cause input typing (real-time "Add a cause" input sync)
+    newSocket.on('rca:cause-input-typing', (data: any) => {
+      rcaCauseInputTypingCallbacks.current.forEach(cb => cb(data));
+    });
+
+    // Handle RCA 5 Whys modal opened (real-time modal sync)
+    newSocket.on('rca:five-whys-modal-opened', (data: any) => {
+      console.log('🔍 RCA 5 Whys modal opened event:', data);
+      rcaFiveWhysModalOpenedCallbacks.current.forEach(cb => cb(data));
+    });
+
+    // Handle RCA 5 Whys modal closed (real-time modal sync)
+    newSocket.on('rca:five-whys-modal-closed', (data: any) => {
+      console.log('🔍 RCA 5 Whys modal closed event:', data);
+      rcaFiveWhysModalClosedCallbacks.current.forEach(cb => cb(data));
+    });
+
+    // Handle RCA 5 Whys mode changed (real-time mode sync)
+    newSocket.on('rca:five-whys-mode-changed', (data: any) => {
+      console.log('🔍 RCA 5 Whys mode changed event:', data);
+      rcaFiveWhysModeChangedCallbacks.current.forEach(cb => cb(data));
+    });
+
+    // Handle RCA 5 Whys field typing (real-time typing indicator)
+    newSocket.on('rca:five-whys-field-typing', (data: any) => {
+      console.log('🔍 RCA 5 Whys field typing event:', data);
+      rcaFiveWhysFieldTypingCallbacks.current.forEach(cb => cb(data));
+    });
+
+    // Handle RCA 5 Whys field content update (real-time text sync)
+    newSocket.on('rca:five-whys-field-update', (data: any) => {
+      console.log('🔍 RCA 5 Whys field update event:', data);
+      rcaFiveWhysFieldUpdateCallbacks.current.forEach(cb => cb(data));
+    });
+
+    // Handle RCA 5 Whys status changed (real-time color sync)
+    newSocket.on('rca:five-whys-status-changed', (data: any) => {
+      console.log('🔍 RCA 5 Whys status changed event:', data);
+      rcaFiveWhysStatusChangedCallbacks.current.forEach(cb => cb(data));
+    });
+
+    // Handle RCA 5 Whys AI analyzing state (real-time loading spinner sync)
+    newSocket.on('rca:five-whys-ai-analyzing', (data: any) => {
+      console.log('🔍 RCA 5 Whys AI analyzing event:', data);
+      rcaFiveWhysAIAnalyzingCallbacks.current.forEach(cb => cb(data));
+    });
+
+    // Handle RCA 5 Whys AI result (real-time AI analysis result sync)
+    newSocket.on('rca:five-whys-ai-result', (data: any) => {
+      console.log('🔍 RCA 5 Whys AI result event:', data);
+      rcaFiveWhysAIResultCallbacks.current.forEach(cb => cb(data));
+    });
+
+    // Handle RCA 5 Whys AI Edit mode (real-time edit mode sync)
+    newSocket.on('rca:five-whys-ai-edit-mode', (data: any) => {
+      console.log('🔍 RCA 5 Whys AI edit mode event:', data);
+      rcaFiveWhysAIEditModeCallbacks.current.forEach(cb => cb(data));
+    });
+
+    // Handle RCA 5 Whys AI Edit typing (real-time typing indicator)
+    newSocket.on('rca:five-whys-ai-edit-typing', (data: any) => {
+      console.log('🔍 RCA 5 Whys AI edit typing event:', data);
+      rcaFiveWhysAIEditTypingCallbacks.current.forEach(cb => cb(data));
+    });
+
+    // Handle RCA 5 Whys AI Edit update (real-time content sync)
+    newSocket.on('rca:five-whys-ai-edit-update', (data: any) => {
+      console.log('🔍 RCA 5 Whys AI edit update event:', data);
+      rcaFiveWhysAIEditUpdateCallbacks.current.forEach(cb => cb(data));
+    });
+
+    // Handle RCA 5 Whys Manual validation state (real-time validation sync)
+    newSocket.on('rca:five-whys-manual-validating', (data: any) => {
+      console.log('🔍 RCA 5 Whys Manual validating event:', data);
+      rcaFiveWhysManualValidatingCallbacks.current.forEach(cb => cb(data));
+    });
+
+    // Handle RCA 5 Whys Manual validation result (real-time result sync)
+    newSocket.on('rca:five-whys-manual-validation-result', (data: any) => {
+      console.log('🔍 RCA 5 Whys Manual validation result event:', data);
+      rcaFiveWhysManualValidationResultCallbacks.current.forEach(cb => cb(data));
+    });
+
+    // Handle RCA 5 Whys Manual correction applied (real-time fix sync)
+    newSocket.on('rca:five-whys-manual-correction-applied', (data: any) => {
+      console.log('🔍 RCA 5 Whys Manual correction applied event:', data);
+      rcaFiveWhysManualCorrectionAppliedCallbacks.current.forEach(cb => cb(data));
+    });
+
+    // Handle RCA 5 Whys AI Edit validation state (real-time AI edit validation sync)
+    newSocket.on('rca:five-whys-ai-edit-validating', (data: any) => {
+      console.log('🔍 RCA 5 Whys AI Edit validating event:', data);
+      rcaFiveWhysAIEditValidatingCallbacks.current.forEach(cb => cb(data));
+    });
+
+    // Handle RCA 5 Whys AI Edit validation result (real-time AI edit validation result sync)
+    newSocket.on('rca:five-whys-ai-edit-validation-result', (data: any) => {
+      console.log('🔍 RCA 5 Whys AI Edit validation result event:', data);
+      rcaFiveWhysAIEditValidationResultCallbacks.current.forEach(cb => cb(data));
+    });
+
+    // Handle RCA 5 Whys AI Edit fix applied (real-time Apply Fix sync)
+    newSocket.on('rca:five-whys-ai-edit-fix-applied', (data: any) => {
+      console.log('🔍 RCA 5 Whys AI Edit fix applied event:', data);
+      rcaFiveWhysAIEditFixAppliedCallbacks.current.forEach(cb => cb(data));
+    });
+
+    // Handle RCA 5 Whys cause recommendation (real-time keep/eliminate sync)
+    newSocket.on('rca:five-whys-cause-recommendation', (data: any) => {
+      console.log('🔍 RCA 5 Whys cause recommendation event:', data);
+      rcaFiveWhysCauseRecommendationCallbacks.current.forEach(cb => cb(data));
+    });
+
     // Handle incident participants list
     newSocket.on('incident:participants', (data: { incidentId: string; participants: any[] }) => {
       const onlineIds = data.participants.filter(p => p.isOnline).map(p => p.id);
@@ -461,9 +841,11 @@ export function WebSocketProvider({ children }: { children: React.ReactNode }) {
   }, [socket]);
 
   const joinIncident = useCallback((incidentId: string) => {
+    console.log('🚪 [WS] joinIncident called, incidentId:', incidentId, 'connected:', socket?.connected);
     if (socket?.connected) {
       socket.emit('incident:join', incidentId);
       setCurrentIncidentId(incidentId);
+      console.log('🚪 [WS] Emitted incident:join for:', incidentId);
     }
   }, [socket]);
 
@@ -674,6 +1056,368 @@ export function WebSocketProvider({ children }: { children: React.ReactNode }) {
     return () => { supportStatusChangedCallbacks.current.delete(callback); };
   }, []);
 
+  const onRCACreated = useCallback((callback: (data: any) => void) => {
+    rcaCreatedCallbacks.current.add(callback);
+    return () => { rcaCreatedCallbacks.current.delete(callback); };
+  }, []);
+
+  const onRCAMethodologyAnalysisStarted = useCallback((callback: (data: any) => void) => {
+    rcaMethodologyAnalysisStartedCallbacks.current.add(callback);
+    return () => { rcaMethodologyAnalysisStartedCallbacks.current.delete(callback); };
+  }, []);
+
+  const onRCAMethodologyAnalysisComplete = useCallback((callback: (data: any) => void) => {
+    rcaMethodologyAnalysisCompleteCallbacks.current.add(callback);
+    return () => { rcaMethodologyAnalysisCompleteCallbacks.current.delete(callback); };
+  }, []);
+
+  const onRCAModalState = useCallback((callback: (data: any) => void) => {
+    rcaModalStateCallbacks.current.add(callback);
+    return () => { rcaModalStateCallbacks.current.delete(callback); };
+  }, []);
+
+  const onRCADataUpdated = useCallback((callback: (data: any) => void) => {
+    rcaDataUpdatedCallbacks.current.add(callback);
+    return () => { rcaDataUpdatedCallbacks.current.delete(callback); };
+  }, []);
+
+  const onRCAMethodChanged = useCallback((callback: (data: any) => void) => {
+    rcaMethodChangedCallbacks.current.add(callback);
+    return () => { rcaMethodChangedCallbacks.current.delete(callback); };
+  }, []);
+
+  const onRCAValidated = useCallback((callback: (data: any) => void) => {
+    rcaValidatedCallbacks.current.add(callback);
+    return () => { rcaValidatedCallbacks.current.delete(callback); };
+  }, []);
+
+  const onRCAReopened = useCallback((callback: (data: any) => void) => {
+    rcaReopenedCallbacks.current.add(callback);
+    return () => { rcaReopenedCallbacks.current.delete(callback); };
+  }, []);
+
+  const onRCAAIGenerationStarted = useCallback((callback: (data: any) => void) => {
+    rcaAIGenerationStartedCallbacks.current.add(callback);
+    return () => { rcaAIGenerationStartedCallbacks.current.delete(callback); };
+  }, []);
+
+  const onRCAAIGenerationComplete = useCallback((callback: (data: any) => void) => {
+    rcaAIGenerationCompleteCallbacks.current.add(callback);
+    return () => { rcaAIGenerationCompleteCallbacks.current.delete(callback); };
+  }, []);
+
+  const onRCAAISuggestionsStarted = useCallback((callback: (data: any) => void) => {
+    rcaAISuggestionsStartedCallbacks.current.add(callback);
+    return () => { rcaAISuggestionsStartedCallbacks.current.delete(callback); };
+  }, []);
+
+  const onRCAAISuggestionsReceived = useCallback((callback: (data: any) => void) => {
+    rcaAISuggestionsReceivedCallbacks.current.add(callback);
+    return () => { rcaAISuggestionsReceivedCallbacks.current.delete(callback); };
+  }, []);
+
+  const onRCAAIValidationStarted = useCallback((callback: (data: any) => void) => {
+    rcaAIValidationStartedCallbacks.current.add(callback);
+    return () => { rcaAIValidationStartedCallbacks.current.delete(callback); };
+  }, []);
+
+  const onRCAAIValidationComplete = useCallback((callback: (data: any) => void) => {
+    rcaAIValidationCompleteCallbacks.current.add(callback);
+    return () => { rcaAIValidationCompleteCallbacks.current.delete(callback); };
+  }, []);
+
+  const onRCAClarificationAnswer = useCallback((callback: (data: any) => void) => {
+    rcaClarificationAnswerCallbacks.current.add(callback);
+    return () => { rcaClarificationAnswerCallbacks.current.delete(callback); };
+  }, []);
+
+  const onRCAProblemUpdate = useCallback((callback: (data: any) => void) => {
+    rcaProblemUpdateCallbacks.current.add(callback);
+    return () => { rcaProblemUpdateCallbacks.current.delete(callback); };
+  }, []);
+
+  const onRCACategoriesUpdated = useCallback((callback: (data: any) => void) => {
+    rcaCategoriesUpdatedCallbacks.current.add(callback);
+    return () => { rcaCategoriesUpdatedCallbacks.current.delete(callback); };
+  }, []);
+
+  const onRCACorrectiveActionsUpdated = useCallback((callback: (data: any) => void) => {
+    rcaCorrectiveActionsUpdatedCallbacks.current.add(callback);
+    return () => { rcaCorrectiveActionsUpdatedCallbacks.current.delete(callback); };
+  }, []);
+
+  const onRCACauseInputTyping = useCallback((callback: (data: any) => void) => {
+    rcaCauseInputTypingCallbacks.current.add(callback);
+    return () => { rcaCauseInputTypingCallbacks.current.delete(callback); };
+  }, []);
+
+  const onRCAFiveWhysModalOpened = useCallback((callback: (data: any) => void) => {
+    rcaFiveWhysModalOpenedCallbacks.current.add(callback);
+    return () => { rcaFiveWhysModalOpenedCallbacks.current.delete(callback); };
+  }, []);
+
+  const onRCAFiveWhysModalClosed = useCallback((callback: (data: any) => void) => {
+    rcaFiveWhysModalClosedCallbacks.current.add(callback);
+    return () => { rcaFiveWhysModalClosedCallbacks.current.delete(callback); };
+  }, []);
+
+  const onRCAFiveWhysModeChanged = useCallback((callback: (data: any) => void) => {
+    rcaFiveWhysModeChangedCallbacks.current.add(callback);
+    return () => { rcaFiveWhysModeChangedCallbacks.current.delete(callback); };
+  }, []);
+
+  const onRCAFiveWhysFieldTyping = useCallback((callback: (data: any) => void) => {
+    rcaFiveWhysFieldTypingCallbacks.current.add(callback);
+    return () => { rcaFiveWhysFieldTypingCallbacks.current.delete(callback); };
+  }, []);
+
+  const onRCAFiveWhysFieldUpdate = useCallback((callback: (data: any) => void) => {
+    rcaFiveWhysFieldUpdateCallbacks.current.add(callback);
+    return () => { rcaFiveWhysFieldUpdateCallbacks.current.delete(callback); };
+  }, []);
+
+  const onRCAFiveWhysStatusChanged = useCallback((callback: (data: any) => void) => {
+    rcaFiveWhysStatusChangedCallbacks.current.add(callback);
+    return () => { rcaFiveWhysStatusChangedCallbacks.current.delete(callback); };
+  }, []);
+
+  const onRCAFiveWhysAIAnalyzing = useCallback((callback: (data: any) => void) => {
+    rcaFiveWhysAIAnalyzingCallbacks.current.add(callback);
+    return () => { rcaFiveWhysAIAnalyzingCallbacks.current.delete(callback); };
+  }, []);
+
+  const onRCAFiveWhysAIResult = useCallback((callback: (data: any) => void) => {
+    rcaFiveWhysAIResultCallbacks.current.add(callback);
+    return () => { rcaFiveWhysAIResultCallbacks.current.delete(callback); };
+  }, []);
+
+  const onRCAFiveWhysAIEditMode = useCallback((callback: (data: any) => void) => {
+    rcaFiveWhysAIEditModeCallbacks.current.add(callback);
+    return () => { rcaFiveWhysAIEditModeCallbacks.current.delete(callback); };
+  }, []);
+
+  const onRCAFiveWhysAIEditTyping = useCallback((callback: (data: any) => void) => {
+    rcaFiveWhysAIEditTypingCallbacks.current.add(callback);
+    return () => { rcaFiveWhysAIEditTypingCallbacks.current.delete(callback); };
+  }, []);
+
+  const onRCAFiveWhysAIEditUpdate = useCallback((callback: (data: any) => void) => {
+    rcaFiveWhysAIEditUpdateCallbacks.current.add(callback);
+    return () => { rcaFiveWhysAIEditUpdateCallbacks.current.delete(callback); };
+  }, []);
+
+  const onRCAFiveWhysManualValidating = useCallback((callback: (data: any) => void) => {
+    rcaFiveWhysManualValidatingCallbacks.current.add(callback);
+    return () => { rcaFiveWhysManualValidatingCallbacks.current.delete(callback); };
+  }, []);
+
+  const onRCAFiveWhysManualValidationResult = useCallback((callback: (data: any) => void) => {
+    rcaFiveWhysManualValidationResultCallbacks.current.add(callback);
+    return () => { rcaFiveWhysManualValidationResultCallbacks.current.delete(callback); };
+  }, []);
+
+  const onRCAFiveWhysManualCorrectionApplied = useCallback((callback: (data: any) => void) => {
+    rcaFiveWhysManualCorrectionAppliedCallbacks.current.add(callback);
+    return () => { rcaFiveWhysManualCorrectionAppliedCallbacks.current.delete(callback); };
+  }, []);
+
+  const onRCAFiveWhysAIEditValidating = useCallback((callback: (data: any) => void) => {
+    rcaFiveWhysAIEditValidatingCallbacks.current.add(callback);
+    return () => { rcaFiveWhysAIEditValidatingCallbacks.current.delete(callback); };
+  }, []);
+
+  const onRCAFiveWhysAIEditValidationResult = useCallback((callback: (data: any) => void) => {
+    rcaFiveWhysAIEditValidationResultCallbacks.current.add(callback);
+    return () => { rcaFiveWhysAIEditValidationResultCallbacks.current.delete(callback); };
+  }, []);
+
+  const onRCAFiveWhysAIEditFixApplied = useCallback((callback: (data: any) => void) => {
+    rcaFiveWhysAIEditFixAppliedCallbacks.current.add(callback);
+    return () => { rcaFiveWhysAIEditFixAppliedCallbacks.current.delete(callback); };
+  }, []);
+
+  const onRCAFiveWhysCauseRecommendation = useCallback((callback: (data: any) => void) => {
+    rcaFiveWhysCauseRecommendationCallbacks.current.add(callback);
+    return () => { rcaFiveWhysCauseRecommendationCallbacks.current.delete(callback); };
+  }, []);
+
+  const emitRCAModalState = useCallback((incidentId: string, action: 'opened' | 'closed' | 'method-selected' | 'visibility-changed' | 'analyzing', data?: { selectedMethod?: string; visibility?: string }) => {
+    if (socket?.connected) {
+      socket.emit('rca:modal-state', { incidentId, action, ...data });
+    }
+  }, [socket]);
+
+  const emitRCAClarificationAnswer = useCallback((incidentId: string, rcaId: string, questionIndex: number, answer: string) => {
+    console.log('📝 [WS] emitRCAClarificationAnswer - connected:', socket?.connected, 'incidentId:', incidentId, 'rcaId:', rcaId, 'questionIndex:', questionIndex);
+    if (socket?.connected) {
+      socket.emit('rca:clarification-answer', { incidentId, rcaId, questionIndex, answer });
+      console.log('📝 [WS] Emitted rca:clarification-answer');
+    } else {
+      console.log('📝 [WS] Socket not connected, cannot emit');
+    }
+  }, [socket]);
+
+  const emitRCAProblemUpdate = useCallback((incidentId: string, rcaId: string, problem: string) => {
+    if (socket?.connected) {
+      socket.emit('rca:problem-update', { incidentId, rcaId, problem });
+    }
+  }, [socket]);
+
+  const emitRCACategoriesUpdated = useCallback((incidentId: string, rcaId: string, categories: any[], problem: string) => {
+    console.log('📊 [WS] emitRCACategoriesUpdated - connected:', socket?.connected, 'incidentId:', incidentId, 'rcaId:', rcaId, 'categories count:', categories.length);
+    if (socket?.connected) {
+      socket.emit('rca:categories-updated', { incidentId, rcaId, categories, problem });
+      console.log('📊 [WS] Emitted rca:categories-updated');
+    } else {
+      console.log('📊 [WS] Socket not connected, cannot emit');
+    }
+  }, [socket]);
+
+  const emitRCACorrectiveActionsUpdated = useCallback((incidentId: string, rcaId: string, actionPlans: any, preventiveControls: any[]) => {
+    console.log('🛠️ [WS] emitRCACorrectiveActionsUpdated - connected:', socket?.connected, 'incidentId:', incidentId, 'rcaId:', rcaId);
+    if (socket?.connected) {
+      socket.emit('rca:corrective-actions-updated', { incidentId, rcaId, actionPlans, preventiveControls });
+      console.log('🛠️ [WS] Emitted rca:corrective-actions-updated');
+    } else {
+      console.log('🛠️ [WS] Socket not connected, cannot emit');
+    }
+  }, [socket]);
+
+  const emitRCACauseInputTyping = useCallback((incidentId: string, rcaId: string, categoryId: string, text: string) => {
+    if (socket?.connected) {
+      socket.emit('rca:cause-input-typing', { incidentId, rcaId, categoryId, text });
+    }
+  }, [socket]);
+
+  const emitRCAFiveWhysModalOpened = useCallback((incidentId: string, rcaId: string, causeId: string, causeText: string, categoryName: string, mode: 'choose' | 'continue-or-restart' | 'manual' | 'ai', hasAnswers: boolean, answerCount: number, steps: Array<{ stepNumber: number; question: string; answer: string }>, rootCause?: string) => {
+    console.log('🔍 [WS] emitRCAFiveWhysModalOpened - connected:', socket?.connected, 'mode:', mode, 'hasAnswers:', hasAnswers);
+    if (socket?.connected) {
+      socket.emit('rca:five-whys-modal-opened', { incidentId, rcaId, causeId, causeText, categoryName, mode, hasAnswers, answerCount, steps, rootCause });
+      console.log('🔍 [WS] Emitted rca:five-whys-modal-opened with mode:', mode);
+    }
+  }, [socket]);
+
+  const emitRCAFiveWhysModalClosed = useCallback((incidentId: string, rcaId: string) => {
+    console.log('🔍 [WS] emitRCAFiveWhysModalClosed - connected:', socket?.connected);
+    if (socket?.connected) {
+      socket.emit('rca:five-whys-modal-closed', { incidentId, rcaId });
+      console.log('🔍 [WS] Emitted rca:five-whys-modal-closed');
+    }
+  }, [socket]);
+
+  const emitRCAFiveWhysModeChanged = useCallback((incidentId: string, rcaId: string, mode: 'choose' | 'manual' | 'ai', resetData?: { causeId: string; causeText: string; steps: Array<{ stepNumber: number; question: string; answer: string }>; hasAnswers: boolean; answerCount: number }) => {
+    console.log('🔍 [WS] emitRCAFiveWhysModeChanged - connected:', socket?.connected, 'mode:', mode, 'hasResetData:', !!resetData);
+    if (socket?.connected) {
+      socket.emit('rca:five-whys-mode-changed', { incidentId, rcaId, mode, resetData });
+      console.log('🔍 [WS] Emitted rca:five-whys-mode-changed');
+    }
+  }, [socket]);
+
+  const emitRCAFiveWhysFieldTyping = useCallback((incidentId: string, rcaId: string, fieldType: 'why' | 'rootCause', isTyping: boolean, stepNumber?: number) => {
+    console.log('🔍 [WS] emitRCAFiveWhysFieldTyping - connected:', socket?.connected, 'fieldType:', fieldType, 'stepNumber:', stepNumber, 'isTyping:', isTyping);
+    if (socket?.connected) {
+      socket.emit('rca:five-whys-field-typing', { incidentId, rcaId, fieldType, stepNumber, isTyping });
+    }
+  }, [socket]);
+
+  const emitRCAFiveWhysFieldUpdate = useCallback((incidentId: string, rcaId: string, fieldType: 'why' | 'rootCause', text: string, stepNumber?: number, nextQuestion?: string) => {
+    console.log('🔍 [WS] emitRCAFiveWhysFieldUpdate - connected:', socket?.connected, 'fieldType:', fieldType, 'stepNumber:', stepNumber, 'nextQuestion:', nextQuestion);
+    if (socket?.connected) {
+      socket.emit('rca:five-whys-field-update', { incidentId, rcaId, fieldType, stepNumber, text, nextQuestion });
+    }
+  }, [socket]);
+
+  const emitRCAFiveWhysStatusChanged = useCallback((incidentId: string, rcaId: string, causeId: string, hasAnswers: boolean, answerCount: number) => {
+    console.log('🔍 [WS] emitRCAFiveWhysStatusChanged - connected:', socket?.connected, 'causeId:', causeId, 'hasAnswers:', hasAnswers, 'answerCount:', answerCount);
+    if (socket?.connected) {
+      socket.emit('rca:five-whys-status-changed', { incidentId, rcaId, causeId, hasAnswers, answerCount });
+    }
+  }, [socket]);
+
+  const emitRCAFiveWhysAIAnalyzing = useCallback((incidentId: string, rcaId: string, causeId: string, isAnalyzing: boolean) => {
+    console.log('🔍 [WS] emitRCAFiveWhysAIAnalyzing - connected:', socket?.connected, 'causeId:', causeId, 'isAnalyzing:', isAnalyzing);
+    if (socket?.connected) {
+      socket.emit('rca:five-whys-ai-analyzing', { incidentId, rcaId, causeId, isAnalyzing });
+    }
+  }, [socket]);
+
+  const emitRCAFiveWhysAIResult = useCallback((incidentId: string, rcaId: string, causeId: string, result: any) => {
+    console.log('🔍 [WS] emitRCAFiveWhysAIResult - connected:', socket?.connected, 'causeId:', causeId);
+    if (socket?.connected) {
+      socket.emit('rca:five-whys-ai-result', { incidentId, rcaId, causeId, result });
+    }
+  }, [socket]);
+
+  const emitRCAFiveWhysAIEditMode = useCallback((incidentId: string, rcaId: string, causeId: string, isEditing: boolean, editedSteps: Array<{ stepNumber: number; question: string; answer: string }>, editedRootCause: string) => {
+    console.log('🔍 [WS] emitRCAFiveWhysAIEditMode - connected:', socket?.connected, 'causeId:', causeId, 'isEditing:', isEditing);
+    if (socket?.connected) {
+      socket.emit('rca:five-whys-ai-edit-mode', { incidentId, rcaId, causeId, isEditing, editedSteps, editedRootCause });
+    }
+  }, [socket]);
+
+  const emitRCAFiveWhysAIEditTyping = useCallback((incidentId: string, rcaId: string, fieldType: 'why' | 'rootCause', isTyping: boolean, stepNumber?: number) => {
+    console.log('🔍 [WS] emitRCAFiveWhysAIEditTyping - connected:', socket?.connected, 'fieldType:', fieldType, 'stepNumber:', stepNumber, 'isTyping:', isTyping);
+    if (socket?.connected) {
+      socket.emit('rca:five-whys-ai-edit-typing', { incidentId, rcaId, fieldType, stepNumber, isTyping });
+    }
+  }, [socket]);
+
+  const emitRCAFiveWhysAIEditUpdate = useCallback((incidentId: string, rcaId: string, fieldType: 'why' | 'rootCause', text: string, stepNumber?: number) => {
+    console.log('🔍 [WS] emitRCAFiveWhysAIEditUpdate - connected:', socket?.connected, 'fieldType:', fieldType, 'stepNumber:', stepNumber);
+    if (socket?.connected) {
+      socket.emit('rca:five-whys-ai-edit-update', { incidentId, rcaId, fieldType, stepNumber, text });
+    }
+  }, [socket]);
+
+  const emitRCAFiveWhysManualValidating = useCallback((incidentId: string, rcaId: string, causeId: string, isValidating: boolean) => {
+    console.log('🔍 [WS] emitRCAFiveWhysManualValidating - connected:', socket?.connected, 'causeId:', causeId, 'isValidating:', isValidating);
+    if (socket?.connected) {
+      socket.emit('rca:five-whys-manual-validating', { incidentId, rcaId, causeId, isValidating });
+    }
+  }, [socket]);
+
+  const emitRCAFiveWhysManualValidationResult = useCallback((incidentId: string, rcaId: string, causeId: string, result: any) => {
+    console.log('🔍 [WS] emitRCAFiveWhysManualValidationResult - connected:', socket?.connected, 'causeId:', causeId);
+    if (socket?.connected) {
+      socket.emit('rca:five-whys-manual-validation-result', { incidentId, rcaId, causeId, result });
+    }
+  }, [socket]);
+
+  const emitRCAFiveWhysManualCorrectionApplied = useCallback((incidentId: string, rcaId: string, causeId: string, stepNumber: number, correctedText: string) => {
+    console.log('🔍 [WS] emitRCAFiveWhysManualCorrectionApplied - connected:', socket?.connected, 'causeId:', causeId, 'stepNumber:', stepNumber);
+    if (socket?.connected) {
+      socket.emit('rca:five-whys-manual-correction-applied', { incidentId, rcaId, causeId, stepNumber, correctedText });
+    }
+  }, [socket]);
+
+  const emitRCAFiveWhysAIEditValidating = useCallback((incidentId: string, rcaId: string, causeId: string, isValidating: boolean) => {
+    console.log('🔍 [WS] emitRCAFiveWhysAIEditValidating - connected:', socket?.connected, 'causeId:', causeId, 'isValidating:', isValidating);
+    if (socket?.connected) {
+      socket.emit('rca:five-whys-ai-edit-validating', { incidentId, rcaId, causeId, isValidating });
+    }
+  }, [socket]);
+
+  const emitRCAFiveWhysAIEditValidationResult = useCallback((incidentId: string, rcaId: string, causeId: string, result: any) => {
+    console.log('🔍 [WS] emitRCAFiveWhysAIEditValidationResult - connected:', socket?.connected, 'causeId:', causeId);
+    if (socket?.connected) {
+      socket.emit('rca:five-whys-ai-edit-validation-result', { incidentId, rcaId, causeId, result });
+    }
+  }, [socket]);
+
+  const emitRCAFiveWhysAIEditFixApplied = useCallback((incidentId: string, rcaId: string, causeId: string, stepNumber: number, correctedText: string) => {
+    console.log('🔍 [WS] emitRCAFiveWhysAIEditFixApplied - connected:', socket?.connected, 'causeId:', causeId, 'stepNumber:', stepNumber);
+    if (socket?.connected) {
+      socket.emit('rca:five-whys-ai-edit-fix-applied', { incidentId, rcaId, causeId, stepNumber, correctedText });
+    }
+  }, [socket]);
+
+  const emitRCAFiveWhysCauseRecommendation = useCallback((incidentId: string, rcaId: string, causeId: string, categoryName: string, recommendation: 'keep' | 'eliminate', fiveWhysAnalysis?: any) => {
+    console.log('🔍 [WS] emitRCAFiveWhysCauseRecommendation - connected:', socket?.connected, 'causeId:', causeId, 'recommendation:', recommendation);
+    if (socket?.connected) {
+      socket.emit('rca:five-whys-cause-recommendation', { incidentId, rcaId, causeId, categoryName, recommendation, fiveWhysAnalysis });
+    }
+  }, [socket]);
+
   // Cleanup on unmount
   useEffect(() => {
     return () => {
@@ -732,6 +1476,67 @@ export function WebSocketProvider({ children }: { children: React.ReactNode }) {
         onPrivilegeChanged,
         onSupportNewRequest,
         onSupportStatusChanged,
+        onRCACreated,
+        onRCAMethodologyAnalysisStarted,
+        onRCAMethodologyAnalysisComplete,
+        onRCAModalState,
+        onRCADataUpdated,
+        onRCAMethodChanged,
+        onRCAValidated,
+        onRCAReopened,
+        onRCAAIGenerationStarted,
+        onRCAAIGenerationComplete,
+        onRCAAISuggestionsStarted,
+        onRCAAISuggestionsReceived,
+        onRCAAIValidationStarted,
+        onRCAAIValidationComplete,
+        onRCAClarificationAnswer,
+        onRCAProblemUpdate,
+        onRCACategoriesUpdated,
+        onRCACorrectiveActionsUpdated,
+        onRCACauseInputTyping,
+        onRCAFiveWhysModalOpened,
+        onRCAFiveWhysModalClosed,
+        onRCAFiveWhysModeChanged,
+        onRCAFiveWhysFieldTyping,
+        onRCAFiveWhysFieldUpdate,
+        onRCAFiveWhysStatusChanged,
+        onRCAFiveWhysAIAnalyzing,
+        onRCAFiveWhysAIResult,
+        emitRCAModalState,
+        emitRCAClarificationAnswer,
+        emitRCAProblemUpdate,
+        emitRCACategoriesUpdated,
+        emitRCACorrectiveActionsUpdated,
+        emitRCACauseInputTyping,
+        emitRCAFiveWhysModalOpened,
+        emitRCAFiveWhysModalClosed,
+        emitRCAFiveWhysModeChanged,
+        emitRCAFiveWhysFieldTyping,
+        emitRCAFiveWhysFieldUpdate,
+        emitRCAFiveWhysStatusChanged,
+        emitRCAFiveWhysAIAnalyzing,
+        emitRCAFiveWhysAIResult,
+        onRCAFiveWhysAIEditMode,
+        onRCAFiveWhysAIEditTyping,
+        onRCAFiveWhysAIEditUpdate,
+        emitRCAFiveWhysAIEditMode,
+        emitRCAFiveWhysAIEditTyping,
+        emitRCAFiveWhysAIEditUpdate,
+        onRCAFiveWhysManualValidating,
+        onRCAFiveWhysManualValidationResult,
+        onRCAFiveWhysManualCorrectionApplied,
+        emitRCAFiveWhysManualValidating,
+        emitRCAFiveWhysManualValidationResult,
+        emitRCAFiveWhysManualCorrectionApplied,
+        onRCAFiveWhysAIEditValidating,
+        onRCAFiveWhysAIEditValidationResult,
+        emitRCAFiveWhysAIEditValidating,
+        emitRCAFiveWhysAIEditValidationResult,
+        onRCAFiveWhysAIEditFixApplied,
+        emitRCAFiveWhysAIEditFixApplied,
+        onRCAFiveWhysCauseRecommendation,
+        emitRCAFiveWhysCauseRecommendation,
       }}
     >
       {children}

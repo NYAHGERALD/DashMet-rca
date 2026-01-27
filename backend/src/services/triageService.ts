@@ -4,6 +4,7 @@
 import { prisma } from '../utils/prisma';
 import { IncidentType, Severity, UserRole, IncidentStatus } from '@prisma/client';
 import { generateIncidentSummary } from './aiService';
+import { v4 as uuidv4 } from 'uuid';
 
 interface TriageResult {
   suggestedSeverity: Severity;
@@ -355,6 +356,7 @@ export async function checkSLABreaches() {
     if (incident.assignedToId) {
       await prisma.notification.create({
         data: {
+          id: uuidv4(),
           type: 'SLA_RESPONSE_BREACHED',
           title: 'SLA Response Time Breached',
           message: `Incident ${incident.incidentNumber} has exceeded its response time SLA`,
@@ -375,6 +377,7 @@ export async function checkSLABreaches() {
     if (incident.assignedToId) {
       await prisma.notification.create({
         data: {
+          id: uuidv4(),
           type: 'SLA_RESOLUTION_BREACHED',
           title: 'SLA Resolution Time Breached',
           message: `Incident ${incident.incidentNumber} has exceeded its resolution time SLA`,

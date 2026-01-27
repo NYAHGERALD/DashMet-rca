@@ -60,6 +60,7 @@ import {
   Building,
   Unlock,
   Settings,
+  GitBranch,
 } from 'lucide-react';
 import { format } from 'date-fns';
 import Link from 'next/link';
@@ -96,6 +97,8 @@ interface FMIRReport {
   closedAt?: string;
   closedById?: string;
   collaboratorIds?: string[];
+  linkedIncidentId?: string | null;
+  linkedIncidentNumber?: string | null;
   Facility?: {
     id: string;
     name: string;
@@ -302,6 +305,7 @@ function FMIRListContent() {
   const [togglingVisibility, setTogglingVisibility] = useState<string | null>(null);
   const [togglingClosedStatus, setTogglingClosedStatus] = useState<string | null>(null);
   const [togglingInvestigationStatus, setTogglingInvestigationStatus] = useState<string | null>(null);
+  const [startingRCA, setStartingRCA] = useState<string | null>(null);
   const dropdownRef = useRef<HTMLDivElement>(null);
   
   // Validation modal states
@@ -1008,6 +1012,43 @@ function FMIRListContent() {
     }
   };
 
+  // Handle starting RCA for an FMIR under investigation
+  const handleStartRCA = async (reportId: string) => {
+    setStartingRCA(reportId);
+    try {
+      const response = await api.post(`/fmir/${reportId}/start-rca`);
+      if (response.data.success) {
+        const { incident, isExisting } = response.data.data;
+        
+        if (isExisting) {
+          setToastType('info');
+          setToastMessage('An incident already exists for this FMIR. Navigating to it...');
+        } else {
+          setToastType('success');
+          setToastMessage(`Incident ${incident.incidentNumber} created successfully! Navigating to RCA...`);
+        }
+        
+        // Navigate to the incident page after a short delay
+        setTimeout(() => {
+          router.push(`/incidents/${incident.id}`);
+        }, 500);
+      }
+    } catch (err: any) {
+      console.error('Error starting RCA:', err);
+      // Check if this is a privilege error (403)
+      if (err.response?.status === 403) {
+        showAccessDenied('Start RCA Investigation', err.response?.data?.privilegeKey || 'incidents.create');
+        return;
+      }
+      const errorMessage = err.response?.data?.error || 'Failed to start RCA';
+      setToastType('error');
+      setToastMessage(errorMessage);
+      setTimeout(() => setToastMessage(null), 5000);
+    } finally {
+      setStartingRCA(null);
+    }
+  };
+
   // Helper function to check if user can see the delete button
   // Uses privilege-based access control
   const canDeleteReport = (report: FMIRReport) => {
@@ -1611,7 +1652,7 @@ function FMIRListContent() {
                         {canViewFMIR ? (
                           <Link
                             href={`/fmir/${report.id}`}
-                            className="inline-flex items-center gap-1.5 px-3 py-2 text-sm font-medium text-gray-700 dark:text-gray-300 bg-gray-100 dark:bg-gray-700 hover:bg-gray-200 dark:hover:bg-gray-600 rounded-lg transition-colors"
+                            className="inline-flex items-center gap-1.5 px-3 py-2 text-sm font-medium text-gray-700 dark:text-gray-200 bg-gradient-to-b from-gray-50 to-gray-100 dark:from-gray-600 dark:to-gray-700 hover:from-gray-100 hover:to-gray-200 dark:hover:from-gray-500 dark:hover:to-gray-600 rounded-lg shadow-sm hover:shadow-md border border-gray-200 dark:border-gray-600 transition-all duration-200 transform hover:scale-[1.02] active:scale-[0.98]"
                           >
                             <Eye className="w-4 h-4" />
                             View
@@ -1619,7 +1660,7 @@ function FMIRListContent() {
                         ) : (
                           <button
                             onClick={() => showAccessDenied('View Foreign Material Report', FMIR_PRIVILEGES.VIEW)}
-                            className="inline-flex items-center gap-1.5 px-3 py-2 text-sm font-medium text-gray-400 dark:text-gray-500 bg-gray-100 dark:bg-gray-700 rounded-lg cursor-not-allowed opacity-60"
+                            className="inline-flex items-center gap-1.5 px-3 py-2 text-sm font-medium text-gray-400 dark:text-gray-500 bg-gray-100 dark:bg-gray-700 rounded-lg cursor-not-allowed opacity-60 border border-gray-200 dark:border-gray-600"
                             title="You don't have permission to view reports"
                           >
                             <Eye className="w-4 h-4" />
@@ -1630,7 +1671,7 @@ function FMIRListContent() {
                         {(report.isOwner || report.Collaborators?.some(c => c.id === user?.id)) && !report.isClosed && report.status !== 'SUBMITTED' && (
                           <Link
                             href={`/fmir/new?edit=${report.id}`}
-                            className="inline-flex items-center gap-1.5 px-3 py-2 text-sm font-medium text-primary-700 dark:text-primary-300 bg-primary-100 dark:bg-primary-900/30 hover:bg-primary-200 dark:hover:bg-primary-900/50 rounded-lg transition-colors"
+                            className="inline-flex items-center gap-1.5 px-3 py-2 text-sm font-medium text-primary-700 dark:text-primary-200 bg-gradient-to-b from-primary-50 to-primary-100 dark:from-primary-800/50 dark:to-primary-900/50 hover:from-primary-100 hover:to-primary-200 dark:hover:from-primary-700/50 dark:hover:to-primary-800/50 rounded-lg shadow-sm hover:shadow-md border border-primary-200 dark:border-primary-700 transition-all duration-200 transform hover:scale-[1.02] active:scale-[0.98]"
                           >
                             <Edit className="w-4 h-4" />
                             Edit
@@ -1656,11 +1697,40 @@ function FMIRListContent() {
                             Edit
                           </span>
                         )}
+                        {/* RCA Button - Show when status is UNDER_INVESTIGATION */}
+                        {report.status === 'UNDER_INVESTIGATION' && !report.isClosed && (
+                          report.linkedIncidentId ? (
+                            // RCA already initiated - show green button that links to incident
+                            <Link
+                              href={`/incidents/${report.linkedIncidentId}`}
+                              className="inline-flex items-center gap-1.5 px-3 py-2 text-sm font-medium text-green-700 dark:text-green-200 bg-gradient-to-b from-green-50 to-green-100 dark:from-green-800/50 dark:to-green-900/50 hover:from-green-100 hover:to-green-200 dark:hover:from-green-700/50 dark:hover:to-green-800/50 rounded-lg shadow-sm hover:shadow-md border border-green-200 dark:border-green-700 transition-all duration-200 transform hover:scale-[1.02] active:scale-[0.98]"
+                              title={`View RCA Investigation: ${report.linkedIncidentNumber}`}
+                            >
+                              <CheckCircle className="w-4 h-4" />
+                              RCA Initiated
+                            </Link>
+                          ) : (
+                            // No RCA yet - show amber button to start RCA
+                            <button
+                              onClick={() => handleStartRCA(report.id)}
+                              disabled={startingRCA === report.id}
+                              className="inline-flex items-center gap-1.5 px-3 py-2 text-sm font-medium text-amber-700 dark:text-amber-200 bg-gradient-to-b from-amber-50 to-amber-100 dark:from-amber-800/50 dark:to-amber-900/50 hover:from-amber-100 hover:to-amber-200 dark:hover:from-amber-700/50 dark:hover:to-amber-800/50 rounded-lg shadow-sm hover:shadow-md border border-amber-200 dark:border-amber-700 transition-all duration-200 transform hover:scale-[1.02] active:scale-[0.98] disabled:opacity-50 disabled:cursor-not-allowed disabled:transform-none disabled:hover:shadow-sm"
+                              title="Start Root Cause Analysis for this FMIR"
+                            >
+                              {startingRCA === report.id ? (
+                                <Loader2 className="w-4 h-4 animate-spin" />
+                              ) : (
+                                <GitBranch className="w-4 h-4" />
+                              )}
+                              RCA
+                            </button>
+                          )
+                        )}
                         {canDeleteReport(report) && (
                           <button
                             onClick={() => handleDelete(report.id)}
                             disabled={deleting === report.id}
-                            className="inline-flex items-center gap-1.5 px-3 py-2 text-sm font-medium text-red-700 dark:text-red-400 bg-red-100 dark:bg-red-900/30 hover:bg-red-200 dark:hover:bg-red-900/50 rounded-lg transition-colors disabled:opacity-50"
+                            className="inline-flex items-center gap-1.5 px-3 py-2 text-sm font-medium text-red-700 dark:text-red-200 bg-gradient-to-b from-red-50 to-red-100 dark:from-red-800/50 dark:to-red-900/50 hover:from-red-100 hover:to-red-200 dark:hover:from-red-700/50 dark:hover:to-red-800/50 rounded-lg shadow-sm hover:shadow-md border border-red-200 dark:border-red-700 transition-all duration-200 transform hover:scale-[1.02] active:scale-[0.98] disabled:opacity-50 disabled:cursor-not-allowed disabled:transform-none disabled:hover:shadow-sm"
                             title={
                               canDeleteVisible
                                 ? 'Delete visible report'

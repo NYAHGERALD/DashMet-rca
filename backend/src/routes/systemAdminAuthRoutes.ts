@@ -7,6 +7,7 @@ import { Router, Request, Response } from 'express';
 import { PrismaClient } from '@prisma/client';
 import { adminAuth } from '../config/firebase-admin';
 import crypto from 'crypto';
+import { v4 as uuidv4 } from 'uuid';
 
 const router = Router();
 const prisma = new PrismaClient();
@@ -64,6 +65,7 @@ async function logSecurityEvent(
   try {
     await prisma.auditLog.create({
       data: {
+        id: uuidv4(),
         action: success ? 'VIEW' : 'UPDATE',
         entity: 'SYSTEM_ADMIN_AUTH',
         entityId: 'system-admin-portal',

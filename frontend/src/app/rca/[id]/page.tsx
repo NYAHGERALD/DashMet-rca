@@ -95,6 +95,70 @@ interface RCAAnalysis {
   versionHistory: any[];
 }
 
+/**
+ * Extract the Foreign Material Description from FMIR-formatted description
+ * In RCA Fishbone, the Problem Statement (Effect) should be the specific issue:
+ * For FMIR reports, this is the "FOREIGN MATERIAL DESCRIPTION" section content.
+ */
+function extractProblemFromFMIR(description: string | undefined): string {
+  if (!description) return '';
+  
+  // Check if this is an FMIR-formatted description
+  const isFMIR = description.includes('─') || description.includes('FOREIGN MATERIAL INCIDENT REPORT');
+  
+  if (!isFMIR) {
+    return description;
+  }
+  
+  // Split by lines to properly parse the structure
+  const lines = description.split('\n');
+  
+  let inFMDSection = false;
+  let fmdContent: string[] = [];
+  let skipNextSeparator = false;
+  
+  for (let i = 0; i < lines.length; i++) {
+    const line = lines[i].trim();
+    
+    // Skip separator lines
+    if (line.match(/^─+$/)) {
+      if (inFMDSection && skipNextSeparator) {
+        skipNextSeparator = false;
+        continue;
+      }
+      continue;
+    }
+    
+    // Check if this is the FOREIGN MATERIAL DESCRIPTION header
+    if (line.toUpperCase().includes('FOREIGN MATERIAL DESCRIPTION')) {
+      inFMDSection = true;
+      skipNextSeparator = true; // Skip the separator line that follows the header
+      continue;
+    }
+    
+    // Check if we hit the next section (end of FMD content)
+    if (inFMDSection) {
+      const sectionHeaders = ['CAUSE IDENTIFICATION', 'CORRECTIVE ACTION', 'VERIFICATION', 'EVIDENCE', 'GENERAL INFORMATION', 'INVESTIGATION'];
+      const isNextSection = sectionHeaders.some(h => line.toUpperCase().includes(h));
+      if (isNextSection) {
+        break; // Stop collecting content
+      }
+      
+      // Collect the content
+      if (line.length > 0) {
+        fmdContent.push(line);
+      }
+    }
+  }
+  
+  if (fmdContent.length > 0) {
+    return fmdContent.join(' ').trim();
+  }
+  
+  // Fallback: return original description if we can't find the FMD section
+  return description;
+}
+
 interface AIRecommendation {
   recommendedMethod: string;
   reason: string;
@@ -124,7 +188,21 @@ export default function RCAWorkspacePage() {
   const router = useRouter();
   const rcaId = params.id as string;
   const { user } = useAuth();
-  const { connect, onlineUsers, onParticipantsUpdated, onParticipantRoleUpdated, isConnected, joinIncident, leaveIncident } = useWebSocket();
+  const { 
+    connect, 
+    onlineUsers, 
+    onParticipantsUpdated, 
+    onParticipantRoleUpdated, 
+    isConnected, 
+    joinIncident, 
+    leaveIncident, 
+    onRCADataUpdated,
+    onRCAMethodChanged,
+    onRCAValidated,
+    onRCAReopened,
+    onRCAAIGenerationStarted,
+    onRCAAIGenerationComplete
+  } = useWebSocket();
 
   // Privilege-based access control
   const { hasPrivilege } = usePrivileges();
@@ -258,6 +336,126 @@ export default function RCAWorkspacePage() {
     });
     return unsubscribe;
   }, [rca?.incident?.id, onParticipantRoleUpdated]);
+
+  // Listen for RCA data updates from other team members (real-time sync)
+  useEffect(() => {
+    if (!rcaId) return;
+    
+    const unsubscribe = onRCADataUpdated((data) => {
+      // Only update if this is for the current RCA and from another user
+      if (data.rcaId === rcaId && data.updatedBy?.id !== user?.id) {
+        console.log('🔄 RCA data updated by team member:', data.updatedBy?.firstName, data.updatedBy?.lastName);
+        // Update the local state with the new data
+        setRca(prev => {
+          if (!prev) return prev;
+          if (data.type === 'fishbone') {
+            return {
+              ...prev,
+              fishboneData: data.data.fishboneData,
+              status: data.data.status,
+              rootCauseStatement: data.data.rootCauseStatement,
+            };
+          } else if (data.type === 'five-whys') {
+            return {
+              ...prev,
+              fiveWhysData: data.data.fiveWhysData,
+              status: data.data.status,
+              rootCauseStatement: data.data.rootCauseStatement,
+            };
+          }
+          return prev;
+        });
+      }
+    });
+    return unsubscribe;
+  }, [rcaId, user?.id, onRCADataUpdated]);
+
+  // Listen for RCA method changes from other team members (real-time sync)
+  useEffect(() => {
+    if (!rcaId) return;
+    
+    const unsubscribe = onRCAMethodChanged((data) => {
+      if (data.rcaId === rcaId && data.updatedBy?.id !== user?.id) {
+        console.log('🔄 RCA method changed by team member:', data.updatedBy?.firstName, data.updatedBy?.lastName, 'to', data.method);
+        setRca(prev => {
+          if (!prev) return prev;
+          return {
+            ...prev,
+            method: data.method as 'FIVE_WHYS' | 'FISHBONE',
+          };
+        });
+      }
+    });
+    return unsubscribe;
+  }, [rcaId, user?.id, onRCAMethodChanged]);
+
+  // Listen for RCA validation from other team members (real-time sync)
+  useEffect(() => {
+    if (!rcaId) return;
+    
+    const unsubscribe = onRCAValidated((data) => {
+      if (data.rcaId === rcaId && data.validatedBy?.id !== user?.id) {
+        console.log('🔄 RCA validated by team member:', data.validatedBy?.firstName, data.validatedBy?.lastName);
+        setRca(prev => {
+          if (!prev) return prev;
+          return {
+            ...prev,
+            isValidated: data.isValidated,
+            rootCauseStatement: data.rootCauseStatement,
+            status: 'VALIDATED',
+          };
+        });
+      }
+    });
+    return unsubscribe;
+  }, [rcaId, user?.id, onRCAValidated]);
+
+  // Listen for RCA reopen from other team members (real-time sync)
+  useEffect(() => {
+    if (!rcaId) return;
+    
+    const unsubscribe = onRCAReopened((data) => {
+      if (data.rcaId === rcaId && data.reopenedBy?.id !== user?.id) {
+        console.log('🔄 RCA reopened by team member:', data.reopenedBy?.firstName, data.reopenedBy?.lastName);
+        setRca(prev => {
+          if (!prev) return prev;
+          return {
+            ...prev,
+            isValidated: false,
+            status: 'IN_PROGRESS',
+          };
+        });
+      }
+    });
+    return unsubscribe;
+  }, [rcaId, user?.id, onRCAReopened]);
+
+  // Listen for AI generation events from other team members (real-time sync)
+  useEffect(() => {
+    if (!rcaId) return;
+    
+    const unsubStarted = onRCAAIGenerationStarted((data) => {
+      if (data.rcaId === rcaId && data.startedBy?.id !== user?.id) {
+        console.log('🤖 AI generation started by:', data.startedBy?.firstName, data.startedBy?.lastName);
+        // Could show a toast/notification that AI is being generated
+      }
+    });
+
+    const unsubComplete = onRCAAIGenerationComplete((data) => {
+      if (data.rcaId === rcaId && data.generatedBy?.id !== user?.id) {
+        console.log('🤖 AI generation completed by:', data.generatedBy?.firstName, data.generatedBy?.lastName);
+        // If autoSaved, refetch the RCA to get the new data
+        if (data.autoSaved) {
+          fetchRCA();
+        }
+      }
+    });
+
+    return () => {
+      unsubStarted();
+      unsubComplete();
+    };
+  }, [rcaId, user?.id, onRCAAIGenerationStarted, onRCAAIGenerationComplete, fetchRCA]);
 
   const handleMethodChange = async (method: 'FIVE_WHYS' | 'FISHBONE') => {
     try {
@@ -478,12 +676,79 @@ export default function RCAWorkspacePage() {
               <h2 className="text-lg font-semibold text-gray-900 dark:text-white mb-4">
                 Incident Details
               </h2>
-              <div className="space-y-3">
+              <div className="space-y-4">
                 <div>
                   <span className="text-sm font-medium text-gray-500 dark:text-gray-400">Description:</span>
-                  <p className="text-gray-900 dark:text-white mt-1">{rca.incident?.description || 'No description'}</p>
+                  {/* Check if description contains FMIR report structure with section markers */}
+                  {rca.incident?.description?.includes('─') || rca.incident?.description?.includes('FOREIGN MATERIAL INCIDENT REPORT') ? (
+                    <div className="mt-2 space-y-4 text-sm text-gray-900 dark:text-white">
+                      {/* Parse and render FMIR-formatted description */}
+                      {(() => {
+                        const desc = rca.incident?.description || '';
+                        // Extract sections from FMIR format
+                        const sections: { title: string; content: string }[] = [];
+                        
+                        // Split by section headers (text followed by ─)
+                        const sectionRegex = /([A-Z][A-Z\s]+?)(?:\s*─+\s*|\s*$)/g;
+                        const parts = desc.split(/─+/).filter(p => p.trim());
+                        
+                        // Known FMIR sections
+                        const sectionTitles = ['GENERAL INFORMATION', 'FOREIGN MATERIAL DESCRIPTION', 'CAUSE IDENTIFICATION', 'CORRECTIVE ACTION TAKEN', 'VERIFICATION ACTIONS', 'EVIDENCE'];
+                        
+                        let currentSection = '';
+                        let currentContent = '';
+                        
+                        parts.forEach((part, idx) => {
+                          const trimmed = part.trim();
+                          const matchedTitle = sectionTitles.find(title => trimmed.startsWith(title) || trimmed.includes(title));
+                          
+                          if (matchedTitle) {
+                            if (currentSection) {
+                              sections.push({ title: currentSection, content: currentContent.trim() });
+                            }
+                            currentSection = matchedTitle;
+                            currentContent = trimmed.replace(matchedTitle, '').trim();
+                          } else if (idx === 0 && trimmed.includes('FMIR-')) {
+                            // First part is usually the report title
+                            sections.push({ title: 'Report', content: trimmed });
+                          } else if (currentSection) {
+                            currentContent += ' ' + trimmed;
+                          } else {
+                            currentContent += trimmed;
+                          }
+                        });
+                        
+                        // Add last section
+                        if (currentSection && currentContent) {
+                          sections.push({ title: currentSection, content: currentContent.trim() });
+                        }
+                        
+                        // If no structured sections found, try to display as clean paragraphs
+                        if (sections.length === 0) {
+                          return (
+                            <p className="whitespace-pre-wrap leading-relaxed">
+                              {desc.replace(/─+/g, '').trim()}
+                            </p>
+                          );
+                        }
+                        
+                        return sections.map((section, idx) => (
+                          <div key={idx} className="border-l-2 border-blue-400 dark:border-blue-600 pl-3">
+                            <h4 className="font-medium text-blue-600 dark:text-blue-400 text-xs uppercase tracking-wide mb-1">
+                              {section.title}
+                            </h4>
+                            <p className="text-gray-800 dark:text-gray-200 leading-relaxed">
+                              {section.content}
+                            </p>
+                          </div>
+                        ));
+                      })()}
+                    </div>
+                  ) : (
+                    <p className="text-gray-900 dark:text-white mt-1">{rca.incident?.description || 'No description'}</p>
+                  )}
                 </div>
-                <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
+                <div className="grid grid-cols-2 md:grid-cols-4 gap-4 pt-2 border-t border-gray-200 dark:border-gray-700">
                   <div>
                     <span className="text-sm font-medium text-gray-500 dark:text-gray-400">Type:</span>
                     <p className="text-gray-900 dark:text-white">{rca.incident?.type?.replace('_', ' ') || 'Unknown'}</p>
@@ -863,7 +1128,27 @@ export default function RCAWorkspacePage() {
               ) : (
                 <FishboneBuilder
                   rcaId={rca.id}
-                  data={rca.fishboneData || { problem: rca.incident?.description || '', categories: [] }}
+                  incidentId={rca.incident?.id || rca.incidentId}
+                  currentUserId={user?.id}
+                  data={(() => {
+                    // If fishboneData exists, check if problem needs cleaning
+                    if (rca.fishboneData) {
+                      const currentProblem = rca.fishboneData.problem || '';
+                      // If the saved problem contains raw FMIR format, extract just the FM description
+                      if (currentProblem.includes('FOREIGN MATERIAL INCIDENT REPORT') || currentProblem.includes('─')) {
+                        return {
+                          ...rca.fishboneData,
+                          problem: extractProblemFromFMIR(currentProblem)
+                        };
+                      }
+                      return rca.fishboneData;
+                    }
+                    // No fishboneData, extract from incident description
+                    return { 
+                      problem: extractProblemFromFMIR(rca.incident?.description) || '', 
+                      categories: [] 
+                    };
+                  })()}
                   isValidated={rca.isValidated}
                   onSave={handleSaveFishbone}
                   onValidate={handleValidate}

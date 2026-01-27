@@ -6,6 +6,7 @@ import { prisma } from '../utils/prisma';
 import { AuthRequest } from '../middleware/auth';
 import { ValidationError, AuthenticationError, NotFoundError } from '../middleware/errorHandler';
 import { logger } from '../utils/logger';
+import { logAuditEvent, logAuditFromRequest, getClientIp } from '../services/auditService';
 
 // Generate JWT tokens
 const generateTokens = (userId: string) => {
@@ -81,6 +82,8 @@ export const register = async (req: AuthRequest, res: Response) => {
   // Create user
   const user = await prisma.user.create({
     data: {
+      id: uuidv4(),
+      updatedAt: new Date(),
       email,
       password: hashedPassword,
       firstName,
@@ -221,6 +224,20 @@ export const login = async (req: AuthRequest, res: Response) => {
 
   logger.info(`User logged in: ${email}`);
 
+  // Audit log: User login (for organization users - SYSTEM_ADMIN is already blocked earlier)
+  if (user.organizationId) {
+    await logAuditEvent({
+      action: 'LOGIN',
+      entity: 'Session',
+      entityId: user.id,
+      userId: user.id,
+      organizationId: user.organizationId,
+      changes: { loginMethod: 'email_password' },
+      ipAddress: getClientIp(req),
+      userAgent: req.headers['user-agent'],
+    });
+  }
+
   res.json({
     success: true,
     data: {
@@ -278,6 +295,9 @@ export const logout = async (req: AuthRequest, res: Response) => {
       where: { token },
     });
   }
+
+  // Audit log: User logout
+  await logAuditFromRequest(req, 'LOGOUT', 'Session', req.user!.id);
 
   logger.info(`User logged out: ${req.user!.email}`);
 

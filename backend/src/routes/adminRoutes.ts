@@ -9,6 +9,7 @@ import { requireRoles } from '../middleware/rbac';
 import { prisma } from '../utils/prisma';
 import { logger } from '../utils/logger';
 import auditService from '../services/auditService';
+import { v4 as uuidv4 } from 'uuid';
 
 const router = Router();
 
@@ -21,10 +22,21 @@ router.use(authenticate);
 
 /**
  * GET /api/admin/audit-logs
- * Get audit logs with filtering (ADMIN/SYSTEM_ADMIN only)
+ * Get audit logs with filtering (ADMIN only - organization scoped)
+ * SYSTEM_ADMIN does not have access to audit logs (they are organization-specific)
  */
-router.get('/audit-logs', requireRoles('ADMIN', 'SYSTEM_ADMIN'), async (req: AuthRequest, res: Response) => {
+router.get('/audit-logs', requireRoles('ADMIN'), async (req: AuthRequest, res: Response) => {
   try {
+    const currentUser = req.user!;
+    
+    // ADMIN must have an organization
+    if (!currentUser.organizationId) {
+      return res.status(400).json({
+        success: false,
+        error: 'No organization associated with your account',
+      });
+    }
+
     const {
       entity,
       entityId,
@@ -37,6 +49,7 @@ router.get('/audit-logs', requireRoles('ADMIN', 'SYSTEM_ADMIN'), async (req: Aut
     } = req.query;
 
     const filters = {
+      organizationId: currentUser.organizationId, // Always filter by user's organization
       entity: entity as string | undefined,
       entityId: entityId as string | undefined,
       userId: userId as string | undefined,
@@ -73,13 +86,22 @@ router.get('/audit-logs', requireRoles('ADMIN', 'SYSTEM_ADMIN'), async (req: Aut
 
 /**
  * GET /api/admin/audit-logs/entity/:entity/:entityId
- * Get audit trail for a specific entity
+ * Get audit trail for a specific entity (ADMIN only - organization scoped)
  */
-router.get('/audit-logs/entity/:entity/:entityId', requireRoles('ADMIN', 'SYSTEM_ADMIN', 'CI_MANAGER'), async (req: AuthRequest, res: Response) => {
+router.get('/audit-logs/entity/:entity/:entityId', requireRoles('ADMIN', 'CI_MANAGER'), async (req: AuthRequest, res: Response) => {
   try {
     const { entity, entityId } = req.params;
+    const currentUser = req.user!;
 
-    const trail = await auditService.getEntityAuditTrail(entity, entityId);
+    // Must have an organization
+    if (!currentUser.organizationId) {
+      return res.status(400).json({
+        success: false,
+        error: 'No organization associated with your account',
+      });
+    }
+
+    const trail = await auditService.getEntityAuditTrail(entity, entityId, currentUser.organizationId);
 
     res.json({
       success: true,
@@ -97,14 +119,27 @@ router.get('/audit-logs/entity/:entity/:entityId', requireRoles('ADMIN', 'SYSTEM
 
 /**
  * GET /api/admin/audit-logs/user/:userId
- * Get user activity summary
+ * Get user activity summary (ADMIN only - organization scoped)
  */
-router.get('/audit-logs/user/:userId', requireRoles('ADMIN', 'SYSTEM_ADMIN'), async (req: AuthRequest, res: Response) => {
+router.get('/audit-logs/user/:userId', requireRoles('ADMIN'), async (req: AuthRequest, res: Response) => {
   try {
     const { userId } = req.params;
     const { days = '30' } = req.query;
+    const currentUser = req.user!;
 
-    const summary = await auditService.getUserActivitySummary(userId, parseInt(days as string));
+    // Must have an organization
+    if (!currentUser.organizationId) {
+      return res.status(400).json({
+        success: false,
+        error: 'No organization associated with your account',
+      });
+    }
+
+    const summary = await auditService.getUserActivitySummary(
+      userId, 
+      currentUser.organizationId,
+      parseInt(days as string)
+    );
 
     res.json({
       success: true,
@@ -122,10 +157,20 @@ router.get('/audit-logs/user/:userId', requireRoles('ADMIN', 'SYSTEM_ADMIN'), as
 
 /**
  * GET /api/admin/compliance-report
- * Generate compliance report for audit period
+ * Generate compliance report for audit period (ADMIN only - organization scoped)
  */
-router.get('/compliance-report', requireRoles('ADMIN', 'SYSTEM_ADMIN'), async (req: AuthRequest, res: Response) => {
+router.get('/compliance-report', requireRoles('ADMIN'), async (req: AuthRequest, res: Response) => {
   try {
+    const currentUser = req.user!;
+
+    // Must have an organization
+    if (!currentUser.organizationId) {
+      return res.status(400).json({
+        success: false,
+        error: 'No organization associated with your account',
+      });
+    }
+
     const {
       startDate,
       endDate,
@@ -140,6 +185,7 @@ router.get('/compliance-report', requireRoles('ADMIN', 'SYSTEM_ADMIN'), async (r
     }
 
     const report = await auditService.generateComplianceReport(
+      currentUser.organizationId,
       new Date(startDate as string),
       new Date(endDate as string),
       format as 'summary' | 'detailed'
@@ -192,7 +238,7 @@ router.get('/health', requireRoles('ADMIN', 'SYSTEM_ADMIN'), async (req: AuthReq
       rcaCount,
       activeSessionCount,
     ] = await Promise.all([
-      prisma.user.count({ where: { isActive: true } }),
+      prisma.user.count({ where: { isActive: true, role: { not: 'SYSTEM_ADMIN' } } }),
       prisma.incident.count(),
       prisma.rCAAnalysis.count(),
       prisma.session.count({ where: { expiresAt: { gt: new Date() } } }),
@@ -262,11 +308,11 @@ router.get('/statistics', requireRoles('ADMIN', 'SYSTEM_ADMIN'), async (req: Aut
       capaStats,
       orgStats,
     ] = await Promise.all([
-      // User statistics
+      // User statistics (exclude SYSTEM_ADMIN - they are app owners, not org users)
       prisma.user.groupBy({
         by: ['role'],
         _count: true,
-        where: { isActive: true },
+        where: { isActive: true, role: { not: 'SYSTEM_ADMIN' } },
       }),
       
       // Incident statistics
@@ -336,33 +382,178 @@ router.get('/statistics', requireRoles('ADMIN', 'SYSTEM_ADMIN'), async (req: Aut
 });
 
 // ============================================================================
-// Phase 14.3: Regulatory Readiness
+// Phase 14.3: Regulatory Readiness (Fully Dynamic - No Hardcoded Values)
 // ============================================================================
 
 /**
- * GET /api/admin/regulatory-check
- * Check regulatory readiness status
+ * Regulatory configuration by type
+ * Maps each regulatory framework to relevant incident types and categories
  */
-router.get('/regulatory-check', requireRoles('ADMIN', 'SYSTEM_ADMIN', 'QA_FOOD_SAFETY'), async (req: AuthRequest, res: Response) => {
+const REGULATORY_CONFIG: Record<string, {
+  name: string;
+  incidentTypes: string[];
+  relevantCategories: string[];
+  description: string;
+}> = {
+  FSMA: {
+    name: 'Food Safety Modernization Act',
+    incidentTypes: ['FOOD_SAFETY'],
+    relevantCategories: ['foreign material', 'contamination', 'allergen', 'biological', 'chemical', 'physical'],
+    description: 'FDA food safety preventive controls',
+  },
+  HACCP: {
+    name: 'Hazard Analysis Critical Control Points',
+    incidentTypes: ['FOOD_SAFETY'],
+    relevantCategories: ['ccp', 'critical control', 'hazard', 'biological', 'chemical', 'physical'],
+    description: 'HACCP-based food safety management',
+  },
+  FDA: {
+    name: 'Food and Drug Administration',
+    incidentTypes: ['FOOD_SAFETY', 'MACHINE_EQUIPMENT'],
+    relevantCategories: ['contamination', 'labeling', 'packaging', 'recall', 'complaint'],
+    description: 'FDA regulatory compliance for food and drugs',
+  },
+  OSHA: {
+    name: 'Occupational Safety and Health',
+    incidentTypes: ['WORKPLACE_SAFETY'],
+    relevantCategories: ['injury', 'safety', 'workplace', 'ergonomic', 'slip', 'fall', 'equipment'],
+    description: 'OSHA workplace safety compliance',
+  },
+};
+
+/**
+ * GET /api/admin/regulatory-check
+ * Check regulatory readiness status - FULLY DYNAMIC from database
+ */
+router.get('/regulatory-check', requireRoles('ADMIN', 'QA_FOOD_SAFETY'), async (req: AuthRequest, res: Response) => {
   try {
-    const { regulationType, incidentType, timeRange } = req.query;
+    const { regulationType = 'FSMA', timeRange, facilityId } = req.query;
+    const currentUser = req.user;
+    const organizationId = currentUser?.organizationId;
 
-    // Build the where clause for incidents
-    const incidentWhere: any = {
-      type: 'FOOD_SAFETY',
-      severity: { in: ['CRITICAL', 'HIGH'] },
-      status: { notIn: ['CLOSED'] },
-    };
-
-    // Filter by time range if provided
-    if (timeRange) {
-      const [start, end] = (timeRange as string).split(',').map(t => new Date(parseInt(t)));
-      incidentWhere.createdAt = { gte: start, lte: end };
+    // Validate regulation type
+    const regConfig = REGULATORY_CONFIG[regulationType as string];
+    if (!regConfig) {
+      return res.status(400).json({
+        success: false,
+        error: `Invalid regulation type. Must be one of: ${Object.keys(REGULATORY_CONFIG).join(', ')}`,
+      });
     }
 
-    // Get all incidents requiring regulatory attention
+    // Validate facilityId if provided (must belong to user's organization)
+    let facilityInfo: { id: string; name: string } | null = null;
+    if (facilityId && facilityId !== 'all') {
+      const facility = await prisma.facility.findFirst({
+        where: {
+          id: facilityId as string,
+          ...(organizationId ? { organizationId } : {}),
+        },
+        select: { id: true, name: true },
+      });
+      if (!facility) {
+        return res.status(400).json({
+          success: false,
+          error: 'Invalid facility or not authorized to access this facility',
+        });
+      }
+      facilityInfo = facility;
+    }
+
+    // Check for active tracking to determine the time window
+    let trackingInfo: { 
+      id: string; 
+      trackingStartDate: Date; 
+      windowDays: number; 
+      isActive: boolean;
+    } | null = null;
+    
+    if (organizationId) {
+      const tracking = await prisma.regulatoryTracking.findFirst({
+        where: {
+          organizationId,
+          regulationType: regulationType as string,
+          ...(facilityId && facilityId !== 'all' ? { facilityId: facilityId as string } : { facilityId: null }),
+        },
+        select: {
+          id: true,
+          trackingStartDate: true,
+          windowDays: true,
+          isActive: true,
+        },
+      });
+      trackingInfo = tracking;
+    }
+
+    // Build date filter based on tracking or default
+    let dateFilter: any = {};
+    let trackingStatus: 'active' | 'inactive' | 'not_started' = 'not_started';
+    
+    if (timeRange) {
+      // Manual time range override
+      const [start, end] = (timeRange as string).split(',').map(t => new Date(parseInt(t)));
+      dateFilter = { gte: start, lte: end };
+    } else if (trackingInfo?.isActive) {
+      // Use tracking window (from start date, up to windowDays days)
+      trackingStatus = 'active';
+      const windowEnd = new Date();
+      const windowStart = trackingInfo.trackingStartDate;
+      
+      // If more than windowDays have passed, use rolling window
+      const daysSinceStart = Math.floor((windowEnd.getTime() - windowStart.getTime()) / (24 * 60 * 60 * 1000));
+      if (daysSinceStart > trackingInfo.windowDays) {
+        // Rolling window: last N days
+        dateFilter = { gte: new Date(Date.now() - trackingInfo.windowDays * 24 * 60 * 60 * 1000) };
+      } else {
+        // Fixed window from tracking start
+        dateFilter = { gte: windowStart };
+      }
+    } else if (trackingInfo) {
+      trackingStatus = 'inactive';
+      // Tracking exists but is inactive - still show data from tracking period
+      dateFilter = { gte: trackingInfo.trackingStartDate };
+    } else {
+      // No tracking - return early with "not started" status
+      return res.json({
+        success: true,
+        data: {
+          regulationType,
+          regulationName: regConfig.name,
+          regulationDescription: regConfig.description,
+          trackingStatus: 'not_started',
+          readinessScore: null,
+          readinessLevel: null,
+          message: 'Tracking has not been started for this scope. Click "Start Tracking" to begin.',
+          scope: {
+            type: facilityId && facilityId !== 'all' ? 'facility' : 'organization',
+            facilityId: facilityInfo?.id || null,
+            facilityName: facilityInfo?.name || null,
+          },
+        },
+      });
+    }
+
+    // Build organization filter if user has one, and optionally filter by facility
+    const orgFilter = {
+      ...(organizationId ? { organizationId } : {}),
+      ...(facilityId && facilityId !== 'all' ? { facilityId: facilityId as string } : {}),
+    };
+
+    // Get facility count for organization-level reporting
+    const facilitiesCount = organizationId ? await prisma.facility.count({
+      where: { organizationId },
+    }) : 0;
+
+    // =============================================
+    // 1. Get CRITICAL/HIGH incidents that need attention
+    // =============================================
     const criticalIncidents = await prisma.incident.findMany({
-      where: incidentWhere,
+      where: {
+        ...orgFilter,
+        type: { in: regConfig.incidentTypes as any[] },
+        severity: { in: ['CRITICAL', 'HIGH'] },
+        status: { notIn: ['CLOSED'] },
+        createdAt: dateFilter,
+      },
       select: {
         id: true,
         incidentNumber: true,
@@ -371,68 +562,272 @@ router.get('/regulatory-check', requireRoles('ADMIN', 'SYSTEM_ADMIN', 'QA_FOOD_S
         createdAt: true,
         slaResponseBreached: true,
         slaResolutionBreached: true,
+        Category: { select: { name: true } },
+      },
+      orderBy: { createdAt: 'desc' },
+    });
+
+    // =============================================
+    // 2. Get RCA completion and validation statistics
+    // =============================================
+    // Get all RCAs in time window for relevant incident types
+    const rcaStats = await prisma.rCAAnalysis.findMany({
+      where: {
+        createdAt: dateFilter,
+        Incident: {
+          ...orgFilter,
+          type: { in: regConfig.incidentTypes as any[] },
+        },
+      },
+      select: {
+        id: true,
+        isValidated: true,
+        status: true,
+        Incident: {
+          select: { severity: true },
+        },
       },
     });
 
-    // Get pending CAPA actions with regulatory tags
-    const actions = await prisma.cAPAction.findMany({
+    const totalRCAs = rcaStats.length;
+    const validatedRCAs = rcaStats.filter(r => r.isValidated).length;
+    const completedRCAs = rcaStats.filter(r => r.status === 'COMPLETED').length;
+    const criticalIncidentsWithRCA = rcaStats.filter(r => 
+      r.Incident.severity === 'CRITICAL' || r.Incident.severity === 'HIGH'
+    ).length;
+
+    // Get critical incidents that should have RCAs
+    const criticalIncidentIds = criticalIncidents.map(i => i.id);
+    const criticalIncidentsNeedingRCA = await prisma.incident.count({
       where: {
-        RCAAnalysis: {
-          Incident: incidentWhere,
-        },
-        regulatoryTags: { hasSome: [regulationType as string, 'HACCP', 'FDA', 'OSHA'] },
+        ...orgFilter,
+        severity: { in: ['CRITICAL', 'HIGH'] },
+        type: { in: regConfig.incidentTypes as any[] },
+        status: { notIn: ['DRAFT'] }, // Only submitted incidents need RCA
+        createdAt: dateFilter,
       },
-      include: {
+    });
+
+    const criticalIncidentsHavingRCA = await prisma.rCAAnalysis.count({
+      where: {
+        Incident: {
+          ...orgFilter,
+          severity: { in: ['CRITICAL', 'HIGH'] },
+          type: { in: regConfig.incidentTypes as any[] },
+          createdAt: dateFilter,
+        },
+        status: 'COMPLETED',
+      },
+    });
+
+    // =============================================
+    // 3. Get CAPA action statistics
+    // =============================================
+    const capaActions = await prisma.cAPAction.findMany({
+      where: {
+        createdAt: dateFilter,
         RCAAnalysis: {
-          select: {
-            Incident: {
-              select: { incidentNumber: true },
-            },
+          Incident: {
+            ...orgFilter,
+            type: { in: regConfig.incidentTypes as any[] },
           },
         },
-        User: {
-          select: { firstName: true, lastName: true },
-        },
+        OR: [
+          { regulatoryTags: { hasSome: [regulationType as string] } },
+          { regulatoryTags: { isEmpty: true } }, // Include untagged actions too
+        ],
+      },
+      select: {
+        id: true,
+        status: true,
+        completionEvidence: true,
+        completedAt: true,
+        dueDate: true,
+        priority: true,
       },
     });
 
-    // Get validated vs unvalidated RCAs ratio
-    const [validatedRCAs, totalRCAs] = await Promise.all([
-      prisma.rCAAnalysis.count({ where: { isValidated: true } }),
-      prisma.rCAAnalysis.count(),
-    ]);
+    const pendingCAPAActions = capaActions.filter(a => 
+      a.status !== 'COMPLETED' && a.status !== 'VERIFIED'
+    ).length;
+    const overdueCAPAActions = capaActions.filter(a => 
+      a.status !== 'COMPLETED' && a.status !== 'VERIFIED' && 
+      a.dueDate && new Date(a.dueDate) < new Date()
+    ).length;
+    const completedCAPAActions = capaActions.filter(a => 
+      a.status === 'COMPLETED' || a.status === 'VERIFIED'
+    ).length;
+    const capaWithEvidence = capaActions.filter(a => 
+      (a.status === 'COMPLETED' || a.status === 'VERIFIED') && 
+      a.completionEvidence && a.completionEvidence.trim() !== ''
+    ).length;
 
-    // Calculate readiness score
-    const readinessScore = calculateReadinessScore({
-      criticalIncidents: criticalIncidents.length,
-      pendingRegulatoryActions: actions.length,
-      validatedRCAsRatio: totalRCAs > 0 ? validatedRCAs / totalRCAs : 1,
-      slaBreaches: criticalIncidents.filter(i => i.slaResponseBreached || i.slaResolutionBreached).length,
+    // =============================================
+    // 4. Get SLA breach statistics
+    // =============================================
+    const slaBreaches = criticalIncidents.filter(i => 
+      i.slaResponseBreached || i.slaResolutionBreached
+    ).length;
+
+    // =============================================
+    // 5. FMIR statistics (for FSMA/HACCP/FDA)
+    // =============================================
+    let fmirStats = { total: 0, closed: 0, withEvidence: 0, auditPassed: 0 };
+    if (['FSMA', 'HACCP', 'FDA'].includes(regulationType as string)) {
+      const fmirData = await prisma.foreignMaterialIncident.findMany({
+        where: {
+          ...orgFilter,
+          createdAt: dateFilter,
+        },
+        select: {
+          id: true,
+          status: true,
+          isClosed: true,
+          FMIREvidence: { select: { id: true } },
+          FMIRAuditReport: { 
+            select: { passesAudit: true },
+            orderBy: { createdAt: 'desc' },
+            take: 1,
+          },
+        },
+      });
+
+      fmirStats = {
+        total: fmirData.length,
+        closed: fmirData.filter(f => f.isClosed).length,
+        withEvidence: fmirData.filter(f => f.FMIREvidence.length > 0).length,
+        auditPassed: fmirData.filter(f => 
+          f.FMIRAuditReport.length > 0 && f.FMIRAuditReport[0].passesAudit
+        ).length,
+      };
+    }
+
+    // =============================================
+    // 6. Evidence coverage statistics
+    // =============================================
+    const incidentsWithEvidence = await prisma.incident.count({
+      where: {
+        ...orgFilter,
+        type: { in: regConfig.incidentTypes as any[] },
+        createdAt: dateFilter,
+        Evidence: { some: {} },
+      },
     });
 
-    const checklistItems = generateRegulatoryChecklist(regulationType as string, {
-      criticalIncidents,
-      regulatoryActions: actions,
-      validatedRCAsRatio: totalRCAs > 0 ? validatedRCAs / totalRCAs : 1,
+    const totalIncidentsInPeriod = await prisma.incident.count({
+      where: {
+        ...orgFilter,
+        type: { in: regConfig.incidentTypes as any[] },
+        createdAt: dateFilter,
+        status: { notIn: ['DRAFT'] },
+      },
+    });
+
+    // =============================================
+    // Calculate readiness score dynamically
+    // =============================================
+    const readinessScore = calculateDynamicReadinessScore({
+      regulationType: regulationType as string,
+      criticalIncidentsOpen: criticalIncidents.length,
+      pendingCAPAActions,
+      overdueCAPAActions,
+      rcaValidationRate: totalRCAs > 0 ? validatedRCAs / totalRCAs : 1,
+      rcaCompletionRate: criticalIncidentsNeedingRCA > 0 
+        ? criticalIncidentsHavingRCA / criticalIncidentsNeedingRCA : 1,
+      slaBreaches,
+      capaEvidenceRate: completedCAPAActions > 0 
+        ? capaWithEvidence / completedCAPAActions : 1,
+      fmirClosureRate: fmirStats.total > 0 
+        ? fmirStats.closed / fmirStats.total : 1,
+      evidenceCoverage: totalIncidentsInPeriod > 0 
+        ? incidentsWithEvidence / totalIncidentsInPeriod : 1,
+    });
+
+    // =============================================
+    // Generate dynamic checklist
+    // =============================================
+    const checklistItems = await generateDynamicChecklist({
+      regulationType: regulationType as string,
+      organizationId,
+      dateFilter,
+      stats: {
+        criticalIncidents,
+        criticalIncidentsNeedingRCA,
+        criticalIncidentsHavingRCA,
+        totalRCAs,
+        validatedRCAs,
+        completedCAPAActions,
+        capaWithEvidence,
+        pendingCAPAActions,
+        overdueCAPAActions,
+        fmirStats,
+        incidentsWithEvidence,
+        totalIncidentsInPeriod,
+        slaBreaches,
+      },
     });
 
     res.json({
       success: true,
       data: {
         regulationType,
+        regulationName: regConfig.name,
+        regulationDescription: regConfig.description,
         readinessScore: readinessScore.toFixed(0),
         readinessLevel: getReadinessLevel(readinessScore),
         summary: {
           openCriticalIncidents: criticalIncidents.length,
-          pendingRegulatoryActions: actions.length,
+          pendingRegulatoryActions: pendingCAPAActions,
           rcaValidationRate: totalRCAs > 0 
             ? ((validatedRCAs / totalRCAs) * 100).toFixed(1) + '%' 
             : 'N/A',
-          slaBreaches: criticalIncidents.filter(i => i.slaResponseBreached || i.slaResolutionBreached).length,
+          slaBreaches,
+        },
+        detailedMetrics: {
+          rca: {
+            total: totalRCAs,
+            validated: validatedRCAs,
+            completed: completedRCAs,
+            validationRate: totalRCAs > 0 ? ((validatedRCAs / totalRCAs) * 100).toFixed(1) : 'N/A',
+          },
+          capa: {
+            total: capaActions.length,
+            completed: completedCAPAActions,
+            pending: pendingCAPAActions,
+            overdue: overdueCAPAActions,
+            withEvidence: capaWithEvidence,
+            evidenceRate: completedCAPAActions > 0 
+              ? ((capaWithEvidence / completedCAPAActions) * 100).toFixed(1) : 'N/A',
+          },
+          fmir: fmirStats,
+          evidence: {
+            incidentsWithEvidence,
+            totalIncidents: totalIncidentsInPeriod,
+            coverageRate: totalIncidentsInPeriod > 0 
+              ? ((incidentsWithEvidence / totalIncidentsInPeriod) * 100).toFixed(1) : 'N/A',
+          },
         },
         criticalItems: criticalIncidents.slice(0, 10),
-        pendingActions: actions.slice(0, 10),
         checklist: checklistItems,
+        timeWindow: {
+          start: dateFilter.gte?.toISOString(),
+          end: dateFilter.lte?.toISOString() || new Date().toISOString(),
+        },
+        // Facility scope information
+        scope: {
+          type: facilityId && facilityId !== 'all' ? 'facility' : 'organization',
+          facilityId: facilityInfo?.id || null,
+          facilityName: facilityInfo?.name || null,
+          totalFacilities: facilitiesCount,
+        },
+        // Tracking information
+        tracking: trackingInfo ? {
+          id: trackingInfo.id,
+          status: trackingStatus,
+          startDate: trackingInfo.trackingStartDate.toISOString(),
+          windowDays: trackingInfo.windowDays,
+          daysActive: Math.floor((new Date().getTime() - trackingInfo.trackingStartDate.getTime()) / (24 * 60 * 60 * 1000)),
+        } : null,
       },
     });
 
@@ -441,6 +836,448 @@ router.get('/regulatory-check', requireRoles('ADMIN', 'SYSTEM_ADMIN', 'QA_FOOD_S
     res.status(500).json({
       success: false,
       error: 'Failed to check regulatory readiness',
+    });
+  }
+});
+
+// ============================================================================
+// Phase 14.3b: Regulatory Tracking Management
+// ============================================================================
+
+/**
+ * GET /api/admin/regulatory-tracking
+ * Get tracking status for a facility or organization
+ */
+router.get('/regulatory-tracking', requireRoles('ADMIN', 'QA_FOOD_SAFETY'), async (req: AuthRequest, res: Response) => {
+  try {
+    const { facilityId, regulationType = 'FSMA' } = req.query;
+    const currentUser = req.user;
+    const organizationId = currentUser?.organizationId;
+
+    if (!organizationId) {
+      return res.status(400).json({
+        success: false,
+        error: 'No organization associated with your account',
+      });
+    }
+
+    // Find existing tracking record
+    const tracking = await prisma.regulatoryTracking.findFirst({
+      where: {
+        organizationId,
+        regulationType: regulationType as string,
+        ...(facilityId && facilityId !== 'all' ? { facilityId: facilityId as string } : { facilityId: null }),
+      },
+      include: {
+        Facility: { select: { id: true, name: true } },
+        CreatedByUser: { select: { firstName: true, lastName: true } },
+        Snapshots: {
+          orderBy: { periodStart: 'desc' },
+          take: 12, // Last 12 months
+        },
+      },
+    });
+
+    res.json({
+      success: true,
+      data: {
+        tracking,
+        hasActiveTracking: tracking?.isActive ?? false,
+      },
+    });
+
+  } catch (error: any) {
+    logger.error('Error fetching regulatory tracking:', error);
+    res.status(500).json({
+      success: false,
+      error: 'Failed to fetch regulatory tracking',
+    });
+  }
+});
+
+/**
+ * POST /api/admin/regulatory-tracking/start
+ * Start tracking for a facility or organization
+ */
+router.post('/regulatory-tracking/start', requireRoles('ADMIN', 'QA_FOOD_SAFETY'), async (req: AuthRequest, res: Response) => {
+  try {
+    const { facilityId, regulationType = 'FSMA', windowDays = 30 } = req.body;
+    const currentUser = req.user;
+    const organizationId = currentUser?.organizationId;
+
+    if (!organizationId) {
+      return res.status(400).json({
+        success: false,
+        error: 'No organization associated with your account',
+      });
+    }
+
+    // Validate facilityId if provided
+    if (facilityId && facilityId !== 'all') {
+      const facility = await prisma.facility.findFirst({
+        where: { id: facilityId, organizationId },
+      });
+      if (!facility) {
+        return res.status(400).json({
+          success: false,
+          error: 'Invalid facility or not authorized',
+        });
+      }
+    }
+
+    // Check if tracking already exists
+    const existing = await prisma.regulatoryTracking.findFirst({
+      where: {
+        organizationId,
+        regulationType,
+        ...(facilityId && facilityId !== 'all' ? { facilityId } : { facilityId: null }),
+      },
+    });
+
+    let tracking;
+    if (existing) {
+      // Reactivate existing tracking
+      tracking = await prisma.regulatoryTracking.update({
+        where: { id: existing.id },
+        data: {
+          isActive: true,
+          trackingStartDate: new Date(),
+          windowDays,
+        },
+        include: {
+          Facility: { select: { id: true, name: true } },
+        },
+      });
+    } else {
+      // Create new tracking
+      tracking = await prisma.regulatoryTracking.create({
+        data: {
+          id: uuidv4(),
+          organizationId,
+          regulationType,
+          facilityId: facilityId && facilityId !== 'all' ? facilityId : null,
+          createdBy: currentUser!.id,
+          windowDays,
+        },
+        include: {
+          Facility: { select: { id: true, name: true } },
+        },
+      });
+    }
+
+    // Log the action
+    await auditService.logAuditEvent({
+      action: 'CREATE',
+      entity: 'RegulatoryTracking',
+      entityId: tracking.id,
+      userId: currentUser!.id,
+      organizationId,
+      changes: {
+        regulationType,
+        facilityId: facilityId || 'organization-level',
+        windowDays,
+      },
+    });
+
+    res.json({
+      success: true,
+      message: 'Regulatory tracking started',
+      data: tracking,
+    });
+
+  } catch (error: any) {
+    logger.error('Error starting regulatory tracking:', error);
+    res.status(500).json({
+      success: false,
+      error: 'Failed to start regulatory tracking',
+    });
+  }
+});
+
+/**
+ * POST /api/admin/regulatory-tracking/reset
+ * Reset tracking - archives current period and starts fresh
+ */
+router.post('/regulatory-tracking/reset', requireRoles('ADMIN', 'QA_FOOD_SAFETY'), async (req: AuthRequest, res: Response) => {
+  try {
+    const { trackingId, createSnapshot = true } = req.body;
+    const currentUser = req.user;
+    const organizationId = currentUser?.organizationId;
+
+    if (!organizationId) {
+      return res.status(400).json({
+        success: false,
+        error: 'No organization associated with your account',
+      });
+    }
+
+    // Find the tracking record
+    const tracking = await prisma.regulatoryTracking.findFirst({
+      where: {
+        id: trackingId,
+        organizationId,
+      },
+    });
+
+    if (!tracking) {
+      return res.status(404).json({
+        success: false,
+        error: 'Tracking record not found',
+      });
+    }
+
+    // Calculate period for snapshot
+    const periodEnd = new Date();
+    const periodStart = tracking.trackingStartDate;
+    const periodLabel = periodStart.toLocaleDateString('en-US', { month: 'long', year: 'numeric' });
+
+    // Create snapshot of current period if requested
+    if (createSnapshot) {
+      // Get current readiness data for the snapshot
+      const regConfig = REGULATORY_CONFIG[tracking.regulationType];
+      const dateFilter = { gte: periodStart, lte: periodEnd };
+      const orgFilter = {
+        organizationId,
+        ...(tracking.facilityId ? { facilityId: tracking.facilityId } : {}),
+      };
+
+      // Get metrics for snapshot
+      const totalIncidents = await prisma.incident.count({
+        where: {
+          ...orgFilter,
+          type: { in: regConfig?.incidentTypes as any[] || ['FOOD_SAFETY'] },
+          createdAt: dateFilter,
+          status: { notIn: ['DRAFT'] },
+        },
+      });
+
+      const criticalIncidents = await prisma.incident.count({
+        where: {
+          ...orgFilter,
+          type: { in: regConfig?.incidentTypes as any[] || ['FOOD_SAFETY'] },
+          severity: { in: ['CRITICAL', 'HIGH'] },
+          createdAt: dateFilter,
+        },
+      });
+
+      const rcasCompleted = await prisma.rCAAnalysis.count({
+        where: {
+          createdAt: dateFilter,
+          status: 'COMPLETED',
+          Incident: orgFilter,
+        },
+      });
+
+      const capasCompleted = await prisma.cAPAction.count({
+        where: {
+          createdAt: dateFilter,
+          status: { in: ['COMPLETED', 'VERIFIED'] },
+          RCAAnalysis: { Incident: orgFilter },
+        },
+      });
+
+      // Calculate a simple readiness score for the snapshot
+      let snapshotScore = 100;
+      if (totalIncidents > 0) {
+        const criticalRate = criticalIncidents / totalIncidents;
+        snapshotScore -= criticalRate * 30;
+      }
+      if (criticalIncidents > 0 && rcasCompleted < criticalIncidents) {
+        snapshotScore -= ((criticalIncidents - rcasCompleted) / criticalIncidents) * 20;
+      }
+      snapshotScore = Math.max(0, Math.min(100, snapshotScore));
+
+      await prisma.regulatorySnapshot.create({
+        data: {
+          id: uuidv4(),
+          trackingId: tracking.id,
+          periodStart,
+          periodEnd,
+          periodLabel,
+          readinessScore: snapshotScore,
+          readinessLevel: getReadinessLevel(snapshotScore),
+          metrics: {
+            totalIncidents,
+            criticalIncidents,
+            rcasCompleted,
+            capasCompleted,
+          },
+          summary: {
+            windowDays: tracking.windowDays,
+            regulationType: tracking.regulationType,
+          },
+          totalIncidents,
+          criticalIncidents,
+          rcasCompleted,
+          capasCompleted,
+        },
+      });
+    }
+
+    // Reset the tracking start date
+    const updatedTracking = await prisma.regulatoryTracking.update({
+      where: { id: tracking.id },
+      data: {
+        trackingStartDate: new Date(),
+      },
+      include: {
+        Facility: { select: { id: true, name: true } },
+        Snapshots: {
+          orderBy: { periodStart: 'desc' },
+          take: 12,
+        },
+      },
+    });
+
+    // Log the action
+    await auditService.log({
+      action: 'UPDATE',
+      entity: 'RegulatoryTracking',
+      entityId: tracking.id,
+      userId: currentUser!.id,
+      organizationId,
+      changes: {
+        action: 'RESET',
+        previousPeriod: { start: periodStart, end: periodEnd },
+        snapshotCreated: createSnapshot,
+      },
+    });
+
+    res.json({
+      success: true,
+      message: 'Regulatory tracking reset successfully',
+      data: updatedTracking,
+    });
+
+  } catch (error: any) {
+    logger.error('Error resetting regulatory tracking:', error);
+    res.status(500).json({
+      success: false,
+      error: 'Failed to reset regulatory tracking',
+    });
+  }
+});
+
+/**
+ * GET /api/admin/regulatory-tracking/history
+ * Get historical snapshots for a tracking record
+ */
+router.get('/regulatory-tracking/history', requireRoles('ADMIN', 'QA_FOOD_SAFETY'), async (req: AuthRequest, res: Response) => {
+  try {
+    const { facilityId, regulationType = 'FSMA', months = '12' } = req.query;
+    const currentUser = req.user;
+    const organizationId = currentUser?.organizationId;
+
+    if (!organizationId) {
+      return res.status(400).json({
+        success: false,
+        error: 'No organization associated with your account',
+      });
+    }
+
+    // Find the tracking record
+    const tracking = await prisma.regulatoryTracking.findFirst({
+      where: {
+        organizationId,
+        regulationType: regulationType as string,
+        ...(facilityId && facilityId !== 'all' ? { facilityId: facilityId as string } : { facilityId: null }),
+      },
+    });
+
+    if (!tracking) {
+      return res.json({
+        success: true,
+        data: {
+          snapshots: [],
+          message: 'No tracking history found',
+        },
+      });
+    }
+
+    const snapshots = await prisma.regulatorySnapshot.findMany({
+      where: {
+        trackingId: tracking.id,
+      },
+      orderBy: { periodStart: 'desc' },
+      take: parseInt(months as string),
+    });
+
+    res.json({
+      success: true,
+      data: {
+        trackingId: tracking.id,
+        regulationType: tracking.regulationType,
+        facilityId: tracking.facilityId,
+        snapshots,
+      },
+    });
+
+  } catch (error: any) {
+    logger.error('Error fetching regulatory history:', error);
+    res.status(500).json({
+      success: false,
+      error: 'Failed to fetch regulatory history',
+    });
+  }
+});
+
+/**
+ * POST /api/admin/regulatory-tracking/stop
+ * Stop/pause tracking without deleting
+ */
+router.post('/regulatory-tracking/stop', requireRoles('ADMIN', 'QA_FOOD_SAFETY'), async (req: AuthRequest, res: Response) => {
+  try {
+    const { trackingId } = req.body;
+    const currentUser = req.user;
+    const organizationId = currentUser?.organizationId;
+
+    if (!organizationId) {
+      return res.status(400).json({
+        success: false,
+        error: 'No organization associated with your account',
+      });
+    }
+
+    const tracking = await prisma.regulatoryTracking.findFirst({
+      where: {
+        id: trackingId,
+        organizationId,
+      },
+    });
+
+    if (!tracking) {
+      return res.status(404).json({
+        success: false,
+        error: 'Tracking record not found',
+      });
+    }
+
+    const updatedTracking = await prisma.regulatoryTracking.update({
+      where: { id: tracking.id },
+      data: { isActive: false },
+    });
+
+    // Log the action
+    await auditService.log({
+      action: 'UPDATE',
+      entity: 'RegulatoryTracking',
+      entityId: tracking.id,
+      userId: currentUser!.id,
+      organizationId,
+      changes: { action: 'STOPPED' },
+    });
+
+    res.json({
+      success: true,
+      message: 'Regulatory tracking stopped',
+      data: updatedTracking,
+    });
+
+  } catch (error: any) {
+    logger.error('Error stopping regulatory tracking:', error);
+    res.status(500).json({
+      success: false,
+      error: 'Failed to stop regulatory tracking',
     });
   }
 });
@@ -654,25 +1491,71 @@ async function calculateSLAMetrics(startDate: Date): Promise<any> {
   };
 }
 
-function calculateReadinessScore(params: {
-  criticalIncidents: number;
-  pendingRegulatoryActions: number;
-  validatedRCAsRatio: number;
+/**
+ * Calculate readiness score dynamically based on multiple factors
+ * Each factor is weighted according to regulatory importance
+ */
+function calculateDynamicReadinessScore(params: {
+  regulationType: string;
+  criticalIncidentsOpen: number;
+  pendingCAPAActions: number;
+  overdueCAPAActions: number;
+  rcaValidationRate: number;
+  rcaCompletionRate: number;
   slaBreaches: number;
+  capaEvidenceRate: number;
+  fmirClosureRate: number;
+  evidenceCoverage: number;
 }): number {
   let score = 100;
 
-  // Deduct for critical incidents (max -30)
-  score -= Math.min(30, params.criticalIncidents * 5);
+  // =============================================
+  // Core deductions (apply to all regulation types)
+  // =============================================
+  
+  // Critical incidents open: -5 points each, max -20
+  score -= Math.min(20, params.criticalIncidentsOpen * 5);
 
-  // Deduct for pending regulatory actions (max -25)
-  score -= Math.min(25, params.pendingRegulatoryActions * 3);
+  // Pending CAPA actions: -2 points each, max -15
+  score -= Math.min(15, params.pendingCAPAActions * 2);
 
-  // Add for RCA validation ratio (max +20)
-  score -= (1 - params.validatedRCAsRatio) * 20;
+  // Overdue CAPA actions: -5 points each (more severe), max -20
+  score -= Math.min(20, params.overdueCAPAActions * 5);
 
-  // Deduct for SLA breaches (max -25)
-  score -= Math.min(25, params.slaBreaches * 5);
+  // RCA validation rate: lose up to 15 points for low validation
+  score -= (1 - params.rcaValidationRate) * 15;
+
+  // RCA completion rate for critical incidents: lose up to 15 points
+  score -= (1 - params.rcaCompletionRate) * 15;
+
+  // SLA breaches: -3 points each, max -15
+  score -= Math.min(15, params.slaBreaches * 3);
+
+  // =============================================
+  // Documentation quality factors
+  // =============================================
+  
+  // CAPA evidence rate: lose up to 10 points for missing evidence
+  score -= (1 - params.capaEvidenceRate) * 10;
+
+  // Evidence coverage: lose up to 10 points for poor coverage
+  score -= (1 - params.evidenceCoverage) * 10;
+
+  // =============================================
+  // Regulation-specific adjustments
+  // =============================================
+  
+  if (params.regulationType === 'FSMA' || params.regulationType === 'FDA') {
+    // FMIR closure rate is important for food safety
+    score -= (1 - params.fmirClosureRate) * 10;
+  }
+
+  if (params.regulationType === 'OSHA') {
+    // OSHA places extra emphasis on timely corrective actions
+    if (params.overdueCAPAActions > 0) {
+      score -= 5; // Additional penalty for any overdue actions
+    }
+  }
 
   return Math.max(0, Math.min(100, score));
 }
@@ -685,46 +1568,302 @@ function getReadinessLevel(score: number): string {
   return 'CRITICAL';
 }
 
-function generateRegulatoryChecklist(regulationType: string, data: any): any[] {
-  const checklist = [
-    {
-      item: 'All critical incidents have RCA completed',
-      status: data.criticalIncidents.every((i: any) => i.status === 'CLOSED' || i.status === 'IN_REVIEW'),
-      priority: 'HIGH',
-    },
-    {
-      item: 'RCA validation rate above 90%',
-      status: data.validatedRCAsRatio >= 0.9,
-      priority: 'HIGH',
-    },
-    {
-      item: 'No pending regulatory corrective actions',
-      status: data.regulatoryActions.length === 0,
-      priority: 'MEDIUM',
-    },
-    {
-      item: 'All CAPA actions documented with evidence',
-      status: true, // Placeholder - would need actual verification
-      priority: 'HIGH',
-    },
-    {
-      item: 'Training records up to date',
-      status: true, // Placeholder
-      priority: 'MEDIUM',
-    },
-  ];
+/**
+ * Generate dynamic checklist based on actual database state
+ */
+async function generateDynamicChecklist(params: {
+  regulationType: string;
+  organizationId?: string;
+  dateFilter: any;
+  stats: {
+    criticalIncidents: any[];
+    criticalIncidentsNeedingRCA: number;
+    criticalIncidentsHavingRCA: number;
+    totalRCAs: number;
+    validatedRCAs: number;
+    completedCAPAActions: number;
+    capaWithEvidence: number;
+    pendingCAPAActions: number;
+    overdueCAPAActions: number;
+    fmirStats: { total: number; closed: number; withEvidence: number; auditPassed: number };
+    incidentsWithEvidence: number;
+    totalIncidentsInPeriod: number;
+    slaBreaches: number;
+  };
+}): Promise<{ item: string; status: boolean; priority: 'HIGH' | 'MEDIUM' | 'LOW'; details?: string }[]> {
+  const { stats, regulationType, organizationId, dateFilter } = params;
+  const checklist: { item: string; status: boolean; priority: 'HIGH' | 'MEDIUM' | 'LOW'; details?: string }[] = [];
 
-  // Add regulation-specific items
+  // =============================================
+  // Universal checklist items (all regulation types)
+  // =============================================
+
+  // 1. All critical incidents have RCA completed
+  const criticalIncidentsRCAComplete = stats.criticalIncidentsNeedingRCA === 0 || 
+    stats.criticalIncidentsHavingRCA >= stats.criticalIncidentsNeedingRCA;
+  checklist.push({
+    item: 'All critical incidents have RCA completed',
+    status: criticalIncidentsRCAComplete,
+    priority: 'HIGH',
+    details: `${stats.criticalIncidentsHavingRCA}/${stats.criticalIncidentsNeedingRCA} critical incidents have completed RCA`,
+  });
+
+  // 2. RCA validation rate above 90%
+  const rcaValidationRate = stats.totalRCAs > 0 ? (stats.validatedRCAs / stats.totalRCAs) : 1;
+  checklist.push({
+    item: 'RCA validation rate above 90%',
+    status: rcaValidationRate >= 0.9,
+    priority: 'HIGH',
+    details: `Current rate: ${(rcaValidationRate * 100).toFixed(1)}% (${stats.validatedRCAs}/${stats.totalRCAs})`,
+  });
+
+  // 3. No pending regulatory corrective actions
+  checklist.push({
+    item: 'No pending regulatory corrective actions',
+    status: stats.pendingCAPAActions === 0,
+    priority: 'MEDIUM',
+    details: stats.pendingCAPAActions > 0 
+      ? `${stats.pendingCAPAActions} pending actions (${stats.overdueCAPAActions} overdue)`
+      : 'All actions completed',
+  });
+
+  // 4. All CAPA actions documented with evidence
+  const capaEvidenceComplete = stats.completedCAPAActions === 0 || 
+    stats.capaWithEvidence >= stats.completedCAPAActions;
+  checklist.push({
+    item: 'All CAPA actions documented with evidence',
+    status: capaEvidenceComplete,
+    priority: 'HIGH',
+    details: `${stats.capaWithEvidence}/${stats.completedCAPAActions} completed actions have evidence`,
+  });
+
+  // 5. Training records up to date
+  // Query actual training-related data if available
+  const orgFilter = organizationId ? { organizationId } : {};
+  const trainingIncidents = await prisma.incident.count({
+    where: {
+      ...orgFilter,
+      type: 'WORKPLACE_SAFETY',
+      createdAt: dateFilter,
+      description: { contains: 'training', mode: 'insensitive' },
+    },
+  });
+  
+  // Check if there are training-related corrective actions pending
+  const trainingCAPAsPending = await prisma.cAPAction.count({
+    where: {
+      createdAt: dateFilter,
+      status: { notIn: ['COMPLETED', 'VERIFIED'] },
+      OR: [
+        { title: { contains: 'training', mode: 'insensitive' } },
+        { description: { contains: 'training', mode: 'insensitive' } },
+      ],
+    },
+  });
+
+  checklist.push({
+    item: 'Training records up to date',
+    status: trainingCAPAsPending === 0,
+    priority: 'MEDIUM',
+    details: trainingCAPAsPending > 0 
+      ? `${trainingCAPAsPending} training-related actions pending`
+      : 'No pending training-related actions',
+  });
+
+  // =============================================
+  // FSMA-specific checklist items
+  // =============================================
   if (regulationType === 'FSMA') {
-    checklist.push(
-      { item: 'PCQI records complete', status: true, priority: 'HIGH' },
-      { item: 'Allergen controls documented', status: true, priority: 'HIGH' }
-    );
-  } else if (regulationType === 'HACCP') {
-    checklist.push(
-      { item: 'CCP monitoring records complete', status: true, priority: 'HIGH' },
-      { item: 'Deviation procedures documented', status: true, priority: 'HIGH' }
-    );
+    // PCQI records - check for incidents mentioning PCQI
+    const pcqiRelatedIncidents = await prisma.incident.count({
+      where: {
+        ...orgFilter,
+        type: 'FOOD_SAFETY',
+        createdAt: dateFilter,
+        status: { notIn: ['CLOSED'] },
+        OR: [
+          { description: { contains: 'PCQI', mode: 'insensitive' } },
+          { description: { contains: 'preventive control', mode: 'insensitive' } },
+        ],
+      },
+    });
+
+    checklist.push({
+      item: 'PCQI records complete',
+      status: pcqiRelatedIncidents === 0,
+      priority: 'HIGH',
+      details: pcqiRelatedIncidents > 0 
+        ? `${pcqiRelatedIncidents} open PCQI-related incidents` 
+        : 'No open PCQI-related incidents',
+    });
+
+    // Allergen controls - check for allergen incidents
+    const allergenIncidents = await prisma.incident.count({
+      where: {
+        ...orgFilter,
+        type: 'FOOD_SAFETY',
+        createdAt: dateFilter,
+        status: { notIn: ['CLOSED'] },
+        OR: [
+          { description: { contains: 'allergen', mode: 'insensitive' } },
+          { Category: { name: { contains: 'allergen', mode: 'insensitive' } } },
+        ],
+      },
+    });
+
+    checklist.push({
+      item: 'Allergen controls documented',
+      status: allergenIncidents === 0,
+      priority: 'HIGH',
+      details: allergenIncidents > 0 
+        ? `${allergenIncidents} open allergen-related incidents`
+        : 'No open allergen-related incidents',
+    });
+  }
+
+  // =============================================
+  // HACCP-specific checklist items
+  // =============================================
+  if (regulationType === 'HACCP') {
+    // CCP monitoring - check for CCP-related incidents
+    const ccpIncidents = await prisma.incident.count({
+      where: {
+        ...orgFilter,
+        type: 'FOOD_SAFETY',
+        createdAt: dateFilter,
+        status: { notIn: ['CLOSED'] },
+        OR: [
+          { description: { contains: 'CCP', mode: 'insensitive' } },
+          { description: { contains: 'critical control point', mode: 'insensitive' } },
+          { Category: { name: { contains: 'CCP', mode: 'insensitive' } } },
+        ],
+      },
+    });
+
+    checklist.push({
+      item: 'CCP monitoring records complete',
+      status: ccpIncidents === 0,
+      priority: 'HIGH',
+      details: ccpIncidents > 0 
+        ? `${ccpIncidents} open CCP-related incidents`
+        : 'No open CCP-related incidents',
+    });
+
+    // Deviation procedures - check for deviations with proper documentation
+    const deviationIncidents = await prisma.incident.count({
+      where: {
+        ...orgFilter,
+        type: 'FOOD_SAFETY',
+        createdAt: dateFilter,
+        status: { notIn: ['CLOSED'] },
+        OR: [
+          { description: { contains: 'deviation', mode: 'insensitive' } },
+          { description: { contains: 'corrective action', mode: 'insensitive' } },
+        ],
+      },
+    });
+
+    checklist.push({
+      item: 'Deviation procedures documented',
+      status: deviationIncidents === 0,
+      priority: 'HIGH',
+      details: deviationIncidents > 0 
+        ? `${deviationIncidents} open deviation-related incidents`
+        : 'No open deviation-related incidents',
+    });
+  }
+
+  // =============================================
+  // FDA-specific checklist items
+  // =============================================
+  if (regulationType === 'FDA') {
+    // FMIR completion rate
+    checklist.push({
+      item: 'All FMIR reports properly closed',
+      status: stats.fmirStats.total === 0 || stats.fmirStats.closed === stats.fmirStats.total,
+      priority: 'HIGH',
+      details: `${stats.fmirStats.closed}/${stats.fmirStats.total} FMIR reports closed`,
+    });
+
+    // Evidence attached to FMIRs
+    checklist.push({
+      item: 'FMIR reports have evidence attached',
+      status: stats.fmirStats.total === 0 || stats.fmirStats.withEvidence >= stats.fmirStats.total * 0.9,
+      priority: 'MEDIUM',
+      details: `${stats.fmirStats.withEvidence}/${stats.fmirStats.total} reports have evidence`,
+    });
+  }
+
+  // =============================================
+  // OSHA-specific checklist items  
+  // =============================================
+  if (regulationType === 'OSHA') {
+    // Workplace safety incidents properly documented
+    const workplaceSafetyOpen = await prisma.incident.count({
+      where: {
+        ...orgFilter,
+        type: 'WORKPLACE_SAFETY',
+        createdAt: dateFilter,
+        status: { notIn: ['CLOSED'] },
+        severity: { in: ['CRITICAL', 'HIGH'] },
+      },
+    });
+
+    checklist.push({
+      item: 'All workplace safety incidents documented',
+      status: workplaceSafetyOpen === 0,
+      priority: 'HIGH',
+      details: workplaceSafetyOpen > 0 
+        ? `${workplaceSafetyOpen} open safety incidents require attention`
+        : 'No open critical safety incidents',
+    });
+
+    // OSHA 300 log compliance (check for incidents mentioning OSHA case numbers)
+    const oshaRelatedIncidents = await prisma.incident.count({
+      where: {
+        ...orgFilter,
+        type: 'WORKPLACE_SAFETY',
+        createdAt: dateFilter,
+        oshaCaseNumber: { not: null },
+      },
+    });
+
+    const oshaIncidentsTotal = await prisma.incident.count({
+      where: {
+        ...orgFilter,
+        type: 'WORKPLACE_SAFETY',
+        createdAt: dateFilter,
+        severity: { in: ['CRITICAL', 'HIGH'] },
+      },
+    });
+
+    checklist.push({
+      item: 'OSHA 300 log entries complete',
+      status: oshaIncidentsTotal === 0 || oshaRelatedIncidents >= oshaIncidentsTotal * 0.9,
+      priority: 'HIGH',
+      details: `${oshaRelatedIncidents}/${oshaIncidentsTotal} critical incidents have OSHA case numbers`,
+    });
+
+    // Investigation timeline compliance
+    const investigationsPending = await prisma.incident.count({
+      where: {
+        ...orgFilter,
+        type: 'WORKPLACE_SAFETY',
+        createdAt: dateFilter,
+        investigationSubmittedAt: null,
+        severity: { in: ['CRITICAL', 'HIGH'] },
+        status: { notIn: ['DRAFT', 'CLOSED'] },
+      },
+    });
+
+    checklist.push({
+      item: 'Investigation timelines met',
+      status: investigationsPending === 0,
+      priority: 'MEDIUM',
+      details: investigationsPending > 0 
+        ? `${investigationsPending} incidents pending investigation`
+        : 'All investigations completed on time',
+    });
   }
 
   return checklist;

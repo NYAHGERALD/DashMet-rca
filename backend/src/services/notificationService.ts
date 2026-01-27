@@ -4,6 +4,7 @@
 import { prisma } from '../utils/prisma';
 import { NotificationType } from '@prisma/client';
 import nodemailer from 'nodemailer';
+import { v4 as uuidv4 } from 'uuid';
 
 interface NotificationData {
   type: NotificationType;
@@ -44,6 +45,7 @@ const createEmailTransporter = () => {
 export async function createNotification(data: NotificationData) {
   return prisma.notification.create({
     data: {
+      id: uuidv4(),
       type: data.type,
       title: data.title,
       message: data.message,
@@ -59,6 +61,7 @@ export async function createNotification(data: NotificationData) {
 export async function createBulkNotifications(notifications: NotificationData[]) {
   return prisma.notification.createMany({
     data: notifications.map(n => ({
+      id: uuidv4(),
       type: n.type,
       title: n.title,
       message: n.message,

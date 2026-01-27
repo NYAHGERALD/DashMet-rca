@@ -288,6 +288,8 @@ router.post('/:incidentId/messages', asyncHandler(async (req, res) => {
 
   const message = await prisma.chatMessage.create({
     data: {
+      id: uuidv4(),
+      updatedAt: new Date(),
       incidentId,
       userId: user.id,
       content: content.trim(),
@@ -358,6 +360,7 @@ router.post('/:incidentId/messages', asyncHandler(async (req, res) => {
   if (offlineUsers.length > 0) {
     await prisma.notification.createMany({
       data: offlineUsers.map(u => ({
+        id: uuidv4(),
         type: 'COMMENT_ADDED' as const,
         title: 'New Team Message',
         message: `${user.firstName} ${user.lastName}: ${content.substring(0, 100)}${content.length > 100 ? '...' : ''}`,
@@ -381,6 +384,7 @@ router.post('/:incidentId/messages', asyncHandler(async (req, res) => {
       if (mentionedUsers.length > 0) {
         await prisma.notification.createMany({
           data: mentionedUsers.map(u => ({
+            id: uuidv4(),
             type: 'COMMENT_ADDED' as const,
             title: 'You were mentioned',
             message: `${user.firstName} ${user.lastName} mentioned you: ${content.substring(0, 100)}${content.length > 100 ? '...' : ''}`,
@@ -736,6 +740,7 @@ router.post('/:incidentId/messages/:messageId/reactions', asyncHandler(async (re
   // Add new reaction
   const reaction = await prisma.chatMessageReaction.create({
     data: {
+      id: uuidv4(),
       messageId,
       userId: user.id,
       emoji,
@@ -1097,6 +1102,8 @@ router.post('/:incidentId/messages/evidence', asyncHandler(async (req, res) => {
   // Create message with evidence link
   const message = await prisma.chatMessage.create({
     data: {
+      id: uuidv4(),
+      updatedAt: new Date(),
       incidentId,
       userId: user.id,
       content,
@@ -1332,6 +1339,8 @@ router.post('/:incidentId/messages/rca', asyncHandler(async (req, res) => {
 
   const message = await prisma.chatMessage.create({
     data: {
+      id: uuidv4(),
+      updatedAt: new Date(),
       incidentId,
       userId: user.id,
       content,
@@ -1419,6 +1428,8 @@ router.post('/:incidentId/messages/:messageId/create-action', asyncHandler(async
   // Create CAPA action
   const capaAction = await prisma.cAPAction.create({
     data: {
+      id: uuidv4(),
+      updatedAt: new Date(),
       title: title || message.content.substring(0, 100),
       description: description || message.content,
       actionType: actionType || 'CORRECTIVE',
@@ -1449,6 +1460,8 @@ router.post('/:incidentId/messages/:messageId/create-action', asyncHandler(async
   // Create notification message in chat
   await prisma.chatMessage.create({
     data: {
+      id: uuidv4(),
+      updatedAt: new Date(),
       incidentId,
       userId: user.id,
       content: `Created action item: "${capaAction.title}" assigned to ${capaAction.User.firstName} ${capaAction.User.lastName}`,
@@ -1535,6 +1548,8 @@ router.post('/:incidentId/messages/handoff', asyncHandler(async (req, res) => {
 
   const message = await prisma.chatMessage.create({
     data: {
+      id: uuidv4(),
+      updatedAt: new Date(),
       incidentId,
       userId: user.id,
       content: handoffContent,
@@ -1561,6 +1576,7 @@ router.post('/:incidentId/messages/handoff', asyncHandler(async (req, res) => {
   if (assignToUserId) {
     await prisma.notification.create({
       data: {
+        id: uuidv4(),
         type: 'INCIDENT_UPDATED',
         title: 'Shift Handoff',
         message: `${user.firstName} ${user.lastName} handed off incident to ${shiftTo} shift`,
@@ -1667,6 +1683,8 @@ router.post('/:incidentId/messages/question', asyncHandler(async (req, res) => {
 
   const message = await prisma.chatMessage.create({
     data: {
+      id: uuidv4(),
+      updatedAt: new Date(),
       incidentId,
       userId: user.id,
       content: content.trim(),
@@ -1879,6 +1897,8 @@ router.post('/:incidentId/messages/update', asyncHandler(async (req, res) => {
 
   const message = await prisma.chatMessage.create({
     data: {
+      id: uuidv4(),
+      updatedAt: new Date(),
       incidentId,
       userId: user.id,
       content: content.trim(),
@@ -1955,6 +1975,8 @@ router.post('/:incidentId/messages/announcement', asyncHandler(async (req, res) 
 
   const message = await prisma.chatMessage.create({
     data: {
+      id: uuidv4(),
+      updatedAt: new Date(),
       incidentId,
       userId: user.id,
       content: content.trim(),
@@ -1996,6 +2018,7 @@ router.post('/:incidentId/messages/announcement', asyncHandler(async (req, res) 
     const priorityText = priority === 'urgent' ? '🚨 URGENT: ' : priority === 'important' ? '⚠️ ' : '';
     await prisma.notification.createMany({
       data: participants.map(p => ({
+        id: uuidv4(),
         type: 'COMMENT_ADDED' as const,
         title: `${priorityText}Team Announcement`,
         message: `${user.firstName} ${user.lastName}: ${content.substring(0, 100)}${content.length > 100 ? '...' : ''}`,
@@ -2213,6 +2236,8 @@ export async function createStatusUpdateMessage(
 
   return prisma.chatMessage.create({
     data: {
+      id: uuidv4(),
+      updatedAt: new Date(),
       incidentId,
       userId,
       content: `Status changed from ${fromStatus} to ${toStatus}`,
@@ -2520,6 +2545,7 @@ router.post('/:incidentId/upload', upload.single('file'), handleMulterError, asy
 
     await prisma.evidence.create({
       data: {
+        id: uuidv4(),
         incidentId,
         type: evidenceType,
         fileName: file.originalname,
@@ -2534,6 +2560,8 @@ router.post('/:incidentId/upload', upload.single('file'), handleMulterError, asy
   // Create the message
   const message = await prisma.chatMessage.create({
     data: {
+      id: uuidv4(),
+      updatedAt: new Date(),
       incidentId,
       userId: user.id,
       content: caption || (isVoiceMessage ? '🎤 Voice message' : file.originalname),
@@ -2648,6 +2676,7 @@ router.post('/:incidentId/upload-multiple', upload.array('files', 10), handleMul
 
     await prisma.evidence.create({
       data: {
+        id: uuidv4(),
         incidentId,
         type: evidenceType,
         fileName: file.originalname,
@@ -2661,6 +2690,8 @@ router.post('/:incidentId/upload-multiple', upload.array('files', 10), handleMul
     // Create the message
     const message = await prisma.chatMessage.create({
       data: {
+        id: uuidv4(),
+        updatedAt: new Date(),
         incidentId,
         userId: user.id,
         content: caption || file.originalname,
@@ -2761,6 +2792,8 @@ router.post('/templates', asyncHandler(async (req, res) => {
 
   const template = await prisma.chatMessageTemplate.create({
     data: {
+      id: uuidv4(),
+      updatedAt: new Date(),
       userId: user.id,
       name,
       category: category || 'general',

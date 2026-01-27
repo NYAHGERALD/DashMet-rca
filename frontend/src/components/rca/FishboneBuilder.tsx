@@ -1,8 +1,9 @@
 'use client';
 
-import { useState, useCallback, useEffect } from 'react';
+import { useState, useCallback, useEffect, useRef } from 'react';
 import api from '@/lib/api';
 import { useToast } from '@/components/ui/Toast';
+import { useWebSocket } from '@/lib/websocket';
 
 interface FishboneCause {
   id: string;
@@ -97,8 +98,10 @@ interface CauseFiveWhysResult {
 
 interface FishboneBuilderProps {
   rcaId: string;
+  incidentId: string;
   data: FishboneData;
   isValidated: boolean;
+  currentUserId?: string;
   onSave: (data: FishboneData) => Promise<void>;
   onValidate: (rootCauseStatement: string) => Promise<void>;
   onReopen?: () => Promise<void>;
@@ -108,13 +111,67 @@ type AIWorkflowStep = 'idle' | 'validating_problem' | 'problem_feedback' | 'gene
 
 export default function FishboneBuilder({
   rcaId,
+  incidentId,
   data,
   isValidated,
+  currentUserId,
   onSave,
   onValidate,
   onReopen,
 }: FishboneBuilderProps) {
   const { showToast } = useToast();
+  const { 
+    onRCAAISuggestionsStarted, 
+    onRCAAISuggestionsReceived, 
+    onRCAAIValidationStarted, 
+    onRCAAIValidationComplete,
+    onRCAClarificationAnswer,
+    onRCAProblemUpdate,
+    onRCACategoriesUpdated,
+    onRCACorrectiveActionsUpdated,
+    onRCACauseInputTyping,
+    onRCAFiveWhysModalOpened,
+    onRCAFiveWhysModalClosed,
+    onRCAFiveWhysModeChanged,
+    onRCAFiveWhysFieldTyping,
+    onRCAFiveWhysFieldUpdate,
+    onRCAFiveWhysStatusChanged,
+    onRCAFiveWhysAIAnalyzing,
+    onRCAFiveWhysAIResult,
+    onRCAFiveWhysAIEditMode,
+    onRCAFiveWhysAIEditTyping,
+    onRCAFiveWhysAIEditUpdate,
+    onRCAFiveWhysManualValidating,
+    onRCAFiveWhysManualValidationResult,
+    onRCAFiveWhysManualCorrectionApplied,
+    emitRCAClarificationAnswer,
+    emitRCAProblemUpdate,
+    emitRCACategoriesUpdated,
+    emitRCACorrectiveActionsUpdated,
+    emitRCACauseInputTyping,
+    emitRCAFiveWhysModalOpened,
+    emitRCAFiveWhysModalClosed,
+    emitRCAFiveWhysModeChanged,
+    emitRCAFiveWhysFieldTyping,
+    emitRCAFiveWhysFieldUpdate,
+    emitRCAFiveWhysStatusChanged,
+    emitRCAFiveWhysAIAnalyzing,
+    emitRCAFiveWhysAIResult,
+    emitRCAFiveWhysAIEditMode,
+    emitRCAFiveWhysAIEditTyping,
+    emitRCAFiveWhysAIEditUpdate,
+    emitRCAFiveWhysManualValidating,
+    emitRCAFiveWhysManualValidationResult,
+    emitRCAFiveWhysManualCorrectionApplied,
+    onRCAFiveWhysAIEditValidating,
+    onRCAFiveWhysAIEditValidationResult,
+    emitRCAFiveWhysAIEditValidating,
+    emitRCAFiveWhysAIEditValidationResult,
+    onRCAFiveWhysAIEditFixApplied,
+    emitRCAFiveWhysAIEditFixApplied,
+    onRCAFiveWhysCauseRecommendation,
+    emitRCAFiveWhysCauseRecommendation,
+  } = useWebSocket();
   const [problem, setProblem] = useState(data.problem || '');
   const [categories, setCategories] = useState<FishboneCategory[]>(data.categories || []);
   const [rootCauseText, setRootCauseText] = useState(data.rootCauseText || '');
@@ -127,6 +184,15 @@ export default function FishboneBuilder({
   const [aiAnalysis, setAiAnalysis] = useState<AIAnalysisResult | null>(null);
   const [showAIPanel, setShowAIPanel] = useState(false);
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
+  
+  // Remote typing indicators for "Add a cause" inputs
+  const [remoteTypingIndicators, setRemoteTypingIndicators] = useState<Record<string, { userName: string; text: string; timestamp: string }>>({});
+  
+  // Track who started the AI analysis (for collaborative display)
+  const [aiAnalysisStartedBy, setAiAnalysisStartedBy] = useState<{ id: string; firstName: string; lastName: string } | null>(null);
+  
+  // Track who opened the 5 Whys modal (for collaborative display)
+  const [fiveWhysModalOpenedBy, setFiveWhysModalOpenedBy] = useState<{ id: string; firstName: string; lastName: string } | null>(null);
   
   // Enhanced AI Workflow State
   const [aiWorkflowStep, setAiWorkflowStep] = useState<AIWorkflowStep>('idle');
@@ -149,7 +215,7 @@ export default function FishboneBuilder({
     suggestedRootCause?: string;
   } | null>(null);
   
-  // 5 Whys Analysis Mode State
+  // 5 Whys Analysis Mode State - removed 'continue-or-restart' as we now use a unified 'choose' screen
   const [fiveWhysMode, setFiveWhysMode] = useState<'choose' | 'manual' | 'ai'>('choose');
   const [manualFiveWhysSteps, setManualFiveWhysSteps] = useState<Array<{ stepNumber: number; question: string; answer: string }>>([
     { stepNumber: 1, question: 'Why did this happen?', answer: '' },
@@ -168,6 +234,34 @@ export default function FishboneBuilder({
     suggestedRootCause?: string;
     spellingCorrections?: Array<{ original: string; corrected: string; stepNumber?: number }>;
   } | null>(null);
+  
+  // 5 Whys field typing indicators (who is typing on which field)
+  const [fiveWhysTypingIndicators, setFiveWhysTypingIndicators] = useState<Record<string, { userName: string; userId: string; timestamp: string }>>({});
+  
+  // Track which causes have 5 Whys analyses with answers (for color coding)
+  // Key: causeId, Value: { hasAnswers: boolean, answerCount: number }
+  const [causeAnalysisStatuses, setCauseAnalysisStatuses] = useState<Record<string, { hasAnswers: boolean; answerCount: number }>>({});
+  
+  // Currently loaded database analysis for the open 5 Whys modal
+  const [currentDbAnalysis, setCurrentDbAnalysis] = useState<{
+    id: string;
+    causeId: string;
+    steps: Array<{ id: string; stepNumber: number; question: string; answer: string | null }>;
+    analysisMethod?: string | null;
+  } | null>(null);
+  
+  // Track the analysis method used (manual or ai) - stored in database
+  const [currentAnalysisMethod, setCurrentAnalysisMethod] = useState<'manual' | 'ai' | null>(null);
+  
+  // Auto-save toast notification state
+  const [autoSaveToast, setAutoSaveToast] = useState<{show: boolean; message: string}>({show: false, message: ''});
+  const autoSaveToastTimeout = useRef<NodeJS.Timeout | null>(null);
+  
+  // Refs for debouncing field updates and typing indicators
+  const fiveWhysFieldUpdateTimeouts = useRef<Record<string, NodeJS.Timeout>>({});
+  const fiveWhysTypingTimeouts = useRef<Record<string, NodeJS.Timeout>>({});
+  // Debounce timer for saving to database
+  const dbSaveTimeouts = useRef<Record<string, NodeJS.Timeout>>({});
   
   // Action Plans State - Initialize from saved data
   const [actionPlans, setActionPlans] = useState<ActionPlans>(
@@ -231,6 +325,15 @@ export default function FishboneBuilder({
   // Tab State
   const [activeTab, setActiveTab] = useState<'analysis' | 'diagram' | 'actions' | 'controls'>('analysis');
   
+  // AI Session State - For auto-save and recovery
+  const [sessionLoaded, setSessionLoaded] = useState(false);
+  const [sessionLoading, setSessionLoading] = useState(true);
+  const autoSaveTimeoutRef = useRef<NodeJS.Timeout | null>(null);
+  const isAutoSavingRef = useRef(false);
+  
+  // Confirmation Dialog State - For suggested problem override warning
+  const [showProblemOverrideConfirm, setShowProblemOverrideConfirm] = useState(false);
+  
   // Fetch control type options from the API
   useEffect(() => {
     const fetchControlTypes = async () => {
@@ -253,6 +356,759 @@ export default function FishboneBuilder({
     };
     fetchControlTypes();
   }, []);
+
+  // Auto-save AI Session function
+  const saveAISession = useCallback(async (force = false) => {
+    // Don't save if already saving or if the panel isn't open
+    if (isAutoSavingRef.current && !force) return;
+    if (aiWorkflowStep === 'idle' && !showAIPanel && !problemValidation && !aiAnalysis) return;
+    
+    isAutoSavingRef.current = true;
+    
+    try {
+      await api.post(`/rca/${rcaId}/ai-fishbone-session`, {
+        workflowStep: aiWorkflowStep,
+        problemValidation,
+        clarificationAnswers,
+        aiAnalysisResult: aiAnalysis
+      });
+    } catch (error) {
+      console.error('Failed to auto-save AI session:', error);
+    } finally {
+      isAutoSavingRef.current = false;
+    }
+  }, [rcaId, aiWorkflowStep, problemValidation, clarificationAnswers, aiAnalysis, showAIPanel]);
+
+  // Debounced auto-save - triggers 2 seconds after last change
+  const debouncedAutoSave = useCallback(() => {
+    if (autoSaveTimeoutRef.current) {
+      clearTimeout(autoSaveTimeoutRef.current);
+    }
+    autoSaveTimeoutRef.current = setTimeout(() => {
+      saveAISession();
+    }, 2000);
+  }, [saveAISession]);
+
+  // Auto-save when key states change
+  useEffect(() => {
+    if (sessionLoaded && showAIPanel) {
+      debouncedAutoSave();
+    }
+    return () => {
+      if (autoSaveTimeoutRef.current) {
+        clearTimeout(autoSaveTimeoutRef.current);
+      }
+    };
+  }, [aiWorkflowStep, problemValidation, clarificationAnswers, aiAnalysis, sessionLoaded, showAIPanel, debouncedAutoSave]);
+
+  // Load saved AI session on mount
+  useEffect(() => {
+    const loadSavedSession = async () => {
+      try {
+        const response = await api.get(`/rca/${rcaId}/ai-fishbone-session`);
+        if (response.data.success && response.data.data) {
+          const session = response.data.data;
+          
+          // Restore the AI workflow state
+          const workflowStepMap: Record<string, AIWorkflowStep> = {
+            'IDLE': 'idle',
+            'VALIDATING_PROBLEM': 'validating_problem',
+            'PROBLEM_FEEDBACK': 'problem_feedback',
+            'GENERATING': 'generating',
+            'ANALYZING_CAUSES': 'analyzing_causes',
+            'COMPLETE': 'complete'
+          };
+          
+          const mappedStep = workflowStepMap[session.workflowStep] || 'idle';
+          setAiWorkflowStep(mappedStep);
+          
+          if (session.problemValidation) {
+            setProblemValidation(session.problemValidation);
+          }
+          
+          if (session.clarificationAnswers && session.clarificationAnswers.length > 0) {
+            setClarificationAnswers(session.clarificationAnswers);
+          }
+          
+          if (session.aiAnalysisResult) {
+            setAiAnalysis(session.aiAnalysisResult);
+            setShowAIPanel(true);
+          }
+          
+          // Set who started the session
+          if (session.startedByFirstName) {
+            setAiAnalysisStartedBy({
+              id: session.startedById || '',
+              firstName: session.startedByFirstName,
+              lastName: session.startedByLastName || ''
+            });
+          }
+          
+          // If there's a saved session with meaningful state, show the AI panel
+          if (mappedStep !== 'idle' || session.aiAnalysisResult || session.problemValidation) {
+            setShowAIPanel(true);
+          }
+          
+          showToast('Restored previous AI analysis session', 'info');
+        }
+      } catch (error) {
+        console.error('Failed to load AI session:', error);
+      } finally {
+        setSessionLoading(false);
+        setSessionLoaded(true);
+      }
+    };
+    
+    loadSavedSession();
+  }, [rcaId, showToast]);
+
+  // Load persisted 5 Whys modal state on mount
+  useEffect(() => {
+    const loadModalState = async () => {
+      try {
+        const response = await api.get(`/rca/${rcaId}`);
+        if (response.data.success && response.data.data?.fiveWhysModalState) {
+          const modalState = response.data.data.fiveWhysModalState;
+          
+          if (modalState.isOpen && modalState.causeId && modalState.causeText && modalState.categoryName) {
+            // Find the cause in the current categories
+            const cause: FishboneCause = {
+              id: modalState.causeId,
+              text: modalState.causeText,
+            };
+            
+            // Set who opened the modal
+            if (modalState.openedBy) {
+              setFiveWhysModalOpenedBy({
+                id: modalState.openedBy.id || '',
+                firstName: modalState.openedBy.firstName || '',
+                lastName: modalState.openedBy.lastName || '',
+              });
+            }
+            
+            // Open the modal with correct structure
+            setSelectedCauseForAnalysis({ 
+              id: cause.id, 
+              text: cause.text, 
+              categoryName: modalState.categoryName 
+            });
+            
+            showToast(
+              `5 Whys modal restored (opened by ${modalState.openedBy?.firstName || 'a team member'})`,
+              'info'
+            );
+          }
+        }
+      } catch (error) {
+        console.error('Failed to load 5 Whys modal state:', error);
+      }
+    };
+    
+    loadModalState();
+  }, [rcaId, showToast]);
+
+  // Load 5 Whys analysis statuses for all causes (for color coding)
+  useEffect(() => {
+    const loadAnalysisStatuses = async () => {
+      try {
+        const response = await api.get(`/rca/${rcaId}/five-whys-analyses`);
+        if (response.data.success && response.data.analyses) {
+          const statuses: Record<string, { hasAnswers: boolean; answerCount: number }> = {};
+          response.data.analyses.forEach((analysis: { causeId: string; hasAnswers: boolean; answerCount: number }) => {
+            statuses[analysis.causeId] = {
+              hasAnswers: analysis.hasAnswers,
+              answerCount: analysis.answerCount
+            };
+          });
+          setCauseAnalysisStatuses(statuses);
+          console.log('📊 Loaded 5 Whys analysis statuses:', statuses);
+        }
+      } catch (error) {
+        console.error('Failed to load 5 Whys analysis statuses:', error);
+      }
+    };
+    
+    loadAnalysisStatuses();
+  }, [rcaId]);
+
+  // Clear AI session when analysis is applied or cancelled
+  const clearAISession = useCallback(async () => {
+    try {
+      await api.delete(`/rca/${rcaId}/ai-fishbone-session`);
+    } catch (error) {
+      console.error('Failed to clear AI session:', error);
+    }
+  }, [rcaId]);
+
+  // Debounced problem statement broadcast ref
+  const problemBroadcastTimeoutRef = useRef<NodeJS.Timeout | null>(null);
+  
+  // Handle problem statement change with real-time broadcast and auto-save
+  const handleProblemChange = useCallback((newProblem: string) => {
+    // Update local state immediately
+    setProblem(newProblem);
+    
+    // Debounce the broadcast (300ms delay for smoother typing experience)
+    if (problemBroadcastTimeoutRef.current) {
+      clearTimeout(problemBroadcastTimeoutRef.current);
+    }
+    
+    problemBroadcastTimeoutRef.current = setTimeout(() => {
+      // Broadcast to other team members
+      emitRCAProblemUpdate(incidentId, rcaId, newProblem);
+    }, 300);
+  }, [incidentId, rcaId, emitRCAProblemUpdate]);
+  
+  // Cleanup problem broadcast timeout on unmount
+  useEffect(() => {
+    return () => {
+      if (problemBroadcastTimeoutRef.current) {
+        clearTimeout(problemBroadcastTimeoutRef.current);
+      }
+    };
+  }, []);
+
+  // WebSocket listeners for collaborative AI analysis
+  useEffect(() => {
+    // Listen for when another team member starts AI analysis
+    const unsubSuggestionsStarted = onRCAAISuggestionsStarted((data) => {
+      if (data.rcaId === rcaId) {
+        // Another user started AI analysis - show the panel and loading state
+        setShowAIPanel(true);
+        setGeneratingFullAnalysis(true);
+        setAiWorkflowStep('generating');
+        setAiAnalysisStartedBy(data.startedBy);
+        showToast(`${data.startedBy.firstName} ${data.startedBy.lastName} started AI analysis`, 'info');
+      }
+    });
+
+    // Listen for when AI suggestions are received
+    const unsubSuggestionsReceived = onRCAAISuggestionsReceived((data) => {
+      if (data.rcaId === rcaId) {
+        // Receive AI suggestions from another user's request
+        setAiAnalysis(data.analysis);
+        setAiWorkflowStep('complete');
+        setGeneratingFullAnalysis(false);
+        setAiAnalysisStartedBy(data.generatedBy);
+        showToast(`AI analysis complete - generated by ${data.generatedBy.firstName} ${data.generatedBy.lastName}`, 'success');
+      }
+    });
+
+    // Listen for when problem validation starts
+    const unsubValidationStarted = onRCAAIValidationStarted((data) => {
+      if (data.rcaId === rcaId) {
+        // Another user started problem validation
+        setShowAIPanel(true);
+        setAiWorkflowStep('validating_problem');
+        setAiAnalysisStartedBy(data.startedBy);
+        showToast(`${data.startedBy.firstName} ${data.startedBy.lastName} is validating the problem statement`, 'info');
+      }
+    });
+
+    // Listen for when problem validation is complete
+    const unsubValidationComplete = onRCAAIValidationComplete((data) => {
+      if (data.rcaId === rcaId) {
+        // Receive validation result
+        setProblemValidation(data.validation);
+        if (data.validation.canProceed && !data.validation.needsClarification) {
+          setAiWorkflowStep('generating');
+        } else {
+          setAiWorkflowStep('problem_feedback');
+          // Initialize clarification answers array if needed
+          if (data.validation.clarificationQuestions) {
+            setClarificationAnswers(new Array(data.validation.clarificationQuestions.length).fill(''));
+          }
+        }
+      }
+    });
+
+    // Listen for clarification answer updates from other team members
+    const unsubClarificationAnswer = onRCAClarificationAnswer((data) => {
+      if (data.rcaId === rcaId) {
+        // Another user updated a clarification answer - update our local state
+        setClarificationAnswers((prev) => {
+          const updated = [...prev];
+          updated[data.questionIndex] = data.answer;
+          return updated;
+        });
+      }
+    });
+
+    // Listen for problem statement updates from other team members
+    const unsubProblemUpdate = onRCAProblemUpdate((data) => {
+      if (data.rcaId === rcaId) {
+        // Another user updated the problem statement
+        setProblem(data.problem);
+      }
+    });
+
+    // Listen for categories updates from other team members (fishbone diagram sync)
+    const unsubCategoriesUpdated = onRCACategoriesUpdated((data) => {
+      if (data.rcaId === rcaId) {
+        console.log('📊 Received categories update from:', data.userName);
+        // Another user applied AI analysis or updated categories - update our local state
+        setCategories(data.categories);
+        setProblem(data.problem);
+        // Close the AI panel for all team members when analysis is applied
+        setShowAIPanel(false);
+        setAiWorkflowStep('idle');
+        setProblemValidation(null);
+        setClarificationAnswers([]);
+        setAiAnalysis(null);
+        showToast(`${data.userName} applied Fishbone analysis`, 'success');
+      }
+    });
+
+    // Listen for corrective actions updates from other team members
+    const unsubCorrectiveActionsUpdated = onRCACorrectiveActionsUpdated((data) => {
+      if (data.rcaId === rcaId) {
+        console.log('🛠️ Received corrective actions update from:', data.userName);
+        // Another user generated/updated corrective actions - update our local state
+        setActionPlans(data.actionPlans);
+        if (data.preventiveControls && data.preventiveControls.length > 0) {
+          setPreventiveControls(data.preventiveControls);
+          setShowPreventiveControls(true);
+        }
+        setShowActionPlans(true);
+        setShowCorrectiveActionsSection(true);
+        showToast(`${data.userName} generated Corrective Actions & Preventive Controls`, 'success');
+      }
+    });
+
+    // Listen for cause input typing from other team members
+    const unsubCauseInputTyping = onRCACauseInputTyping((data) => {
+      if (data.rcaId === rcaId) {
+        // Show remote typing indicator for this category
+        setRemoteTypingIndicators(prev => ({
+          ...prev,
+          [data.categoryId]: {
+            userName: data.userName,
+            text: data.text,
+            timestamp: data.timestamp,
+          }
+        }));
+        
+        // Clear the indicator after 3 seconds of no activity
+        setTimeout(() => {
+          setRemoteTypingIndicators(prev => {
+            const current = prev[data.categoryId];
+            // Only clear if this is the same update (based on timestamp)
+            if (current && current.timestamp === data.timestamp) {
+              const { [data.categoryId]: _, ...rest } = prev;
+              return rest;
+            }
+            return prev;
+          });
+        }, 3000);
+      }
+    });
+
+    // Listen for 5 Whys modal opened by other team members
+    const unsubFiveWhysModalOpened = onRCAFiveWhysModalOpened((data) => {
+      // Only process if opened by another user, not the current user
+      if (data.rcaId === rcaId && data.openedBy.id !== currentUserId) {
+        console.log('🔍 5 Whys modal opened by:', data.openedBy, 'mode:', data.mode, 'hasAnswers:', data.hasAnswers, 'rootCause:', data.rootCause);
+        // Open the modal for this user as well with the same state
+        setSelectedCauseForAnalysis({ 
+          id: data.causeId, 
+          text: data.causeText, 
+          categoryName: data.categoryName 
+        });
+        
+        // Use the broadcasted mode (this ensures all team members see the same screen)
+        setFiveWhysMode(data.mode || 'choose');
+        setCauseAnalysisResult(null);
+        
+        // Use the broadcasted steps data if available, otherwise use defaults
+        if (data.steps && Array.isArray(data.steps) && data.steps.length > 0) {
+          setManualFiveWhysSteps(data.steps);
+        } else {
+          setManualFiveWhysSteps([
+            { stepNumber: 1, question: `Why did "${data.causeText}" happen?`, answer: '' },
+            { stepNumber: 2, question: 'Why?', answer: '' },
+            { stepNumber: 3, question: 'Why?', answer: '' },
+            { stepNumber: 4, question: 'Why?', answer: '' },
+            { stepNumber: 5, question: 'Why?', answer: '' },
+          ]);
+        }
+        
+        // Update the cause analysis status for color coding
+        if (data.hasAnswers !== undefined) {
+          setCauseAnalysisStatuses(prev => ({
+            ...prev,
+            [data.causeId]: {
+              hasAnswers: data.hasAnswers,
+              answerCount: data.answerCount || 0
+            }
+          }));
+        }
+        
+        // Set the root cause from broadcast if available
+        setManualRootCause(data.rootCause || '');
+        setManualAnalysisValidation(null);
+        setFiveWhysModalOpenedBy(data.openedBy);
+        showToast(`${data.openedBy.firstName} ${data.openedBy.lastName} opened 5 Whys Analysis`, 'info');
+      }
+    });
+
+    // Listen for 5 Whys modal closed by other team members
+    const unsubFiveWhysModalClosed = onRCAFiveWhysModalClosed((data) => {
+      if (data.rcaId === rcaId) {
+        console.log('🔍 5 Whys modal closed by:', data.closedBy);
+        // Close the modal for this user as well
+        setSelectedCauseForAnalysis(null);
+        setCauseAnalysisResult(null);
+        setFiveWhysMode('choose');
+        setAnalyzingCause(false);
+        setIsEditingFiveWhys(false);
+        setEditedFiveWhysSteps([]);
+        setEditedRootCause('');
+        setEditValidationFeedback(null);
+        setManualFiveWhysSteps([
+          { stepNumber: 1, question: 'Why did this happen?', answer: '' },
+          { stepNumber: 2, question: 'Why?', answer: '' },
+          { stepNumber: 3, question: 'Why?', answer: '' },
+          { stepNumber: 4, question: 'Why?', answer: '' },
+          { stepNumber: 5, question: 'Why?', answer: '' },
+        ]);
+        setManualRootCause('');
+        setManualAnalysisValidation(null);
+        setValidatingManualAnalysis(false);
+        setFiveWhysModalOpenedBy(null);
+        // Only show toast if closed by another user, not self
+        if (data.closedBy.id !== currentUserId) {
+          showToast(`${data.closedBy.firstName} ${data.closedBy.lastName} closed the 5 Whys Analysis`, 'info');
+        }
+      }
+    });
+
+    // Listen for 5 Whys mode changed by other team members
+    const unsubFiveWhysModeChanged = onRCAFiveWhysModeChanged((data) => {
+      if (data.rcaId === rcaId) {
+        console.log('🔍 5 Whys mode changed by:', data.changedBy, 'to:', data.mode, 'hasResetData:', !!data.resetData);
+        // Update the mode for this user as well (map old 'continue-or-restart' to 'choose')
+        const newMode = data.mode === 'continue-or-restart' ? 'choose' : data.mode as 'choose' | 'manual' | 'ai';
+        setFiveWhysMode(newMode);
+        
+        // If resetData is provided (Start Fresh scenario), apply the cleared steps
+        if (data.resetData && data.changedBy.id !== currentUserId) {
+          // Update the steps to the cleared state
+          setManualFiveWhysSteps(data.resetData.steps);
+          // Update the cause analysis status for color coding using causeId from resetData
+          setCauseAnalysisStatuses(prev => ({
+            ...prev,
+            [data.resetData.causeId]: {
+              hasAnswers: data.resetData.hasAnswers,
+              answerCount: data.resetData.answerCount
+            }
+          }));
+          // Clear root cause and validation state
+          setManualRootCause('');
+          setManualAnalysisValidation(null);
+        }
+        
+        // Only show toast if changed by another user, not self
+        if (data.changedBy.id !== currentUserId) {
+          const modeLabel = data.mode === 'manual' ? 'Manual Analysis' 
+            : data.mode === 'ai' ? 'AI Analysis' 
+            : data.resetData ? 'Start Fresh' : 'options';
+          showToast(`${data.changedBy.firstName} ${data.changedBy.lastName} selected ${modeLabel}`, 'info');
+        }
+      }
+    });
+
+    // Listen for 5 Whys field typing indicators from other team members
+    const unsubFiveWhysFieldTyping = onRCAFiveWhysFieldTyping((data) => {
+      if (data.rcaId === rcaId && data.userId !== currentUserId) {
+        console.log('🔍 5 Whys field typing:', data);
+        const fieldKey = data.fieldType === 'rootCause' ? 'rootCause' : `why-${data.stepNumber}`;
+        
+        if (data.isTyping) {
+          // Add typing indicator
+          setFiveWhysTypingIndicators(prev => ({
+            ...prev,
+            [fieldKey]: {
+              userName: data.userName,
+              userId: data.userId,
+              timestamp: data.timestamp,
+            }
+          }));
+        } else {
+          // Remove typing indicator
+          setFiveWhysTypingIndicators(prev => {
+            const updated = { ...prev };
+            delete updated[fieldKey];
+            return updated;
+          });
+        }
+      }
+    });
+
+    // Listen for 5 Whys field content updates from other team members
+    const unsubFiveWhysFieldUpdate = onRCAFiveWhysFieldUpdate((data) => {
+      if (data.rcaId === rcaId && data.userId !== currentUserId) {
+        console.log('🔍 5 Whys field update received:', data);
+        
+        if (data.fieldType === 'rootCause') {
+          // Update root cause text
+          setManualRootCause(data.text);
+        } else if (data.fieldType === 'why' && data.stepNumber) {
+          // Update the specific Why step AND the next step's question
+          setManualFiveWhysSteps(steps => {
+            const updatedSteps = steps.map(step =>
+              step.stepNumber === data.stepNumber ? { ...step, answer: data.text } : step
+            );
+            
+            // Also update the next step's question if included in the broadcast
+            if (data.nextQuestion && data.stepNumber < 5) {
+              const nextStepIndex = updatedSteps.findIndex(s => s.stepNumber === data.stepNumber + 1);
+              if (nextStepIndex !== -1) {
+                updatedSteps[nextStepIndex] = {
+                  ...updatedSteps[nextStepIndex],
+                  question: data.nextQuestion
+                };
+              }
+            }
+            
+            return updatedSteps;
+          });
+        }
+      }
+    });
+
+    // Subscribe to 5 Whys status changes (button color sync)
+    const unsubFiveWhysStatusChanged = onRCAFiveWhysStatusChanged((data) => {
+      if (data.rcaId === rcaId && data.userId !== currentUserId) {
+        console.log('🔍 5 Whys status changed received:', data);
+        // Update the cause analysis status for this cause
+        setCauseAnalysisStatuses(prev => ({
+          ...prev,
+          [data.causeId]: {
+            hasAnswers: data.hasAnswers,
+            answerCount: data.answerCount
+          }
+        }));
+        // Show toast notification
+        showToast(`${data.userName} updated 5 Whys analysis`);
+      }
+    });
+
+    // Subscribe to 5 Whys AI analyzing state (loading spinner sync)
+    const unsubFiveWhysAIAnalyzing = onRCAFiveWhysAIAnalyzing((data) => {
+      if (data.rcaId === rcaId && data.userId !== currentUserId) {
+        console.log('🔍 5 Whys AI analyzing state received:', data.isAnalyzing, 'from:', data.userName);
+        setAnalyzingCause(data.isAnalyzing);
+        // When AI analysis starts, switch to AI mode to show the loading state
+        if (data.isAnalyzing) {
+          setFiveWhysMode('ai');
+          showToast(`${data.userName} started AI Analysis`, 'info');
+        }
+      }
+    });
+
+    // Subscribe to 5 Whys AI result (AI analysis result sync)
+    const unsubFiveWhysAIResult = onRCAFiveWhysAIResult((data) => {
+      if (data.rcaId === rcaId && data.userId !== currentUserId) {
+        console.log('🔍 5 Whys AI result received from:', data.userName);
+        // Set the mode to 'ai' so the UI shows the result view
+        setFiveWhysMode('ai');
+        setCauseAnalysisResult(data.result);
+        
+        // Update local status to show green button (since AI analysis is saved to database)
+        if (data.causeId) {
+          setCauseAnalysisStatuses(prev => ({
+            ...prev,
+            [data.causeId]: {
+              hasAnswers: true,
+              answerCount: 5
+            }
+          }));
+        }
+        
+        showToast(`${data.userName} completed AI Analysis`, 'success');
+      }
+    });
+
+    // Subscribe to 5 Whys AI Edit mode changes (real-time edit mode sync)
+    const unsubFiveWhysAIEditMode = onRCAFiveWhysAIEditMode((data) => {
+      if (data.rcaId === rcaId && data.userId !== currentUserId) {
+        console.log('🔍 5 Whys AI edit mode received:', data.isEditing, 'from:', data.userName);
+        setIsEditingFiveWhys(data.isEditing);
+        if (data.isEditing && data.editedSteps) {
+          setEditedFiveWhysSteps(data.editedSteps);
+          setEditedRootCause(data.editedRootCause || '');
+          showToast(`${data.userName} started editing AI Analysis`, 'info');
+        } else if (!data.isEditing) {
+          setEditedFiveWhysSteps([]);
+          setEditedRootCause('');
+          setEditValidationFeedback(null);
+          showToast(`${data.userName} cancelled editing`, 'info');
+        }
+      }
+    });
+
+    // Subscribe to 5 Whys AI Edit typing (real-time typing indicator)
+    const unsubFiveWhysAIEditTyping = onRCAFiveWhysAIEditTyping((data) => {
+      if (data.rcaId === rcaId && data.userId !== currentUserId) {
+        console.log('🔍 5 Whys AI edit typing received:', data.fieldType, 'step:', data.stepNumber, 'isTyping:', data.isTyping, 'from:', data.userName);
+        // Could be used for typing indicators if needed
+      }
+    });
+
+    // Subscribe to 5 Whys AI Edit field updates (real-time content sync)
+    const unsubFiveWhysAIEditUpdate = onRCAFiveWhysAIEditUpdate((data) => {
+      if (data.rcaId === rcaId && data.userId !== currentUserId) {
+        console.log('🔍 5 Whys AI edit update received:', data.fieldType, 'step:', data.stepNumber, 'from:', data.userName);
+        if (data.fieldType === 'why' && data.stepNumber) {
+          setEditedFiveWhysSteps(prev => 
+            prev.map(step => 
+              step.stepNumber === data.stepNumber ? { ...step, answer: data.text } : step
+            )
+          );
+        } else if (data.fieldType === 'rootCause') {
+          setEditedRootCause(data.text);
+        }
+      }
+    });
+
+    // Subscribe to 5 Whys Manual validation state (real-time validation sync)
+    const unsubFiveWhysManualValidating = onRCAFiveWhysManualValidating((data) => {
+      if (data.rcaId === rcaId && data.userId !== currentUserId) {
+        console.log('🔍 5 Whys Manual validating received:', data.isValidating, 'from:', data.userName);
+        setValidatingManualAnalysis(data.isValidating);
+        if (data.isValidating) {
+          showToast(`${data.userName} started AI Validation`, 'info');
+        }
+      }
+    });
+
+    // Subscribe to 5 Whys Manual validation result (real-time result sync)
+    const unsubFiveWhysManualValidationResult = onRCAFiveWhysManualValidationResult((data) => {
+      if (data.rcaId === rcaId && data.userId !== currentUserId) {
+        console.log('🔍 5 Whys Manual validation result received from:', data.userName);
+        setManualAnalysisValidation(data.result);
+        showToast(`${data.userName} completed AI Validation`, 'success');
+      }
+    });
+
+    // Subscribe to 5 Whys Manual correction applied (real-time fix sync)
+    const unsubFiveWhysManualCorrectionApplied = onRCAFiveWhysManualCorrectionApplied((data) => {
+      if (data.rcaId === rcaId && data.userId !== currentUserId) {
+        console.log('🔍 5 Whys Manual correction applied received:', data.stepNumber, 'from:', data.userName);
+        // Apply the correction to the manual steps
+        setManualFiveWhysSteps(steps =>
+          steps.map(step =>
+            step.stepNumber === data.stepNumber ? { ...step, answer: data.correctedText } : step
+          )
+        );
+        showToast(`${data.userName} applied AI fix to Why #${data.stepNumber}`, 'info');
+      }
+    });
+
+    // Subscribe to 5 Whys AI Edit validation state (real-time loading sync)
+    const unsubFiveWhysAIEditValidating = onRCAFiveWhysAIEditValidating((data) => {
+      if (data.rcaId === rcaId && data.userId !== currentUserId && data.causeId === selectedCauseForAnalysis?.id) {
+        console.log('🔍 5 Whys AI Edit validating state received:', data.isValidating, 'from:', data.userName);
+        setValidatingEdits(data.isValidating);
+        if (data.isValidating) {
+          setEditValidationFeedback(null);
+          showToast(`${data.userName} is validating AI edits...`, 'info');
+        }
+      }
+    });
+
+    // Subscribe to 5 Whys AI Edit validation result (real-time result sync)
+    const unsubFiveWhysAIEditValidationResult = onRCAFiveWhysAIEditValidationResult((data) => {
+      if (data.rcaId === rcaId && data.userId !== currentUserId && data.causeId === selectedCauseForAnalysis?.id) {
+        console.log('🔍 5 Whys AI Edit validation result received from:', data.userName);
+        setEditValidationFeedback(data.result);
+        showToast(`${data.userName} completed AI Edit Validation`, 'success');
+      }
+    });
+
+    // Subscribe to 5 Whys AI Edit fix applied (real-time Apply Fix sync)
+    const unsubFiveWhysAIEditFixApplied = onRCAFiveWhysAIEditFixApplied((data) => {
+      if (data.rcaId === rcaId && data.userId !== currentUserId && data.causeId === selectedCauseForAnalysis?.id) {
+        console.log('🔍 5 Whys AI Edit fix applied received:', data.stepNumber, 'from:', data.userName);
+        // Apply the fix to the edited steps
+        setEditedFiveWhysSteps(steps =>
+          steps.map(step =>
+            step.stepNumber === data.stepNumber ? { ...step, answer: data.correctedText } : step
+          )
+        );
+        // Remove this issue from feedback
+        setEditValidationFeedback(prev => prev ? {
+          ...prev,
+          issues: prev.issues.filter(issue => issue.stepNumber !== data.stepNumber),
+        } : null);
+        showToast(`${data.userName} applied AI fix to Why #${data.stepNumber}`, 'info');
+      }
+    });
+
+    // Subscribe to 5 Whys cause recommendation (real-time keep/eliminate sync)
+    const unsubFiveWhysCauseRecommendation = onRCAFiveWhysCauseRecommendation((data) => {
+      if (data.rcaId === rcaId && data.userId !== currentUserId) {
+        console.log('🔍 5 Whys cause recommendation received:', data.recommendation, 'from:', data.userName);
+        
+        if (data.recommendation === 'eliminate') {
+          // Remove the cause from its category
+          setCategories(cats => cats.map((cat) => ({
+            ...cat,
+            causes: cat.causes.filter((c) => c.id !== data.causeId),
+          })));
+          showToast(`${data.userName} eliminated the cause`, 'info');
+        } else {
+          // Mark as validated root cause with the analysis
+          setCategories(cats => cats.map((cat) => ({
+            ...cat,
+            causes: cat.causes.map((c) =>
+              c.id === data.causeId
+                ? { ...c, fiveWhysAnalysis: data.fiveWhysAnalysis }
+                : c
+            ),
+          })));
+          showToast(`${data.userName} confirmed the root cause`, 'success');
+        }
+        
+        // Close modal if viewing the same cause
+        if (selectedCauseForAnalysis?.id === data.causeId) {
+          setSelectedCauseForAnalysis(null);
+          setCauseAnalysisResult(null);
+          setFiveWhysMode('choose');
+        }
+      }
+    });
+
+    return () => {
+      unsubSuggestionsStarted();
+      unsubSuggestionsReceived();
+      unsubValidationStarted();
+      unsubValidationComplete();
+      unsubClarificationAnswer();
+      unsubProblemUpdate();
+      unsubCategoriesUpdated();
+      unsubCorrectiveActionsUpdated();
+      unsubCauseInputTyping();
+      unsubFiveWhysModalOpened();
+      unsubFiveWhysModalClosed();
+      unsubFiveWhysModeChanged();
+      unsubFiveWhysFieldTyping();
+      unsubFiveWhysFieldUpdate();
+      unsubFiveWhysStatusChanged();
+      unsubFiveWhysAIAnalyzing();
+      unsubFiveWhysAIResult();
+      unsubFiveWhysAIEditMode();
+      unsubFiveWhysAIEditTyping();
+      unsubFiveWhysAIEditUpdate();
+      unsubFiveWhysManualValidating();
+      unsubFiveWhysManualValidationResult();
+      unsubFiveWhysManualCorrectionApplied();
+      unsubFiveWhysAIEditValidating();
+      unsubFiveWhysAIEditValidationResult();
+      unsubFiveWhysAIEditFixApplied();
+      unsubFiveWhysCauseRecommendation();
+    };
+  }, [rcaId, currentUserId, selectedCauseForAnalysis?.id, onRCAAISuggestionsStarted, onRCAAISuggestionsReceived, onRCAAIValidationStarted, onRCAAIValidationComplete, onRCAClarificationAnswer, onRCAProblemUpdate, onRCACategoriesUpdated, onRCACorrectiveActionsUpdated, onRCACauseInputTyping, onRCAFiveWhysModalOpened, onRCAFiveWhysModalClosed, onRCAFiveWhysModeChanged, onRCAFiveWhysFieldTyping, onRCAFiveWhysFieldUpdate, onRCAFiveWhysStatusChanged, onRCAFiveWhysAIAnalyzing, onRCAFiveWhysAIResult, onRCAFiveWhysAIEditMode, onRCAFiveWhysAIEditTyping, onRCAFiveWhysAIEditUpdate, onRCAFiveWhysManualValidating, onRCAFiveWhysManualValidationResult, onRCAFiveWhysManualCorrectionApplied, onRCAFiveWhysAIEditValidating, onRCAFiveWhysAIEditValidationResult, onRCAFiveWhysAIEditFixApplied, onRCAFiveWhysCauseRecommendation, showToast]);
   
   // Check if all causes are analyzed
   const allCausesAnalyzed = useCallback(() => {
@@ -476,38 +1332,252 @@ export default function FishboneBuilder({
     await generateEnhancedAnalysis();
   };
 
-  // Apply suggested problem revision
+  // Apply suggested problem revision - with confirmation if overriding existing
   const applySuggestedProblem = () => {
     if (problemValidation?.suggestedRevision) {
-      setProblem(problemValidation.suggestedRevision);
+      // If there's already a problem statement, show confirmation dialog
+      if (problem.trim() && problem.trim() !== problemValidation.suggestedRevision.trim()) {
+        setShowProblemOverrideConfirm(true);
+      } else {
+        // No existing problem or same as suggestion, apply directly
+        setProblem(problemValidation.suggestedRevision);
+      }
     }
   };
 
+  // Confirm override of existing problem statement
+  const confirmProblemOverride = () => {
+    if (problemValidation?.suggestedRevision) {
+      setProblem(problemValidation.suggestedRevision);
+      setShowProblemOverrideConfirm(false);
+    }
+  };
+
+  // Cancel problem override
+  const cancelProblemOverride = () => {
+    setShowProblemOverrideConfirm(false);
+  };
+
   // Open 5 Whys modal for a cause (shows choice between Manual and AI)
-  const openFiveWhysModal = (cause: FishboneCause, categoryName: string) => {
+  const openFiveWhysModal = async (cause: FishboneCause, categoryName: string) => {
     setSelectedCauseForAnalysis({ id: cause.id, text: cause.text, categoryName });
-    setFiveWhysMode('choose');
     setCauseAnalysisResult(null);
-    setManualFiveWhysSteps([
+    setCurrentDbAnalysis(null);
+    
+    // Variables to track for broadcasting
+    let finalMode: 'choose' | 'manual' | 'ai' = 'choose';
+    let hasAnswers = false;
+    let answerCount = 0;
+    let finalRootCause = '';
+    let finalSteps: Array<{ stepNumber: number; question: string; answer: string }> = [
       { stepNumber: 1, question: `Why did "${cause.text}" happen?`, answer: '' },
       { stepNumber: 2, question: 'Why?', answer: '' },
       { stepNumber: 3, question: 'Why?', answer: '' },
       { stepNumber: 4, question: 'Why?', answer: '' },
       { stepNumber: 5, question: 'Why?', answer: '' },
-    ]);
-    setManualRootCause('');
+    ];
+    
+    // Track saved analysis method (manual or ai)
+    let savedAnalysisMethod: 'manual' | 'ai' | null = null;
+    
+    // Try to load existing analysis from database or create new one
+    try {
+      const response = await api.post(`/rca/${rcaId}/five-whys-analysis`, {
+        causeId: cause.id,
+        causeText: cause.text,
+        categoryId: '', // Optional
+        categoryName: categoryName,
+        initialQuestion: `Why did "${cause.text}" happen?`
+      });
+      
+      if (response.data.success && response.data.analysis) {
+        const dbAnalysis = response.data.analysis;
+        setCurrentDbAnalysis({
+          id: dbAnalysis.id,
+          causeId: dbAnalysis.causeId,
+          steps: dbAnalysis.steps,
+          analysisMethod: dbAnalysis.analysisMethod
+        });
+        
+        // Load saved analysis method
+        savedAnalysisMethod = dbAnalysis.analysisMethod as 'manual' | 'ai' | null;
+        setCurrentAnalysisMethod(savedAnalysisMethod);
+        
+        // If there are saved answers, populate the manual steps from database
+        const hasExistingAnswers = dbAnalysis.steps.some((s: { answer: string | null }) => s.answer && s.answer.trim());
+        hasAnswers = hasExistingAnswers;
+        answerCount = dbAnalysis.answerCount || 0;
+        
+        if (hasExistingAnswers) {
+          finalSteps = dbAnalysis.steps.map((s: { stepNumber: number; question: string; answer: string | null }) => ({
+            stepNumber: s.stepNumber,
+            question: s.question,
+            answer: s.answer || ''
+          }));
+          setManualFiveWhysSteps(finalSteps);
+        } else {
+          // Use default empty steps with proper first question
+          setManualFiveWhysSteps(finalSteps);
+        }
+        
+        // Always show 'choose' mode - it will show Continue button if hasAnswers
+        finalMode = 'choose';
+        setFiveWhysMode('choose');
+        
+        // Update the status for this cause
+        setCauseAnalysisStatuses(prev => ({
+          ...prev,
+          [cause.id]: {
+            hasAnswers: dbAnalysis.hasAnswers,
+            answerCount: dbAnalysis.answerCount
+          }
+        }));
+        
+        // Load saved root cause if exists
+        if (dbAnalysis.rootCause) {
+          setManualRootCause(dbAnalysis.rootCause);
+          finalRootCause = dbAnalysis.rootCause;
+        } else {
+          setManualRootCause('');
+        }
+        
+        console.log('📊 Loaded/Created 5 Whys analysis:', dbAnalysis.id, 'isNew:', response.data.isNew, 'hasAnswers:', hasExistingAnswers, 'method:', dbAnalysis.analysisMethod, 'rootCause:', dbAnalysis.rootCause);
+      } else {
+        // No analysis returned, use default choose mode
+        setManualFiveWhysSteps(finalSteps);
+        setFiveWhysMode('choose');
+        setManualRootCause('');
+        setCurrentAnalysisMethod(null);
+      }
+    } catch (error) {
+      console.error('Failed to load/create 5 Whys analysis:', error);
+      // Fallback to default empty steps and choose mode
+      setManualFiveWhysSteps(finalSteps);
+      setFiveWhysMode('choose');
+      setManualRootCause('');
+      setCurrentAnalysisMethod(null);
+    }
+    
     setManualAnalysisValidation(null);
+    setFiveWhysModalOpenedBy(null); // Reset - current user opened it
+    
+    // Broadcast to all team members to open the modal with the correct mode and data
+    emitRCAFiveWhysModalOpened(incidentId, rcaId, cause.id, cause.text, categoryName, finalMode, hasAnswers, answerCount, finalSteps, finalRootCause);
+  };
+
+  // Continue with existing 5 Whys analysis (go to the previously used mode: manual or ai)
+  const continueFiveWhysAnalysis = () => {
+    // Use saved analysis method, or default to manual if not set
+    const modeToUse = currentAnalysisMethod || 'manual';
+    
+    if (modeToUse === 'ai' && causeAnalysisStatuses[selectedCauseForAnalysis?.id || '']?.hasAnswers) {
+      // For AI mode with existing data, set up the result and show AI view
+      setCauseAnalysisResult({
+        fiveWhys: {
+          steps: manualFiveWhysSteps.map(s => ({
+            stepNumber: s.stepNumber,
+            question: s.question,
+            answer: s.answer,
+            explanation: ''
+          })),
+          rootCause: manualRootCause,
+        },
+        resolvesOriginalProblem: true,
+        validationExplanation: 'Continuing from saved AI analysis.',
+      });
+      setFiveWhysMode('ai');
+    } else {
+      setFiveWhysMode('manual');
+    }
+    
+    setManualAnalysisValidation(null);
+    
+    // Broadcast mode change to all team members
+    emitRCAFiveWhysModeChanged(incidentId, rcaId, modeToUse);
+  };
+
+  // Start fresh - clear existing answers and show choose mode
+  const startFreshFiveWhysAnalysis = async () => {
+    if (!selectedCauseForAnalysis) return;
+    
+    // Clear all answers in the steps
+    const clearedSteps = [
+      { stepNumber: 1, question: `Why did "${selectedCauseForAnalysis.text}" happen?`, answer: '' },
+      { stepNumber: 2, question: 'Why?', answer: '' },
+      { stepNumber: 3, question: 'Why?', answer: '' },
+      { stepNumber: 4, question: 'Why?', answer: '' },
+      { stepNumber: 5, question: 'Why?', answer: '' },
+    ];
+    setManualFiveWhysSteps(clearedSteps);
+    setManualRootCause('');
+    
+    // Clear answers in database by updating with autosave endpoint
+    try {
+      await api.patch(`/rca/${rcaId}/five-whys-autosave`, {
+        causeId: selectedCauseForAnalysis.id,
+        causeText: selectedCauseForAnalysis.text,
+        categoryName: selectedCauseForAnalysis.categoryName,
+        steps: clearedSteps,
+        rootCause: ''
+      });
+      
+      // Update local status to reflect cleared answers
+      setCauseAnalysisStatuses(prev => ({
+        ...prev,
+        [selectedCauseForAnalysis.id]: {
+          hasAnswers: false,
+          answerCount: 0
+        }
+      }));
+      
+      // Broadcast status change to other team members (color indicator)
+      emitRCAFiveWhysStatusChanged(incidentId, rcaId, selectedCauseForAnalysis.id, false, 0);
+      
+      console.log('🗑️ Cleared all 5 Whys answers for cause:', selectedCauseForAnalysis.id);
+    } catch (error) {
+      console.error('Failed to clear 5 Whys answers:', error);
+    }
+    
+    // Show the choose mode (Manual vs AI)
+    setFiveWhysMode('choose');
+    
+    // Broadcast mode change with reset data to all team members
+    emitRCAFiveWhysModeChanged(incidentId, rcaId, 'choose', {
+      causeId: selectedCauseForAnalysis.id,
+      causeText: selectedCauseForAnalysis.text,
+      steps: clearedSteps,
+      hasAnswers: false,
+      answerCount: 0
+    });
   };
 
   // Start AI-powered 5 Whys analysis
   const startAIFiveWhysAnalysis = async () => {
     if (!selectedCauseForAnalysis) return;
     
+    // Validate required fields before making API call
+    if (!problem || !problem.trim()) {
+      setErrorMessage('Problem statement is required for AI analysis. Please define the problem first.');
+      return;
+    }
+    
     setFiveWhysMode('ai');
+    setCurrentAnalysisMethod('ai');
     setAnalyzingCause(true);
     setCauseAnalysisResult(null);
     
+    // Broadcast mode change and analyzing state to all team members
+    emitRCAFiveWhysModeChanged(incidentId, rcaId, 'ai');
+    emitRCAFiveWhysAIAnalyzing(incidentId, rcaId, selectedCauseForAnalysis.id, true);
+    
     try {
+      console.log('🔍 Starting AI 5 Whys analysis with:', {
+        causeId: selectedCauseForAnalysis.id,
+        causeText: selectedCauseForAnalysis.text,
+        categoryName: selectedCauseForAnalysis.categoryName,
+        problem,
+      });
+      
       const response = await api.post(`/rca/${rcaId}/ai/fishbone-cause-five-whys`, {
         causeId: selectedCauseForAnalysis.id,
         causeText: selectedCauseForAnalysis.text,
@@ -515,29 +1585,349 @@ export default function FishboneBuilder({
         problem,
       });
       
-      setCauseAnalysisResult(response.data.data);
+      const result = response.data.data;
+      setCauseAnalysisResult(result);
+      
+      // Save AI analysis to database (same table as manual analysis)
+      try {
+        const saveResponse = await api.post(`/rca/${rcaId}/ai/save-five-whys-analysis`, {
+          causeId: selectedCauseForAnalysis.id,
+          causeText: selectedCauseForAnalysis.text,
+          categoryName: selectedCauseForAnalysis.categoryName,
+          steps: result.fiveWhys.steps,
+          rootCause: result.fiveWhys.rootCause,
+          isValidRootCause: true,
+          resolvesOriginalProblem: result.resolvesOriginalProblem,
+        });
+        
+        console.log('🔍 AI 5 Whys analysis saved to database:', saveResponse.data);
+        
+        // Update local status to show green button
+        setCauseAnalysisStatuses(prev => ({
+          ...prev,
+          [selectedCauseForAnalysis.id]: {
+            hasAnswers: true,
+            answerCount: 5
+          }
+        }));
+        
+        // Broadcast status change so all team members see the green button
+        emitRCAFiveWhysStatusChanged(incidentId, rcaId, selectedCauseForAnalysis.id, true, 5);
+      } catch (saveErr) {
+        console.error('Failed to save AI 5 Whys analysis to database:', saveErr);
+        // Don't fail the whole operation, just log the error
+      }
+      
+      // Broadcast AI result to all team members
+      emitRCAFiveWhysAIResult(incidentId, rcaId, selectedCauseForAnalysis.id, result);
     } catch (err) {
       console.error('5 Whys analysis failed:', err);
       setErrorMessage('Failed to analyze cause with 5 Whys. Please try again.');
       setFiveWhysMode('choose');
+      // Broadcast mode change back to choose on error
+      emitRCAFiveWhysModeChanged(incidentId, rcaId, 'choose');
     } finally {
       setAnalyzingCause(false);
+      // Broadcast analyzing state complete
+      if (selectedCauseForAnalysis) {
+        emitRCAFiveWhysAIAnalyzing(incidentId, rcaId, selectedCauseForAnalysis.id, false);
+      }
     }
   };
 
   // Start Manual 5 Whys analysis
   const startManualFiveWhysAnalysis = () => {
+    // Clear existing answers when starting fresh
+    if (selectedCauseForAnalysis) {
+      const freshSteps = [
+        { stepNumber: 1, question: `Why did "${selectedCauseForAnalysis.text}" happen?`, answer: '' },
+        { stepNumber: 2, question: 'Why?', answer: '' },
+        { stepNumber: 3, question: 'Why?', answer: '' },
+        { stepNumber: 4, question: 'Why?', answer: '' },
+        { stepNumber: 5, question: 'Why?', answer: '' },
+      ];
+      setManualFiveWhysSteps(freshSteps);
+      setManualRootCause('');
+    }
+    
     setFiveWhysMode('manual');
+    setCurrentAnalysisMethod('manual');
     setManualAnalysisValidation(null);
+    
+    // Broadcast mode change to all team members
+    emitRCAFiveWhysModeChanged(incidentId, rcaId, 'manual');
   };
 
-  // Update a manual 5 Whys step
+  // Go back to choose mode (from either manual or AI)
+  const goBackToChooseMode = () => {
+    setFiveWhysMode('choose');
+    
+    // Broadcast mode change to all team members
+    emitRCAFiveWhysModeChanged(incidentId, rcaId, 'choose');
+  };
+
+  // Update a manual 5 Whys step with real-time broadcast
+  // Conjunctions to filter from the start of answers (English, French, Spanish)
+  // These words are filtered to make the next "Why [answer]?" question grammatically correct
+  const conjunctionsToFilter = new Set([
+    // English Coordinating Conjunctions
+    'and', 'but', 'or', 'nor', 'for', 'yet', 'so',
+    // English Subordinating Conjunctions
+    'because', 'since', 'although', 'though', 'while', 'whereas', 'if', 'unless',
+    'until', 'when', 'whenever', 'where', 'wherever', 'after', 'before', 'as',
+    'once', 'than', 'that', 'whether', 'while', 'even', 'even though', 'even if',
+    'in order that', 'so that', 'provided that', 'assuming that', 'given that',
+    // French Coordinating Conjunctions
+    'et', 'ou', 'mais', 'donc', 'or', 'ni', 'car',
+    // French Subordinating Conjunctions  
+    'parce que', 'puisque', 'comme', 'quand', 'lorsque', 'si', 'bien que',
+    'quoique', 'pour que', 'afin que', 'avant que', 'après que', 'depuis que',
+    'pendant que', 'tandis que', 'alors que', 'dès que', 'aussitôt que',
+    // Spanish Coordinating Conjunctions
+    'y', 'e', 'o', 'u', 'pero', 'sino', 'ni', 'que',
+    // Spanish Subordinating Conjunctions
+    'porque', 'ya que', 'puesto que', 'como', 'cuando', 'mientras', 'si',
+    'aunque', 'para que', 'a fin de que', 'antes de que', 'después de que',
+    'desde que', 'hasta que', 'en cuanto', 'tan pronto como', 'a menos que',
+  ]);
+
+  // Helper function to filter leading conjunctions from an answer
+  const filterLeadingConjunction = (text: string): string => {
+    if (!text.trim()) return text;
+    
+    const trimmedText = text.trim();
+    const lowerText = trimmedText.toLowerCase();
+    
+    // Check for multi-word conjunctions first (longer matches take priority)
+    const multiWordConjunctions = [
+      'even though', 'even if', 'in order that', 'so that', 'provided that',
+      'assuming that', 'given that', 'parce que', 'bien que', 'pour que',
+      'afin que', 'avant que', 'après que', 'depuis que', 'pendant que',
+      'tandis que', 'alors que', 'dès que', 'aussitôt que', 'ya que',
+      'puesto que', 'para que', 'a fin de que', 'antes de que', 'después de que',
+      'desde que', 'hasta que', 'en cuanto', 'tan pronto como', 'a menos que',
+    ];
+    
+    for (const conj of multiWordConjunctions) {
+      if (lowerText.startsWith(conj + ' ')) {
+        return trimmedText.substring(conj.length).trim();
+      }
+    }
+    
+    // Check for single-word conjunctions
+    const words = trimmedText.split(/\s+/);
+    if (words.length > 0 && conjunctionsToFilter.has(words[0].toLowerCase())) {
+      return words.slice(1).join(' ');
+    }
+    
+    return trimmedText;
+  };
+
+  // Generate the dynamic question for a Why step based on previous answer
+  const generateWhyQuestion = (stepNumber: number, previousAnswer: string): string => {
+    if (stepNumber === 1) {
+      // First step uses the cause text
+      return selectedCauseForAnalysis 
+        ? `Why did "${selectedCauseForAnalysis.text}" happen?`
+        : 'Why did this happen?';
+    }
+    
+    const filteredAnswer = filterLeadingConjunction(previousAnswer);
+    
+    if (!filteredAnswer.trim()) {
+      return 'Why?';
+    }
+    
+    // Construct the question: "Why [filtered answer]?"
+    return `Why ${filteredAnswer}?`;
+  };
+
+  // Show auto-save toast notification
+  const showAutoSaveToast = (message: string = 'Changes saved') => {
+    // Clear any existing timeout
+    if (autoSaveToastTimeout.current) {
+      clearTimeout(autoSaveToastTimeout.current);
+    }
+    
+    // Show the toast
+    setAutoSaveToast({show: true, message});
+    
+    // Hide after 2 seconds
+    autoSaveToastTimeout.current = setTimeout(() => {
+      setAutoSaveToast({show: false, message: ''});
+    }, 2000);
+  };
+
   const updateManualStep = (stepNumber: number, answer: string) => {
-    setManualFiveWhysSteps(steps => 
-      steps.map(step => 
+    // Update local state immediately - both the answer AND the next step's question
+    setManualFiveWhysSteps(steps => {
+      const updatedSteps = steps.map(step => 
         step.stepNumber === stepNumber ? { ...step, answer } : step
-      )
-    );
+      );
+      
+      // Update the NEXT step's question based on this answer
+      if (stepNumber < 5) {
+        const nextStepIndex = updatedSteps.findIndex(s => s.stepNumber === stepNumber + 1);
+        if (nextStepIndex !== -1) {
+          const newQuestion = generateWhyQuestion(stepNumber + 1, answer);
+          updatedSteps[nextStepIndex] = {
+            ...updatedSteps[nextStepIndex],
+            question: newQuestion
+          };
+        }
+      }
+      
+      return updatedSteps;
+    });
+    
+    const fieldKey = `why-${stepNumber}`;
+    
+    // Generate the next question to include in the broadcast
+    const nextQuestion = stepNumber < 5 ? generateWhyQuestion(stepNumber + 1, answer) : undefined;
+    
+    // Emit typing indicator (start typing)
+    emitRCAFiveWhysFieldTyping(incidentId, rcaId, 'why', true, stepNumber);
+    
+    // Clear previous timeout for this field
+    if (fiveWhysFieldUpdateTimeouts.current[fieldKey]) {
+      clearTimeout(fiveWhysFieldUpdateTimeouts.current[fieldKey]);
+    }
+    if (fiveWhysTypingTimeouts.current[fieldKey]) {
+      clearTimeout(fiveWhysTypingTimeouts.current[fieldKey]);
+    }
+    if (dbSaveTimeouts.current[fieldKey]) {
+      clearTimeout(dbSaveTimeouts.current[fieldKey]);
+    }
+    
+    // Debounce the content update (emit after 150ms of no typing)
+    fiveWhysFieldUpdateTimeouts.current[fieldKey] = setTimeout(() => {
+      emitRCAFiveWhysFieldUpdate(incidentId, rcaId, 'why', answer, stepNumber, nextQuestion);
+    }, 150);
+    
+    // Stop typing indicator after 1 second of no typing
+    fiveWhysTypingTimeouts.current[fieldKey] = setTimeout(() => {
+      emitRCAFiveWhysFieldTyping(incidentId, rcaId, 'why', false, stepNumber);
+    }, 1000);
+    
+    // Debounce database save (save after 500ms of no typing)
+    dbSaveTimeouts.current[fieldKey] = setTimeout(async () => {
+      if (selectedCauseForAnalysis) {
+        try {
+          // Get the latest steps state for the save
+          setManualFiveWhysSteps(currentSteps => {
+            // Update the question for the next step in the save payload
+            const stepsToSave = currentSteps.map(step => 
+              step.stepNumber === stepNumber ? { ...step, answer } : step
+            );
+            
+            // Update next question if applicable
+            if (stepNumber < 5) {
+              const nextStepIndex = stepsToSave.findIndex(s => s.stepNumber === stepNumber + 1);
+              if (nextStepIndex !== -1) {
+                stepsToSave[nextStepIndex] = {
+                  ...stepsToSave[nextStepIndex],
+                  question: generateWhyQuestion(stepNumber + 1, answer)
+                };
+              }
+            }
+            
+            // Perform the API call
+            api.patch(`/rca/${rcaId}/five-whys-autosave`, {
+              causeId: selectedCauseForAnalysis.id,
+              causeText: selectedCauseForAnalysis.text,
+              categoryName: selectedCauseForAnalysis.categoryName,
+              steps: stepsToSave,
+              fieldType: 'why',
+              stepNumber,
+              analysisMethod: 'manual'
+            }).then(response => {
+              if (response.data.success) {
+                // Update cause analysis status for color coding
+                setCauseAnalysisStatuses(prev => ({
+                  ...prev,
+                  [selectedCauseForAnalysis.id]: {
+                    hasAnswers: response.data.analysis?.hasAnswers || false,
+                    answerCount: response.data.analysis?.answerCount || 0
+                  }
+                }));
+                // Broadcast status change to other team members
+                emitRCAFiveWhysStatusChanged(
+                  incidentId,
+                  rcaId,
+                  selectedCauseForAnalysis.id,
+                  response.data.analysis?.hasAnswers || false,
+                  response.data.analysis?.answerCount || 0
+                );
+                // Show auto-save toast
+                showAutoSaveToast('Changes saved');
+                console.log(`💾 Auto-saved 5 Whys step ${stepNumber} to database`);
+              }
+            }).catch(error => {
+              console.error(`Failed to auto-save 5 Whys step ${stepNumber}:`, error);
+            });
+            
+            return currentSteps; // Don't modify state, just use for reading
+          });
+        } catch (error) {
+          console.error(`Failed to auto-save 5 Whys step ${stepNumber}:`, error);
+        }
+      }
+    }, 500);
+  };
+
+  // Update manual root cause with real-time broadcast
+  const updateManualRootCause = (text: string) => {
+    // Update local state immediately
+    setManualRootCause(text);
+    
+    const fieldKey = 'rootCause';
+    
+    // Emit typing indicator (start typing)
+    emitRCAFiveWhysFieldTyping(incidentId, rcaId, 'rootCause', true);
+    
+    // Clear previous timeout for this field
+    if (fiveWhysFieldUpdateTimeouts.current[fieldKey]) {
+      clearTimeout(fiveWhysFieldUpdateTimeouts.current[fieldKey]);
+    }
+    if (fiveWhysTypingTimeouts.current[fieldKey]) {
+      clearTimeout(fiveWhysTypingTimeouts.current[fieldKey]);
+    }
+    if (dbSaveTimeouts.current[fieldKey]) {
+      clearTimeout(dbSaveTimeouts.current[fieldKey]);
+    }
+    
+    // Debounce the content update (emit after 150ms of no typing)
+    fiveWhysFieldUpdateTimeouts.current[fieldKey] = setTimeout(() => {
+      emitRCAFiveWhysFieldUpdate(incidentId, rcaId, 'rootCause', text);
+    }, 150);
+    
+    // Stop typing indicator after 1 second of no typing
+    fiveWhysTypingTimeouts.current[fieldKey] = setTimeout(() => {
+      emitRCAFiveWhysFieldTyping(incidentId, rcaId, 'rootCause', false);
+    }, 1000);
+    
+    // Debounce database save (save after 500ms of no typing)
+    dbSaveTimeouts.current[fieldKey] = setTimeout(async () => {
+      if (selectedCauseForAnalysis) {
+        try {
+          const response = await api.patch(`/rca/${rcaId}/five-whys-autosave`, {
+            causeId: selectedCauseForAnalysis.id,
+            causeText: selectedCauseForAnalysis.text,
+            categoryName: selectedCauseForAnalysis.categoryName,
+            rootCause: text,
+            fieldType: 'rootCause',
+            analysisMethod: 'manual'
+          });
+          
+          if (response.data.success) {
+            showAutoSaveToast('Root cause saved');
+            console.log(`💾 Auto-saved root cause to database`);
+          }
+        } catch (error) {
+          console.error('Failed to auto-save root cause:', error);
+        }
+      }
+    }, 500);
   };
 
   // Validate manual 5 Whys analysis with AI
@@ -546,6 +1936,9 @@ export default function FishboneBuilder({
     
     setValidatingManualAnalysis(true);
     setManualAnalysisValidation(null);
+    
+    // Broadcast validation start to all team members
+    emitRCAFiveWhysManualValidating(incidentId, rcaId, selectedCauseForAnalysis.id, true);
     
     try {
       const response = await api.post(`/rca/${rcaId}/ai/validate-five-whys`, {
@@ -556,18 +1949,28 @@ export default function FishboneBuilder({
         rootCause: manualRootCause,
       });
       
-      setManualAnalysisValidation(response.data.data);
+      const validationResult = response.data.data;
+      setManualAnalysisValidation(validationResult);
+      
+      // Broadcast validation result to all team members
+      emitRCAFiveWhysManualValidationResult(incidentId, rcaId, selectedCauseForAnalysis.id, validationResult);
     } catch (err) {
       console.error('Manual 5 Whys validation failed:', err);
       // Set a default validation result
-      setManualAnalysisValidation({
+      const defaultResult = {
         isValid: true,
         issues: [],
         overallFeedback: 'AI validation is currently unavailable. Please review your analysis manually.',
         resolvesOriginalProblem: true,
-      });
+      };
+      setManualAnalysisValidation(defaultResult);
+      
+      // Broadcast the fallback result
+      emitRCAFiveWhysManualValidationResult(incidentId, rcaId, selectedCauseForAnalysis.id, defaultResult);
     } finally {
       setValidatingManualAnalysis(false);
+      // Broadcast validation complete
+      emitRCAFiveWhysManualValidating(incidentId, rcaId, selectedCauseForAnalysis.id, false);
     }
   };
 
@@ -578,11 +1981,18 @@ export default function FishboneBuilder({
         step.stepNumber === stepNumber ? { ...step, answer: correctedText } : step
       )
     );
+    
+    // Broadcast the correction to all team members
+    if (selectedCauseForAnalysis) {
+      emitRCAFiveWhysManualCorrectionApplied(incidentId, rcaId, selectedCauseForAnalysis.id, stepNumber, correctedText);
+    }
   };
 
   // Handle manual analysis recommendation (keep or eliminate)
   const handleManualCauseRecommendation = (recommendation: 'keep' | 'eliminate') => {
     if (!selectedCauseForAnalysis) return;
+    
+    let fiveWhysAnalysis: any = undefined;
     
     if (recommendation === 'eliminate') {
       // Remove the cause from its category
@@ -593,7 +2003,7 @@ export default function FishboneBuilder({
       setCategories(updated);
     } else {
       // Mark as validated root cause with manual analysis
-      const fiveWhysAnalysis = {
+      fiveWhysAnalysis = {
         steps: manualFiveWhysSteps,
         rootCause: manualRootCause,
         isValidRootCause: true,
@@ -609,6 +2019,16 @@ export default function FishboneBuilder({
       }));
       setCategories(updated);
     }
+    
+    // Broadcast to all team members
+    emitRCAFiveWhysCauseRecommendation(
+      incidentId,
+      rcaId,
+      selectedCauseForAnalysis.id,
+      selectedCauseForAnalysis.categoryName || '',
+      recommendation,
+      fiveWhysAnalysis
+    );
     
     closeFiveWhysModal();
   };
@@ -633,6 +2053,10 @@ export default function FishboneBuilder({
     setManualRootCause('');
     setManualAnalysisValidation(null);
     setValidatingManualAnalysis(false);
+    setFiveWhysModalOpenedBy(null);
+    
+    // Broadcast to all team members to close the modal
+    emitRCAFiveWhysModalClosed(incidentId, rcaId);
   };
 
   // Legacy function - keep for compatibility but redirect to new modal
@@ -644,6 +2068,8 @@ export default function FishboneBuilder({
   const handleCauseRecommendation = (recommendation: 'keep' | 'eliminate') => {
     if (!selectedCauseForAnalysis || !causeAnalysisResult) return;
     
+    let fiveWhysAnalysis: any = undefined;
+    
     if (recommendation === 'eliminate') {
       // Remove the cause from its category
       const updated = categories.map((cat) => ({
@@ -653,31 +2079,55 @@ export default function FishboneBuilder({
       setCategories(updated);
     } else {
       // Mark as validated root cause
+      fiveWhysAnalysis = { ...causeAnalysisResult.fiveWhys, isValidRootCause: true };
       const updated = categories.map((cat) => ({
         ...cat,
         causes: cat.causes.map((c) => 
           c.id === selectedCauseForAnalysis.id 
-            ? { ...c, fiveWhysAnalysis: { ...causeAnalysisResult.fiveWhys, isValidRootCause: true } }
+            ? { ...c, fiveWhysAnalysis }
             : c
         ),
       }));
       setCategories(updated);
     }
     
+    // Broadcast to all team members
+    emitRCAFiveWhysCauseRecommendation(
+      incidentId,
+      rcaId,
+      selectedCauseForAnalysis.id,
+      selectedCauseForAnalysis.categoryName || '',
+      recommendation,
+      fiveWhysAnalysis
+    );
+    
     closeFiveWhysModal();
   };
 
   // Start editing the 5 Whys
   const startEditingFiveWhys = () => {
-    if (causeAnalysisResult) {
-      setEditedFiveWhysSteps([...causeAnalysisResult.fiveWhys.steps]);
-      setEditedRootCause(causeAnalysisResult.fiveWhys.rootCause);
+    if (causeAnalysisResult && selectedCauseForAnalysis) {
+      const steps = [...causeAnalysisResult.fiveWhys.steps];
+      const rootCause = causeAnalysisResult.fiveWhys.rootCause;
+      
+      setEditedFiveWhysSteps(steps);
+      setEditedRootCause(rootCause);
       setIsEditingFiveWhys(true);
       setEditValidationFeedback(null);
+      
+      // Broadcast edit mode to all team members
+      emitRCAFiveWhysAIEditMode(
+        incidentId,
+        rcaId,
+        selectedCauseForAnalysis.id,
+        true,
+        steps,
+        rootCause
+      );
     }
   };
 
-  // Update an edited step answer
+  // Update an edited step answer (AI Edit mode with auto-save)
   const updateEditedStepAnswer = (stepNumber: number, newAnswer: string) => {
     setEditedFiveWhysSteps(prev => 
       prev.map(step => 
@@ -686,20 +2136,159 @@ export default function FishboneBuilder({
     );
     // Clear validation feedback when user edits
     setEditValidationFeedback(null);
+    
+    // Broadcast field update to all team members
+    if (selectedCauseForAnalysis) {
+      emitRCAFiveWhysAIEditUpdate(incidentId, rcaId, 'why', newAnswer, stepNumber);
+    }
+    
+    // Auto-save to database with debounce
+    const fieldKey = `ai-edit-why-${stepNumber}`;
+    if (dbSaveTimeouts.current[fieldKey]) {
+      clearTimeout(dbSaveTimeouts.current[fieldKey]);
+    }
+    
+    dbSaveTimeouts.current[fieldKey] = setTimeout(async () => {
+      if (selectedCauseForAnalysis) {
+        try {
+          // Get current edited steps to save
+          setEditedFiveWhysSteps(currentSteps => {
+            const stepsToSave = currentSteps.map(step => ({
+              stepNumber: step.stepNumber,
+              question: step.question,
+              answer: step.answer
+            }));
+            
+            api.patch(`/rca/${rcaId}/five-whys-autosave`, {
+              causeId: selectedCauseForAnalysis.id,
+              causeText: selectedCauseForAnalysis.text,
+              categoryName: selectedCauseForAnalysis.categoryName,
+              steps: stepsToSave,
+              fieldType: 'why',
+              stepNumber,
+              analysisMethod: 'ai'
+            }).then(response => {
+              if (response.data.success) {
+                setCauseAnalysisStatuses(prev => ({
+                  ...prev,
+                  [selectedCauseForAnalysis.id]: {
+                    hasAnswers: response.data.analysis?.hasAnswers || false,
+                    answerCount: response.data.analysis?.answerCount || 0
+                  }
+                }));
+                showAutoSaveToast('Changes saved');
+                console.log(`💾 AI Edit: Auto-saved step ${stepNumber}`);
+              }
+            }).catch(error => {
+              console.error(`AI Edit: Failed to auto-save step ${stepNumber}:`, error);
+            });
+            
+            return currentSteps;
+          });
+        } catch (error) {
+          console.error(`AI Edit: Failed to auto-save step ${stepNumber}:`, error);
+        }
+      }
+    }, 500);
   };
 
-  // Update edited root cause
+  // Update edited root cause (AI Edit mode with auto-save)
   const updateEditedRootCause = (newRootCause: string) => {
     setEditedRootCause(newRootCause);
     setEditValidationFeedback(null);
+    
+    // Broadcast root cause update to all team members
+    if (selectedCauseForAnalysis) {
+      emitRCAFiveWhysAIEditUpdate(incidentId, rcaId, 'rootCause', newRootCause);
+    }
+    
+    // Auto-save to database with debounce
+    const fieldKey = 'ai-edit-rootCause';
+    if (dbSaveTimeouts.current[fieldKey]) {
+      clearTimeout(dbSaveTimeouts.current[fieldKey]);
+    }
+    
+    dbSaveTimeouts.current[fieldKey] = setTimeout(async () => {
+      if (selectedCauseForAnalysis) {
+        try {
+          const response = await api.patch(`/rca/${rcaId}/five-whys-autosave`, {
+            causeId: selectedCauseForAnalysis.id,
+            causeText: selectedCauseForAnalysis.text,
+            categoryName: selectedCauseForAnalysis.categoryName,
+            rootCause: newRootCause,
+            fieldType: 'rootCause',
+            analysisMethod: 'ai'
+          });
+          
+          if (response.data.success) {
+            showAutoSaveToast('Root cause saved');
+            console.log('💾 AI Edit: Auto-saved root cause');
+          }
+        } catch (error) {
+          console.error('AI Edit: Failed to auto-save root cause:', error);
+        }
+      }
+    }, 500);
   };
 
-  // Cancel editing
+  // Cancel editing (without saving)
   const cancelEditingFiveWhys = () => {
     setIsEditingFiveWhys(false);
     setEditedFiveWhysSteps([]);
     setEditedRootCause('');
     setEditValidationFeedback(null);
+    
+    // Broadcast edit mode off to all team members
+    if (selectedCauseForAnalysis) {
+      emitRCAFiveWhysAIEditMode(incidentId, rcaId, selectedCauseForAnalysis.id, false, [], '');
+    }
+  };
+
+  // Save and go back - saves the current edited data and returns to choose mode
+  const saveAndGoBack = async () => {
+    if (!selectedCauseForAnalysis) return;
+    
+    try {
+      // Save the current edited data to the database
+      await api.patch(`/rca/${rcaId}/five-whys-autosave`, {
+        causeId: selectedCauseForAnalysis.id,
+        fiveWhysSteps: editedFiveWhysSteps,
+        rootCause: editedRootCause,
+        analysisMethod: 'ai'
+      });
+      
+      showAutoSaveToast();
+      
+      // Exit edit mode and go back to choose mode
+      setIsEditingFiveWhys(false);
+      setEditedFiveWhysSteps([]);
+      setEditedRootCause('');
+      setEditValidationFeedback(null);
+      setFiveWhysMode('choose');
+      
+      // Broadcast edit mode off to all team members
+      emitRCAFiveWhysAIEditMode(incidentId, rcaId, selectedCauseForAnalysis.id, false, [], '');
+    } catch (error) {
+      console.error('Error saving 5 Whys before going back:', error);
+    }
+  };
+
+  // Explicit save button - saves without exiting edit mode
+  const explicitSaveFiveWhys = async () => {
+    if (!selectedCauseForAnalysis) return;
+    
+    try {
+      await api.patch(`/rca/${rcaId}/five-whys-autosave`, {
+        causeId: selectedCauseForAnalysis.id,
+        fiveWhysSteps: editedFiveWhysSteps,
+        rootCause: editedRootCause,
+        analysisMethod: 'ai'
+      });
+      
+      showAutoSaveToast();
+    } catch (error) {
+      console.error('Error saving 5 Whys:', error);
+    }
   };
 
   // Validate edited 5 Whys with AI
@@ -708,6 +2297,9 @@ export default function FishboneBuilder({
     
     setValidatingEdits(true);
     setEditValidationFeedback(null);
+    
+    // Broadcast validation starting to all team members
+    emitRCAFiveWhysAIEditValidating(incidentId, rcaId, selectedCauseForAnalysis.id, true);
     
     try {
       const response = await api.post(`/rca/${rcaId}/ai/validate-edited-five-whys`, {
@@ -720,6 +2312,9 @@ export default function FishboneBuilder({
       
       const validation = response.data.data;
       setEditValidationFeedback(validation);
+      
+      // Broadcast validation result to all team members
+      emitRCAFiveWhysAIEditValidationResult(incidentId, rcaId, selectedCauseForAnalysis.id, validation);
       
       // If valid, update the cause analysis result
       if (validation.isValid) {
@@ -734,17 +2329,40 @@ export default function FishboneBuilder({
           validationExplanation: validation.overallFeedback,
         } : null);
         setIsEditingFiveWhys(false);
+        
+        // Broadcast edit mode off and the updated result to all team members
+        emitRCAFiveWhysAIEditMode(incidentId, rcaId, selectedCauseForAnalysis.id, false, [], '');
+        
+        // Broadcast the updated AI result
+        const updatedResult = {
+          fiveWhys: {
+            steps: editedFiveWhysSteps,
+            rootCause: validation.suggestedRootCause || editedRootCause,
+          },
+          resolvesOriginalProblem: validation.resolvesOriginalProblem,
+          validationExplanation: validation.overallFeedback,
+        };
+        emitRCAFiveWhysAIResult(incidentId, rcaId, selectedCauseForAnalysis.id, updatedResult);
       }
     } catch (err) {
       console.error('Failed to validate edited 5 Whys:', err);
-      setEditValidationFeedback({
+      const errorResult = {
         isValid: false,
         issues: [],
         overallFeedback: 'Failed to validate edits. Please try again.',
         resolvesOriginalProblem: false,
-      });
+      };
+      setEditValidationFeedback(errorResult);
+      
+      // Broadcast error result to all team members
+      emitRCAFiveWhysAIEditValidationResult(incidentId, rcaId, selectedCauseForAnalysis.id, errorResult);
     } finally {
       setValidatingEdits(false);
+      
+      // Broadcast validation complete to all team members
+      if (selectedCauseForAnalysis) {
+        emitRCAFiveWhysAIEditValidating(incidentId, rcaId, selectedCauseForAnalysis.id, false);
+      }
     }
   };
 
@@ -760,6 +2378,11 @@ export default function FishboneBuilder({
       ...prev,
       issues: prev.issues.filter(issue => issue.stepNumber !== stepNumber),
     } : null);
+    
+    // Broadcast the fix applied to all team members (includes step update + issue removal)
+    if (selectedCauseForAnalysis) {
+      emitRCAFiveWhysAIEditFixApplied(incidentId, rcaId, selectedCauseForAnalysis.id, stepNumber, suggestion);
+    }
   };
 
   // Apply AI analysis to current form
@@ -767,6 +2390,10 @@ export default function FishboneBuilder({
     if (aiAnalysis && !aiAnalysis.error) {
       setProblem(aiAnalysis.problem);
       setCategories(aiAnalysis.categories);
+      
+      // Broadcast the categories update to all team members
+      console.log('📊 Applying AI analysis and broadcasting categories, incidentId:', incidentId, 'rcaId:', rcaId);
+      emitRCACategoriesUpdated(incidentId, rcaId, aiAnalysis.categories, aiAnalysis.problem);
       
       // DO NOT apply rootCauseText from AI analysis
       // Root Cause Statement should only be generated AFTER all causes
@@ -780,6 +2407,9 @@ export default function FishboneBuilder({
       
       setShowAIPanel(false);
       setAiWorkflowStep('idle');
+      
+      // Clear the AI session from database since analysis is applied
+      clearAISession();
     }
   };
 
@@ -790,6 +2420,9 @@ export default function FishboneBuilder({
     setProblemValidation(null);
     setClarificationAnswers([]);
     setAiAnalysis(null);
+    
+    // Clear the AI session when user explicitly closes the panel
+    clearAISession();
   };
 
   const addCause = (categoryId: string) => {
@@ -807,6 +2440,9 @@ export default function FishboneBuilder({
     });
     setCategories(updated);
     setNewCauseInputs((prev) => ({ ...prev, [categoryId]: '' }));
+    
+    // Broadcast categories update to team members
+    emitRCACategoriesUpdated(incidentId, rcaId, updated, problem);
   };
 
   const removeCause = (categoryId: string, causeId: string) => {
@@ -820,8 +2456,14 @@ export default function FishboneBuilder({
       return cat;
     });
     setCategories(updated);
+    
+    // Broadcast categories update to team members
+    emitRCACategoriesUpdated(incidentId, rcaId, updated, problem);
   };
 
+  // Debounced broadcast for cause text updates
+  const debouncedBroadcastCauseUpdateRef = useRef<NodeJS.Timeout | null>(null);
+  
   const updateCause = (categoryId: string, causeId: string, text: string) => {
     const updated = categories.map((cat) => {
       if (cat.id === categoryId) {
@@ -833,6 +2475,14 @@ export default function FishboneBuilder({
       return cat;
     });
     setCategories(updated);
+    
+    // Debounce broadcast to avoid too many updates while typing
+    if (debouncedBroadcastCauseUpdateRef.current) {
+      clearTimeout(debouncedBroadcastCauseUpdateRef.current);
+    }
+    debouncedBroadcastCauseUpdateRef.current = setTimeout(() => {
+      emitRCACategoriesUpdated(incidentId, rcaId, updated, problem);
+    }, 500);
   };
 
   const getAISuggestions = async (categoryId: string, categoryName: string) => {
@@ -862,6 +2512,12 @@ export default function FishboneBuilder({
         return cat;
       });
       setCategories(updated);
+      
+      // NOTE: Do NOT broadcast AI suggestions automatically - each team member 
+      // should explicitly click "Get AI suggestions" to see them. This prevents
+      // AI-generated causes from appearing on other users' screens without consent.
+      // The causes will be saved to database when user clicks "Save Progress" or
+      // when they manually add/edit/remove causes.
     } catch (err) {
       console.error('Failed to get AI suggestions:', err);
     } finally {
@@ -1046,6 +2702,10 @@ export default function FishboneBuilder({
       }
       setShowActionPlans(true);
       setShowCorrectiveActionsSection(true);
+      
+      // Broadcast to all team members
+      console.log('🛠️ Broadcasting corrective actions update, incidentId:', incidentId);
+      emitRCACorrectiveActionsUpdated(incidentId, rcaId, result.actionPlans, result.preventiveControls || []);
     } catch (err: any) {
       console.error('Failed to generate AI corrective actions:', err);
       setErrorMessage(err.response?.data?.error || 'Failed to generate corrective actions. Please try again.');
@@ -1330,9 +2990,16 @@ export default function FishboneBuilder({
           <div className="flex items-center justify-between mb-4">
             <div className="flex items-center space-x-2">
               <span className="text-2xl">🤖</span>
-              <h3 className="text-lg font-semibold text-purple-900 dark:text-purple-100">
-                AI-Assisted Fishbone Analysis
-              </h3>
+              <div>
+                <h3 className="text-lg font-semibold text-purple-900 dark:text-purple-100">
+                  AI-Assisted Fishbone Analysis
+                </h3>
+                {aiAnalysisStartedBy && (
+                  <p className="text-xs text-purple-600 dark:text-purple-400">
+                    Started by {aiAnalysisStartedBy.firstName} {aiAnalysisStartedBy.lastName}
+                  </p>
+                )}
+              </div>
             </div>
             <button
               onClick={closeAIWorkflow}
@@ -1390,9 +3057,13 @@ export default function FishboneBuilder({
                         type="text"
                         value={clarificationAnswers[idx] || ''}
                         onChange={(e) => {
+                          const newValue = e.target.value;
                           const updated = [...clarificationAnswers];
-                          updated[idx] = e.target.value;
+                          updated[idx] = newValue;
                           setClarificationAnswers(updated);
+                          // Broadcast to other team members in real-time
+                          console.log('📝 FishboneBuilder: onChange called, incidentId:', incidentId, 'rcaId:', rcaId, 'idx:', idx);
+                          emitRCAClarificationAnswer(incidentId, rcaId, idx, newValue);
                         }}
                         className="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-700 text-gray-900 dark:text-white"
                         placeholder="Your answer..."
@@ -1577,7 +3248,17 @@ export default function FishboneBuilder({
       {/* Cause 5 Whys Analysis Modal */}
       {selectedCauseForAnalysis && (
         <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50">
-          <div className="bg-white dark:bg-gray-800 rounded-lg shadow-xl max-w-6xl w-full mx-4 p-6 max-h-[85vh] overflow-y-auto">
+          <div className="bg-white dark:bg-gray-800 rounded-lg shadow-xl max-w-6xl w-full mx-4 p-6 max-h-[85vh] overflow-y-auto relative">
+            {/* Auto-save toast notification */}
+            {autoSaveToast.show && (
+              <div className="absolute top-2 right-14 bg-green-500 text-white px-3 py-1 rounded-full text-xs font-medium shadow-lg flex items-center space-x-1 animate-pulse z-50">
+                <svg className="w-3 h-3" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 13l4 4L19 7" />
+                </svg>
+                <span>{autoSaveToast.message}</span>
+              </div>
+            )}
+            
             <div className="flex items-center justify-between mb-4">
               <h3 className="text-lg font-semibold text-gray-900 dark:text-white">
                 5 Whys Analysis: {selectedCauseForAnalysis.categoryName}
@@ -1597,12 +3278,53 @@ export default function FishboneBuilder({
               <p className="text-gray-900 dark:text-white font-medium">{selectedCauseForAnalysis.text}</p>
             </div>
 
-            {/* Choice Screen - Manual vs AI */}
+            {/* Choice Screen - Manual vs AI with Continue option when work exists */}
             {fiveWhysMode === 'choose' && (
               <div className="space-y-4">
-                <p className="text-sm text-gray-600 dark:text-gray-400 text-center mb-6">
-                  Choose how you want to perform the 5 Whys analysis for this cause:
-                </p>
+                {/* Continue Section - Only shows when there's existing work */}
+                {causeAnalysisStatuses[selectedCauseForAnalysis.id]?.hasAnswers && (
+                  <>
+                    {/* Continue Button */}
+                    <button
+                      onClick={continueFiveWhysAnalysis}
+                      className="w-full p-4 bg-gradient-to-r from-green-500 to-emerald-500 hover:from-green-600 hover:to-emerald-600 text-white rounded-xl transition-all shadow-lg hover:shadow-xl flex items-center justify-center space-x-3"
+                    >
+                      <svg className="w-6 h-6" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M14.752 11.168l-3.197-2.132A1 1 0 0010 9.87v4.263a1 1 0 001.555.832l3.197-2.132a1 1 0 000-1.664z" />
+                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
+                      </svg>
+                      <span className="font-semibold text-lg">Continue Analysis</span>
+                      <span className="text-sm opacity-80">
+                        ({causeAnalysisStatuses[selectedCauseForAnalysis.id]?.answerCount || 0}/5 answered)
+                      </span>
+                    </button>
+                    
+                    {/* Alert message */}
+                    <div className="p-3 bg-amber-50 dark:bg-amber-900/20 border border-amber-200 dark:border-amber-700 rounded-lg">
+                      <p className="text-sm text-amber-700 dark:text-amber-300 text-center">
+                        <span className="font-medium">Click continue</span> to continue editing the 5 Whys from the previously selected method
+                        {currentAnalysisMethod ? ` (${currentAnalysisMethod === 'ai' ? 'AI Analysis' : 'Manual Analysis'})` : ''}, 
+                        or choose an option below to clear current data and start fresh.
+                      </p>
+                    </div>
+                    
+                    <div className="relative">
+                      <div className="absolute inset-0 flex items-center">
+                        <div className="w-full border-t border-gray-300 dark:border-gray-600"></div>
+                      </div>
+                      <div className="relative flex justify-center text-sm">
+                        <span className="px-2 bg-white dark:bg-gray-800 text-gray-500 dark:text-gray-400">or start fresh</span>
+                      </div>
+                    </div>
+                  </>
+                )}
+
+                {/* Instructions text - only show when no existing work */}
+                {!causeAnalysisStatuses[selectedCauseForAnalysis.id]?.hasAnswers && (
+                  <p className="text-sm text-gray-600 dark:text-gray-400 text-center mb-6">
+                    Choose how you want to perform the 5 Whys analysis for this cause:
+                  </p>
+                )}
                 
                 <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                   {/* Manual Analysis Button */}
@@ -1620,6 +3342,11 @@ export default function FishboneBuilder({
                       <p className="text-sm text-blue-600 dark:text-blue-400">
                         Enter your own 5 Whys analysis. AI will validate your answers for accuracy and spelling.
                       </p>
+                      {causeAnalysisStatuses[selectedCauseForAnalysis.id]?.hasAnswers && (
+                        <p className="text-xs text-amber-500 dark:text-amber-400 mt-2">
+                          ⚠️ This will start fresh
+                        </p>
+                      )}
                     </div>
                   </button>
 
@@ -1638,6 +3365,11 @@ export default function FishboneBuilder({
                       <p className="text-sm text-purple-600 dark:text-purple-400">
                         Let AI automatically generate the 5 Whys analysis based on the cause and context.
                       </p>
+                      {causeAnalysisStatuses[selectedCauseForAnalysis.id]?.hasAnswers && (
+                        <p className="text-xs text-amber-500 dark:text-amber-400 mt-2">
+                          ⚠️ This will start fresh
+                        </p>
+                      )}
                     </div>
                   </button>
                 </div>
@@ -1649,7 +3381,7 @@ export default function FishboneBuilder({
               <div className="space-y-4">
                 {/* Back button */}
                 <button
-                  onClick={() => setFiveWhysMode('choose')}
+                  onClick={goBackToChooseMode}
                   className="text-sm text-gray-500 hover:text-gray-700 dark:text-gray-400 dark:hover:text-gray-200 flex items-center space-x-1 mb-2"
                 >
                   <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
@@ -1688,16 +3420,27 @@ export default function FishboneBuilder({
                                 {step.stepNumber}
                               </span>
                               <div className="flex-1">
-                                <p className="text-sm font-medium text-gray-700 dark:text-gray-300">{step.question}</p>
+                                <div className="flex items-center justify-between">
+                                  <p className="text-sm font-medium text-gray-700 dark:text-gray-300">{step.question}</p>
+                                  {/* Typing indicator for this Why step */}
+                                  {fiveWhysTypingIndicators[`why-${step.stepNumber}`] && (
+                                    <span className="text-xs text-blue-500 dark:text-blue-400 flex items-center animate-pulse">
+                                      <span className="w-2 h-2 bg-blue-500 rounded-full mr-1 animate-bounce"></span>
+                                      {fiveWhysTypingIndicators[`why-${step.stepNumber}`].userName} is typing...
+                                    </span>
+                                  )}
+                                </div>
                                 <textarea
                                   value={step.answer}
                                   onChange={(e) => updateManualStep(step.stepNumber, e.target.value)}
                                   placeholder="Enter your answer..."
                                   rows={2}
                                   className={`w-full mt-1 px-2 py-1 text-sm border rounded bg-white dark:bg-gray-700 text-gray-900 dark:text-white ${
-                                    issue 
-                                      ? 'border-amber-300 dark:border-amber-600' 
-                                      : 'border-gray-300 dark:border-gray-600'
+                                    fiveWhysTypingIndicators[`why-${step.stepNumber}`]
+                                      ? 'border-blue-400 dark:border-blue-500 ring-1 ring-blue-300 dark:ring-blue-600'
+                                      : issue 
+                                        ? 'border-amber-300 dark:border-amber-600' 
+                                        : 'border-gray-300 dark:border-gray-600'
                                   } focus:outline-none focus:ring-1 focus:border-blue-500`}
                                 />
                                 
@@ -1727,15 +3470,28 @@ export default function FishboneBuilder({
 
                     {/* Root Cause Input */}
                     <div className="p-4 bg-green-50 dark:bg-green-900/20 rounded-lg border border-green-200 dark:border-green-700">
-                      <label className="block text-sm font-medium text-green-700 dark:text-green-300 mb-2">
-                        Root Cause (Final Answer)
-                      </label>
+                      <div className="flex items-center justify-between mb-2">
+                        <label className="block text-sm font-medium text-green-700 dark:text-green-300">
+                          Root Cause (Final Answer)
+                        </label>
+                        {/* Typing indicator for root cause */}
+                        {fiveWhysTypingIndicators['rootCause'] && (
+                          <span className="text-xs text-green-600 dark:text-green-400 flex items-center animate-pulse">
+                            <span className="w-2 h-2 bg-green-500 rounded-full mr-1 animate-bounce"></span>
+                            {fiveWhysTypingIndicators['rootCause'].userName} is typing...
+                          </span>
+                        )}
+                      </div>
                       <textarea
                         value={manualRootCause}
-                        onChange={(e) => setManualRootCause(e.target.value)}
+                        onChange={(e) => updateManualRootCause(e.target.value)}
                         placeholder="Based on your 5 Whys analysis, what is the root cause?"
                         rows={2}
-                        className="w-full px-2 py-1 text-sm border border-green-300 dark:border-green-600 rounded bg-white dark:bg-gray-700 text-gray-900 dark:text-white focus:outline-none focus:ring-1 focus:border-green-500"
+                        className={`w-full px-2 py-1 text-sm border rounded bg-white dark:bg-gray-700 text-gray-900 dark:text-white focus:outline-none focus:ring-1 focus:border-green-500 ${
+                          fiveWhysTypingIndicators['rootCause']
+                            ? 'border-green-400 dark:border-green-500 ring-1 ring-green-300 dark:ring-green-600'
+                            : 'border-green-300 dark:border-green-600'
+                        }`}
                       />
                       
                       {/* Suggested Root Cause from validation */}
@@ -2034,23 +3790,40 @@ export default function FishboneBuilder({
 
                 {/* Action Buttons - Different for edit mode */}
                 {isEditingFiveWhys ? (
-                  <div className="flex justify-end space-x-3 pt-2">
+                  <div className="flex justify-between items-center pt-2">
+                    {/* Left side - Back button */}
                     <button
-                      onClick={cancelEditingFiveWhys}
-                      className="px-4 py-2 text-gray-600 dark:text-gray-300 hover:bg-gray-100 dark:hover:bg-gray-700 rounded-lg"
-                    >
-                      Cancel
-                    </button>
-                    <button
-                      onClick={validateEditedFiveWhys}
-                      disabled={validatingEdits}
-                      className="px-4 py-2 bg-purple-600 text-white rounded-lg hover:bg-purple-700 disabled:opacity-50 flex items-center space-x-2"
+                      onClick={saveAndGoBack}
+                      className="px-4 py-2 bg-gray-100 text-gray-700 dark:bg-gray-700 dark:text-gray-300 hover:bg-gray-200 dark:hover:bg-gray-600 rounded-lg flex items-center space-x-2"
                     >
                       <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z" />
+                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M10 19l-7-7m0 0l7-7m-7 7h18" />
                       </svg>
-                      <span>Validate with AI</span>
+                      <span>Save & Back</span>
                     </button>
+                    
+                    {/* Right side - Save and Validate buttons */}
+                    <div className="flex space-x-3">
+                      <button
+                        onClick={explicitSaveFiveWhys}
+                        className="px-4 py-2 bg-green-600 text-white rounded-lg hover:bg-green-700 flex items-center space-x-2"
+                      >
+                        <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M8 7H5a2 2 0 00-2 2v9a2 2 0 002 2h14a2 2 0 002-2V9a2 2 0 00-2-2h-3m-1 4l-3 3m0 0l-3-3m3 3V4" />
+                        </svg>
+                        <span>Save</span>
+                      </button>
+                      <button
+                        onClick={validateEditedFiveWhys}
+                        disabled={validatingEdits}
+                        className="px-4 py-2 bg-purple-600 text-white rounded-lg hover:bg-purple-700 disabled:opacity-50 flex items-center space-x-2"
+                      >
+                        <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z" />
+                        </svg>
+                        <span>Validate with AI</span>
+                      </button>
+                    </div>
                   </div>
                 ) : (
                   <div className="flex justify-end space-x-3 pt-2">
@@ -2079,7 +3852,7 @@ export default function FishboneBuilder({
               /* No AI result yet - show back button */
               <div className="text-center py-4">
                 <button
-                  onClick={() => setFiveWhysMode('choose')}
+                  onClick={goBackToChooseMode}
                   className="text-sm text-gray-500 hover:text-gray-700 dark:text-gray-400 dark:hover:text-gray-200 flex items-center space-x-1 mx-auto"
                 >
                   <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
@@ -2208,10 +3981,28 @@ export default function FishboneBuilder({
             </label>
             <textarea
               value={problem}
-              onChange={(e) => setProblem(e.target.value)}
+              onChange={(e) => {
+                handleProblemChange(e.target.value);
+                // Auto-resize textarea
+                e.target.style.height = 'auto';
+                e.target.style.height = `${e.target.scrollHeight}px`;
+              }}
+              onInput={(e) => {
+                // Also handle input for initial load and paste events
+                const target = e.target as HTMLTextAreaElement;
+                target.style.height = 'auto';
+                target.style.height = `${target.scrollHeight}px`;
+              }}
+              ref={(el) => {
+                // Auto-resize on initial render
+                if (el && problem) {
+                  el.style.height = 'auto';
+                  el.style.height = `${el.scrollHeight}px`;
+                }
+              }}
               disabled={isValidated}
               rows={2}
-              className="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-800 text-gray-900 dark:text-white disabled:opacity-50"
+              className="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-800 text-gray-900 dark:text-white disabled:opacity-50 resize-none overflow-hidden min-h-[60px]"
               placeholder="Describe the problem or effect..."
             />
           </div>
@@ -2262,17 +4053,32 @@ export default function FishboneBuilder({
                           {cause.aiSuggested && (
                             <span className="text-xs text-blue-600 dark:text-blue-400">AI suggested</span>
                           )}
-                          {/* 5 Whys Drill-down Button */}
+                          {/* 5 Whys Drill-down Button - Color coded based on analysis status */}
                           {!isValidated && cause.text && (
                             <button
                               onClick={() => analyzeCauseWithFiveWhys(cause, category.name)}
                               disabled={analyzingCause}
-                              className="text-xs text-purple-600 hover:text-purple-700 dark:text-purple-400 dark:hover:text-purple-300 flex items-center space-x-1"
+                              className={`text-xs flex items-center space-x-1 ${
+                                causeAnalysisStatuses[cause.id]?.hasAnswers
+                                  ? 'text-green-600 hover:text-green-700 dark:text-green-400 dark:hover:text-green-300'
+                                  : 'text-blue-600 hover:text-blue-700 dark:text-blue-400 dark:hover:text-blue-300'
+                              }`}
                             >
                               <svg className="w-3 h-3" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M8.228 9c.549-1.165 2.03-2 3.772-2 2.21 0 4 1.343 4 3 0 1.4-1.278 2.575-3.006 2.907-.542.104-.994.54-.994 1.093m0 3h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
+                                {causeAnalysisStatuses[cause.id]?.hasAnswers ? (
+                                  // Checkmark icon for analyzed
+                                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z" />
+                                ) : (
+                                  // Question mark icon for not analyzed
+                                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M8.228 9c.549-1.165 2.03-2 3.772-2 2.21 0 4 1.343 4 3 0 1.4-1.278 2.575-3.006 2.907-.542.104-.994.54-.994 1.093m0 3h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
+                                )}
                               </svg>
                               <span>5 Whys</span>
+                              {causeAnalysisStatuses[cause.id]?.answerCount > 0 && (
+                                <span className="text-[10px] bg-green-100 dark:bg-green-800 text-green-700 dark:text-green-300 px-1 rounded">
+                                  {causeAnalysisStatuses[cause.id].answerCount}/5
+                                </span>
+                              )}
                             </button>
                           )}
                           {/* Show if cause has been analyzed */}
@@ -2309,16 +4115,35 @@ export default function FishboneBuilder({
                 {/* Add Cause Input */}
                 {!isValidated && (
                   <div className="space-y-2">
+                    {/* Remote typing indicator - shows what other user is typing */}
+                    {remoteTypingIndicators[category.id] && (
+                      <div className="p-2 bg-blue-50 dark:bg-blue-900/30 border border-blue-200 dark:border-blue-700 rounded text-sm">
+                        <div className="flex items-center space-x-2 text-blue-600 dark:text-blue-400">
+                          <svg className="w-3 h-3 animate-pulse flex-shrink-0" fill="currentColor" viewBox="0 0 20 20">
+                            <circle cx="3" cy="10" r="2" />
+                            <circle cx="10" cy="10" r="2" />
+                            <circle cx="17" cy="10" r="2" />
+                          </svg>
+                          <span className="font-medium">{remoteTypingIndicators[category.id].userName} is typing:</span>
+                        </div>
+                        <p className="mt-1 text-gray-700 dark:text-gray-300 italic pl-5">
+                          "{remoteTypingIndicators[category.id].text || '...'}"
+                        </p>
+                      </div>
+                    )}
                     <div className="flex space-x-2">
                       <input
                         type="text"
                         value={newCauseInputs[category.id] || ''}
-                        onChange={(e) =>
+                        onChange={(e) => {
+                          const newValue = e.target.value;
                           setNewCauseInputs((prev) => ({
                             ...prev,
-                            [category.id]: e.target.value,
-                          }))
-                        }
+                            [category.id]: newValue,
+                          }));
+                          // Broadcast typing to team members
+                          emitRCACauseInputTyping(incidentId, rcaId, category.id, newValue);
+                        }}
                         onKeyPress={(e) => e.key === 'Enter' && addCause(category.id)}
                         placeholder="Add a cause..."
                         className="flex-1 px-2 py-1 text-sm border border-gray-300 dark:border-gray-600 rounded bg-white dark:bg-gray-700 text-gray-900 dark:text-white"
@@ -3726,6 +5551,59 @@ export default function FishboneBuilder({
             </button>
           </div>
         )
+      )}
+
+      {/* Problem Statement Override Confirmation Dialog */}
+      {showProblemOverrideConfirm && (
+        <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50">
+          <div className="bg-white dark:bg-gray-800 rounded-lg shadow-xl max-w-lg w-full mx-4 p-6">
+            <div className="flex items-center space-x-3 mb-4">
+              <div className="p-2 bg-amber-100 dark:bg-amber-900/30 rounded-full">
+                <svg className="w-6 h-6 text-amber-600 dark:text-amber-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z" />
+                </svg>
+              </div>
+              <h3 className="text-lg font-semibold text-gray-900 dark:text-white">
+                Override Problem Statement?
+              </h3>
+            </div>
+            <p className="text-sm text-gray-600 dark:text-gray-300 mb-4">
+              Applying this suggested revision will <span className="font-semibold text-amber-600 dark:text-amber-400">replace your current problem statement</span>. This action cannot be undone.
+            </p>
+            <div className="mb-4 space-y-3">
+              <div className="p-3 bg-red-50 dark:bg-red-900/20 border border-red-200 dark:border-red-800 rounded-lg">
+                <p className="text-xs font-medium text-red-600 dark:text-red-400 mb-1">Current Problem Statement:</p>
+                <p className="text-sm text-red-800 dark:text-red-300">{problem}</p>
+              </div>
+              <div className="flex justify-center">
+                <svg className="w-5 h-5 text-gray-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 14l-7 7m0 0l-7-7m7 7V3" />
+                </svg>
+              </div>
+              <div className="p-3 bg-green-50 dark:bg-green-900/20 border border-green-200 dark:border-green-800 rounded-lg">
+                <p className="text-xs font-medium text-green-600 dark:text-green-400 mb-1">Suggested Revision:</p>
+                <p className="text-sm text-green-800 dark:text-green-300">{problemValidation?.suggestedRevision}</p>
+              </div>
+            </div>
+            <div className="flex justify-end space-x-3">
+              <button
+                onClick={cancelProblemOverride}
+                className="px-4 py-2 text-gray-600 dark:text-gray-300 hover:text-gray-800 dark:hover:text-white border border-gray-300 dark:border-gray-600 rounded-lg hover:bg-gray-50 dark:hover:bg-gray-700"
+              >
+                Keep Current
+              </button>
+              <button
+                onClick={confirmProblemOverride}
+                className="px-4 py-2 bg-amber-600 text-white rounded-lg hover:bg-amber-700 flex items-center space-x-2"
+              >
+                <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15" />
+                </svg>
+                <span>Apply Revision</span>
+              </button>
+            </div>
+          </div>
+        </div>
       )}
 
       {/* Validation Modal */}

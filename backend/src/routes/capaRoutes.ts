@@ -9,6 +9,7 @@ import { requireMinimumRole, requireRoles, requirePrivilege } from '../middlewar
 import { UserRole, ActionStatus, ActionType, ActionPriority } from '@prisma/client';
 import { prisma } from '../utils/prisma';
 import { ValidationError } from '../middleware/errorHandler';
+import { v4 as uuidv4 } from 'uuid';
 import { 
   analyzeActionQuality, 
   detectWeakActions,
@@ -337,6 +338,8 @@ router.post('/', requirePrivilege('capa.create'), async (req: AuthRequest, res: 
 
     const newAction = await prisma.cAPAction.create({
       data: {
+        id: uuidv4(),
+        updatedAt: new Date(),
         rcaAnalysisId,
         actionType: actionType as ActionType,
         title,
@@ -640,6 +643,7 @@ router.patch('/:id/status', async (req: AuthRequest, res: Response) => {
       }),
       prisma.cAPAuditLog.create({
         data: {
+          id: uuidv4(),
           capActionId: id,
           action: `STATUS_CHANGE`,
           previousStatus: existingAction.status,
@@ -975,6 +979,7 @@ router.post(
       // Create audit log entry for effectiveness review
       await prisma.cAPAuditLog.create({
         data: {
+          id: uuidv4(),
           capActionId: id,
           action: 'EFFECTIVENESS_REVIEW',
           previousStatus,
@@ -1257,6 +1262,8 @@ router.post(
 
         const action = await prisma.cAPAction.create({
           data: {
+            id: uuidv4(),
+            updatedAt: new Date(),
             rcaAnalysisId: rcaId,
             actionType: getActionType(actionItem.Category),
             title: actionItem.action.substring(0, 200), // Truncate if too long

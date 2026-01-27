@@ -1,6 +1,6 @@
 'use client';
 
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useCallback } from 'react';
 import { useParams, useRouter } from 'next/navigation';
 import Link from 'next/link';
 import Image from 'next/image';
@@ -241,6 +241,54 @@ interface Incident {
   dateTimeReturnedToWork?: string;
   dateIncidentReported?: string;
   dateInjuryKnownWorkRelated?: string;
+  
+  // ============ FMIR LINKED DATA ============
+  fmirReportId?: string | null;
+  FMIRReport?: {
+    id: string;
+    reportNumber: string;
+    status: string;
+    productName?: string;
+    productItemNumber?: string;
+    productCodeBatchLot?: string;
+    foreignMaterialDescription?: string;
+    foreignMaterialSize?: string;
+    foreignMaterialHardness?: string;
+    causeIdentification?: string;
+    possibleSource?: string;
+    howWhyOccurred?: string;
+    correctiveAction?: string;
+    verificationActions?: string;
+    incidentDate?: string;
+    incidentTime?: string;
+    department?: string;
+    createdAt: string;
+    submittedAt?: string;
+    Facility?: { id: string; name: string };
+    FMIREvidence?: Array<{
+      id: string;
+      fileName: string;
+      type: string;
+      filePath: string;
+      fileSize?: number;
+      mimeType: string;
+      description?: string;
+      uploadedAt: string;
+    }>;
+    FMIRAIValidation?: {
+      id: string;
+      complianceScore: number;
+      overallCompliance: string;
+      summary?: string;
+      aiExplanation?: string;
+      fieldAnalysis?: any;
+      evidenceAnalysis?: any;
+      causeAnalysis?: any;
+      correctiveActionAnalysis?: any;
+      productHoldAnalysis?: any;
+    } | null;
+    User_ForeignMaterialIncident_createdByIdToUser?: { id: string; firstName: string; lastName: string; email: string };
+  } | null;
 }
 
 export default function IncidentDetailPage() {
@@ -262,7 +310,7 @@ export default function IncidentDetailPage() {
   const shouldShowAccessDenied = !privilegesLoading && !canViewIncident;
 
   // WebSocket for team collaboration
-  const { connect, isConnected, joinIncident, leaveIncident, onlineUsers, onParticipantsUpdated, onParticipantRoleUpdated, onInvitationDeclined, onVisibilityChanged } = useWebSocket();
+  const { connect, isConnected, joinIncident, leaveIncident, onlineUsers, onParticipantsUpdated, onParticipantRoleUpdated, onInvitationDeclined, onVisibilityChanged, onRCACreated, onRCAMethodologyAnalysisStarted, onRCAMethodologyAnalysisComplete, onRCAModalState, emitRCAModalState } = useWebSocket();
 
   const [incident, setIncident] = useState<Incident | null>(null);
   const [loading, setLoading] = useState(true);
@@ -274,6 +322,27 @@ export default function IncidentDetailPage() {
   const [changingVisibility, setChangingVisibility] = useState(false);
   const [deletingEvidenceId, setDeletingEvidenceId] = useState<string | null>(null);
   const [regeneratingAI, setRegeneratingAI] = useState(false);
+  
+  // AI Methodology Analysis State
+  const [analyzingMethodology, setAnalyzingMethodology] = useState(false);
+  const [methodologyRecommendation, setMethodologyRecommendation] = useState<{
+    recommendedMethod: 'FIVE_WHYS' | 'FISHBONE';
+    reason: string;
+    confidence: number;
+    alternativeMethod?: 'FIVE_WHYS' | 'FISHBONE';
+    alternativeReason?: string;
+    factors: {
+      complexity: 'low' | 'medium' | 'high';
+      recurrence: boolean;
+      hasMultipleCauses: boolean;
+      evidenceQuality: string;
+    };
+    analyzedBy?: { id: string; firstName: string; lastName: string };
+    analyzedAt?: string;
+  } | null>(null);
+  
+  // Team members viewing the Start RCA modal
+  const [teamViewingModal, setTeamViewingModal] = useState<{ id: string; name: string; action: string }[]>([]);
   
   // AI Regeneration Modal State
   const [aiModalOpen, setAiModalOpen] = useState(false);
@@ -297,6 +366,10 @@ export default function IncidentDetailPage() {
   
   // Workplace Safety tab state
   const [activeWsTab, setActiveWsTab] = useState<'incident' | 'investigation'>('incident');
+  
+  // FMIR Evidence media URLs - store blob URLs for authenticated file access
+  const [fmirEvidenceUrls, setFmirEvidenceUrls] = useState<Record<string, string>>({});
+  const [loadingFmirEvidence, setLoadingFmirEvidence] = useState(false);
 
   // Check if current user is the incident owner
   const isOwner = Boolean(user?.id && incident?.User_Incident_createdByIdToUser?.id === user.id);
@@ -435,6 +508,86 @@ export default function IncidentDetailPage() {
     return unsubscribe;
   }, [incidentId, isOwner, onVisibilityChanged]);
 
+  // Listen for RCA created events (real-time notification for team members)
+  useEffect(() => {
+    const unsubscribe = onRCACreated((data) => {
+      if (data.incidentId === incidentId) {
+        // Refetch incident to get updated RCA status
+        fetchIncident();
+      }
+    });
+    return unsubscribe;
+  }, [incidentId, onRCACreated]);
+
+  // Listen for RCA modal state changes (real-time team sync)
+  useEffect(() => {
+    const unsubscribe = onRCAModalState((data) => {
+      if (data.incidentId === incidentId && data.userId !== user?.id) {
+        // Update team viewing modal list
+        setTeamViewingModal(prev => {
+          const existing = prev.find(t => t.id === data.userId);
+          if (data.action === 'closed') {
+            return prev.filter(t => t.id !== data.userId);
+          }
+          if (existing) {
+            return prev.map(t => t.id === data.userId ? { ...t, action: data.action } : t);
+          }
+          return [...prev, { id: data.userId, name: data.userName, action: data.action }];
+        });
+
+        // Sync method selection
+        if (data.action === 'method-selected' && data.selectedMethod) {
+          setSelectedMethod(data.selectedMethod as 'FIVE_WHYS' | 'FISHBONE');
+        }
+        
+        // Sync visibility selection
+        if (data.action === 'visibility-changed' && data.visibility) {
+          setRcaVisibility(data.visibility as 'PRIVATE' | 'TEAM' | 'PUBLIC');
+        }
+        
+        // Open modal if someone else opened it
+        if (data.action === 'opened' && !showStartRCA) {
+          setShowStartRCA(true);
+        }
+      }
+    });
+    return unsubscribe;
+  }, [incidentId, user?.id, onRCAModalState, showStartRCA]);
+
+  // Listen for RCA methodology analysis started
+  useEffect(() => {
+    const unsubscribe = onRCAMethodologyAnalysisStarted((data) => {
+      if (data.incidentId === incidentId && data.analyzedBy?.id !== user?.id) {
+        setAnalyzingMethodology(true);
+        setTeamViewingModal(prev => {
+          const existing = prev.find(t => t.id === data.analyzedBy.id);
+          if (existing) {
+            return prev.map(t => t.id === data.analyzedBy.id ? { ...t, action: 'analyzing' } : t);
+          }
+          return [...prev, { id: data.analyzedBy.id, name: `${data.analyzedBy.firstName} ${data.analyzedBy.lastName}`, action: 'analyzing' }];
+        });
+      }
+    });
+    return unsubscribe;
+  }, [incidentId, user?.id, onRCAMethodologyAnalysisStarted]);
+
+  // Listen for RCA methodology analysis complete
+  useEffect(() => {
+    const unsubscribe = onRCAMethodologyAnalysisComplete((data) => {
+      if (data.incidentId === incidentId) {
+        setAnalyzingMethodology(false);
+        if (data.recommendation) {
+          setMethodologyRecommendation(data.recommendation);
+          // Auto-select the recommended method
+          if (data.recommendation.recommendedMethod) {
+            setSelectedMethod(data.recommendation.recommendedMethod);
+          }
+        }
+      }
+    });
+    return unsubscribe;
+  }, [incidentId, onRCAMethodologyAnalysisComplete]);
+
   useEffect(() => {
     fetchIncident();
   }, [incidentId]);
@@ -447,6 +600,69 @@ export default function IncidentDetailPage() {
       setError(err.response?.data?.error || 'Failed to load incident');
     } finally {
       setLoading(false);
+    }
+  };
+
+  // Load FMIR evidence media with authentication (Firebase Storage files need to be fetched via backend)
+  const loadFmirEvidenceMedia = useCallback(async (fmirId: string, evidenceId: string, type: string) => {
+    if (type !== 'PHOTO' && type !== 'VIDEO') return;
+    if (fmirEvidenceUrls[evidenceId]) return; // Already loaded
+    
+    try {
+      const response = await api.get(`/fmir/${fmirId}/evidence/${evidenceId}/download`, {
+        responseType: 'blob',
+      });
+      
+      const blobUrl = URL.createObjectURL(response.data);
+      setFmirEvidenceUrls(prev => ({ ...prev, [evidenceId]: blobUrl }));
+    } catch (err) {
+      console.error('Error loading FMIR evidence media:', err);
+    }
+  }, [fmirEvidenceUrls]);
+
+  // Load FMIR evidence media when incident with FMIR data is loaded
+  useEffect(() => {
+    if (incident?.FMIRReport?.FMIREvidence && incident.FMIRReport.FMIREvidence.length > 0) {
+      setLoadingFmirEvidence(true);
+      const fmirId = incident.FMIRReport.id;
+      
+      // Load all image/video evidence
+      const mediaEvidence = incident.FMIRReport.FMIREvidence.filter(
+        (e) => e.mimeType?.startsWith('image/') || e.mimeType?.startsWith('video/')
+      );
+      
+      Promise.all(
+        mediaEvidence.map((e) => loadFmirEvidenceMedia(fmirId, e.id, e.type))
+      ).finally(() => {
+        setLoadingFmirEvidence(false);
+      });
+    }
+
+    // Cleanup blob URLs when component unmounts
+    return () => {
+      Object.values(fmirEvidenceUrls).forEach(url => {
+        URL.revokeObjectURL(url);
+      });
+    };
+  }, [incident?.FMIRReport?.id, incident?.FMIRReport?.FMIREvidence]);
+
+  // Handle FMIR evidence download
+  const handleFmirEvidenceDownload = async (fmirId: string, evidenceId: string, fileName: string) => {
+    try {
+      const response = await api.get(`/fmir/${fmirId}/evidence/${evidenceId}/download`, {
+        responseType: 'blob',
+      });
+      
+      const blobUrl = URL.createObjectURL(response.data);
+      const link = document.createElement('a');
+      link.href = blobUrl;
+      link.download = fileName;
+      document.body.appendChild(link);
+      link.click();
+      document.body.removeChild(link);
+      URL.revokeObjectURL(blobUrl);
+    } catch (err) {
+      console.error('Error downloading FMIR evidence:', err);
     }
   };
 
@@ -544,6 +760,35 @@ export default function IncidentDetailPage() {
     return incident.IncidentParticipant?.filter(
       p => p.isActive && p.userId !== incident.User_Incident_createdByIdToUser.id
     ) || [];
+  };
+
+  // Handle AI methodology analysis - thorough analysis to recommend best RCA method
+  const handleAnalyzeMethodology = async () => {
+    if (!incident) return;
+    
+    setAnalyzingMethodology(true);
+    setMethodologyRecommendation(null);
+    
+    // Emit WebSocket event for team sync
+    emitRCAModalState(incidentId, 'analyzing');
+    
+    try {
+      const response = await api.post(`/rca/incidents/${incidentId}/analyze-methodology`);
+      
+      if (response.data.success && response.data.data.recommendation) {
+        const rec = response.data.data.recommendation;
+        setMethodologyRecommendation(rec);
+        // Auto-select the recommended method
+        setSelectedMethod(rec.recommendedMethod);
+        // Emit method selection for team sync
+        emitRCAModalState(incidentId, 'method-selected', { selectedMethod: rec.recommendedMethod });
+      }
+    } catch (err: any) {
+      console.error('Failed to analyze methodology:', err);
+      handlePrivilegeError(err, showAccessDenied, setError, 'Analyze Methodology');
+    } finally {
+      setAnalyzingMethodology(false);
+    }
   };
 
   const handleStartRCA = async () => {
@@ -1197,6 +1442,310 @@ export default function IncidentDetailPage() {
                 </div>
               )}
             </div>
+
+            {/* FMIR Report Card - Displayed when incident is linked to an FMIR */}
+            {incident.FMIRReport && (
+              <div className="bg-gradient-to-br from-amber-50 to-orange-50 dark:from-amber-900/20 dark:to-orange-900/20 rounded-lg shadow p-6 border border-amber-200 dark:border-amber-800">
+                <div className="flex items-center justify-between mb-4">
+                  <div className="flex items-center space-x-2">
+                    <div className="w-8 h-8 bg-amber-100 dark:bg-amber-800 rounded-full flex items-center justify-center">
+                      <svg className="w-5 h-5 text-amber-600 dark:text-amber-400" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" />
+                      </svg>
+                    </div>
+                    <h2 className="text-lg font-semibold text-amber-900 dark:text-amber-100">
+                      Foreign Material Incident Report
+                    </h2>
+                  </div>
+                  <Link
+                    href={`/fmir/${incident.FMIRReport.id}`}
+                    className="text-xs text-amber-600 dark:text-amber-400 hover:text-amber-800 dark:hover:text-amber-200 flex items-center gap-1 bg-amber-100 dark:bg-amber-900/50 px-3 py-1.5 rounded-md"
+                  >
+                    <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M10 6H6a2 2 0 00-2 2v10a2 2 0 002 2h10a2 2 0 002-2v-4M14 4h6m0 0v6m0-6L10 14" />
+                    </svg>
+                    View Full FMIR
+                  </Link>
+                </div>
+
+                {/* FMIR Quick Info */}
+                <div className="grid grid-cols-2 md:grid-cols-4 gap-4 mb-4">
+                  <div className="bg-white/50 dark:bg-gray-800/50 rounded-lg p-3">
+                    <p className="text-xs text-amber-600 dark:text-amber-400 font-medium mb-1">Report Number</p>
+                    <p className="text-sm font-semibold text-amber-900 dark:text-amber-100">{incident.FMIRReport.reportNumber}</p>
+                  </div>
+                  {incident.FMIRReport.productName && (
+                    <div className="bg-white/50 dark:bg-gray-800/50 rounded-lg p-3">
+                      <p className="text-xs text-amber-600 dark:text-amber-400 font-medium mb-1">Product</p>
+                      <p className="text-sm font-semibold text-amber-900 dark:text-amber-100">{incident.FMIRReport.productName}</p>
+                    </div>
+                  )}
+                  {incident.FMIRReport.productCodeBatchLot && (
+                    <div className="bg-white/50 dark:bg-gray-800/50 rounded-lg p-3">
+                      <p className="text-xs text-amber-600 dark:text-amber-400 font-medium mb-1">Batch/Lot</p>
+                      <p className="text-sm font-semibold text-amber-900 dark:text-amber-100">{incident.FMIRReport.productCodeBatchLot}</p>
+                    </div>
+                  )}
+                  {incident.FMIRReport.department && (
+                    <div className="bg-white/50 dark:bg-gray-800/50 rounded-lg p-3">
+                      <p className="text-xs text-amber-600 dark:text-amber-400 font-medium mb-1">Department</p>
+                      <p className="text-sm font-semibold text-amber-900 dark:text-amber-100">{incident.FMIRReport.department}</p>
+                    </div>
+                  )}
+                </div>
+
+                {/* Foreign Material Details */}
+                {incident.FMIRReport.foreignMaterialDescription && (
+                  <div className="mb-4">
+                    <h3 className="text-sm font-semibold text-amber-800 dark:text-amber-200 mb-2 flex items-center gap-2">
+                      <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z" />
+                      </svg>
+                      Foreign Material Description
+                    </h3>
+                    <p className="text-sm text-amber-700 dark:text-amber-300 leading-relaxed bg-white/30 dark:bg-gray-800/30 p-3 rounded-lg">
+                      {incident.FMIRReport.foreignMaterialDescription}
+                      {incident.FMIRReport.foreignMaterialSize && (
+                        <span className="ml-2 text-xs text-amber-600 dark:text-amber-400">(Size: {incident.FMIRReport.foreignMaterialSize})</span>
+                      )}
+                    </p>
+                  </div>
+                )}
+
+                {/* Cause & Source */}
+                {(incident.FMIRReport.possibleSource || incident.FMIRReport.howWhyOccurred) && (
+                  <div className="mb-4">
+                    <h3 className="text-sm font-semibold text-amber-800 dark:text-amber-200 mb-2 flex items-center gap-2">
+                      <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M8.228 9c.549-1.165 2.03-2 3.772-2 2.21 0 4 1.343 4 3 0 1.4-1.278 2.575-3.006 2.907-.542.104-.994.54-.994 1.093m0 3h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
+                      </svg>
+                      Cause Identification
+                    </h3>
+                    <div className="bg-white/30 dark:bg-gray-800/30 p-3 rounded-lg space-y-2">
+                      {incident.FMIRReport.possibleSource && (
+                        <p className="text-sm text-amber-700 dark:text-amber-300">
+                          <span className="font-medium">Possible Source:</span> {incident.FMIRReport.possibleSource}
+                        </p>
+                      )}
+                      {incident.FMIRReport.howWhyOccurred && (
+                        <p className="text-sm text-amber-700 dark:text-amber-300">
+                          <span className="font-medium">How/Why:</span> {incident.FMIRReport.howWhyOccurred}
+                        </p>
+                      )}
+                    </div>
+                  </div>
+                )}
+
+                {/* Corrective Action */}
+                {incident.FMIRReport.correctiveAction && (
+                  <div className="mb-4">
+                    <h3 className="text-sm font-semibold text-amber-800 dark:text-amber-200 mb-2 flex items-center gap-2">
+                      <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z" />
+                      </svg>
+                      Corrective Action Taken
+                    </h3>
+                    <p className="text-sm text-amber-700 dark:text-amber-300 leading-relaxed bg-white/30 dark:bg-gray-800/30 p-3 rounded-lg">
+                      {incident.FMIRReport.correctiveAction}
+                    </p>
+                  </div>
+                )}
+
+                {/* FMIR AI Validation Summary */}
+                {incident.FMIRReport.FMIRAIValidation && (
+                  <div className="mb-4 p-4 bg-amber-100/50 dark:bg-amber-900/30 rounded-lg border border-amber-300 dark:border-amber-700">
+                    <h3 className="text-sm font-semibold text-amber-800 dark:text-amber-200 mb-2 flex items-center gap-2">
+                      <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9.663 17h4.673M12 3v1m6.364 1.636l-.707.707M21 12h-1M4 12H3m3.343-5.657l-.707-.707m2.828 9.9a5 5 0 117.072 0l-.548.547A3.374 3.374 0 0014 18.469V19a2 2 0 11-4 0v-.531c0-.895-.356-1.754-.988-2.386l-.548-.547z" />
+                      </svg>
+                      AI Compliance Validation
+                      <span className={`ml-2 px-2 py-0.5 rounded text-xs font-medium ${
+                        incident.FMIRReport.FMIRAIValidation.overallCompliance === 'COMPLIANT' 
+                          ? 'bg-green-100 text-green-700 dark:bg-green-900/50 dark:text-green-300'
+                          : incident.FMIRReport.FMIRAIValidation.overallCompliance === 'PARTIALLY_COMPLIANT'
+                          ? 'bg-yellow-100 text-yellow-700 dark:bg-yellow-900/50 dark:text-yellow-300'
+                          : 'bg-red-100 text-red-700 dark:bg-red-900/50 dark:text-red-300'
+                      }`}>
+                        {incident.FMIRReport.FMIRAIValidation.complianceScore}% - {incident.FMIRReport.FMIRAIValidation.overallCompliance?.replace('_', ' ')}
+                      </span>
+                    </h3>
+                    {incident.FMIRReport.FMIRAIValidation.summary && (
+                      <p className="text-sm text-amber-700 dark:text-amber-300 leading-relaxed">
+                        {incident.FMIRReport.FMIRAIValidation.summary}
+                      </p>
+                    )}
+                  </div>
+                )}
+
+                {/* FMIR Evidence Gallery */}
+                {incident.FMIRReport.FMIREvidence && incident.FMIRReport.FMIREvidence.length > 0 && (
+                  <div className="mt-6 pt-6 border-t border-amber-200 dark:border-amber-800">
+                    <h3 className="text-base font-semibold text-amber-900 dark:text-amber-100 mb-4 flex items-center gap-2">
+                      <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 16l4.586-4.586a2 2 0 012.828 0L16 16m-2-2l1.586-1.586a2 2 0 012.828 0L20 14m-6-6h.01M6 20h12a2 2 0 002-2V6a2 2 0 00-2-2H6a2 2 0 00-2 2v12a2 2 0 002 2z" />
+                      </svg>
+                      Evidence Attachments
+                      <span className="ml-2 px-2 py-0.5 bg-amber-200 dark:bg-amber-800 text-amber-800 dark:text-amber-200 text-xs font-medium rounded-full">
+                        {incident.FMIRReport.FMIREvidence.length} file{incident.FMIRReport.FMIREvidence.length !== 1 ? 's' : ''}
+                      </span>
+                      {loadingFmirEvidence && (
+                        <span className="ml-2 text-xs text-amber-600 dark:text-amber-400 flex items-center gap-1">
+                          <svg className="animate-spin w-3 h-3" viewBox="0 0 24 24" fill="none">
+                            <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"/>
+                            <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z"/>
+                          </svg>
+                          Loading images...
+                        </span>
+                      )}
+                    </h3>
+                    <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
+                      {incident.FMIRReport.FMIREvidence.map((evidence: any, index: number) => {
+                        const isImage = evidence.mimeType?.startsWith('image/');
+                        const isVideo = evidence.mimeType?.startsWith('video/');
+                        const mediaUrl = fmirEvidenceUrls[evidence.id];
+                        
+                        return (
+                          <div
+                            key={evidence.id}
+                            className="group relative bg-white dark:bg-gray-800 rounded-xl overflow-hidden shadow-md hover:shadow-xl transition-all duration-300 border border-amber-200 dark:border-amber-700 hover:border-amber-400 dark:hover:border-amber-500"
+                          >
+                            {/* Image/Video Preview */}
+                            {isImage ? (
+                              <div 
+                                className="relative aspect-video bg-gray-100 dark:bg-gray-700 overflow-hidden cursor-pointer"
+                                onClick={() => {
+                                  if (mediaUrl) {
+                                    window.open(mediaUrl, '_blank');
+                                  } else {
+                                    handleFmirEvidenceDownload(incident.FMIRReport!.id, evidence.id, evidence.fileName);
+                                  }
+                                }}
+                              >
+                                {mediaUrl ? (
+                                  <img
+                                    src={mediaUrl}
+                                    alt={evidence.fileName}
+                                    className="w-full h-full object-cover group-hover:scale-105 transition-transform duration-300"
+                                  />
+                                ) : (
+                                  <div className="absolute inset-0 flex items-center justify-center">
+                                    <svg className="animate-spin w-8 h-8 text-amber-500" viewBox="0 0 24 24" fill="none">
+                                      <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"/>
+                                      <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z"/>
+                                    </svg>
+                                  </div>
+                                )}
+                                {/* Hover overlay */}
+                                <div className="absolute inset-0 bg-gradient-to-t from-black/60 via-transparent to-transparent opacity-0 group-hover:opacity-100 transition-opacity duration-300 flex items-end justify-center pb-4">
+                                  <span className="text-white text-sm font-medium flex items-center gap-1.5">
+                                    <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 12a3 3 0 11-6 0 3 3 0 016 0z" />
+                                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M2.458 12C3.732 7.943 7.523 5 12 5c4.478 0 8.268 2.943 9.542 7-1.274 4.057-5.064 7-9.542 7-4.477 0-8.268-2.943-9.542-7z" />
+                                    </svg>
+                                    View Full Size
+                                  </span>
+                                </div>
+                                {/* Evidence number badge */}
+                                <div className="absolute top-2 left-2 px-2 py-1 bg-amber-500 text-white text-xs font-bold rounded-md shadow">
+                                  #{index + 1}
+                                </div>
+                              </div>
+                            ) : isVideo ? (
+                              <div 
+                                className="relative aspect-video bg-gray-100 dark:bg-gray-700 overflow-hidden cursor-pointer"
+                                onClick={() => {
+                                  if (mediaUrl) {
+                                    window.open(mediaUrl, '_blank');
+                                  } else {
+                                    handleFmirEvidenceDownload(incident.FMIRReport!.id, evidence.id, evidence.fileName);
+                                  }
+                                }}
+                              >
+                                {mediaUrl ? (
+                                  <video
+                                    src={mediaUrl}
+                                    className="w-full h-full object-cover"
+                                    controls={false}
+                                    muted
+                                  />
+                                ) : (
+                                  <div className="absolute inset-0 flex items-center justify-center">
+                                    <svg className="animate-spin w-8 h-8 text-amber-500" viewBox="0 0 24 24" fill="none">
+                                      <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"/>
+                                      <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z"/>
+                                    </svg>
+                                  </div>
+                                )}
+                                {/* Video play icon overlay */}
+                                <div className="absolute inset-0 flex items-center justify-center bg-black/30 group-hover:bg-black/40 transition-colors">
+                                  <div className="w-12 h-12 bg-white/90 rounded-full flex items-center justify-center">
+                                    <svg className="w-6 h-6 text-amber-600 ml-1" fill="currentColor" viewBox="0 0 24 24">
+                                      <path d="M8 5v14l11-7z"/>
+                                    </svg>
+                                  </div>
+                                </div>
+                                {/* Evidence number badge */}
+                                <div className="absolute top-2 left-2 px-2 py-1 bg-amber-500 text-white text-xs font-bold rounded-md shadow">
+                                  #{index + 1}
+                                </div>
+                              </div>
+                            ) : (
+                              /* Non-image/video file placeholder */
+                              <div 
+                                className="relative aspect-video bg-gradient-to-br from-gray-100 to-gray-200 dark:from-gray-700 dark:to-gray-800 flex items-center justify-center cursor-pointer"
+                                onClick={() => handleFmirEvidenceDownload(incident.FMIRReport!.id, evidence.id, evidence.fileName)}
+                              >
+                                <div className="text-center">
+                                  <svg className="w-12 h-12 text-amber-500 mx-auto mb-2" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" />
+                                  </svg>
+                                  <span className="text-xs text-gray-500 dark:text-gray-400 uppercase font-medium">
+                                    {evidence.fileName?.split('.').pop() || 'FILE'}
+                                  </span>
+                                </div>
+                                {/* Evidence number badge */}
+                                <div className="absolute top-2 left-2 px-2 py-1 bg-amber-500 text-white text-xs font-bold rounded-md shadow">
+                                  #{index + 1}
+                                </div>
+                              </div>
+                            )}
+                            
+                            {/* File info footer */}
+                            <div className="p-3 bg-white dark:bg-gray-800">
+                              <p className="text-sm font-medium text-gray-900 dark:text-gray-100 truncate group-hover:text-amber-600 dark:group-hover:text-amber-400 transition-colors">
+                                {evidence.fileName}
+                              </p>
+                              {evidence.description && (
+                                <p className="text-xs text-gray-500 dark:text-gray-400 mt-1 line-clamp-2">
+                                  {evidence.description}
+                                </p>
+                              )}
+                              <div className="flex items-center justify-between mt-2 pt-2 border-t border-gray-100 dark:border-gray-700">
+                                <span className="text-xs text-gray-400 dark:text-gray-500">
+                                  {evidence.fileSize ? `${(evidence.fileSize / 1024).toFixed(1)} KB` : evidence.type || 'File'}
+                                </span>
+                                <button
+                                  onClick={(e) => {
+                                    e.stopPropagation();
+                                    handleFmirEvidenceDownload(incident.FMIRReport!.id, evidence.id, evidence.fileName);
+                                  }}
+                                  className="text-xs text-amber-600 dark:text-amber-400 flex items-center gap-1 hover:text-amber-700 dark:hover:text-amber-300 transition-colors"
+                                >
+                                  <svg className="w-3 h-3" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4" />
+                                  </svg>
+                                  Download
+                                </button>
+                              </div>
+                            </div>
+                          </div>
+                        );
+                      })}
+                    </div>
+                  </div>
+                )}
+              </div>
+            )}
 
             {/* AI Insights Card - Key Findings & Investigation Guidance */}
             {incident.aiAnalysisData && ((incident.aiAnalysisData.keyFindings?.length ?? 0) > 0 || (incident.aiAnalysisData.investigationGuidance?.length ?? 0) > 0 || incident.aiAnalysisData.evidenceSummary) && (
@@ -2799,7 +3348,12 @@ export default function IncidentDetailPage() {
                         if (incident?.aiAnalysisData?.recommendedRCAMethodology?.primary) {
                           setSelectedMethod(incident.aiAnalysisData.recommendedRCAMethodology.primary as 'FIVE_WHYS' | 'FISHBONE');
                         }
+                        // Reset analysis state
+                        setMethodologyRecommendation(null);
+                        setTeamViewingModal([]);
                         setShowStartRCA(true);
+                        // Emit WebSocket event for team sync
+                        emitRCAModalState(incidentId, 'opened');
                       }}
                       className="mt-4 w-full px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition-colors"
                     >
@@ -2914,12 +3468,142 @@ export default function IncidentDetailPage() {
       {showStartRCA && (
         <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50">
           <div className="bg-white dark:bg-gray-800 rounded-lg shadow-xl max-w-lg w-full mx-4 p-6 max-h-[90vh] overflow-y-auto">
-            <h3 className="text-lg font-semibold text-gray-900 dark:text-white mb-4">
-              Start Root Cause Analysis
-            </h3>
+            <div className="flex items-center justify-between mb-4">
+              <h3 className="text-lg font-semibold text-gray-900 dark:text-white">
+                Start Root Cause Analysis
+              </h3>
+              {/* Team members viewing this modal indicator */}
+              {teamViewingModal.length > 0 && (
+                <div className="flex items-center gap-1">
+                  <span className="text-xs text-gray-500 dark:text-gray-400">👥</span>
+                  <div className="flex -space-x-2">
+                    {teamViewingModal.slice(0, 3).map((member) => (
+                      <div
+                        key={member.id}
+                        className={`w-6 h-6 rounded-full flex items-center justify-center text-[10px] font-medium border-2 border-white dark:border-gray-800 ${
+                          member.action === 'analyzing' ? 'bg-purple-500 text-white animate-pulse' : 'bg-blue-500 text-white'
+                        }`}
+                        title={`${member.name} ${member.action === 'analyzing' ? 'is analyzing...' : 'is viewing'}`}
+                      >
+                        {member.name.split(' ').map(n => n[0]).join('').toUpperCase().slice(0, 2)}
+                      </div>
+                    ))}
+                    {teamViewingModal.length > 3 && (
+                      <div className="w-6 h-6 rounded-full bg-gray-500 text-white flex items-center justify-center text-[10px] font-medium border-2 border-white dark:border-gray-800">
+                        +{teamViewingModal.length - 3}
+                      </div>
+                    )}
+                  </div>
+                </div>
+              )}
+            </div>
 
-            {/* AI Recommendation Banner */}
-            {incident?.aiAnalysisData?.recommendedRCAMethodology && (
+            {/* AI Analysis Button - Thorough Analysis */}
+            <div className="mb-4">
+              <button
+                onClick={handleAnalyzeMethodology}
+                disabled={analyzingMethodology}
+                className={`w-full p-3 border-2 border-dashed rounded-lg transition-all ${
+                  analyzingMethodology
+                    ? 'border-purple-400 bg-purple-50 dark:bg-purple-900/20 cursor-wait'
+                    : 'border-purple-300 dark:border-purple-600 hover:border-purple-500 hover:bg-purple-50 dark:hover:bg-purple-900/20'
+                }`}
+              >
+                <div className="flex items-center justify-center gap-2">
+                  {analyzingMethodology ? (
+                    <>
+                      <svg className="w-5 h-5 text-purple-600 dark:text-purple-400 animate-spin" fill="none" viewBox="0 0 24 24">
+                        <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"></circle>
+                        <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
+                      </svg>
+                      <span className="text-sm font-medium text-purple-700 dark:text-purple-300">
+                        AI Analyzing Incident & Evidence...
+                      </span>
+                    </>
+                  ) : (
+                    <>
+                      <span className="text-xl">🧠</span>
+                      <span className="text-sm font-medium text-purple-700 dark:text-purple-300">
+                        AI Analyze & Recommend Methodology
+                      </span>
+                    </>
+                  )}
+                </div>
+                <p className="text-xs text-gray-500 dark:text-gray-400 mt-1">
+                  Thoroughly analyze incident details, evidence, and context to recommend the best RCA method
+                </p>
+              </button>
+            </div>
+
+            {/* AI Recommendation Result */}
+            {methodologyRecommendation && (
+              <div className="mb-4 p-4 bg-gradient-to-r from-purple-50 to-blue-50 dark:from-purple-900/30 dark:to-blue-900/30 border border-purple-200 dark:border-purple-700 rounded-lg">
+                <div className="flex items-start gap-3">
+                  <span className="text-2xl">🤖</span>
+                  <div className="flex-1">
+                    <div className="flex items-center gap-2 mb-2">
+                      <span className="font-semibold text-gray-900 dark:text-white">
+                        AI Recommends: {methodologyRecommendation.recommendedMethod === 'FISHBONE' ? 'Fishbone Diagram' : '5 Whys'}
+                      </span>
+                      <span className={`px-2 py-0.5 text-xs font-medium rounded-full ${
+                        methodologyRecommendation.confidence >= 80 
+                          ? 'bg-green-100 dark:bg-green-800 text-green-700 dark:text-green-200'
+                          : methodologyRecommendation.confidence >= 60
+                          ? 'bg-yellow-100 dark:bg-yellow-800 text-yellow-700 dark:text-yellow-200'
+                          : 'bg-gray-100 dark:bg-gray-700 text-gray-700 dark:text-gray-300'
+                      }`}>
+                        {Math.round(methodologyRecommendation.confidence * (methodologyRecommendation.confidence <= 1 ? 100 : 1))}% confidence
+                      </span>
+                    </div>
+                    <p className="text-sm text-gray-700 dark:text-gray-300 mb-3">
+                      {methodologyRecommendation.reason}
+                    </p>
+                    
+                    {/* Analysis Factors */}
+                    <div className="flex flex-wrap gap-2 mb-2">
+                      <span className={`px-2 py-1 text-xs rounded-full ${
+                        methodologyRecommendation.factors.complexity === 'high' 
+                          ? 'bg-red-100 dark:bg-red-800 text-red-700 dark:text-red-200'
+                          : methodologyRecommendation.factors.complexity === 'medium'
+                          ? 'bg-yellow-100 dark:bg-yellow-800 text-yellow-700 dark:text-yellow-200'
+                          : 'bg-green-100 dark:bg-green-800 text-green-700 dark:text-green-200'
+                      }`}>
+                        {methodologyRecommendation.factors.complexity} complexity
+                      </span>
+                      {methodologyRecommendation.factors.recurrence && (
+                        <span className="px-2 py-1 text-xs rounded-full bg-orange-100 dark:bg-orange-800 text-orange-700 dark:text-orange-200">
+                          recurring issue
+                        </span>
+                      )}
+                      {methodologyRecommendation.factors.hasMultipleCauses && (
+                        <span className="px-2 py-1 text-xs rounded-full bg-blue-100 dark:bg-blue-800 text-blue-700 dark:text-blue-200">
+                          multiple causes
+                        </span>
+                      )}
+                    </div>
+
+                    {/* Alternative suggestion */}
+                    {methodologyRecommendation.alternativeMethod && methodologyRecommendation.alternativeReason && (
+                      <div className="mt-2 pt-2 border-t border-purple-200 dark:border-purple-600">
+                        <p className="text-xs text-gray-600 dark:text-gray-400">
+                          <span className="font-medium">Alternative:</span> {methodologyRecommendation.alternativeMethod === 'FISHBONE' ? 'Fishbone' : '5 Whys'} - {methodologyRecommendation.alternativeReason}
+                        </p>
+                      </div>
+                    )}
+                    
+                    {/* Analyzed by (for team sync) */}
+                    {methodologyRecommendation.analyzedBy && methodologyRecommendation.analyzedBy.id !== user?.id && (
+                      <p className="text-xs text-gray-500 dark:text-gray-400 mt-2">
+                        Analyzed by {methodologyRecommendation.analyzedBy.firstName} {methodologyRecommendation.analyzedBy.lastName}
+                      </p>
+                    )}
+                  </div>
+                </div>
+              </div>
+            )}
+
+            {/* Legacy AI Recommendation Banner (from incident creation) */}
+            {!methodologyRecommendation && incident?.aiAnalysisData?.recommendedRCAMethodology && (
               <div className="mb-4 p-3 bg-purple-50 dark:bg-purple-900/30 border border-purple-200 dark:border-purple-700 rounded-lg">
                 <div className="flex items-center gap-2 text-sm">
                   <span className="text-purple-600 dark:text-purple-400">🤖</span>
@@ -2930,17 +3614,26 @@ export default function IncidentDetailPage() {
                     ({incident.aiAnalysisData.recommendedRCAMethodology.confidence}% confidence)
                   </span>
                 </div>
+                {incident.aiAnalysisData.recommendedRCAMethodology.reason && (
+                  <p className="text-xs text-gray-600 dark:text-gray-400 mt-1 ml-6">
+                    {incident.aiAnalysisData.recommendedRCAMethodology.reason}
+                  </p>
+                )}
               </div>
             )}
 
             {/* RCA Method Selection */}
             <p className="text-sm font-medium text-gray-700 dark:text-gray-300 mb-3 flex items-center gap-2">
               <span>🔍</span> Choose Analysis Method
+              <span className="text-xs text-gray-400 dark:text-gray-500 font-normal">(You have the final decision)</span>
             </p>
 
             <div className="space-y-3 mb-6">
               <button
-                onClick={() => setSelectedMethod('FIVE_WHYS')}
+                onClick={() => {
+                  setSelectedMethod('FIVE_WHYS');
+                  emitRCAModalState(incidentId, 'method-selected', { selectedMethod: 'FIVE_WHYS' });
+                }}
                 className={`w-full p-3 border rounded-lg text-left transition-colors ${
                   selectedMethod === 'FIVE_WHYS'
                     ? 'border-purple-500 bg-purple-50 dark:bg-purple-900/30'
@@ -2954,7 +3647,7 @@ export default function IncidentDetailPage() {
                   <div className="flex-1">
                     <div className="flex items-center gap-2">
                       <p className="font-medium text-gray-900 dark:text-white text-sm">5 Whys</p>
-                      {incident?.aiAnalysisData?.recommendedRCAMethodology?.primary === 'FIVE_WHYS' && (
+                      {(methodologyRecommendation?.recommendedMethod === 'FIVE_WHYS' || (!methodologyRecommendation && incident?.aiAnalysisData?.recommendedRCAMethodology?.primary === 'FIVE_WHYS')) && (
                         <span className="px-1.5 py-0.5 text-[10px] font-medium bg-purple-200 dark:bg-purple-700 text-purple-700 dark:text-purple-200 rounded">
                           AI Recommended
                         </span>
@@ -2968,7 +3661,10 @@ export default function IncidentDetailPage() {
               </button>
 
               <button
-                onClick={() => setSelectedMethod('FISHBONE')}
+                onClick={() => {
+                  setSelectedMethod('FISHBONE');
+                  emitRCAModalState(incidentId, 'method-selected', { selectedMethod: 'FISHBONE' });
+                }}
                 className={`w-full p-3 border rounded-lg text-left transition-colors ${
                   selectedMethod === 'FISHBONE'
                     ? 'border-teal-500 bg-teal-50 dark:bg-teal-900/30'
@@ -2982,7 +3678,7 @@ export default function IncidentDetailPage() {
                   <div className="flex-1">
                     <div className="flex items-center gap-2">
                       <p className="font-medium text-gray-900 dark:text-white text-sm">Fishbone (Ishikawa)</p>
-                      {incident?.aiAnalysisData?.recommendedRCAMethodology?.primary === 'FISHBONE' && (
+                      {(methodologyRecommendation?.recommendedMethod === 'FISHBONE' || (!methodologyRecommendation && incident?.aiAnalysisData?.recommendedRCAMethodology?.primary === 'FISHBONE')) && (
                         <span className="px-1.5 py-0.5 text-[10px] font-medium bg-teal-200 dark:bg-teal-700 text-teal-700 dark:text-teal-200 rounded">
                           AI Recommended
                         </span>
@@ -2998,14 +3694,19 @@ export default function IncidentDetailPage() {
 
             <div className="flex justify-end space-x-3">
               <button
-                onClick={() => setShowStartRCA(false)}
+                onClick={() => {
+                  setShowStartRCA(false);
+                  setMethodologyRecommendation(null);
+                  setTeamViewingModal([]);
+                  emitRCAModalState(incidentId, 'closed');
+                }}
                 className="px-4 py-2 text-gray-600 dark:text-gray-300 hover:text-gray-800 dark:hover:text-white"
               >
                 Cancel
               </button>
               <button
                 onClick={handleStartRCA}
-                disabled={startingRCA}
+                disabled={startingRCA || analyzingMethodology}
                 className="px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 disabled:opacity-50"
               >
                 {startingRCA ? 'Starting...' : 'Start Analysis'}

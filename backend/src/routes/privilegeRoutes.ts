@@ -2,6 +2,7 @@ import { Router, Request, Response, NextFunction } from 'express';
 import { PrismaClient, UserRole, FeatureModule, PrivilegeAction } from '@prisma/client';
 import { authenticate, AuthRequest } from '../middleware/auth';
 import { websocketService } from '../services/websocketService';
+import { v4 as uuidv4 } from 'uuid';
 
 const router = Router();
 const prisma = new PrismaClient();
@@ -36,6 +37,7 @@ interface AuditLogParams {
 async function createAuditLog(params: AuditLogParams) {
   return prisma.privilegeAuditLog.create({
     data: {
+      id: uuidv4(),
       organizationId: params.organizationId,
       role: params.role,
       module: params.module,
@@ -1429,6 +1431,7 @@ router.put(
         updatedAt: new Date(),
       },
       create: {
+        id: uuidv4(),
         organizationId: userOrgId,
         role: role as UserRole,
         module: definition.module,
@@ -1437,6 +1440,7 @@ router.put(
         isEnabled,
         description: definition.description,
         createdById: userId,
+        updatedAt: new Date(),
       },
     });
 
@@ -1535,6 +1539,7 @@ router.put(
           updatedAt: new Date(),
         },
         create: {
+          id: uuidv4(),
           organizationId: userOrgId,
           role: role as UserRole,
           module: definition.module,
@@ -1543,6 +1548,7 @@ router.put(
           isEnabled,
           description: definition.description,
           createdById: userId,
+          updatedAt: new Date(),
         },
       });
 
@@ -1949,6 +1955,7 @@ router.post(
         updatedAt: new Date(),
       },
       create: {
+        id: uuidv4(),
         organizationId: userOrgId,
         role: auditLog.role,
         module: auditLog.module,
@@ -1957,6 +1964,7 @@ router.post(
         isEnabled: revertedValue,
         description: definition.description,
         createdById: userId,
+        updatedAt: new Date(),
       },
     });
 

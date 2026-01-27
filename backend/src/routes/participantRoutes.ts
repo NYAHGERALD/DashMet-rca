@@ -4,6 +4,7 @@ import { prisma } from '../utils/prisma';
 import { ValidationError, NotFoundError } from '../middleware/errorHandler';
 import { ParticipantRole } from '@prisma/client';
 import { websocketService } from '../services/websocketService';
+import { v4 as uuidv4 } from 'uuid';
 
 const router = Router();
 
@@ -198,12 +199,14 @@ router.post('/:incidentId', async (req, res) => {
       newUserIds.map((userId: string) =>
         prisma.incidentParticipant.create({
           data: {
+            id: uuidv4(),
             incidentId,
             userId,
             role: role as ParticipantRole,
             addedById: user.id,
             invitationStatus: 'PENDING',
             invitedAt: new Date(),
+            updatedAt: new Date(),
           },
           include: {
             User_IncidentParticipant_userIdToUser: {
@@ -242,6 +245,8 @@ router.post('/:incidentId', async (req, res) => {
     
     await prisma.chatMessage.create({
       data: {
+        id: uuidv4(),
+        updatedAt: new Date(),
         incidentId,
         userId: user.id,
         content: `${user.firstName} ${user.lastName} ${messagePrefix} ${addedNames} to the team (pending acceptance)`,
@@ -254,6 +259,7 @@ router.post('/:incidentId', async (req, res) => {
   if (allInvitedUserIds.length > 0) {
     await prisma.notification.createMany({
       data: allInvitedUserIds.map((userId: string) => ({
+        id: uuidv4(),
         type: 'INCIDENT_ASSIGNED' as const,
         title: 'Team Incident Invitation',
         message: `You have been invited to join the team for incident ${incident.incidentNumber}. Please accept or decline the invitation.`,
@@ -535,6 +541,8 @@ router.delete('/:incidentId/:userId', async (req, res) => {
   if (!chatArchived) {
     systemMessage = await prisma.chatMessage.create({
       data: {
+        id: uuidv4(),
+        updatedAt: new Date(),
         incidentId,
         userId: user.id,
         content: `${removedName} ${action} the team`,
@@ -876,6 +884,8 @@ router.post('/invitations/:incidentId/accept', async (req, res) => {
   // Create system message for acceptance
   await prisma.chatMessage.create({
     data: {
+      id: uuidv4(),
+      updatedAt: new Date(),
       incidentId,
       userId: user.id,
       content: `${user.firstName} ${user.lastName} has joined the team`,
@@ -887,6 +897,7 @@ router.post('/invitations/:incidentId/accept', async (req, res) => {
   if (invitation.Incident.createdById !== user.id) {
     await prisma.notification.create({
       data: {
+        id: uuidv4(),
         type: 'INCIDENT_ASSIGNED',
         title: 'Team Invitation Accepted',
         message: `${user.firstName} ${user.lastName} has accepted the invitation to join incident ${invitation.Incident.incidentNumber}`,
@@ -956,6 +967,8 @@ router.post('/invitations/:incidentId/decline', async (req, res) => {
   // Create system message for decline
   await prisma.chatMessage.create({
     data: {
+      id: uuidv4(),
+      updatedAt: new Date(),
       incidentId,
       userId: user.id,
       content: `${user.firstName} ${user.lastName} declined the team invitation`,
@@ -967,6 +980,7 @@ router.post('/invitations/:incidentId/decline', async (req, res) => {
   if (invitation.Incident.createdById !== user.id) {
     await prisma.notification.create({
       data: {
+        id: uuidv4(),
         type: 'INCIDENT_ASSIGNED',
         title: 'Team Invitation Declined',
         message: `${user.firstName} ${user.lastName} has declined the invitation to join incident ${invitation.Incident.incidentNumber}`,
@@ -1019,6 +1033,7 @@ router.post('/invitations/:incidentId/decline', async (req, res) => {
     // Notify owner that incident was reverted to private
     await prisma.notification.create({
       data: {
+        id: uuidv4(),
         type: 'INCIDENT_ASSIGNED',
         title: 'Incident Visibility Changed',
         message: `Incident ${invitation.Incident.incidentNumber} has been automatically reverted to Private as no team members accepted the invitation.`,

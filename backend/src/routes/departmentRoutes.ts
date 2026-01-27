@@ -4,6 +4,7 @@ import { requireMinimumRole } from '../middleware/rbac';
 import { UserRole } from '@prisma/client';
 import { prisma } from '../utils/prisma';
 import { ValidationError } from '../middleware/errorHandler';
+import { v4 as uuidv4 } from 'uuid';
 
 const router = Router();
 
@@ -76,6 +77,8 @@ router.post('/facilities/departments', requireMinimumRole(UserRole.ADMIN), async
 
   const department = await prisma.department.create({
     data: {
+      id: uuidv4(),
+      updatedAt: new Date(),
       name,
       description,
       facilityId,

@@ -4,6 +4,7 @@ import { requireMinimumRole } from '../middleware/rbac';
 import { UserRole } from '@prisma/client';
 import { prisma } from '../utils/prisma';
 import { ValidationError } from '../middleware/errorHandler';
+import { v4 as uuidv4 } from 'uuid';
 
 const router = Router();
 
@@ -146,6 +147,8 @@ router.post('/', authenticate, requireMinimumRole(UserRole.SYSTEM_ADMIN), async 
 
   const organization = await prisma.organization.create({
     data: {
+      id: uuidv4(),
+      updatedAt: new Date(),
       name,
       region,
       defaultLanguage: defaultLanguage || 'ENGLISH',
@@ -159,15 +162,16 @@ router.post('/', authenticate, requireMinimumRole(UserRole.SYSTEM_ADMIN), async 
 });
 
 // PATCH /api/organizations/:id - Update organization
-// Requires password confirmation for security
+// Requires password confirmation for email/password users, or SSO re-authentication for SSO users
 router.patch('/:id', authenticate, requireMinimumRole(UserRole.ADMIN), async (req: AuthRequest, res) => {
   const { id } = req.params;
-  const { name, region, defaultLanguage, password } = req.body;
+  const { name, region, defaultLanguage, password, ssoVerified } = req.body;
   const currentUser = req.user!;
 
-  // Password is required for organization updates
-  if (!password) {
-    throw new ValidationError('Password is required to update organization');
+  // For security, require either password (for email/password users) or ssoVerified flag (for SSO users)
+  // SSO users re-authenticate via popup on client-side, then send ssoVerified: true
+  if (!password && !ssoVerified) {
+    throw new ValidationError('Identity verification required to update organization');
   }
 
   // Verify password using Firebase
@@ -615,6 +619,8 @@ router.post('/:id/access-codes', authenticate, requireMinimumRole(UserRole.ADMIN
 
   const accessCode = await prisma.organizationAccessCode.create({
     data: {
+      id: uuidv4(),
+      updatedAt: new Date(),
       code: code!,
       role: role as UserRole,
       organizationId: id,

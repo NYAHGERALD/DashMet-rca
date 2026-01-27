@@ -10,6 +10,7 @@ import { v4 as uuidv4 } from 'uuid';
 import { websocketService } from '../services/websocketService';
 import { validateFMIRForLocking, analyzeFMIRCompliance, explainRegulation, generateFMIRSuccessAudit } from '../services/aiService';
 import { adminStorage } from '../config/firebase-admin';
+import { logAuditFromRequest } from '../services/auditService';
 
 const router = Router();
 const prisma = new PrismaClient();
@@ -285,7 +286,26 @@ router.get(
       prisma.foreignMaterialIncident.count({ where }),
     ]);
 
-    // Fetch collaborator details for each report
+    // Fetch collaborator details for each report and check for linked incidents
+    const reportIds = reports.map(r => r.id);
+    
+    // Batch query to find all linked incidents
+    const linkedIncidents = await prisma.incident.findMany({
+      where: {
+        fmirReportId: { in: reportIds },
+      },
+      select: {
+        id: true,
+        incidentNumber: true,
+        fmirReportId: true,
+      },
+    });
+    
+    // Create a map for quick lookup
+    const linkedIncidentMap = new Map(
+      linkedIncidents.map(i => [i.fmirReportId, { id: i.id, incidentNumber: i.incidentNumber }])
+    );
+    
     const reportsWithCollaborators = await Promise.all(
       reports.map(async (report) => {
         let collaborators: any[] = [];
@@ -303,10 +323,15 @@ router.get(
             },
           });
         }
+        
+        const linkedIncident = linkedIncidentMap.get(report.id);
+        
         return {
           ...report,
           Collaborators: collaborators,
           isOwner: report.createdById === userId,
+          linkedIncidentId: linkedIncident?.id || null,
+          linkedIncidentNumber: linkedIncident?.incidentNumber || null,
         };
       })
     );
@@ -585,6 +610,13 @@ router.post(
       },
     });
 
+    // Audit log: FMIR created
+    await logAuditFromRequest(authReq, 'CREATE', 'FMIR', report.id, {
+      reportNumber: report.reportNumber,
+      status: report.status,
+      facilityId: report.facilityId,
+    });
+
     res.status(201).json({
       success: true,
       data: report,
@@ -705,6 +737,15 @@ router.put(
     const uniqueUserIds = [...new Set(allLinkedUserIds)];
     
     const userName = `${authReq.user?.firstName} ${authReq.user?.lastName}`;
+
+    // Audit log: FMIR updated
+    await logAuditFromRequest(authReq, 'UPDATE', 'FMIR', report.id, {
+      reportNumber: report.reportNumber,
+      previousStatus,
+      newStatus: newStatus || previousStatus,
+      statusChanged,
+      changedFields: Object.keys(updateData),
+    });
     
     // Check if this is a status change that needs special notification
     if (statusChanged && previousStatus === 'UNDER_INVESTIGATION' && newStatus === 'SUBMITTED') {
@@ -885,6 +926,7 @@ router.post(
   asyncHandler(async (req: Request, res: Response, next: NextFunction) => {
     const authReq = req as AuthRequest;
     const { id } = req.params;
+    const { validationData } = req.body; // Accept validation data from frontend
     const userId = authReq.user?.id;
     const userOrgId = authReq.user?.organizationId;
 
@@ -913,6 +955,54 @@ router.post(
 
     // Track if this is a re-submission from investigation (for real-time modal)
     const wasUnderInvestigation = report.status === 'UNDER_INVESTIGATION';
+
+    // Save AI validation data if provided
+    if (validationData?.compliance) {
+      try {
+        // Parse the analysis fields from the compliance data
+        const causeAnalysis = validationData.compliance.fieldAnalysis?.find(
+          (f: any) => f.field?.toLowerCase().includes('cause') || f.issue?.toLowerCase().includes('cause')
+        ) || null;
+        const correctiveActionAnalysis = validationData.compliance.fieldAnalysis?.find(
+          (f: any) => f.field?.toLowerCase().includes('corrective') || f.issue?.toLowerCase().includes('corrective')
+        ) || null;
+        const productHoldAnalysis = validationData.compliance.fieldAnalysis?.find(
+          (f: any) => f.field?.toLowerCase().includes('hold') || f.issue?.toLowerCase().includes('hold')
+        ) || null;
+
+        await prisma.fMIRAIValidation.upsert({
+          where: { fmirId: id },
+          create: {
+            id: uuidv4(),
+            fmirId: id,
+            complianceScore: validationData.compliance.complianceScore || 0,
+            overallCompliance: validationData.compliance.overallCompliance || 'NEEDS_IMPROVEMENT',
+            summary: validationData.compliance.summary || '',
+            aiExplanation: validationData.compliance.aiExplanation || null,
+            fieldAnalysis: validationData.compliance.fieldAnalysis || [],
+            evidenceAnalysis: validationData.compliance.evidenceAnalysis || { adequate: false, summary: '', recommendations: [] },
+            causeAnalysis: causeAnalysis,
+            correctiveActionAnalysis: correctiveActionAnalysis,
+            productHoldAnalysis: productHoldAnalysis,
+          },
+          update: {
+            complianceScore: validationData.compliance.complianceScore || 0,
+            overallCompliance: validationData.compliance.overallCompliance || 'NEEDS_IMPROVEMENT',
+            summary: validationData.compliance.summary || '',
+            aiExplanation: validationData.compliance.aiExplanation || null,
+            fieldAnalysis: validationData.compliance.fieldAnalysis || [],
+            evidenceAnalysis: validationData.compliance.evidenceAnalysis || { adequate: false, summary: '', recommendations: [] },
+            causeAnalysis: causeAnalysis,
+            correctiveActionAnalysis: correctiveActionAnalysis,
+            productHoldAnalysis: productHoldAnalysis,
+          },
+        });
+        console.log(`✅ AI Validation data saved for FMIR ${report.reportNumber}`);
+      } catch (err) {
+        console.error('Failed to save AI validation data:', err);
+        // Don't fail the submission if validation data save fails
+      }
+    }
 
     // Ensure QA/Food Safety users are added as collaborators when submitting
     const qaUserIds = await getQAFoodSafetyUsers(userOrgId);
@@ -1289,6 +1379,13 @@ router.delete(
       collaboratorIds: report.collaboratorIds || [],
       createdById: report.createdById,
     };
+
+    // Audit log: FMIR deleted (log before actual deletion)
+    await logAuditFromRequest(authReq, 'DELETE', 'FMIR', id, {
+      reportNumber: report.reportNumber,
+      deletedBy: userId,
+      status: report.status,
+    });
 
     await prisma.foreignMaterialIncident.delete({
       where: { id },
@@ -3316,5 +3413,287 @@ router.get(
     res.json({ success: true, data: counts });
   })
 );
+
+/**
+ * @route   POST /api/fmir/:id/start-rca
+ * @desc    Create an Incident linked to this FMIR and redirect to RCA flow
+ * @access  Private - Requires incidents.create and rca.create privileges
+ * 
+ * This endpoint:
+ * 1. Creates a new Incident linked to the FMIR (or returns existing one)
+ * 2. Copies relevant data from FMIR to the Incident
+ * 3. Returns the Incident ID for navigation to the RCA flow
+ */
+router.post(
+  '/:id/start-rca',
+  authenticate,
+  requirePrivilege('incidents.create'),
+  asyncHandler(async (req: Request, res: Response, next: NextFunction) => {
+    const authReq = req as AuthRequest;
+    const { id } = req.params;
+    const userId = authReq.user?.id;
+    const userOrgId = authReq.user?.organizationId;
+
+    if (!userId || !userOrgId) {
+      res.status(401).json({ error: 'Unauthorized' });
+      return;
+    }
+
+    // Get the FMIR report with all related data
+    const fmirReport = await prisma.foreignMaterialIncident.findFirst({
+      where: {
+        id,
+        organizationId: userOrgId,
+      },
+      include: {
+        Facility: true,
+        FMIREvidence: true,
+        FMIRAIValidation: true,
+        LinkedIncident: true,
+        User_ForeignMaterialIncident_createdByIdToUser: {
+          select: { id: true, firstName: true, lastName: true, email: true },
+        },
+      },
+    });
+
+    if (!fmirReport) {
+      res.status(404).json({ error: 'FMIR report not found' });
+      return;
+    }
+
+    // Check if FMIR is in UNDER_INVESTIGATION status
+    if (fmirReport.status !== 'UNDER_INVESTIGATION') {
+      res.status(400).json({ 
+        error: 'FMIR must be Under Investigation to start RCA',
+        currentStatus: fmirReport.status,
+      });
+      return;
+    }
+
+    // Check if there's already a linked incident
+    if (fmirReport.LinkedIncident) {
+      // Return the existing incident
+      res.json({
+        success: true,
+        data: {
+          incident: fmirReport.LinkedIncident,
+          isExisting: true,
+        },
+      });
+      return;
+    }
+
+    // Get or create a FOOD_SAFETY category for the organization
+    let category = await prisma.category.findFirst({
+      where: {
+        organizationId: userOrgId,
+        type: 'FOOD_SAFETY',
+        isActive: true,
+      },
+      orderBy: { sortOrder: 'asc' },
+    });
+
+    // If no FOOD_SAFETY category exists, create a default one
+    if (!category) {
+      category = await prisma.category.create({
+        data: {
+          id: uuidv4(),
+          organizationId: userOrgId,
+          type: 'FOOD_SAFETY',
+          name: 'Foreign Material Incident',
+          sortOrder: 1,
+          isActive: true,
+          allowCustomTitle: true,
+        },
+      });
+    }
+
+    // Generate incident number
+    const year = new Date().getFullYear();
+    const facilityCode = fmirReport.Facility?.name?.substring(0, 3).toUpperCase() || 'GEN';
+    
+    // Get count of incidents this year for this facility
+    const incidentCount = await prisma.incident.count({
+      where: {
+        organizationId: userOrgId,
+        facilityId: fmirReport.facilityId || undefined,
+        createdAt: {
+          gte: new Date(`${year}-01-01`),
+          lt: new Date(`${year + 1}-01-01`),
+        },
+      },
+    });
+    
+    const incidentNumber = `INC-${facilityCode}-${String(incidentCount + 1).padStart(4, '0')}-${year}`;
+
+    // Create the incident linked to the FMIR
+    const incident = await prisma.incident.create({
+      data: {
+        id: uuidv4(),
+        incidentNumber,
+        type: 'FOOD_SAFETY',
+        categoryId: category.id,
+        customTitle: `FMIR: ${fmirReport.reportNumber} - ${fmirReport.foreignMaterialDescription?.substring(0, 100) || 'Foreign Material Investigation'}`,
+        facilityId: fmirReport.facilityId || (await getDefaultFacilityId(userOrgId)),
+        areaId: null,
+        lineId: null,
+        description: buildFMIRIncidentDescription(fmirReport),
+        aiSummary: fmirReport.FMIRAIValidation?.summary || null,
+        occurredAt: fmirReport.incidentDate,
+        reportedAt: fmirReport.submittedAt || fmirReport.createdAt,
+        status: 'SUBMITTED',
+        severity: 'MEDIUM',
+        createdById: userId,
+        assignedToId: null,
+        organizationId: userOrgId,
+        productName: fmirReport.productName || null,
+        lotNumber: fmirReport.productCodeBatchLot || null,
+        fmirReportId: fmirReport.id,
+        visibility: 'PRIVATE',
+        updatedAt: new Date(),
+      },
+      include: {
+        Facility: true,
+        Category: true,
+        User_Incident_createdByIdToUser: {
+          select: { id: true, firstName: true, lastName: true, email: true },
+        },
+      },
+    });
+
+    console.log(`✅ Created Incident ${incident.incidentNumber} linked to FMIR ${fmirReport.reportNumber}`);
+
+    res.json({
+      success: true,
+      data: {
+        incident,
+        isExisting: false,
+      },
+    });
+  })
+);
+
+/**
+ * @route   GET /api/fmir/:id/linked-incident
+ * @desc    Get the Incident linked to this FMIR (if any)
+ * @access  Private - Requires fmir.view privilege
+ */
+router.get(
+  '/:id/linked-incident',
+  authenticate,
+  requirePrivilege('fmir.view'),
+  asyncHandler(async (req: Request, res: Response, next: NextFunction) => {
+    const authReq = req as AuthRequest;
+    const { id } = req.params;
+    const userOrgId = authReq.user?.organizationId;
+
+    if (!userOrgId) {
+      res.status(401).json({ error: 'Unauthorized' });
+      return;
+    }
+
+    // Find incident linked to this FMIR
+    const incident = await prisma.incident.findFirst({
+      where: {
+        fmirReportId: id,
+        organizationId: userOrgId,
+      },
+      include: {
+        Facility: true,
+        Category: true,
+        RCAAnalysis: {
+          orderBy: { createdAt: 'desc' },
+          take: 1,
+        },
+      },
+    });
+
+    res.json({
+      success: true,
+      data: incident,
+    });
+  })
+);
+
+// Helper function to get default facility ID
+async function getDefaultFacilityId(organizationId: string): Promise<string> {
+  const facility = await prisma.facility.findFirst({
+    where: { organizationId },
+    orderBy: { createdAt: 'asc' },
+  });
+  
+  if (!facility) {
+    throw new Error('No facility found for organization');
+  }
+  
+  return facility.id;
+}
+
+// Helper function to build incident description from FMIR data
+function buildFMIRIncidentDescription(fmirReport: any): string {
+  const sections: string[] = [];
+  
+  sections.push(`FOREIGN MATERIAL INCIDENT REPORT: ${fmirReport.reportNumber}`);
+  sections.push('═'.repeat(60));
+  sections.push('');
+  
+  // Section 1: General Information
+  sections.push('GENERAL INFORMATION');
+  sections.push('─'.repeat(40));
+  if (fmirReport.productName) sections.push(`Product Name:    ${fmirReport.productName}`);
+  if (fmirReport.productItemNumber) sections.push(`Item Number:     ${fmirReport.productItemNumber}`);
+  if (fmirReport.productCodeBatchLot) sections.push(`Batch/Lot:       ${fmirReport.productCodeBatchLot}`);
+  if (fmirReport.department) sections.push(`Department:      ${fmirReport.department}`);
+  if (fmirReport.incidentDate) sections.push(`Incident Date:   ${new Date(fmirReport.incidentDate).toLocaleDateString()}`);
+  if (fmirReport.incidentTime) sections.push(`Incident Time:   ${fmirReport.incidentTime}`);
+  sections.push('');
+  
+  // Section 2: Foreign Material Description
+  sections.push('FOREIGN MATERIAL DESCRIPTION');
+  sections.push('─'.repeat(40));
+  if (fmirReport.foreignMaterialDescription) sections.push(fmirReport.foreignMaterialDescription);
+  sections.push('');
+  if (fmirReport.foreignMaterialSize) sections.push(`Size:      ${fmirReport.foreignMaterialSize}`);
+  if (fmirReport.foreignMaterialHardness) sections.push(`Hardness:  ${fmirReport.foreignMaterialHardness}`);
+  sections.push('');
+  
+  // Section 3: Cause Identification
+  if (fmirReport.causeIdentification || fmirReport.possibleSource || fmirReport.howWhyOccurred) {
+    sections.push('CAUSE IDENTIFICATION');
+    sections.push('─'.repeat(40));
+    if (fmirReport.causeIdentification) {
+      sections.push(fmirReport.causeIdentification);
+      sections.push('');
+    }
+    if (fmirReport.possibleSource) sections.push(`Possible Source: ${fmirReport.possibleSource}`);
+    if (fmirReport.howWhyOccurred) sections.push(`How/Why Occurred: ${fmirReport.howWhyOccurred}`);
+    sections.push('');
+  }
+  
+  // Section 4: Corrective Action
+  if (fmirReport.correctiveAction) {
+    sections.push('CORRECTIVE ACTION TAKEN');
+    sections.push('─'.repeat(40));
+    sections.push(fmirReport.correctiveAction);
+    sections.push('');
+  }
+  
+  // Section 5: Verification
+  if (fmirReport.verificationActions) {
+    sections.push('VERIFICATION ACTIONS');
+    sections.push('─'.repeat(40));
+    sections.push(fmirReport.verificationActions);
+    sections.push('');
+  }
+  
+  // Evidence count
+  if (fmirReport.FMIREvidence && fmirReport.FMIREvidence.length > 0) {
+    sections.push('EVIDENCE');
+    sections.push('─'.repeat(40));
+    sections.push(`${fmirReport.FMIREvidence.length} file(s) attached to the FMIR report.`);
+  }
+  
+  return sections.join('\n');
+}
 
 export default router;

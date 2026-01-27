@@ -14,6 +14,7 @@ import {
   findMatchingAssignmentRule,
   checkSLABreaches,
 } from '../services/triageService';
+import { v4 as uuidv4 } from 'uuid';
 
 const router = Router();
 
@@ -93,6 +94,8 @@ router.post('/assignment-rules', requireMinimumRole(UserRole.ADMIN), async (req,
 
   const rule = await prisma.assignmentRule.create({
     data: {
+      id: uuidv4(),
+      updatedAt: new Date(),
       name,
       description,
       organizationId: user.organizationId,

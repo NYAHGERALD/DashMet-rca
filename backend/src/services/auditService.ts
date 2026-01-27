@@ -1,18 +1,27 @@
 /**
  * Phase 14: Audit Service
  * Comprehensive audit logging for regulatory compliance
+ * 
+ * IMPORTANT: This service is organization-scoped.
+ * - Each audit log is associated with an organization
+ * - SYSTEM_ADMIN activities are NEVER logged
+ * - Organizations can only see their own audit logs
  */
 
 import { prisma } from '../utils/prisma';
 import { logger } from '../utils/logger';
 import { Request } from 'express';
 import { AuthRequest } from '../middleware/auth';
+import { v4 as uuidv4 } from 'uuid';
+
+type AuditAction = 'CREATE' | 'UPDATE' | 'DELETE' | 'LOGIN' | 'LOGOUT' | 'EXPORT' | 'VIEW';
 
 interface AuditLogParams {
-  action: 'CREATE' | 'UPDATE' | 'DELETE' | 'LOGIN' | 'LOGOUT' | 'EXPORT' | 'VIEW';
+  action: AuditAction;
   entity: string;
   entityId: string;
   userId?: string;
+  organizationId?: string;
   changes?: any;
   ipAddress?: string;
   userAgent?: string;
@@ -20,22 +29,31 @@ interface AuditLogParams {
 
 /**
  * Log an audit event
+ * Note: Will NOT log if user is SYSTEM_ADMIN or if no organizationId is provided
  */
 export async function logAuditEvent(params: AuditLogParams): Promise<void> {
   try {
+    // Skip logging if no organization (system-level actions are not logged)
+    if (!params.organizationId) {
+      logger.debug(`Audit skipped: No organizationId for ${params.action} on ${params.entity}:${params.entityId}`);
+      return;
+    }
+
     await prisma.auditLog.create({
       data: {
+        id: uuidv4(),
         action: params.action,
         entity: params.entity,
         entityId: params.entityId,
         userId: params.userId,
+        organizationId: params.organizationId,
         changes: params.changes,
         ipAddress: params.ipAddress,
         userAgent: params.userAgent,
       },
     });
 
-    logger.info(`Audit: ${params.action} on ${params.entity}:${params.entityId} by ${params.userId || 'system'}`);
+    logger.info(`Audit: ${params.action} on ${params.entity}:${params.entityId} by ${params.userId || 'system'} in org ${params.organizationId}`);
   } catch (error) {
     logger.error('Failed to log audit event:', error);
     // Don't throw - audit logging should not break operations
@@ -44,15 +62,29 @@ export async function logAuditEvent(params: AuditLogParams): Promise<void> {
 
 /**
  * Log audit event from request context
+ * IMPORTANT: Will NOT log for SYSTEM_ADMIN users
  */
 export async function logAuditFromRequest(
   req: AuthRequest,
-  action: 'CREATE' | 'UPDATE' | 'DELETE' | 'LOGIN' | 'LOGOUT' | 'EXPORT' | 'VIEW',
+  action: AuditAction,
   entity: string,
   entityId: string,
   changes?: any
 ): Promise<void> {
-  const userId = req.user?.id;
+  const user = req.user;
+  
+  // NEVER log System Admin activities
+  if (user?.role === 'SYSTEM_ADMIN') {
+    logger.debug(`Audit skipped: SYSTEM_ADMIN user ${user.id} performing ${action} on ${entity}`);
+    return;
+  }
+
+  // Skip if user has no organization
+  if (!user?.organizationId) {
+    logger.debug(`Audit skipped: User ${user?.id} has no organization`);
+    return;
+  }
+
   const ipAddress = getClientIp(req);
   const userAgent = req.headers['user-agent'];
 
@@ -60,7 +92,8 @@ export async function logAuditFromRequest(
     action,
     entity,
     entityId,
-    userId,
+    userId: user.id,
+    organizationId: user.organizationId,
     changes,
     ipAddress,
     userAgent,
@@ -80,9 +113,11 @@ export function getClientIp(req: Request): string {
 }
 
 /**
- * Get audit logs with filtering
+ * Get audit logs with filtering - ORGANIZATION SCOPED
+ * Only returns logs for the specified organization
  */
 export async function getAuditLogs(filters: {
+  organizationId: string; // Required - organization scope
   entity?: string;
   entityId?: string;
   userId?: string;
@@ -93,6 +128,7 @@ export async function getAuditLogs(filters: {
   limit?: number;
 }): Promise<{ logs: any[]; total: number }> {
   const {
+    organizationId,
     entity,
     entityId,
     userId,
@@ -103,7 +139,10 @@ export async function getAuditLogs(filters: {
     limit = 50,
   } = filters;
 
-  const where: any = {};
+  // Organization is required for filtering
+  const where: any = {
+    organizationId, // Always filter by organization
+  };
   
   if (entity) where.entity = entity;
   if (entityId) where.entityId = entityId;
@@ -137,17 +176,41 @@ export async function getAuditLogs(filters: {
     prisma.auditLog.count({ where }),
   ]);
 
-  return { logs, total };
+  // Transform logs to include user info in a friendly format
+  const transformedLogs = logs.map(log => ({
+    id: log.id,
+    action: log.action,
+    entity: log.entity,
+    entityId: log.entityId,
+    userId: log.userId,
+    changes: log.changes,
+    ipAddress: log.ipAddress,
+    userAgent: log.userAgent,
+    createdAt: log.createdAt,
+    user: log.User ? {
+      id: log.User.id,
+      firstName: log.User.firstName,
+      lastName: log.User.lastName,
+      email: log.User.email,
+    } : null,
+  }));
+
+  return { logs: transformedLogs, total };
 }
 
 /**
- * Get audit trail for a specific entity
+ * Get audit trail for a specific entity - ORGANIZATION SCOPED
  */
-export async function getEntityAuditTrail(entity: string, entityId: string): Promise<any[]> {
+export async function getEntityAuditTrail(
+  entity: string, 
+  entityId: string,
+  organizationId: string
+): Promise<any[]> {
   return prisma.auditLog.findMany({
     where: {
       entity,
       entityId,
+      organizationId, // Only return logs for this organization
     },
     include: {
       User: {
@@ -163,15 +226,20 @@ export async function getEntityAuditTrail(entity: string, entityId: string): Pro
 }
 
 /**
- * Get user activity summary
+ * Get user activity summary - ORGANIZATION SCOPED
  */
-export async function getUserActivitySummary(userId: string, days: number = 30): Promise<any> {
+export async function getUserActivitySummary(
+  userId: string, 
+  organizationId: string,
+  days: number = 30
+): Promise<any> {
   const startDate = new Date();
   startDate.setDate(startDate.getDate() - days);
 
   const logs = await prisma.auditLog.findMany({
     where: {
       userId,
+      organizationId, // Only logs from this organization
       createdAt: { gte: startDate },
     },
     orderBy: { createdAt: 'desc' },
@@ -199,15 +267,17 @@ export async function getUserActivitySummary(userId: string, days: number = 30):
 }
 
 /**
- * Generate compliance report for audit period
+ * Generate compliance report for audit period - ORGANIZATION SCOPED
  */
 export async function generateComplianceReport(
+  organizationId: string,
   startDate: Date,
   endDate: Date,
   format: 'summary' | 'detailed' = 'summary'
 ): Promise<any> {
   const logs = await prisma.auditLog.findMany({
     where: {
+      organizationId, // Only logs from this organization
       createdAt: {
         gte: startDate,
         lte: endDate,

@@ -7,6 +7,7 @@ import { AuthRequest } from '../middleware/auth';
 import { adminStorage } from '../config/firebase-admin';
 import multer from 'multer';
 import { websocketService } from '../services/websocketService';
+import { logAuditFromRequest } from '../services/auditService';
 
 const router = Router();
 
@@ -344,6 +345,13 @@ router.patch(
       },
     });
 
+    // Audit log: User activation status changed
+    await logAuditFromRequest(req, 'UPDATE', 'User', id, {
+      action: isActive ? 'ACTIVATED' : 'DEACTIVATED',
+      targetEmail: user.email,
+      targetRole: user.role,
+    });
+
     res.json({
       success: true,
       data: { user },
@@ -488,6 +496,14 @@ router.patch(
         console.log(`📤 Emitted fmir:collaborator-added for ${updatedReportIds.length} reports`);
       }
     }
+
+    // Audit log: User role changed
+    await logAuditFromRequest(req, 'UPDATE', 'User', id, {
+      action: 'ROLE_CHANGED',
+      targetEmail: user.email,
+      previousRole: targetUser.role,
+      newRole: role,
+    });
 
     res.json({
       success: true,

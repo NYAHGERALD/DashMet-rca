@@ -1926,12 +1926,64 @@ function FMIRNewPageContent() {
     formData.dispositionJustification.trim() &&
     
     // Section 9: Prevention Measures
-    formData.preventionMeasures.trim()
+    formData.preventionMeasures.trim() &&
+    
+    // Section 10: Corporate Notification & Pre-Shipment
+    // corporateNotified is always set (boolean - true or false) - no additional check needed
+    // If corporateNotified is true, corporatePersonsNotified is required
+    // If productPlacedOnHold is true, preShipmentReview is required
+    (!formData.corporateNotified || formData.corporatePersonsNotified.trim()) &&
+    (!formData.productPlacedOnHold || formData.preShipmentReview.trim())
   );
+
+  // Debug: Log which fields are missing (only in development)
+  if (process.env.NODE_ENV === 'development' && !isFormFullyComplete && autoSaveEnabled) {
+    const missingFields: string[] = [];
+    if (!formData.incidentDate) missingFields.push('incidentDate');
+    if (!formData.incidentTime) missingFields.push('incidentTime');
+    if (!formData.facilityId) missingFields.push('facilityId');
+    if (!formData.department) missingFields.push('department');
+    if (!formData.area) missingFields.push('area');
+    if (!formData.line) missingFields.push('line');
+    if (!formData.fmSourceCategory) missingFields.push('fmSourceCategory');
+    if (!formData.fmSourceType) missingFields.push('fmSourceType');
+    if (!formData.productName.trim()) missingFields.push('productName');
+    if (!formData.productItemNumber.trim()) missingFields.push('productItemNumber');
+    if (!formData.productCodeBatchLot.trim()) missingFields.push('productCodeBatchLot');
+    if (!formData.amount.trim()) missingFields.push('amount');
+    if (!formData.foreignMaterialDescription.trim()) missingFields.push('foreignMaterialDescription');
+    if (!formData.foreignMaterialSize.trim()) missingFields.push('foreignMaterialSize');
+    if (!formData.foreignMaterialHardness.trim()) missingFields.push('foreignMaterialHardness');
+    if (!formData.causeIdentification.trim()) missingFields.push('causeIdentification');
+    if (!formData.correctiveAction.trim()) missingFields.push('correctiveAction');
+    if (!formData.verificationActions.trim()) missingFields.push('verificationActions');
+    if (!formData.holdDecisionDetails.trim()) missingFields.push('holdDecisionDetails');
+    if (formData.productPlacedOnHold && !formData.itemsHeld.trim()) missingFields.push('itemsHeld (required when product on hold)');
+    if (!formData.screeningProcess.trim()) missingFields.push('screeningProcess');
+    if (!formData.finalDisposition.trim()) missingFields.push('finalDisposition');
+    if (!formData.dispositionJustification.trim()) missingFields.push('dispositionJustification');
+    if (!formData.preventionMeasures.trim()) missingFields.push('preventionMeasures');
+    if (formData.corporateNotified && !formData.corporatePersonsNotified.trim()) missingFields.push('corporatePersonsNotified (required when corporate notified)');
+    if (formData.productPlacedOnHold && !formData.preShipmentReview.trim()) missingFields.push('preShipmentReview (required when product on hold)');
+    if (missingFields.length > 0) {
+      console.log('🚫 Form incomplete. Missing fields:', missingFields);
+    }
+  }
 
   // Show submit button: Always when Auto Save OFF, only when fully complete when Auto Save ON
   // Hide submit button when status is UNDER_INVESTIGATION (show Validate instead)
   const showSubmitButton = formData.status !== 'UNDER_INVESTIGATION' && (!autoSaveEnabled || (autoSaveEnabled && isFormFullyComplete && currentReportId));
+  
+  // Debug logging for submit button visibility
+  console.log('📋 Submit Button Debug:', {
+    showSubmitButton,
+    status: formData.status,
+    autoSaveEnabled,
+    isFormFullyComplete,
+    currentReportId,
+    corporateNotified: formData.corporateNotified,
+    productPlacedOnHold: formData.productPlacedOnHold,
+  });
   
   // Show validate button: Only when status is UNDER_INVESTIGATION
   const showValidateButton = formData.status === 'UNDER_INVESTIGATION';
@@ -2004,14 +2056,17 @@ function FMIRNewPageContent() {
       let response;
       const reportId = currentReportId || editId;
       
+      // Prepare validation data payload to save AI analysis
+      const submitPayload = validationData ? { validationData } : {};
+      
       if (reportId) {
         response = await api.put(`/fmir/${reportId}`, payload);
-        // Also submit
-        await api.post(`/fmir/${reportId}/submit`);
+        // Also submit with validation data
+        await api.post(`/fmir/${reportId}/submit`, submitPayload);
       } else {
         response = await api.post('/fmir', payload);
         if (response.data.success) {
-          await api.post(`/fmir/${response.data.data.id}/submit`);
+          await api.post(`/fmir/${response.data.data.id}/submit`, submitPayload);
         }
       }
 
@@ -3127,6 +3182,13 @@ function FMIRNewPageContent() {
                     <span className="hidden sm:inline">Submit Report</span>
                     <span className="sm:hidden">Submit</span>
                   </button>
+                )}
+                {!showSubmitButton && !showValidateButton && (
+                  <span className="text-xs text-amber-600 dark:text-amber-400 inline-flex items-center gap-1.5 px-3 py-1.5 bg-amber-50 dark:bg-amber-900/20 rounded-lg border border-amber-200 dark:border-amber-700">
+                    <AlertCircle className="w-3.5 h-3.5" />
+                    <span className="hidden sm:inline">Fill all required fields to submit</span>
+                    <span className="sm:hidden">Fill required fields</span>
+                  </span>
                 )}
                 {showValidateButton && (
                   <button
@@ -4258,6 +4320,12 @@ function FMIRNewPageContent() {
                 )}
                 {validating ? 'Validating...' : 'Submit Report'}
               </button>
+            )}
+            {!showSubmitButton && !showValidateButton && (
+              <span className="text-xs text-amber-600 dark:text-amber-400 inline-flex items-center gap-1 px-3 py-2 bg-amber-50 dark:bg-amber-900/20 rounded-lg border border-amber-200 dark:border-amber-800">
+                <AlertCircle className="w-3.5 h-3.5" />
+                Fill all required fields to enable Submit
+              </span>
             )}
             {showValidateButton && (
               <button

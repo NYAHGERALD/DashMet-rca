@@ -1,6 +1,6 @@
 import { Router, Request, Response, NextFunction } from 'express';
 import asyncHandler from 'express-async-handler';
-import { authenticate } from '../middleware/auth';
+import { authenticate, AuthRequest } from '../middleware/auth';
 import { requireMinimumRole, requirePrivilege, hasPrivilege } from '../middleware/rbac';
 import { UserRole } from '@prisma/client';
 import { prisma } from '../utils/prisma';
@@ -10,6 +10,7 @@ import { adminStorage } from '../config/firebase-admin';
 import { generateIncidentSummary } from '../services/aiService';
 import { triageIncident, applyTriageToIncident } from '../services/triageService';
 import { notifyIncidentSubmitted, notifyIncidentAssignment, notifyIncidentStatusChange } from '../services/notificationService';
+import { logAuditFromRequest } from '../services/auditService';
 import { createStatusUpdateMessage } from './chatRoutes';
 import * as fs from 'fs';
 import * as path from 'path';
@@ -442,6 +443,29 @@ router.get('/:id', asyncHandler(async (req: Request, res: Response) => {
           },
         },
       },
+      // Include FMIR report if this incident was created from an FMIR
+      FMIRReport: {
+        include: {
+          Facility: true,
+          FMIREvidence: {
+            select: {
+              id: true,
+              fileName: true,
+              type: true,
+              filePath: true,
+              fileSize: true,
+              mimeType: true,
+              description: true,
+              uploadedAt: true,
+            },
+            orderBy: { uploadedAt: 'asc' },
+          },
+          FMIRAIValidation: true,
+          User_ForeignMaterialIncident_createdByIdToUser: {
+            select: { id: true, firstName: true, lastName: true, email: true },
+          },
+        },
+      },
     },
   });
 
@@ -774,12 +798,14 @@ router.post('/', requirePrivilege('incidents.create'), async (req, res) => {
   // Create team participants if this is a team incident
   if (isTeamIncident && participants && Array.isArray(participants) && participants.length > 0) {
     const participantData = participants.map((p: any) => ({
+      id: uuidv4(),
       incidentId: incident.id,
       userId: p.userId,
       role: p.role || 'MEMBER',
       canEdit: p.canEdit !== undefined ? p.canEdit : true,
       canChat: p.canChat !== undefined ? p.canChat : true,
       addedById: user.id,
+      updatedAt: new Date(),
     }));
 
     await prisma.incidentParticipant.createMany({
@@ -792,6 +818,7 @@ router.post('/', requirePrivilege('incidents.create'), async (req, res) => {
   if (isTeamIncident) {
     await prisma.incidentParticipant.create({
       data: {
+        id: uuidv4(),
         incidentId: incident.id,
         userId: user.id,
         role: 'OWNER',
@@ -800,9 +827,19 @@ router.post('/', requirePrivilege('incidents.create'), async (req, res) => {
         addedById: user.id,
         invitationStatus: 'ACCEPTED',  // Owner auto-accepts their own invitation
         respondedAt: new Date(),
+        updatedAt: new Date(),
       },
     });
   }
+
+  // Audit log: Incident created
+  await logAuditFromRequest(req as AuthRequest, 'CREATE', 'Incident', incident.id, {
+    incidentNumber: incident.incidentNumber,
+    type: incident.type,
+    status: incident.status,
+    visibility: incident.visibility,
+    severity: incident.severity,
+  });
 
   res.status(201).json({
     success: true,
@@ -1045,6 +1082,14 @@ router.patch('/:id', requirePrivilege('incidents.edit'), async (req: Request, re
       data: updateData,
     });
 
+    // Audit log: Incident updated
+    await logAuditFromRequest(req as AuthRequest, 'UPDATE', 'Incident', incident.id, {
+      incidentNumber: incident.incidentNumber,
+      changedFields: Object.keys(updateData),
+      oldStatus: oldStatus,
+      newStatus: status || oldStatus,
+    });
+
     // Send notifications for status changes
     if (status && status !== oldStatus) {
       await notifyIncidentStatusChange(id, oldStatus, status, `${user.firstName} ${user.lastName}`);
@@ -1142,6 +1187,12 @@ router.delete('/:id', requirePrivilege('incidents.delete'), async (req: Request,
 
     // Delete archived chat messages
     await prisma.archivedChatMessage.deleteMany({ where: { incidentId: id } });
+
+    // Audit log: Incident deleted
+    await logAuditFromRequest(req as AuthRequest, 'DELETE', 'Incident', id, {
+      incidentNumber: incident.incidentNumber,
+      deletedBy: user.id,
+    });
 
     // Finally delete the incident
     await prisma.incident.delete({
@@ -1277,6 +1328,7 @@ router.patch('/:id/visibility', async (req: Request, res: Response, next: NextFu
         // Add owner as participant with ACCEPTED status
         await prisma.incidentParticipant.create({
           data: {
+            id: uuidv4(),
             incidentId: id,
             userId: incident.createdById,
             role: 'OWNER',
@@ -1285,6 +1337,7 @@ router.patch('/:id/visibility', async (req: Request, res: Response, next: NextFu
             addedById: user.id,
             invitationStatus: 'ACCEPTED',
             respondedAt: new Date(),
+            updatedAt: new Date(),
           },
         });
       } else if (existingOwnerParticipant.invitationStatus !== 'ACCEPTED') {
@@ -1709,6 +1762,17 @@ router.post('/:id/submit', requirePrivilege('incidents.change_status'), async (r
             slaResolutionDeadline: triageResult.slaResolutionDeadline,
           },
         });
+
+        // Audit log: Incident submitted with triage
+        await logAuditFromRequest(req as AuthRequest, 'UPDATE', 'Incident', id, {
+          incidentNumber: incident.incidentNumber,
+          action: 'SUBMITTED',
+          previousStatus: 'DRAFT',
+          newStatus: 'SUBMITTED',
+          triageApplied: true,
+          autoAssigned: triageResult.autoAssigned,
+        });
+
         return;
       } catch (triageError: any) {
         console.error('Triage failed, but incident was submitted:', triageError.message);
@@ -1718,6 +1782,15 @@ router.post('/:id/submit', requirePrivilege('incidents.change_status'), async (r
 
     // Notify about submission (even without triage)
     await notifyIncidentSubmitted(id);
+
+    // Audit log: Incident submitted without triage
+    await logAuditFromRequest(req as AuthRequest, 'UPDATE', 'Incident', id, {
+      incidentNumber: incident.incidentNumber,
+      action: 'SUBMITTED',
+      previousStatus: 'DRAFT',
+      newStatus: 'SUBMITTED',
+      triageApplied: false,
+    });
 
     res.json({
       success: true,
@@ -1769,6 +1842,15 @@ router.post('/:id/assign', requirePrivilege('incidents.assign'), async (req: Req
     if (oldStatus !== 'ASSIGNED') {
       await notifyIncidentStatusChange(id, oldStatus, 'ASSIGNED', `${user.firstName} ${user.lastName}`);
     }
+
+    // Audit log: Incident assigned
+    await logAuditFromRequest(req as AuthRequest, 'UPDATE', 'Incident', id, {
+      action: 'ASSIGNED',
+      previousStatus: oldStatus,
+      newStatus: 'ASSIGNED',
+      previousAssignee: incident.assignedToId,
+      newAssignee: assignToUserId,
+    });
 
     res.json({
       success: true,
@@ -1859,6 +1941,7 @@ router.post('/:id/evidence', uploadMultiple, async (req: Request, res: Response,
         // Create evidence record with Firebase Storage URL and transcription
         return prisma.evidence.create({
           data: {
+            id: uuidv4(),
             type,
             fileName: file.originalname,
             filePath: publicUrl,

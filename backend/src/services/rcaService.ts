@@ -6,6 +6,7 @@
 import { prisma } from '../utils/prisma';
 import { RCAMethod, RCAStatus, Severity, IncidentStatus, Prisma } from '@prisma/client';
 import { getAIMethodRecommendation } from './aiService';
+import { v4 as uuidv4 } from 'uuid';
 
 // ============================================================================
 // Types
@@ -367,6 +368,8 @@ export async function createRCAAnalysis(
   // Create the RCA analysis
   const rcaAnalysis = await prisma.rCAAnalysis.create({
     data: {
+      id: uuidv4(),
+      updatedAt: new Date(),
       incidentId,
       method,
       analystId,
@@ -539,6 +542,8 @@ export async function addComment(
 
   return prisma.comment.create({
     data: {
+      id: uuidv4(),
+      updatedAt: new Date(),
       content,
       userId,
       incidentId,
@@ -590,6 +595,8 @@ function getDefaultFishboneCategories(incidentType: string): FishboneCategory[] 
  * Update RCA method selection
  */
 export async function updateRCAMethod(rcaId: string, method: RCAMethod) {
+  console.log('[updateRCAMethod] Starting with rcaId:', rcaId, 'method:', method);
+  
   const rca = await prisma.rCAAnalysis.findUnique({
     where: { id: rcaId },
     include: { Incident: true },
@@ -598,6 +605,8 @@ export async function updateRCAMethod(rcaId: string, method: RCAMethod) {
   if (!rca) {
     throw new Error('RCA analysis not found');
   }
+
+  console.log('[updateRCAMethod] Found RCA:', rca.id, 'current method:', rca.method);
 
   // Initialize data for the new method
   const updateData: Record<string, unknown> = { method };
@@ -611,10 +620,15 @@ export async function updateRCAMethod(rcaId: string, method: RCAMethod) {
     };
   }
 
-  return prisma.rCAAnalysis.update({
+  console.log('[updateRCAMethod] Updating with data keys:', Object.keys(updateData));
+
+  const result = await prisma.rCAAnalysis.update({
     where: { id: rcaId },
     data: updateData,
   });
+  
+  console.log('[updateRCAMethod] Update successful');
+  return result;
 }
 
 // ============================================================================
@@ -826,6 +840,7 @@ export async function updateFiveWhys(
 
   await prisma.rCAVersion.create({
     data: {
+      id: uuidv4(),
       rcaAnalysisId: rcaId,
       versionNumber: newVersionNumber,
       data: fiveWhysData as any,
@@ -985,6 +1000,7 @@ export async function updateFishbone(
 
   await prisma.rCAVersion.create({
     data: {
+      id: uuidv4(),
       rcaAnalysisId: rcaId,
       versionNumber: newVersionNumber,
       data: fishboneData as any,
@@ -1258,6 +1274,7 @@ export async function reopenRCA(rcaId: string, userId: string, reason?: string) 
 
   await prisma.rCAVersion.create({
     data: {
+      id: uuidv4(),
       rcaAnalysisId: rcaId,
       versionNumber: (latestVersion?.versionNumber || 0) + 1,
       data: {
@@ -1338,6 +1355,7 @@ export async function restoreRCAVersion(
 
   await prisma.rCAVersion.create({
     data: {
+      id: uuidv4(),
       rcaAnalysisId: rcaId,
       versionNumber: newVersionNumber,
       data: version.data as any,

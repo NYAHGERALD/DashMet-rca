@@ -2,6 +2,7 @@ import { Router, Response } from 'express';
 import { PrismaClient, UserRole } from '@prisma/client';
 import { authenticate, AuthRequest } from '../middleware/auth';
 import { requireSystemAdmin } from '../middleware/rbac';
+import { v4 as uuidv4 } from 'uuid';
 
 const router = Router();
 const prisma = new PrismaClient();
@@ -62,6 +63,8 @@ router.post('/', authenticate, requireSystemAdmin, async (req: AuthRequest, res:
     // Create access code
     const accessCode = await prisma.accessCode.create({
       data: {
+        id: uuidv4(),
+        updatedAt: new Date(),
         code,
         role,
         maxUses: parsedMaxUses,

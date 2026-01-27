@@ -5,6 +5,8 @@ import { authenticate, authenticateFirebaseOnly, AuthRequest, FirebaseAuthReques
 import { ValidationError } from '../middleware/errorHandler';
 import { adminAuth } from '../config/firebase-admin';
 import { websocketService } from '../services/websocketService';
+import { logAuditEvent, getClientIp } from '../services/auditService';
+import { v4 as uuidv4 } from 'uuid';
 
 const router = Router();
 
@@ -208,6 +210,8 @@ router.post('/create-profile', authenticateFirebaseOnly, async (req: FirebaseAut
 
       const newOrg = await prisma.organization.create({
         data: {
+          id: uuidv4(),
+          updatedAt: new Date(),
           name: newOrganizationName,
           region: 'USA', // Default region
           defaultLanguage: 'ENGLISH',
@@ -235,6 +239,8 @@ router.post('/create-profile', authenticateFirebaseOnly, async (req: FirebaseAut
 
         const newFacility = await prisma.facility.create({
           data: {
+            id: uuidv4(),
+            updatedAt: new Date(),
             name: newFacilityName,
             organizationId: newOrg.id,
             timezone: 'America/New_York', // Default timezone
@@ -283,6 +289,8 @@ router.post('/create-profile', authenticateFirebaseOnly, async (req: FirebaseAut
   // Create user profile in PostgreSQL
   const user = await prisma.user.create({
     data: {
+      id: uuidv4(),
+      updatedAt: new Date(),
       email: firebaseUser.email,
       firebaseUid: firebaseUser.firebaseUid,
       firstName,
@@ -396,6 +404,20 @@ router.get('/me', authenticate, async (req: AuthRequest, res) => {
     where: { id: userId },
     data: { lastLoginAt: new Date() },
   });
+
+  // Audit log: SSO login (for organization users only)
+  if (user.role !== 'SYSTEM_ADMIN' && user.organizationId) {
+    await logAuditEvent({
+      action: 'LOGIN',
+      entity: 'Session',
+      entityId: userId,
+      userId: userId,
+      organizationId: user.organizationId,
+      changes: { loginMethod: 'sso' },
+      ipAddress: getClientIp(req),
+      userAgent: req.headers['user-agent'] as string,
+    });
+  }
 
   // Flatten organization name for frontend convenience
   const userData = {
