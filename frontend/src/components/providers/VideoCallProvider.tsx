@@ -86,6 +86,7 @@ export function VideoCallProvider({ children }: VideoCallProviderProps) {
   const [currentCall, setCurrentCall] = useState<VideoCallState | null>(null);
   const [incomingCall, setIncomingCall] = useState<IncomingCallNotification | null>(null);
   const [isMinimized, setIsMinimized] = useState(false);
+  const [isScreenSharing, setIsScreenSharing] = useState(false);
   const [rejoinPrompt, setRejoinPrompt] = useState<{
     roomUrl: string;
     roomName: string;
@@ -238,6 +239,7 @@ export function VideoCallProvider({ children }: VideoCallProviderProps) {
     }
     setCurrentCall(null);
     setIsMinimized(false);
+    setIsScreenSharing(false);
     // Clear stored call state - user intentionally ended the call
     sessionStorage.removeItem(CALL_STATE_KEY);
     console.log('📹 [VideoCallProvider] Call ended, cleared sessionStorage');
@@ -295,6 +297,10 @@ export function VideoCallProvider({ children }: VideoCallProviderProps) {
 
   const maximizeCall = useCallback(() => {
     setIsMinimized(false);
+  }, []);
+
+  const handleScreenShareChange = useCallback((isSharing: boolean) => {
+    setIsScreenSharing(isSharing);
   }, []);
 
   const dismissRejoinPrompt = useCallback(() => {
@@ -432,6 +438,7 @@ export function VideoCallProvider({ children }: VideoCallProviderProps) {
             <DraggableCallBar
               onMaximize={maximizeCall}
               onEndCall={endCall}
+              isScreenSharing={isScreenSharing}
             />
           )}
           
@@ -445,6 +452,7 @@ export function VideoCallProvider({ children }: VideoCallProviderProps) {
               onClose={endCall}
               onRoomCreated={handleCallRoomCreated}
               onMinimize={minimizeCall}
+              onScreenShareChange={handleScreenShareChange}
             />
           </div>
         </>

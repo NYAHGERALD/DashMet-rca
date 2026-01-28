@@ -16,6 +16,7 @@ interface VideoCallProps {
   roomName?: string;
   onRoomCreated?: (roomUrl: string, roomName: string) => void;
   onMinimize?: () => void;
+  onScreenShareChange?: (isSharing: boolean) => void;
 }
 
 interface Participant {
@@ -36,7 +37,7 @@ const isMobileDevice = () => {
     (window.innerWidth <= 768);
 };
 
-export default function VideoCall({ incidentId, rcaId, onClose, roomUrl: initialRoomUrl, roomName: initialRoomName, onRoomCreated, onMinimize }: VideoCallProps) {
+export default function VideoCall({ incidentId, rcaId, onClose, roomUrl: initialRoomUrl, roomName: initialRoomName, onRoomCreated, onMinimize, onScreenShareChange }: VideoCallProps) {
   const callFrameRef = useRef<DailyCall | null>(null);
   const containerRef = useRef<HTMLDivElement>(null);
   const [isLoading, setIsLoading] = useState(true);
@@ -323,8 +324,41 @@ export default function VideoCall({ incidentId, rcaId, onClose, roomUrl: initial
           updateParticipants();
         });
 
-        callFrameRef.current.on('participant-updated', () => {
+        callFrameRef.current.on('participant-updated', (event: any) => {
           updateParticipants();
+          
+          // Check if the local participant started screen sharing
+          // Auto-minimize to prevent recursive mirror effect
+          if (event?.participant?.local && event?.participant?.screen) {
+            console.log('📹 Local screen sharing detected, auto-minimizing to prevent mirror effect');
+            setIsScreenSharing(true);
+            onScreenShareChange?.(true);
+            // Auto-minimize the call window when screen sharing starts
+            if (onMinimize) {
+              onMinimize();
+            }
+          } else if (event?.participant?.local && !event?.participant?.screen) {
+            setIsScreenSharing(false);
+            onScreenShareChange?.(false);
+          }
+        });
+
+        // Listen for screen share start/stop events
+        callFrameRef.current.on('local-screen-share-started', () => {
+          console.log('📹 Local screen share started');
+          setIsScreenSharing(true);
+          onScreenShareChange?.(true);
+          // Auto-minimize to prevent mirror effect
+          if (onMinimize) {
+            console.log('📹 Auto-minimizing call to prevent screen share mirror effect');
+            onMinimize();
+          }
+        });
+
+        callFrameRef.current.on('local-screen-share-stopped', () => {
+          console.log('📹 Local screen share stopped');
+          setIsScreenSharing(false);
+          onScreenShareChange?.(false);
         });
 
         callFrameRef.current.on('error', (e) => {

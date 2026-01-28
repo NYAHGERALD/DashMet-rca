@@ -5,9 +5,10 @@ import React, { useState, useRef, useCallback, useEffect } from 'react';
 interface DraggableCallBarProps {
   onMaximize: () => void;
   onEndCall: () => void;
+  isScreenSharing?: boolean;
 }
 
-export default function DraggableCallBar({ onMaximize, onEndCall }: DraggableCallBarProps) {
+export default function DraggableCallBar({ onMaximize, onEndCall, isScreenSharing }: DraggableCallBarProps) {
   const [position, setPosition] = useState({ x: 0, y: 0 });
   const [isDragging, setIsDragging] = useState(false);
   const [isLongPress, setIsLongPress] = useState(false);
@@ -194,9 +195,18 @@ export default function DraggableCallBar({ onMaximize, onEndCall }: DraggableCal
 
         {/* Call indicator */}
         <div className="flex items-center space-x-1.5 sm:space-x-2">
-          <div className="w-2 h-2 sm:w-3 sm:h-3 bg-green-500 rounded-full animate-pulse flex-shrink-0"></div>
+          <div className={`w-2 h-2 sm:w-3 sm:h-3 rounded-full animate-pulse flex-shrink-0 ${isScreenSharing ? 'bg-blue-500' : 'bg-green-500'}`}></div>
           <span className="font-medium text-xs sm:text-sm whitespace-nowrap">
-            <span className="hidden xs:inline">Team Call </span>Active
+            {isScreenSharing ? (
+              <>
+                <span className="hidden sm:inline">Screen Sharing</span>
+                <span className="sm:hidden">Sharing</span>
+              </>
+            ) : (
+              <>
+                <span className="hidden xs:inline">Team Call </span>Active
+              </>
+            )}
           </span>
         </div>
         
