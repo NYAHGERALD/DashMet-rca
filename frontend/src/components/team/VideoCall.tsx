@@ -29,6 +29,13 @@ interface Participant {
 // Connection states for better tracking
 type ConnectionState = 'idle' | 'checking-devices' | 'creating-room' | 'getting-token' | 'connecting' | 'joining' | 'connected' | 'failed';
 
+// Detect mobile device
+const isMobileDevice = () => {
+  if (typeof window === 'undefined') return false;
+  return /Android|webOS|iPhone|iPad|iPod|BlackBerry|IEMobile|Opera Mini/i.test(navigator.userAgent) ||
+    (window.innerWidth <= 768);
+};
+
 export default function VideoCall({ incidentId, rcaId, onClose, roomUrl: initialRoomUrl, roomName: initialRoomName, onRoomCreated, onMinimize }: VideoCallProps) {
   const callFrameRef = useRef<DailyCall | null>(null);
   const containerRef = useRef<HTMLDivElement>(null);
@@ -42,6 +49,7 @@ export default function VideoCall({ incidentId, rcaId, onClose, roomUrl: initial
   const [isVideoOff, setIsVideoOff] = useState(true);  // Start with video off
   const [isScreenSharing, setIsScreenSharing] = useState(false);
   const [usePopupMode, setUsePopupMode] = useState(false);  // Fallback to popup
+  const [isMobile, setIsMobile] = useState(false);  // Track if on mobile
   const [token, setToken] = useState<string | null>(null);
   const [connectionState, setConnectionState] = useState<ConnectionState>('idle');
   const [retryCount, setRetryCount] = useState(0);
@@ -61,6 +69,11 @@ export default function VideoCall({ incidentId, rcaId, onClose, roomUrl: initial
   const connectionTimeoutRef = useRef<NodeJS.Timeout | null>(null);
   const stateTimeoutRef = useRef<NodeJS.Timeout | null>(null);
   const MAX_RETRIES = 2;
+
+  // Detect mobile on mount
+  useEffect(() => {
+    setIsMobile(isMobileDevice());
+  }, []);
 
   // Clear all timeouts
   const clearAllTimeouts = useCallback(() => {
@@ -173,14 +186,21 @@ export default function VideoCall({ incidentId, rcaId, onClose, roomUrl: initial
           rcaId,
         });
 
-        if (response.data.success) {
+        if (response.data.success && response.data.room) {
           url = response.data.room.url;
           name = response.data.room.name;
           isExistingRoom = response.data.room.isExisting === true;
+          
+          // Validate that we received valid room data
+          if (!url || !name) {
+            console.error('📹 [VideoCall] Invalid room data received:', response.data);
+            throw new Error('Server returned invalid room data. Please try again.');
+          }
+          
           setRoomUrl(url);
           setRoomName(name);
           
-          console.log('📹 [VideoCall] Room response - isExisting:', isExistingRoom, 'url:', url);
+          console.log('📹 [VideoCall] Room response - isExisting:', isExistingRoom, 'url:', url, 'name:', name);
           
           // Only notify parent if this is a NEW room (not existing)
           // This prevents multiple users from broadcasting the same call
@@ -195,9 +215,16 @@ export default function VideoCall({ incidentId, rcaId, onClose, roomUrl: initial
         }
       }
 
+      // Ensure we have a valid room name before proceeding
+      if (!name) {
+        console.error('📹 [VideoCall] No room name available after room creation');
+        throw new Error('Room name not available. Please try again.');
+      }
+
       setConnectionState('getting-token');
       setStateTimeout('getting-token', 15000); // 15s to get token
       setLoadingStatus('Getting access token...');
+      console.log('📹 [VideoCall] Requesting token for room:', name);
       // Get meeting token
       const tokenResponse = await api.post('/video-call/get-token', {
         roomName: name,
@@ -214,11 +241,29 @@ export default function VideoCall({ incidentId, rcaId, onClose, roomUrl: initial
       setStateTimeout('connecting', 20000); // 20s to connect
       setLoadingStatus('Connecting to video call...');
 
-      // If popup mode is enabled, open in new window
-      if (usePopupMode) {
-        const popupUrl = `${url}?t=${meetingToken}`;
-        console.log('📹 Opening in popup mode:', popupUrl);
-        window.open(popupUrl, 'DailyVideoCall', 'width=1200,height=800,menubar=no,toolbar=no');
+      // On mobile devices, open directly in Daily.co's mobile-optimized URL
+      // This provides a much better experience than embedded iframe on mobile
+      const shouldUseMobileMode = isMobile || usePopupMode;
+      
+      if (shouldUseMobileMode) {
+        const mobileUrl = `${url}?t=${meetingToken}`;
+        console.log('📹 Opening in mobile/popup mode:', mobileUrl);
+        
+        // On mobile, open in same tab for better UX (avoids popup blockers)
+        if (isMobile) {
+          // Store state before navigating so we can restore when they return
+          sessionStorage.setItem('dashmet_call_state', JSON.stringify({
+            incidentId,
+            rcaId,
+            roomUrl: url,
+            roomName: name,
+            timestamp: Date.now()
+          }));
+          window.location.href = mobileUrl;
+        } else {
+          // Desktop popup mode
+          window.open(mobileUrl, 'DailyVideoCall', 'width=1200,height=800,menubar=no,toolbar=no');
+        }
         setIsLoading(false);
         setConnectionState('connected');
         clearAllTimeouts();
@@ -371,7 +416,7 @@ export default function VideoCall({ incidentId, rcaId, onClose, roomUrl: initial
       handleConnectionFailure(err instanceof Error ? err.message : 'Failed to start video call');
       initializingRef.current = false;
     }
-  }, [incidentId, rcaId, roomUrl, roomName, onClose, onRoomCreated, clearAllTimeouts, checkDeviceAvailability, setStateTimeout, handleConnectionFailure, usePopupMode]);
+  }, [incidentId, rcaId, roomUrl, roomName, onClose, onRoomCreated, clearAllTimeouts, checkDeviceAvailability, setStateTimeout, handleConnectionFailure, usePopupMode, isMobile]);
 
   const updateParticipants = useCallback(() => {
     if (callFrameRef.current) {
@@ -658,21 +703,39 @@ export default function VideoCall({ incidentId, rcaId, onClose, roomUrl: initial
 
   if (error) {
     return (
-      <div className="fixed inset-0 bg-black/80 flex items-center justify-center z-50">
-        <div className="bg-white dark:bg-gray-800 rounded-lg p-8 max-w-lg mx-4">
+      <div className="fixed inset-0 bg-black/80 flex items-center justify-center z-50 p-4">
+        <div className="bg-white dark:bg-gray-800 rounded-lg p-6 sm:p-8 max-w-lg w-full mx-auto">
           <div className="text-center">
-            <div className="w-16 h-16 bg-red-100 dark:bg-red-900/30 rounded-full flex items-center justify-center mx-auto mb-4">
-              <svg className="w-8 h-8 text-red-600 dark:text-red-400" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+            <div className="w-14 h-14 sm:w-16 sm:h-16 bg-red-100 dark:bg-red-900/30 rounded-full flex items-center justify-center mx-auto mb-4">
+              <svg className="w-7 h-7 sm:w-8 sm:h-8 text-red-600 dark:text-red-400" fill="none" viewBox="0 0 24 24" stroke="currentColor">
                 <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
               </svg>
             </div>
-            <h3 className="text-lg font-semibold text-gray-900 dark:text-white mb-2">
+            <h3 className="text-base sm:text-lg font-semibold text-gray-900 dark:text-white mb-2">
               Unable to Start Call
             </h3>
-            <p className="text-gray-600 dark:text-gray-400 mb-4 whitespace-pre-line text-sm">{error}</p>
+            <p className="text-gray-600 dark:text-gray-400 mb-4 whitespace-pre-line text-xs sm:text-sm">{error}</p>
+            
+            {/* Mobile-specific message */}
+            {isMobile && roomUrl && (
+              <div className="mb-4 p-4 bg-blue-50 dark:bg-blue-900/20 border border-blue-200 dark:border-blue-800 rounded-lg">
+                <p className="text-sm text-blue-800 dark:text-blue-300 mb-3 font-medium">
+                  📱 Mobile users: Tap below to join the call
+                </p>
+                <button
+                  onClick={() => {
+                    const callUrl = token ? `${roomUrl}?t=${token}` : roomUrl;
+                    window.location.href = callUrl;
+                  }}
+                  className="w-full px-4 py-4 bg-green-600 text-white rounded-lg hover:bg-green-700 text-base font-semibold transition-colors shadow-lg"
+                >
+                  Join Video Call
+                </button>
+              </div>
+            )}
             
             {/* Show popup fallback prominently when auto-retry exhausted */}
-            {showPopupFallback && roomUrl && (
+            {showPopupFallback && roomUrl && !isMobile && (
               <div className="mb-4 p-4 bg-green-50 dark:bg-green-900/20 border border-green-200 dark:border-green-800 rounded-lg">
                 <p className="text-sm text-green-800 dark:text-green-300 mb-3 font-medium">
                   ✨ The call is opening in a popup window...
@@ -689,7 +752,7 @@ export default function VideoCall({ incidentId, rcaId, onClose, roomUrl: initial
               </div>
             )}
             
-            {roomUrl && !showPopupFallback && (
+            {roomUrl && !showPopupFallback && !isMobile && (
               <div className="mb-4 p-3 bg-gray-100 dark:bg-gray-700 rounded-lg">
                 <p className="text-xs text-gray-500 dark:text-gray-400 mb-2">Alternative options:</p>
                 <div className="flex flex-col space-y-2">
@@ -708,7 +771,7 @@ export default function VideoCall({ incidentId, rcaId, onClose, roomUrl: initial
                 </div>
               </div>
             )}
-            <div className="flex space-x-3 justify-center">
+            <div className="flex flex-col sm:flex-row space-y-2 sm:space-y-0 sm:space-x-3 justify-center">
               <button
                 onClick={() => {
                   setError(null);
