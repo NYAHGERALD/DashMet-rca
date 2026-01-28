@@ -622,28 +622,28 @@ export default function RCAWorkspacePage() {
     <div className="min-h-screen bg-gray-50 dark:bg-gray-900">
       {/* Header */}
       <div className="bg-white dark:bg-gray-800 shadow">
-        <div className="w-full px-4 sm:px-6 lg:px-8 py-4">
-          <div className="flex items-center justify-between">
-            <div className="flex items-center space-x-4">
+        <div className="w-full px-3 sm:px-4 md:px-6 lg:px-8 py-3 sm:py-4">
+          <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3 sm:gap-0">
+            <div className="flex items-center space-x-3 sm:space-x-4">
               <button
                 onClick={() => router.push('/rca')}
                 className="text-gray-500 hover:text-gray-700 dark:text-gray-400 dark:hover:text-gray-200"
               >
-                <svg className="w-6 h-6" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                <svg className="w-5 h-5 sm:w-6 sm:h-6" fill="none" viewBox="0 0 24 24" stroke="currentColor">
                   <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M10 19l-7-7m0 0l7-7m-7 7h18" />
                 </svg>
               </button>
-              <div>
-                <h1 className="text-xl font-bold text-gray-900 dark:text-white">
+              <div className="min-w-0 flex-1">
+                <h1 className="text-base sm:text-xl font-bold text-gray-900 dark:text-white truncate">
                   RCA Workspace - {rca.incident?.incidentNumber || 'Unknown'}
                 </h1>
-                <p className="text-sm text-gray-500 dark:text-gray-400">
+                <p className="text-xs sm:text-sm text-gray-500 dark:text-gray-400 truncate">
                   {rca.incident?.category?.name || 'Unknown'} | {rca.incident?.facility?.name || 'Unknown'}
                 </p>
               </div>
             </div>
-            <div className="flex items-center space-x-4">
-              <span className={`px-3 py-1 rounded-full text-sm font-medium ${
+            <div className="flex items-center gap-2 sm:gap-4 flex-wrap">
+              <span className={`px-2 sm:px-3 py-0.5 sm:py-1 rounded-full text-xs sm:text-sm font-medium ${
                 rca.isValidated
                   ? 'bg-green-100 text-green-800 dark:bg-green-900 dark:text-green-200'
                   : 'bg-blue-100 text-blue-800 dark:bg-blue-900 dark:text-blue-200'
@@ -651,7 +651,7 @@ export default function RCAWorkspacePage() {
                 {rca.isValidated ? 'Validated' : rca.status.replace('_', ' ')}
               </span>
               {saving && (
-                <span className="text-sm text-gray-500 dark:text-gray-400">
+                <span className="text-xs sm:text-sm text-gray-500 dark:text-gray-400">
                   Saving...
                 </span>
               )}
@@ -661,7 +661,7 @@ export default function RCAWorkspacePage() {
       </div>
 
       {/* Main Content */}
-      <div className="w-full px-4 sm:px-6 lg:px-8 py-6">
+      <div className="w-full px-3 sm:px-4 md:px-6 lg:px-8 py-4 sm:py-6">
         {error && (
           <div className="bg-red-50 dark:bg-red-900/30 border border-red-200 dark:border-red-800 text-red-700 dark:text-red-200 px-4 py-3 rounded mb-6">
             {error}
@@ -670,64 +670,77 @@ export default function RCAWorkspacePage() {
         )}
 
         {/* Full Width Main Panel */}
-        <div className="space-y-6">
+        <div className="space-y-4 sm:space-y-6">
             {/* Incident Details Card */}
-            <div className="bg-white dark:bg-gray-800 rounded-lg shadow p-6">
-              <h2 className="text-lg font-semibold text-gray-900 dark:text-white mb-4">
+            <div className="bg-white dark:bg-gray-800 rounded-lg shadow p-3 sm:p-6">
+              <h2 className="text-base sm:text-lg font-semibold text-gray-900 dark:text-white mb-3 sm:mb-4">
                 Incident Details
               </h2>
-              <div className="space-y-4">
+              <div className="space-y-3 sm:space-y-4">
                 <div>
-                  <span className="text-sm font-medium text-gray-500 dark:text-gray-400">Description:</span>
+                  <span className="text-xs sm:text-sm font-medium text-gray-500 dark:text-gray-400">Description:</span>
                   {/* Check if description contains FMIR report structure with section markers */}
-                  {rca.incident?.description?.includes('─') || rca.incident?.description?.includes('FOREIGN MATERIAL INCIDENT REPORT') ? (
-                    <div className="mt-2 space-y-4 text-sm text-gray-900 dark:text-white">
+                  {rca.incident?.description?.includes('─') || rca.incident?.description?.includes('═') || rca.incident?.description?.includes('FOREIGN MATERIAL INCIDENT REPORT') ? (
+                    <div className="mt-2 space-y-3 sm:space-y-4 text-xs sm:text-sm text-gray-900 dark:text-white">
                       {/* Parse and render FMIR-formatted description */}
                       {(() => {
                         const desc = rca.incident?.description || '';
+                        
+                        // First, clean all unicode box-drawing characters
+                        const cleanedDesc = desc
+                          .replace(/[═─━│┃┄┅┆┇┈┉┊┋╌╍╎╏┌┐└┘├┤┬┴┼╔╗╚╝╠╣╦╩╬╭╮╯╰▀▄█▌▐░▒▓■□▪▫●○◘◙♦♣♠♥—–―_]+/g, '')
+                          .replace(/[\u2500-\u257F]+/g, '') // Remove box drawing block
+                          .replace(/[\u2580-\u259F]+/g, '') // Remove block elements
+                          .replace(/\n{3,}/g, '\n\n') // Collapse multiple newlines
+                          .trim();
+                        
                         // Extract sections from FMIR format
                         const sections: { title: string; content: string }[] = [];
-                        
-                        // Split by section headers (text followed by ─)
-                        const sectionRegex = /([A-Z][A-Z\s]+?)(?:\s*─+\s*|\s*$)/g;
-                        const parts = desc.split(/─+/).filter(p => p.trim());
                         
                         // Known FMIR sections
                         const sectionTitles = ['GENERAL INFORMATION', 'FOREIGN MATERIAL DESCRIPTION', 'CAUSE IDENTIFICATION', 'CORRECTIVE ACTION TAKEN', 'VERIFICATION ACTIONS', 'EVIDENCE'];
                         
+                        // Split by section titles
+                        const lines = cleanedDesc.split('\n');
                         let currentSection = '';
-                        let currentContent = '';
+                        let currentContent: string[] = [];
                         
-                        parts.forEach((part, idx) => {
-                          const trimmed = part.trim();
-                          const matchedTitle = sectionTitles.find(title => trimmed.startsWith(title) || trimmed.includes(title));
+                        for (const line of lines) {
+                          const trimmedLine = line.trim();
+                          const matchedTitle = sectionTitles.find(title => trimmedLine === title || trimmedLine.startsWith(title + ' '));
                           
                           if (matchedTitle) {
+                            // Save previous section
                             if (currentSection) {
-                              sections.push({ title: currentSection, content: currentContent.trim() });
+                              sections.push({ title: currentSection, content: currentContent.join('\n').trim() });
                             }
                             currentSection = matchedTitle;
-                            currentContent = trimmed.replace(matchedTitle, '').trim();
-                          } else if (idx === 0 && trimmed.includes('FMIR-')) {
-                            // First part is usually the report title
-                            sections.push({ title: 'Report', content: trimmed });
-                          } else if (currentSection) {
-                            currentContent += ' ' + trimmed;
-                          } else {
-                            currentContent += trimmed;
+                            // Check if there's content after the title on the same line
+                            const contentAfterTitle = trimmedLine.replace(matchedTitle, '').trim();
+                            currentContent = contentAfterTitle ? [contentAfterTitle] : [];
+                          } else if (trimmedLine.includes('FMIR-') && !currentSection) {
+                            // First part is usually the report title - skip it or add as report
+                            if (!sections.find(s => s.title === 'Report')) {
+                              sections.push({ title: 'Report', content: trimmedLine });
+                            }
+                          } else if (currentSection && trimmedLine) {
+                            currentContent.push(trimmedLine);
+                          } else if (!currentSection && trimmedLine && !trimmedLine.includes('FOREIGN MATERIAL INCIDENT REPORT')) {
+                            // Content before any section - add to a general section
+                            currentContent.push(trimmedLine);
                           }
-                        });
+                        }
                         
                         // Add last section
-                        if (currentSection && currentContent) {
-                          sections.push({ title: currentSection, content: currentContent.trim() });
+                        if (currentSection && currentContent.length > 0) {
+                          sections.push({ title: currentSection, content: currentContent.join('\n').trim() });
                         }
                         
                         // If no structured sections found, try to display as clean paragraphs
                         if (sections.length === 0) {
                           return (
                             <p className="whitespace-pre-wrap leading-relaxed">
-                              {desc.replace(/─+/g, '').trim()}
+                              {cleanedDesc}
                             </p>
                           );
                         }
@@ -737,7 +750,7 @@ export default function RCAWorkspacePage() {
                             <h4 className="font-medium text-blue-600 dark:text-blue-400 text-xs uppercase tracking-wide mb-1">
                               {section.title}
                             </h4>
-                            <p className="text-gray-800 dark:text-gray-200 leading-relaxed">
+                            <p className="text-gray-800 dark:text-gray-200 leading-relaxed whitespace-pre-wrap">
                               {section.content}
                             </p>
                           </div>
@@ -899,41 +912,41 @@ export default function RCAWorkspacePage() {
 
             {/* Method Selector / AI Recommendation */}
             {!rca.isValidated && (
-              <div className="bg-white dark:bg-gray-800 rounded-lg shadow p-6">
-                <div className="flex items-center justify-between mb-4">
-                  <h2 className="text-lg font-semibold text-gray-900 dark:text-white">
+              <div className="bg-white dark:bg-gray-800 rounded-lg shadow p-3 sm:p-6">
+                <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-2 sm:gap-0 mb-3 sm:mb-4">
+                  <h2 className="text-base sm:text-lg font-semibold text-gray-900 dark:text-white">
                     Analysis Method
                   </h2>
                   <button
                     onClick={() => setShowMethodSelector(!showMethodSelector)}
-                    className="text-blue-600 hover:text-blue-700 dark:text-blue-400 text-sm font-medium"
+                    className="text-blue-600 hover:text-blue-700 dark:text-blue-400 text-xs sm:text-sm font-medium self-start sm:self-auto"
                   >
                     Change Method
                   </button>
                 </div>
 
                 {/* Current Method */}
-                <div className="flex items-center space-x-4 mb-4">
-                  <div className={`p-3 rounded-lg ${
+                <div className="flex items-center space-x-3 sm:space-x-4 mb-3 sm:mb-4">
+                  <div className={`p-2 sm:p-3 rounded-lg ${
                     rca.method === 'FIVE_WHYS'
                       ? 'bg-purple-100 dark:bg-purple-900'
                       : 'bg-teal-100 dark:bg-teal-900'
                   }`}>
                     {rca.method === 'FIVE_WHYS' ? (
-                      <svg className="w-6 h-6 text-purple-600 dark:text-purple-300" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                      <svg className="w-5 h-5 sm:w-6 sm:h-6 text-purple-600 dark:text-purple-300" fill="none" viewBox="0 0 24 24" stroke="currentColor">
                         <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M8.228 9c.549-1.165 2.03-2 3.772-2 2.21 0 4 1.343 4 3 0 1.4-1.278 2.575-3.006 2.907-.542.104-.994.54-.994 1.093m0 3h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
                       </svg>
                     ) : (
-                      <svg className="w-6 h-6 text-teal-600 dark:text-teal-300" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                      <svg className="w-5 h-5 sm:w-6 sm:h-6 text-teal-600 dark:text-teal-300" fill="none" viewBox="0 0 24 24" stroke="currentColor">
                         <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 17V7m0 10a2 2 0 01-2 2H5a2 2 0 01-2-2V7a2 2 0 012-2h2a2 2 0 012 2m0 10a2 2 0 002 2h2a2 2 0 002-2M9 7a2 2 0 012-2h2a2 2 0 012 2m0 10V7m0 10a2 2 0 002 2h2a2 2 0 002-2V7a2 2 0 00-2-2h-2a2 2 0 00-2 2" />
                       </svg>
                     )}
                   </div>
                   <div>
-                    <p className="font-medium text-gray-900 dark:text-white">
+                    <p className="text-sm sm:text-base font-medium text-gray-900 dark:text-white">
                       {rca.method === 'FIVE_WHYS' ? '5 Whys Analysis' : 'Fishbone Diagram'}
                     </p>
-                    <p className="text-sm text-gray-500 dark:text-gray-400">
+                    <p className="text-xs sm:text-sm text-gray-500 dark:text-gray-400">
                       {rca.method === 'FIVE_WHYS'
                         ? 'Iterative questioning to find root cause'
                         : 'Visual cause-and-effect diagram'}
@@ -958,15 +971,15 @@ export default function RCAWorkspacePage() {
                     const methodMatches = rca.method === recMethod;
                     
                     return (
-                      <div className={`rounded-lg p-4 ${
+                      <div className={`rounded-lg p-3 sm:p-4 ${
                         methodMatches 
                           ? 'bg-green-50 dark:bg-green-900/30 border border-green-200 dark:border-green-700'
                           : 'bg-yellow-50 dark:bg-yellow-900/30 border border-yellow-200 dark:border-yellow-700'
                       }`}>
-                        <div className="flex items-start space-x-3">
-                          <span className="text-xl mt-0.5">{methodMatches ? '✅' : '💡'}</span>
-                          <div className="flex-1">
-                            <p className={`text-sm font-semibold ${
+                        <div className="flex items-start space-x-2 sm:space-x-3">
+                          <span className="text-lg sm:text-xl mt-0.5">{methodMatches ? '✅' : '💡'}</span>
+                          <div className="flex-1 min-w-0">
+                            <p className={`text-xs sm:text-sm font-semibold ${
                               methodMatches 
                                 ? 'text-green-800 dark:text-green-200'
                                 : 'text-yellow-800 dark:text-yellow-200'
@@ -977,7 +990,7 @@ export default function RCAWorkspacePage() {
                               }
                             </p>
                             {recReason && (
-                              <p className={`text-sm mt-2 leading-relaxed ${
+                              <p className={`text-xs sm:text-sm mt-1.5 sm:mt-2 leading-relaxed ${
                                 methodMatches 
                                   ? 'text-green-700 dark:text-green-300'
                                   : 'text-yellow-700 dark:text-yellow-300'
@@ -986,7 +999,7 @@ export default function RCAWorkspacePage() {
                               </p>
                             )}
                             {recConfidence && (
-                              <div className="mt-2 flex items-center gap-2">
+                              <div className="mt-1.5 sm:mt-2 flex items-center gap-2">
                                 <span className={`text-xs font-medium ${
                                   methodMatches 
                                     ? 'text-green-600 dark:text-green-400'
@@ -997,7 +1010,7 @@ export default function RCAWorkspacePage() {
                               </div>
                             )}
                             {!methodMatches && (
-                              <p className={`text-xs mt-2 italic text-yellow-600 dark:text-yellow-400`}>
+                              <p className={`text-xs mt-1.5 sm:mt-2 italic text-yellow-600 dark:text-yellow-400`}>
                                 You can continue with your current choice. The AI recommendation is just a suggestion based on the incident analysis.
                               </p>
                             )}

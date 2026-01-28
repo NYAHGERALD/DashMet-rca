@@ -203,3 +203,75 @@ School accounts (Microsoft 365 Education)
 The detailed step-by-step Azure/Firebase configuration instructions are in MICROSOFT_LOGIN_SETUP.md.
 
 Do this with extreme professionalism, precision and care and not breaking working logic and flow. also with no mistake. this would the best colaborative App out there.
+
+
+
+
+1. AI Meeting Transcription & Smart Summary
+Auto-transcribe entire call in real-time
+AI-generated summary with key decisions, root causes discussed, and action items
+Searchable transcript linked to incident record
+2. Live Evidence Spotlight
+Present specific evidence (photos/videos/docs) to all participants
+Collaborative annotation tools - draw circles, arrows on images
+Timestamp markers linking discussion to specific evidence
+3. Real-time RCA Sync
+Show the 5 Whys / Fishbone diagram during call
+Team members can edit together with cursors visible
+Changes sync instantly to all viewers
+4. Smart Action Item Detection
+AI listens for commitments: "I'll check the maintenance logs"
+Auto-creates tasks assigned to speaker
+Review and confirm at end of call
+5. Integrated Whiteboard
+Draw fishbone diagrams together
+Sticky notes for brainstorming causes
+Export drawings as incident attachments
+6. Call Recording with Chapter Markers
+Record entire call (with consent)
+Add bookmarks during key moments
+Link recording to specific RCA sections
+7. Expert Quick-Invite
+One-click invite SMEs (Subject Matter Experts)
+Shows their expertise/department
+They get context summary before joining
+8. Voting & Consensus Tools
+Quick polls: "Is this the root cause?"
+Priority voting on corrective actions
+Results documented in RCA record
+9. Live Captions & Translation
+Real-time captions for accessibility
+Multi-language translation for global teams
+10. Call Scheduler with Agenda
+Schedule recurring RCA review calls
+Pre-set agenda items
+Calendar integration (Google/Outlook)
+
+
+
+
+
+Why i keep telling you the same issue over and over.
+Why when one user drawing objects on the image on spotlight and other users do not see them. How would they work, if this feature is not implemented right?
+
+
+
+It seems to be working. however, i noticed that when a user zoom the browser and the image appears big or small, the objects drawn on the image remain thesame size there by the original position the drawn will no longer be correct. the issue this poses is, if A team users have different browsers scalling percent, that means when they draw on an evident or place objects on an evident on a particular position they intented, other team users colaborating will see the objects on a different spot there by making this features unuseful.
+
+we need to find a professional way to fix this issue. text, objects, drawing or painting should maintain their position on the image, either by creating a snapshot of the evidents and make the  text, objects, drawing or painting part of the evident, so that they stick together. this is just to share with you how the feature will be better off. you know better professional way to handle this effectively with professionalism.
+Please.
+Do this with extreme professionalism, precision and care and not breaking working logic and flow. also with no mistake. this would the best colaborative App out there.
+
+Now Implement meeting recording. team users can record a meeting in webm format and after the meeting is stopped or the recording is stopped, it automatically stored in forbase and linked to the incident. The should be recording history section where recordings can be accessed after the recording stops or meeting ends. When record is clicked, it detects if there are multiple windows and users can chose which to record or record selected screens or record all screens.
+
+Can you implement this professionally?
+if yes,
+Do so with extreme professionalism, precision and care and not breaking working logic and flow. also with no mistake. this would the best colaborative App out there.
+
+
+Now check the project file directory if we are comitting and pushing ensitive files to github, check if they are added in .ignore.
+if everything looks good,
+then 
+. add
+comit
+push.

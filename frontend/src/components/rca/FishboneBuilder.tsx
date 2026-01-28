@@ -207,6 +207,8 @@ export default function FishboneBuilder({
   const [editedRootCause, setEditedRootCause] = useState<string>('');
   const [isEditingFiveWhys, setIsEditingFiveWhys] = useState(false);
   const [validatingEdits, setValidatingEdits] = useState(false);
+  const [isSavingFiveWhys, setIsSavingFiveWhys] = useState(false);
+  const [saveStatus, setSaveStatus] = useState<'idle' | 'saving' | 'saved' | 'error'>('idle');
   const [editValidationFeedback, setEditValidationFeedback] = useState<{
     isValid: boolean;
     issues: Array<{ stepNumber: number; issue: string; suggestion: string }>;
@@ -2248,28 +2250,41 @@ export default function FishboneBuilder({
   const saveAndGoBack = async () => {
     if (!selectedCauseForAnalysis) return;
     
+    setIsSavingFiveWhys(true);
+    setSaveStatus('saving');
+    
     try {
       // Save the current edited data to the database
       await api.patch(`/rca/${rcaId}/five-whys-autosave`, {
         causeId: selectedCauseForAnalysis.id,
-        fiveWhysSteps: editedFiveWhysSteps,
+        causeText: selectedCauseForAnalysis.text,
+        categoryName: selectedCauseForAnalysis.categoryName,
+        steps: editedFiveWhysSteps,
         rootCause: editedRootCause,
         analysisMethod: 'ai'
       });
       
+      setSaveStatus('saved');
       showAutoSaveToast();
       
-      // Exit edit mode and go back to choose mode
-      setIsEditingFiveWhys(false);
-      setEditedFiveWhysSteps([]);
-      setEditedRootCause('');
-      setEditValidationFeedback(null);
-      setFiveWhysMode('choose');
-      
-      // Broadcast edit mode off to all team members
-      emitRCAFiveWhysAIEditMode(incidentId, rcaId, selectedCauseForAnalysis.id, false, [], '');
+      // Exit edit mode and go back to choose mode after a brief delay to show success
+      setTimeout(() => {
+        setIsEditingFiveWhys(false);
+        setEditedFiveWhysSteps([]);
+        setEditedRootCause('');
+        setEditValidationFeedback(null);
+        setFiveWhysMode('choose');
+        setSaveStatus('idle');
+        
+        // Broadcast edit mode off to all team members
+        emitRCAFiveWhysAIEditMode(incidentId, rcaId, selectedCauseForAnalysis.id, false, [], '');
+      }, 500);
     } catch (error) {
       console.error('Error saving 5 Whys before going back:', error);
+      setSaveStatus('error');
+      setTimeout(() => setSaveStatus('idle'), 2000);
+    } finally {
+      setIsSavingFiveWhys(false);
     }
   };
 
@@ -2277,17 +2292,30 @@ export default function FishboneBuilder({
   const explicitSaveFiveWhys = async () => {
     if (!selectedCauseForAnalysis) return;
     
+    setIsSavingFiveWhys(true);
+    setSaveStatus('saving');
+    
     try {
       await api.patch(`/rca/${rcaId}/five-whys-autosave`, {
         causeId: selectedCauseForAnalysis.id,
-        fiveWhysSteps: editedFiveWhysSteps,
+        causeText: selectedCauseForAnalysis.text,
+        categoryName: selectedCauseForAnalysis.categoryName,
+        steps: editedFiveWhysSteps,
         rootCause: editedRootCause,
         analysisMethod: 'ai'
       });
       
+      setSaveStatus('saved');
       showAutoSaveToast();
+      
+      // Reset to idle after showing success
+      setTimeout(() => setSaveStatus('idle'), 2000);
     } catch (error) {
       console.error('Error saving 5 Whys:', error);
+      setSaveStatus('error');
+      setTimeout(() => setSaveStatus('idle'), 2000);
+    } finally {
+      setIsSavingFiveWhys(false);
     }
   };
 
@@ -2859,7 +2887,7 @@ export default function FishboneBuilder({
   };
 
   return (
-    <div className="p-6">
+    <div className="p-3 sm:p-6">
       {/* Error Display */}
       {errorMessage && (
         <div className="mb-4 p-4 bg-red-50 dark:bg-red-900/30 border border-red-200 dark:border-red-700 rounded-lg flex items-center justify-between">
@@ -2880,20 +2908,20 @@ export default function FishboneBuilder({
         </div>
       )}
 
-      <div className="flex items-center justify-between mb-6">
-        <h2 className="text-lg font-semibold text-gray-900 dark:text-white">
+      <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3 sm:gap-0 mb-4 sm:mb-6">
+        <h2 className="text-base sm:text-lg font-semibold text-gray-900 dark:text-white">
           Fishbone Diagram (Ishikawa)
         </h2>
-        <div className="flex items-center space-x-3">
+        <div className="flex flex-wrap items-center gap-2 sm:gap-3">
           {!isValidated && (
             <button
               onClick={startAIWorkflow}
               disabled={generatingFullAnalysis || showAIPanel}
-              className="px-4 py-2 bg-gradient-to-r from-purple-600 to-indigo-600 text-white rounded-lg hover:from-purple-700 hover:to-indigo-700 disabled:opacity-50 transition-all flex items-center space-x-2 shadow-lg"
+              className="px-3 sm:px-4 py-1.5 sm:py-2 bg-gradient-to-r from-purple-600 to-indigo-600 text-white rounded-lg hover:from-purple-700 hover:to-indigo-700 disabled:opacity-50 transition-all flex items-center space-x-1.5 sm:space-x-2 shadow-lg text-xs sm:text-sm"
             >
               {generatingFullAnalysis ? (
                 <>
-                  <svg className="animate-spin h-5 w-5" viewBox="0 0 24 24">
+                  <svg className="animate-spin h-4 w-4 sm:h-5 sm:w-5" viewBox="0 0 24 24">
                     <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" fill="none" />
                     <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z" />
                   </svg>
@@ -2901,7 +2929,7 @@ export default function FishboneBuilder({
                 </>
               ) : (
                 <>
-                  <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                  <svg className="w-4 h-4 sm:w-5 sm:h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
                     <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M13 10V3L4 14h7v7l9-11h-7z" />
                   </svg>
                   <span>🤖 AI Generate Analysis</span>
@@ -2909,54 +2937,54 @@ export default function FishboneBuilder({
               )}
             </button>
           )}
-          <span className="px-3 py-1 rounded-full text-xs font-medium bg-gray-100 text-gray-800 dark:bg-gray-700 dark:text-gray-200">
+          <span className="px-2 sm:px-3 py-1 rounded-full text-xs font-medium bg-gray-100 text-gray-800 dark:bg-gray-700 dark:text-gray-200">
             {totalCauses} causes identified
           </span>
         </div>
       </div>
 
       {/* Tab Navigation */}
-      <div className="mb-6 border-b border-gray-200 dark:border-gray-700">
-        <nav className="flex space-x-1" aria-label="Tabs">
+      <div className="mb-6 border-b border-gray-200 dark:border-gray-700 overflow-x-auto">
+        <nav className="flex space-x-1 min-w-max" aria-label="Tabs">
           <button
             onClick={() => setActiveTab('analysis')}
-            className={`px-6 py-3 text-sm font-medium rounded-t-lg transition-colors flex items-center space-x-2 ${
+            className={`px-3 sm:px-6 py-2 sm:py-3 text-xs sm:text-sm font-medium rounded-t-lg transition-colors flex items-center space-x-1 sm:space-x-2 whitespace-nowrap ${
               activeTab === 'analysis'
                 ? 'bg-white dark:bg-gray-800 text-blue-600 dark:text-blue-400 border-t-2 border-x border-blue-500 -mb-px'
                 : 'text-gray-500 dark:text-gray-400 hover:text-gray-700 dark:hover:text-gray-300 hover:bg-gray-50 dark:hover:bg-gray-800/50'
             }`}
           >
-            <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+            <svg className="w-4 h-4 sm:w-5 sm:h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
               <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 5H7a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2V7a2 2 0 00-2-2h-2M9 5a2 2 0 002 2h2a2 2 0 002-2M9 5a2 2 0 012-2h2a2 2 0 012 2m-6 9l2 2 4-4" />
             </svg>
-            <span>Cause Analysis</span>
+            <span className="hidden xs:inline">Cause</span> <span>Analysis</span>
             <span className="px-2 py-0.5 text-xs rounded-full bg-blue-100 dark:bg-blue-900/50 text-blue-600 dark:text-blue-400">
               {totalCauses}
             </span>
           </button>
           <button
             onClick={() => setActiveTab('diagram')}
-            className={`px-6 py-3 text-sm font-medium rounded-t-lg transition-colors flex items-center space-x-2 ${
+            className={`px-3 sm:px-6 py-2 sm:py-3 text-xs sm:text-sm font-medium rounded-t-lg transition-colors flex items-center space-x-1 sm:space-x-2 whitespace-nowrap ${
               activeTab === 'diagram'
                 ? 'bg-white dark:bg-gray-800 text-blue-600 dark:text-blue-400 border-t-2 border-x border-blue-500 -mb-px'
                 : 'text-gray-500 dark:text-gray-400 hover:text-gray-700 dark:hover:text-gray-300 hover:bg-gray-50 dark:hover:bg-gray-800/50'
             }`}
           >
-            <span className="text-lg">🐟</span>
-            <span>Fishbone Diagram</span>
+            <span className="text-base sm:text-lg">🐟</span>
+            <span className="hidden xs:inline">Fishbone</span> <span>Diagram</span>
           </button>
           <button
             onClick={() => setActiveTab('actions')}
-            className={`px-6 py-3 text-sm font-medium rounded-t-lg transition-colors flex items-center space-x-2 ${
+            className={`px-3 sm:px-6 py-2 sm:py-3 text-xs sm:text-sm font-medium rounded-t-lg transition-colors flex items-center space-x-1 sm:space-x-2 whitespace-nowrap ${
               activeTab === 'actions'
                 ? 'bg-white dark:bg-gray-800 text-blue-600 dark:text-blue-400 border-t-2 border-x border-blue-500 -mb-px'
                 : 'text-gray-500 dark:text-gray-400 hover:text-gray-700 dark:hover:text-gray-300 hover:bg-gray-50 dark:hover:bg-gray-800/50'
             }`}
           >
-            <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+            <svg className="w-4 h-4 sm:w-5 sm:h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
               <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z" />
             </svg>
-            <span>Corrective Actions</span>
+            <span className="hidden xs:inline">Corrective</span> <span>Actions</span>
             {(actionPlans.immediate.length + actionPlans.shortTerm.length + actionPlans.longTerm.length) > 0 && (
               <span className="px-2 py-0.5 text-xs rounded-full bg-green-100 dark:bg-green-900/50 text-green-600 dark:text-green-400">
                 {actionPlans.immediate.length + actionPlans.shortTerm.length + actionPlans.longTerm.length}
@@ -2965,16 +2993,16 @@ export default function FishboneBuilder({
           </button>
           <button
             onClick={() => setActiveTab('controls')}
-            className={`px-6 py-3 text-sm font-medium rounded-t-lg transition-colors flex items-center space-x-2 ${
+            className={`px-3 sm:px-6 py-2 sm:py-3 text-xs sm:text-sm font-medium rounded-t-lg transition-colors flex items-center space-x-1 sm:space-x-2 whitespace-nowrap ${
               activeTab === 'controls'
                 ? 'bg-white dark:bg-gray-800 text-blue-600 dark:text-blue-400 border-t-2 border-x border-blue-500 -mb-px'
                 : 'text-gray-500 dark:text-gray-400 hover:text-gray-700 dark:hover:text-gray-300 hover:bg-gray-50 dark:hover:bg-gray-800/50'
             }`}
           >
-            <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+            <svg className="w-4 h-4 sm:w-5 sm:h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
               <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 12l2 2 4-4m5.618-4.016A11.955 11.955 0 0112 2.944a11.955 11.955 0 01-8.618 3.04A12.02 12.02 0 003 9c0 5.591 3.824 10.29 9 11.622 5.176-1.332 9-6.03 9-11.622 0-1.042-.133-2.052-.382-3.016z" />
             </svg>
-            <span>Preventive Controls</span>
+            <span className="hidden xs:inline">Preventive</span> <span>Controls</span>
             {preventiveControls.length > 0 && (
               <span className="px-2 py-0.5 text-xs rounded-full bg-purple-100 dark:bg-purple-900/50 text-purple-600 dark:text-purple-400">
                 {preventiveControls.length}
@@ -3794,28 +3822,74 @@ export default function FishboneBuilder({
                     {/* Left side - Back button */}
                     <button
                       onClick={saveAndGoBack}
-                      className="px-4 py-2 bg-gray-100 text-gray-700 dark:bg-gray-700 dark:text-gray-300 hover:bg-gray-200 dark:hover:bg-gray-600 rounded-lg flex items-center space-x-2"
+                      disabled={isSavingFiveWhys}
+                      className="px-4 py-2 bg-gray-100 text-gray-700 dark:bg-gray-700 dark:text-gray-300 hover:bg-gray-200 dark:hover:bg-gray-600 rounded-lg flex items-center space-x-2 disabled:opacity-50"
                     >
-                      <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M10 19l-7-7m0 0l7-7m-7 7h18" />
-                      </svg>
-                      <span>Save & Back</span>
+                      {isSavingFiveWhys && saveStatus === 'saving' ? (
+                        <>
+                          <svg className="w-4 h-4 animate-spin" fill="none" viewBox="0 0 24 24">
+                            <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
+                            <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z" />
+                          </svg>
+                          <span>Saving...</span>
+                        </>
+                      ) : (
+                        <>
+                          <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M10 19l-7-7m0 0l7-7m-7 7h18" />
+                          </svg>
+                          <span>Save & Back</span>
+                        </>
+                      )}
                     </button>
                     
                     {/* Right side - Save and Validate buttons */}
                     <div className="flex space-x-3">
                       <button
                         onClick={explicitSaveFiveWhys}
-                        className="px-4 py-2 bg-green-600 text-white rounded-lg hover:bg-green-700 flex items-center space-x-2"
+                        disabled={isSavingFiveWhys}
+                        className={`px-4 py-2 rounded-lg flex items-center space-x-2 transition-all duration-300 ${
+                          saveStatus === 'saved' 
+                            ? 'bg-green-500 text-white' 
+                            : saveStatus === 'error'
+                            ? 'bg-red-600 text-white'
+                            : 'bg-green-600 text-white hover:bg-green-700'
+                        } disabled:opacity-50`}
                       >
-                        <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M8 7H5a2 2 0 00-2 2v9a2 2 0 002 2h14a2 2 0 002-2V9a2 2 0 00-2-2h-3m-1 4l-3 3m0 0l-3-3m3 3V4" />
-                        </svg>
-                        <span>Save</span>
+                        {saveStatus === 'saving' ? (
+                          <>
+                            <svg className="w-4 h-4 animate-spin" fill="none" viewBox="0 0 24 24">
+                              <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
+                              <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z" />
+                            </svg>
+                            <span>Saving...</span>
+                          </>
+                        ) : saveStatus === 'saved' ? (
+                          <>
+                            <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 13l4 4L19 7" />
+                            </svg>
+                            <span>Saved</span>
+                          </>
+                        ) : saveStatus === 'error' ? (
+                          <>
+                            <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
+                            </svg>
+                            <span>Error</span>
+                          </>
+                        ) : (
+                          <>
+                            <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M8 7H5a2 2 0 00-2 2v9a2 2 0 002 2h14a2 2 0 002-2V9a2 2 0 00-2-2h-3m-1 4l-3 3m0 0l-3-3m3 3V4" />
+                            </svg>
+                            <span>Save</span>
+                          </>
+                        )}
                       </button>
                       <button
                         onClick={validateEditedFiveWhys}
-                        disabled={validatingEdits}
+                        disabled={validatingEdits || isSavingFiveWhys}
                         className="px-4 py-2 bg-purple-600 text-white rounded-lg hover:bg-purple-700 disabled:opacity-50 flex items-center space-x-2"
                       >
                         <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
@@ -3975,8 +4049,8 @@ export default function FishboneBuilder({
       {activeTab === 'analysis' && (
         <>
           {/* Problem Statement (Fish Head) */}
-          <div className="mb-8 p-4 border-2 border-gray-400 dark:border-gray-500 rounded-lg bg-gray-100 dark:bg-gray-700">
-            <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">
+          <div className="mb-4 sm:mb-8 p-3 sm:p-4 border-2 border-gray-400 dark:border-gray-500 rounded-lg bg-gray-100 dark:bg-gray-700">
+            <label className="block text-xs sm:text-sm font-medium text-gray-700 dark:text-gray-300 mb-1.5 sm:mb-2">
               Problem Statement (Effect)
             </label>
             <textarea
@@ -4002,21 +4076,21 @@ export default function FishboneBuilder({
               }}
               disabled={isValidated}
               rows={2}
-              className="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-800 text-gray-900 dark:text-white disabled:opacity-50 resize-none overflow-hidden min-h-[60px]"
+              className="w-full px-2 sm:px-3 py-1.5 sm:py-2 text-xs sm:text-sm border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-800 text-gray-900 dark:text-white disabled:opacity-50 resize-none overflow-hidden min-h-[50px] sm:min-h-[60px]"
               placeholder="Describe the problem or effect..."
             />
           </div>
 
           {/* Categories (Fish Bones) */}
-          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4 mb-8">
+          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3 sm:gap-4 mb-4 sm:mb-8">
             {categories.map((category, index) => (
               <div
                 key={category.id}
-                className={`border-l-4 rounded-lg p-4 ${getCategoryColor(index)}`}
+                className={`border-l-4 rounded-lg p-3 sm:p-4 ${getCategoryColor(index)}`}
               >
                 {/* Category Header */}
-                <div className={`-mx-4 -mt-4 mb-4 px-4 py-2 rounded-t-lg ${getCategoryHeaderColor(index)}`}>
-                  <h3 className="font-medium text-white">{category.name}</h3>
+                <div className={`-mx-3 sm:-mx-4 -mt-3 sm:-mt-4 mb-3 sm:mb-4 px-3 sm:px-4 py-1.5 sm:py-2 rounded-t-lg ${getCategoryHeaderColor(index)}`}>
+                  <h3 className="text-sm sm:text-base font-medium text-white">{category.name}</h3>
                 </div>
 
                 {/* Causes List */}

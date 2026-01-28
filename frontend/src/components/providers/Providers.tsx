@@ -13,6 +13,7 @@ import { WebSocketProvider } from '@/lib/websocket';
 import { BrowserNotificationProvider } from '@/components/providers/BrowserNotificationProvider';
 import { SupportAlertProvider } from '@/components/providers/SupportAlertProvider';
 import { SupportStatusNotificationProvider } from '@/components/providers/SupportStatusNotificationProvider';
+import { VideoCallProvider } from '@/components/providers/VideoCallProvider';
 import { ToastProvider } from '@/components/ui/Toast';
 
 export function Providers({ children }: { children: React.ReactNode }) {
@@ -36,15 +37,17 @@ export function Providers({ children }: { children: React.ReactNode }) {
             <AuthProvider>
               <OrganizationProvider>
                 <WebSocketProvider>
-                  <BrowserNotificationProvider>
-                    <SupportAlertProvider>
-                      <SupportStatusNotificationProvider>
-                        <ToastProvider>
-                          {children}
-                        </ToastProvider>
-                      </SupportStatusNotificationProvider>
-                    </SupportAlertProvider>
-                  </BrowserNotificationProvider>
+                  <VideoCallProvider>
+                    <BrowserNotificationProvider>
+                      <SupportAlertProvider>
+                        <SupportStatusNotificationProvider>
+                          <ToastProvider>
+                            {children}
+                          </ToastProvider>
+                        </SupportStatusNotificationProvider>
+                      </SupportAlertProvider>
+                    </BrowserNotificationProvider>
+                  </VideoCallProvider>
                 </WebSocketProvider>
               </OrganizationProvider>
             </AuthProvider>

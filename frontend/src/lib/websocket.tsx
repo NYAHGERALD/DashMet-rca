@@ -241,6 +241,32 @@ interface WebSocketContextType {
   onRCAFiveWhysCauseRecommendation: (callback: (data: { incidentId: string; rcaId: string; causeId: string; categoryName: string; recommendation: 'keep' | 'eliminate'; fiveWhysAnalysis?: any; userId: string; userName: string; timestamp: string }) => void) => () => void;
   // Emit RCA 5 Whys cause recommendation
   emitRCAFiveWhysCauseRecommendation: (incidentId: string, rcaId: string, causeId: string, categoryName: string, recommendation: 'keep' | 'eliminate', fiveWhysAnalysis?: any) => void;
+
+  // ========================================
+  // INCIDENT EVIDENCE EVENTS
+  // ========================================
+  // Incident evidence added (for real-time evidence sync when chat attachment is uploaded)
+  onIncidentEvidenceAdded: (callback: (data: { incidentId: string; evidence: { id: string; type: string; fileName: string; filePath: string; mimeType: string; uploadedById: string }; uploadedBy: { id: string; firstName: string; lastName: string }; timestamp: string }) => void) => () => void;
+
+  // ========================================
+  // VIDEO CALL EVENTS
+  // ========================================
+  // Video call started notification
+  onVideoCallStarted: (callback: (data: { incidentId: string; roomUrl: string; roomName: string; startedBy: string; startedByName: string; timestamp: string }) => void) => () => void;
+  // Video call ended notification
+  onVideoCallEnded: (callback: (data: { incidentId: string; roomName: string; endedBy: string; timestamp: string }) => void) => () => void;
+  // User joined call notification
+  onVideoCallUserJoined: (callback: (data: { incidentId: string; roomName: string; userId: string; userName: string; timestamp: string }) => void) => () => void;
+  // User left call notification
+  onVideoCallUserLeft: (callback: (data: { incidentId: string; roomName: string; userId: string; timestamp: string }) => void) => () => void;
+  // Emit video call started
+  emitVideoCallStarted: (incidentId: string, roomUrl: string, roomName: string) => void;
+  // Emit video call ended
+  emitVideoCallEnded: (incidentId: string, roomName: string) => void;
+  // Emit user joined call
+  emitVideoCallUserJoined: (incidentId: string, roomName: string) => void;
+  // Emit user left call
+  emitVideoCallUserLeft: (incidentId: string, roomName: string) => void;
 }
 
 const WebSocketContext = createContext<WebSocketContextType | null>(null);
@@ -324,6 +350,15 @@ export function WebSocketProvider({ children }: { children: React.ReactNode }) {
   const rcaFiveWhysAIEditValidationResultCallbacks = useRef<Set<(data: any) => void>>(new Set());
   const rcaFiveWhysAIEditFixAppliedCallbacks = useRef<Set<(data: any) => void>>(new Set());
   const rcaFiveWhysCauseRecommendationCallbacks = useRef<Set<(data: any) => void>>(new Set());
+  
+  // Video call callbacks
+  const videoCallStartedCallbacks = useRef<Set<(data: any) => void>>(new Set());
+  const videoCallEndedCallbacks = useRef<Set<(data: any) => void>>(new Set());
+  const videoCallUserJoinedCallbacks = useRef<Set<(data: any) => void>>(new Set());
+  const videoCallUserLeftCallbacks = useRef<Set<(data: any) => void>>(new Set());
+  
+  // Incident evidence callbacks
+  const incidentEvidenceAddedCallbacks = useRef<Set<(data: any) => void>>(new Set());
 
   const connect = useCallback((userId: string, organizationId: string) => {
     // Prevent multiple connection attempts
@@ -813,6 +848,44 @@ export function WebSocketProvider({ children }: { children: React.ReactNode }) {
       rcaFiveWhysCauseRecommendationCallbacks.current.forEach(cb => cb(data));
     });
 
+    // ========================================
+    // VIDEO CALL EVENT HANDLERS
+    // ========================================
+    
+    // Handle video call started
+    newSocket.on('video-call:started', (data: any) => {
+      console.log('📹 Video call started event:', data);
+      videoCallStartedCallbacks.current.forEach(cb => cb(data));
+    });
+
+    // Handle video call ended
+    newSocket.on('video-call:ended', (data: any) => {
+      console.log('📹 Video call ended event:', data);
+      videoCallEndedCallbacks.current.forEach(cb => cb(data));
+    });
+
+    // Handle user joined call
+    newSocket.on('video-call:user-joined', (data: any) => {
+      console.log('📹 User joined video call event:', data);
+      videoCallUserJoinedCallbacks.current.forEach(cb => cb(data));
+    });
+
+    // Handle user left call
+    newSocket.on('video-call:user-left', (data: any) => {
+      console.log('📹 User left video call event:', data);
+      videoCallUserLeftCallbacks.current.forEach(cb => cb(data));
+    });
+
+    // ========================================
+    // INCIDENT EVIDENCE EVENT HANDLERS
+    // ========================================
+    
+    // Handle incident evidence added (when chat attachment is uploaded)
+    newSocket.on('incident:evidence:added', (data: any) => {
+      console.log('📎 Incident evidence added event:', data);
+      incidentEvidenceAddedCallbacks.current.forEach(cb => cb(data));
+    });
+
     // Handle incident participants list
     newSocket.on('incident:participants', (data: { incidentId: string; participants: any[] }) => {
       const onlineIds = data.participants.filter(p => p.isOnline).map(p => p.id);
@@ -1241,6 +1314,39 @@ export function WebSocketProvider({ children }: { children: React.ReactNode }) {
     return () => { rcaFiveWhysCauseRecommendationCallbacks.current.delete(callback); };
   }, []);
 
+  // ========================================
+  // VIDEO CALL CALLBACK HANDLERS
+  // ========================================
+  
+  const onVideoCallStarted = useCallback((callback: (data: any) => void) => {
+    videoCallStartedCallbacks.current.add(callback);
+    return () => { videoCallStartedCallbacks.current.delete(callback); };
+  }, []);
+
+  const onVideoCallEnded = useCallback((callback: (data: any) => void) => {
+    videoCallEndedCallbacks.current.add(callback);
+    return () => { videoCallEndedCallbacks.current.delete(callback); };
+  }, []);
+
+  const onVideoCallUserJoined = useCallback((callback: (data: any) => void) => {
+    videoCallUserJoinedCallbacks.current.add(callback);
+    return () => { videoCallUserJoinedCallbacks.current.delete(callback); };
+  }, []);
+
+  const onVideoCallUserLeft = useCallback((callback: (data: any) => void) => {
+    videoCallUserLeftCallbacks.current.add(callback);
+    return () => { videoCallUserLeftCallbacks.current.delete(callback); };
+  }, []);
+
+  // ========================================
+  // INCIDENT EVIDENCE CALLBACK HANDLERS
+  // ========================================
+  
+  const onIncidentEvidenceAdded = useCallback((callback: (data: any) => void) => {
+    incidentEvidenceAddedCallbacks.current.add(callback);
+    return () => { incidentEvidenceAddedCallbacks.current.delete(callback); };
+  }, []);
+
   const emitRCAModalState = useCallback((incidentId: string, action: 'opened' | 'closed' | 'method-selected' | 'visibility-changed' | 'analyzing', data?: { selectedMethod?: string; visibility?: string }) => {
     if (socket?.connected) {
       socket.emit('rca:modal-state', { incidentId, action, ...data });
@@ -1418,6 +1524,38 @@ export function WebSocketProvider({ children }: { children: React.ReactNode }) {
     }
   }, [socket]);
 
+  // ========================================
+  // VIDEO CALL EMIT FUNCTIONS
+  // ========================================
+
+  const emitVideoCallStarted = useCallback((incidentId: string, roomUrl: string, roomName: string) => {
+    console.log('📹 [WS] emitVideoCallStarted - connected:', socket?.connected, 'incidentId:', incidentId);
+    if (socket?.connected) {
+      socket.emit('video-call:started', { incidentId, roomUrl, roomName });
+    }
+  }, [socket]);
+
+  const emitVideoCallEnded = useCallback((incidentId: string, roomName: string) => {
+    console.log('📹 [WS] emitVideoCallEnded - connected:', socket?.connected, 'incidentId:', incidentId);
+    if (socket?.connected) {
+      socket.emit('video-call:ended', { incidentId, roomName });
+    }
+  }, [socket]);
+
+  const emitVideoCallUserJoined = useCallback((incidentId: string, roomName: string) => {
+    console.log('📹 [WS] emitVideoCallUserJoined - connected:', socket?.connected, 'incidentId:', incidentId);
+    if (socket?.connected) {
+      socket.emit('video-call:user-joined', { incidentId, roomName });
+    }
+  }, [socket]);
+
+  const emitVideoCallUserLeft = useCallback((incidentId: string, roomName: string) => {
+    console.log('📹 [WS] emitVideoCallUserLeft - connected:', socket?.connected, 'incidentId:', incidentId);
+    if (socket?.connected) {
+      socket.emit('video-call:user-left', { incidentId, roomName });
+    }
+  }, [socket]);
+
   // Cleanup on unmount
   useEffect(() => {
     return () => {
@@ -1537,6 +1675,17 @@ export function WebSocketProvider({ children }: { children: React.ReactNode }) {
         emitRCAFiveWhysAIEditFixApplied,
         onRCAFiveWhysCauseRecommendation,
         emitRCAFiveWhysCauseRecommendation,
+        // Video call
+        onVideoCallStarted,
+        onVideoCallEnded,
+        onVideoCallUserJoined,
+        onVideoCallUserLeft,
+        emitVideoCallStarted,
+        emitVideoCallEnded,
+        emitVideoCallUserJoined,
+        emitVideoCallUserLeft,
+        // Incident evidence
+        onIncidentEvidenceAdded,
       }}
     >
       {children}

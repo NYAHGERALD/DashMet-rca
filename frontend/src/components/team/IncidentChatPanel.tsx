@@ -43,6 +43,7 @@ import {
   ChevronDown,
   ExternalLink,
   Fish,
+  Loader2,
 } from 'lucide-react';
 import { formatDistanceToNow, format, isToday, isYesterday, isThisWeek, differenceInDays, differenceInWeeks, differenceInMonths, differenceInYears, startOfDay } from 'date-fns';
 import { ReactionsDisplay } from './EmojiPicker';
@@ -201,6 +202,11 @@ export default function IncidentChatPanel({
   
   // Image preview modal state
   const [previewImage, setPreviewImage] = useState<{ url: string; fileName: string } | null>(null);
+  
+  // Evidence image URLs loaded from API
+  const [evidenceUrls, setEvidenceUrls] = useState<Record<string, string>>({});
+  const [loadingEvidenceUrls, setLoadingEvidenceUrls] = useState<Record<string, boolean>>({});
+  const evidenceBlobUrlsRef = useRef<string[]>([]);
   
   // Message filtering state
   const [showFilterMenu, setShowFilterMenu] = useState(false);
@@ -522,6 +528,54 @@ export default function IncidentChatPanel({
   // Scroll to bottom of messages
   const scrollToBottom = useCallback(() => {
     messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
+  }, []);
+
+  // Load evidence image URL from API
+  const loadEvidenceUrl = useCallback(async (evidenceId: string, filePath: string, source?: string) => {
+    // Skip if already loaded or loading
+    if (evidenceUrls[evidenceId] || loadingEvidenceUrls[evidenceId]) return;
+    
+    // If it's already a full URL, use it directly
+    if (filePath.startsWith('http')) {
+      setEvidenceUrls(prev => ({ ...prev, [evidenceId]: filePath }));
+      return;
+    }
+    
+    setLoadingEvidenceUrls(prev => ({ ...prev, [evidenceId]: true }));
+    
+    try {
+      let url: string;
+      // Check if this is FMIR evidence (ID starts with 'fmir_' or source is 'FMIR')
+      if (evidenceId.startsWith('fmir_') || source === 'FMIR') {
+        // Get the fmirId from the incident
+        const incidentResponse = await api.get(`/incidents/${incidentId}`);
+        const fmirId = incidentResponse.data?.data?.fmirReportId || incidentResponse.data?.fmirReportId;
+        if (fmirId) {
+          const actualId = evidenceId.startsWith('fmir_') ? evidenceId.replace('fmir_', '') : evidenceId;
+          url = `/fmir/${fmirId}/evidence/${actualId}/download`;
+        } else {
+          throw new Error('FMIR ID not found');
+        }
+      } else {
+        url = `/incidents/${incidentId}/evidence/${evidenceId}/download`;
+      }
+      
+      const response = await api.get(url, { responseType: 'blob' });
+      const blobUrl = URL.createObjectURL(response.data);
+      evidenceBlobUrlsRef.current.push(blobUrl);
+      setEvidenceUrls(prev => ({ ...prev, [evidenceId]: blobUrl }));
+    } catch (err) {
+      console.error('Failed to load evidence URL:', evidenceId, err);
+    } finally {
+      setLoadingEvidenceUrls(prev => ({ ...prev, [evidenceId]: false }));
+    }
+  }, [incidentId, evidenceUrls, loadingEvidenceUrls]);
+
+  // Clean up blob URLs on unmount
+  useEffect(() => {
+    return () => {
+      evidenceBlobUrlsRef.current.forEach(url => URL.revokeObjectURL(url));
+    };
   }, []);
 
   // Phase 2: Share evidence in chat
@@ -1637,10 +1691,20 @@ export default function IncidentChatPanel({
                     const isImage = evidence.mimeType?.startsWith('image/') || ['PHOTO'].includes(evidence.type) || isImageByExt;
                     const isVideo = evidence.mimeType?.startsWith('video/') || ['VIDEO'].includes(evidence.type) || isVideoByExt;
                     
-                    // Check if filePath is already a full URL (Firebase Storage) or a relative path
-                    const fileUrl = evidence.filePath.startsWith('http') 
+                    // Get the loaded evidence URL, or trigger loading
+                    const loadedUrl = evidenceUrls[evidence.id];
+                    const isLoadingUrl = loadingEvidenceUrls[evidence.id];
+                    
+                    // Trigger loading if not already loaded/loading
+                    if (!loadedUrl && !isLoadingUrl && (isImage || isVideo)) {
+                      // Call loadEvidenceUrl in next tick to avoid state updates during render
+                      setTimeout(() => loadEvidenceUrl(evidence.id, evidence.filePath, evidence.source), 0);
+                    }
+                    
+                    // Use loaded blob URL if available, otherwise try direct URL
+                    const fileUrl = loadedUrl || (evidence.filePath.startsWith('http') 
                       ? evidence.filePath 
-                      : `${process.env.NEXT_PUBLIC_API_URL || 'http://localhost:5001'}${evidence.filePath}`;
+                      : `${process.env.NEXT_PUBLIC_API_URL || 'http://localhost:5001'}${evidence.filePath}`);
                     
                     // Extract comment from content (after "💬 Comment:")
                     const commentMatch = message.content.match(/💬 Comment:\s*(.+)/s);
@@ -1714,32 +1778,62 @@ export default function IncidentChatPanel({
 
                           {/* Image/Video preview */}
                           {isImage && (
-                            <div 
-                              className="cursor-pointer relative group/image"
-                              onClick={() => setPreviewImage({ url: fileUrl, fileName: evidence.fileName })}
-                            >
-                              <img
-                                src={fileUrl}
-                                alt={evidence.fileName}
-                                className="max-w-full max-h-64 object-contain bg-black/5"
-                                onError={(e) => {
-                                  // Hide image on error and show fallback
-                                  (e.target as HTMLImageElement).style.display = 'none';
-                                }}
-                              />
-                              <div className="absolute inset-0 bg-black/0 group-hover/image:bg-black/20 transition-colors flex items-center justify-center opacity-0 group-hover/image:opacity-100">
-                                <span className="text-white text-xs bg-black/50 px-2 py-1 rounded">Click to view full size</span>
+                            isLoadingUrl ? (
+                              <div className="w-full h-32 flex items-center justify-center bg-gray-100 dark:bg-gray-800">
+                                <Loader2 className="w-6 h-6 animate-spin text-gray-400" />
                               </div>
-                            </div>
+                            ) : loadedUrl ? (
+                              <div 
+                                className="cursor-pointer relative group/image"
+                                onClick={() => setPreviewImage({ url: fileUrl, fileName: evidence.fileName })}
+                              >
+                                <img
+                                  src={fileUrl}
+                                  alt={evidence.fileName}
+                                  className="max-w-full max-h-64 object-contain bg-black/5"
+                                  onError={(e) => {
+                                    // Hide image on error and show fallback
+                                    (e.target as HTMLImageElement).style.display = 'none';
+                                  }}
+                                />
+                                <div className="absolute inset-0 bg-black/0 group-hover/image:bg-black/20 transition-colors flex items-center justify-center opacity-0 group-hover/image:opacity-100">
+                                  <span className="text-white text-xs bg-black/50 px-2 py-1 rounded">Click to view full size</span>
+                                </div>
+                              </div>
+                            ) : (
+                              <div 
+                                className="cursor-pointer relative group/image"
+                                onClick={() => setPreviewImage({ url: fileUrl, fileName: evidence.fileName })}
+                              >
+                                <img
+                                  src={fileUrl}
+                                  alt={evidence.fileName}
+                                  className="max-w-full max-h-64 object-contain bg-black/5"
+                                  onError={(e) => {
+                                    // Hide image on error and show fallback
+                                    (e.target as HTMLImageElement).style.display = 'none';
+                                  }}
+                                />
+                                <div className="absolute inset-0 bg-black/0 group-hover/image:bg-black/20 transition-colors flex items-center justify-center opacity-0 group-hover/image:opacity-100">
+                                  <span className="text-white text-xs bg-black/50 px-2 py-1 rounded">Click to view full size</span>
+                                </div>
+                              </div>
+                            )
                           )}
 
                           {isVideo && (
-                            <video
-                              src={fileUrl}
-                              controls
-                              className="max-w-full max-h-64"
-                              preload="metadata"
-                            />
+                            isLoadingUrl ? (
+                              <div className="w-full h-32 flex items-center justify-center bg-gray-100 dark:bg-gray-800">
+                                <Loader2 className="w-6 h-6 animate-spin text-gray-400" />
+                              </div>
+                            ) : (
+                              <video
+                                src={fileUrl}
+                                controls
+                                className="max-w-full max-h-64"
+                                preload="metadata"
+                              />
+                            )
                           )}
 
                           {/* File info */}

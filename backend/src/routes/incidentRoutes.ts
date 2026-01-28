@@ -2075,6 +2075,118 @@ router.patch('/:incidentId/evidence/:evidenceId', async (req, res) => {
   });
 });
 
+// GET /api/incidents/:incidentId/evidence/:evidenceId/download - Download evidence file
+router.get('/:incidentId/evidence/:evidenceId/download', async (req: Request, res: Response, next: NextFunction) => {
+  try {
+    const { incidentId, evidenceId } = req.params;
+    const user = (req as any).user;
+    const userOrgId = user?.organizationId;
+
+    if (!user?.id || !userOrgId) {
+      res.status(401).json({ error: 'Unauthorized' });
+      return;
+    }
+
+    // Verify incident exists and belongs to user's organization
+    const incident = await prisma.incident.findFirst({
+      where: {
+        id: incidentId,
+        organizationId: userOrgId,
+      },
+    });
+
+    if (!incident) {
+      res.status(404).json({ error: 'Incident not found' });
+      return;
+    }
+
+    // Verify evidence exists and belongs to this incident
+    const evidence = await prisma.evidence.findFirst({
+      where: {
+        id: evidenceId,
+        incidentId: incidentId,
+      },
+    });
+
+    if (!evidence) {
+      res.status(404).json({ error: 'Evidence not found' });
+      return;
+    }
+
+    // Handle Firebase Storage files (gs:// or storage.googleapis.com URLs)
+    if (evidence.filePath.startsWith('gs://') || evidence.filePath.includes('storage.googleapis.com') || evidence.filePath.includes('firebasestorage.googleapis.com')) {
+      try {
+        const bucket = adminStorage.bucket();
+        let firebaseFilePath: string;
+        
+        if (evidence.filePath.startsWith('gs://')) {
+          // Extract path from gs:// URL
+          const gsUrl = evidence.filePath.replace(`gs://${bucket.name}/`, '');
+          firebaseFilePath = gsUrl;
+        } else if (evidence.filePath.includes('firebasestorage.googleapis.com')) {
+          // Extract path from firebasestorage URL
+          // Format: https://firebasestorage.googleapis.com/v0/b/bucket-name/o/path%2Fto%2Ffile?...
+          const url = new URL(evidence.filePath);
+          const pathMatch = url.pathname.match(/\/o\/(.+)/);
+          if (pathMatch) {
+            firebaseFilePath = decodeURIComponent(pathMatch[1]);
+          } else {
+            throw new Error('Could not parse Firebase Storage URL');
+          }
+        } else {
+          // Legacy: Extract path from storage.googleapis.com URL
+          const urlParts = evidence.filePath.split(`${bucket.name}/`);
+          firebaseFilePath = urlParts.length > 1 ? decodeURIComponent(urlParts[1]) : '';
+        }
+        
+        const file = bucket.file(firebaseFilePath);
+        
+        // Check if file exists
+        const [exists] = await file.exists();
+        if (!exists) {
+          res.status(404).json({ error: 'File not found in storage' });
+          return;
+        }
+        
+        // Stream the file directly to avoid CORS issues
+        res.setHeader('Content-Type', evidence.mimeType || evidence.fileType || 'application/octet-stream');
+        res.setHeader('Content-Disposition', `inline; filename="${evidence.fileName}"`);
+        
+        // Create a read stream and pipe to response
+        const readStream = file.createReadStream();
+        readStream.on('error', (streamError) => {
+          console.error('Error streaming file:', streamError);
+          if (!res.headersSent) {
+            res.status(500).json({ error: 'Failed to stream file' });
+          }
+        });
+        readStream.pipe(res);
+        return;
+      } catch (err) {
+        console.error('Error accessing Firebase Storage:', err);
+        res.status(500).json({ error: 'Failed to access file storage' });
+        return;
+      }
+    }
+
+    // Handle local files (legacy)
+    const localPath = evidence.filePath.startsWith('/uploads/')
+      ? path.join(process.env.UPLOAD_PATH || './uploads', evidence.filePath.replace('/uploads/', ''))
+      : evidence.filePath;
+
+    if (!fs.existsSync(localPath)) {
+      res.status(404).json({ error: 'File not found' });
+      return;
+    }
+
+    res.setHeader('Content-Type', evidence.mimeType || evidence.fileType || 'application/octet-stream');
+    res.setHeader('Content-Disposition', `inline; filename="${evidence.fileName}"`);
+    fs.createReadStream(localPath).pipe(res);
+  } catch (error) {
+    next(error);
+  }
+});
+
 // POST /api/incidents/:id/ai-summary - Generate AI summary for incident
 router.post('/:id/ai-summary', requirePrivilege('incidents.ai_analysis'), async (req: Request, res: Response, next: NextFunction) => {
   try {

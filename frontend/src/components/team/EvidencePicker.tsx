@@ -1,9 +1,9 @@
 'use client';
 
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useCallback, useRef } from 'react';
 import {
   FileText,
-  Image,
+  Image as ImageIcon,
   FileVideo,
   FileAudio,
   File,
@@ -24,6 +24,8 @@ interface Evidence {
   mimeType: string;
   transcription?: string;
   uploadedAt: string;
+  source?: string; // 'FMIR' or undefined for regular incident evidence
+  fmirId?: string; // Present if source is FMIR
 }
 
 interface EvidencePickerProps {
@@ -36,7 +38,7 @@ interface EvidencePickerProps {
 const getEvidenceIcon = (type: string) => {
   switch (type) {
     case 'PHOTO':
-      return <Image className="w-5 h-5 text-blue-500" />;
+      return <ImageIcon className="w-5 h-5 text-blue-500" />;
     case 'VIDEO':
       return <FileVideo className="w-5 h-5 text-purple-500" />;
     case 'DOCUMENT':
@@ -47,7 +49,6 @@ const getEvidenceIcon = (type: string) => {
       return <File className="w-5 h-5 text-gray-500" />;
   }
 };
-
 const formatFileSize = (bytes: number) => {
   if (bytes < 1024) return `${bytes} B`;
   if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)} KB`;
@@ -67,6 +68,9 @@ export default function EvidencePicker({
   const [searchQuery, setSearchQuery] = useState('');
   const [sending, setSending] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [thumbnailUrls, setThumbnailUrls] = useState<Record<string, string>>({});
+  const [loadingThumbnails, setLoadingThumbnails] = useState<Record<string, boolean>>({});
+  const blobUrlsRef = useRef<string[]>([]);
 
   useEffect(() => {
     if (isOpen && incidentId) {
@@ -75,17 +79,71 @@ export default function EvidencePicker({
     }
   }, [isOpen, incidentId]);
 
+  // Clean up blob URLs when modal closes or unmounts
+  useEffect(() => {
+    if (!isOpen) {
+      blobUrlsRef.current.forEach(url => URL.revokeObjectURL(url));
+      blobUrlsRef.current = [];
+      setThumbnailUrls({});
+    }
+    return () => {
+      blobUrlsRef.current.forEach(url => URL.revokeObjectURL(url));
+    };
+  }, [isOpen]);
+
   const fetchEvidence = async () => {
     setLoading(true);
     try {
       const response = await api.get(`/chat/${incidentId}/evidence`);
-      setEvidence(response.data?.data || []);
+      const evidenceData = response.data?.data || [];
+      setEvidence(evidenceData);
+      
+      // Load thumbnails for images
+      evidenceData.forEach((item: Evidence) => {
+        if (item.type === 'PHOTO' || item.type === 'VIDEO') {
+          loadThumbnail(item);
+        }
+      });
     } catch (error) {
       console.error('Failed to fetch evidence:', error);
     } finally {
       setLoading(false);
     }
   };
+
+  const loadThumbnail = useCallback(async (item: Evidence) => {
+    if (thumbnailUrls[item.id] || loadingThumbnails[item.id]) return;
+
+    setLoadingThumbnails(prev => ({ ...prev, [item.id]: true }));
+
+    try {
+      let url: string;
+      // Check if this is FMIR evidence (ID starts with 'fmir_')
+      if (item.id.startsWith('fmir_')) {
+        // Extract the actual FMIR evidence ID
+        const fmirEvidenceId = item.id.replace('fmir_', '');
+        // We need to get the fmirId from the incident to build the URL
+        const incidentResponse = await api.get(`/incidents/${incidentId}`);
+        const fmirId = incidentResponse.data?.data?.fmirReportId || incidentResponse.data?.fmirReportId;
+        if (fmirId) {
+          url = `/fmir/${fmirId}/evidence/${fmirEvidenceId}/download`;
+        } else {
+          throw new Error('FMIR ID not found');
+        }
+      } else {
+        url = `/incidents/${incidentId}/evidence/${item.id}/download`;
+      }
+
+      const response = await api.get(url, { responseType: 'blob' });
+      const blobUrl = URL.createObjectURL(response.data);
+      blobUrlsRef.current.push(blobUrl);
+      setThumbnailUrls(prev => ({ ...prev, [item.id]: blobUrl }));
+    } catch (err) {
+      console.error('Failed to load thumbnail for:', item.fileName, err);
+    } finally {
+      setLoadingThumbnails(prev => ({ ...prev, [item.id]: false }));
+    }
+  }, [incidentId, thumbnailUrls, loadingThumbnails]);
 
   const handleSend = async () => {
     if (!selectedEvidence) return;
@@ -169,15 +227,25 @@ export default function EvidencePicker({
                     : 'border-gray-200 dark:border-slate-600 hover:bg-gray-50 dark:hover:bg-slate-700'
                 }`}
               >
-                <div className="flex-shrink-0 w-9 h-9 sm:w-10 sm:h-10 rounded-lg bg-gray-100 dark:bg-slate-600 flex items-center justify-center">
-                  {getEvidenceIcon(item.type)}
+                <div className="flex-shrink-0 w-12 h-12 sm:w-14 sm:h-14 rounded-lg bg-gray-100 dark:bg-slate-600 flex items-center justify-center overflow-hidden">
+                  {(item.type === 'PHOTO' || item.type === 'VIDEO') && thumbnailUrls[item.id] ? (
+                    <img 
+                      src={thumbnailUrls[item.id]} 
+                      alt={item.fileName}
+                      className="w-full h-full object-cover"
+                    />
+                  ) : (item.type === 'PHOTO' || item.type === 'VIDEO') && loadingThumbnails[item.id] ? (
+                    <Loader2 className="w-5 h-5 animate-spin text-gray-400" />
+                  ) : (
+                    getEvidenceIcon(item.type)
+                  )}
                 </div>
                 <div className="flex-1 ml-2.5 sm:ml-3 text-left min-w-0">
                   <p className="text-xs sm:text-sm font-medium text-gray-900 dark:text-white truncate">
                     {item.fileName}
                   </p>
                   <p className="text-[10px] sm:text-xs text-gray-500 dark:text-gray-400 truncate">
-                    {item.type} • {formatFileSize(item.fileSize)} • {formatDistanceToNow(new Date(item.uploadedAt), { addSuffix: true })}
+                    {item.type}{item.source === 'FMIR' ? ' (FMIR)' : ''} • {formatFileSize(item.fileSize)} • {formatDistanceToNow(new Date(item.uploadedAt), { addSuffix: true })}
                   </p>
                 </div>
                 {selectedEvidence?.id === item.id && (
@@ -195,11 +263,29 @@ export default function EvidencePicker({
         {/* Selected Evidence Preview & Comment */}
         {selectedEvidence && (
           <div className="border-t border-gray-200 dark:border-slate-700 p-3 sm:p-4 space-y-2.5 sm:space-y-3 bg-gray-50 dark:bg-slate-900">
-            <div className="flex items-center space-x-2 min-w-0">
-              {getEvidenceIcon(selectedEvidence.type)}
-              <span className="text-xs sm:text-sm font-medium text-gray-900 dark:text-white truncate">
-                {selectedEvidence.fileName}
-              </span>
+            <div className="flex items-start space-x-3 min-w-0">
+              {/* Thumbnail preview for selected evidence */}
+              {(selectedEvidence.type === 'PHOTO' || selectedEvidence.type === 'VIDEO') && thumbnailUrls[selectedEvidence.id] ? (
+                <div className="flex-shrink-0 w-16 h-16 rounded-lg overflow-hidden bg-gray-200 dark:bg-slate-600">
+                  <img 
+                    src={thumbnailUrls[selectedEvidence.id]} 
+                    alt={selectedEvidence.fileName}
+                    className="w-full h-full object-cover"
+                  />
+                </div>
+              ) : (
+                <div className="flex-shrink-0 w-10 h-10 rounded-lg bg-gray-100 dark:bg-slate-600 flex items-center justify-center">
+                  {getEvidenceIcon(selectedEvidence.type)}
+                </div>
+              )}
+              <div className="flex-1 min-w-0">
+                <p className="text-xs sm:text-sm font-medium text-gray-900 dark:text-white truncate">
+                  {selectedEvidence.fileName}
+                </p>
+                <p className="text-[10px] sm:text-xs text-gray-500 dark:text-gray-400">
+                  {selectedEvidence.type}{selectedEvidence.source === 'FMIR' ? ' (FMIR)' : ''} • {formatFileSize(selectedEvidence.fileSize)}
+                </p>
+              </div>
             </div>
             <input
               type="text"

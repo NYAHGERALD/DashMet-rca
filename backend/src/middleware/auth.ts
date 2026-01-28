@@ -89,6 +89,7 @@ export const authenticate = async (
         organizationId: true,
         firebaseUid: true,
         isActive: true,
+        profilePicture: true,
       },
     });
 

@@ -3,6 +3,7 @@ import { Server, Socket } from 'socket.io';
 import { Prisma } from '@prisma/client';
 import { prisma } from '../utils/prisma';
 import { v4 as uuidv4 } from 'uuid';
+import { clearRoomFromCache } from '../routes/videoCallRoutes';
 
 interface ConnectedUser {
   socketId: string;
@@ -106,9 +107,12 @@ class WebSocketService {
     // Join incident chat room
     socket.on('incident:join', async (incidentId: string) => {
       try {
+        console.log(`🚪 [WS] incident:join request from user ${userInfo.userId} for incident ${incidentId}`);
+        
         // Verify user has access to this incident
         const hasAccess = await this.verifyIncidentAccess(userInfo.userId, incidentId);
         if (!hasAccess) {
+          console.log(`🚫 [WS] Access denied for user ${userInfo.userId} to incident ${incidentId}`);
           socket.emit('error', { message: 'Access denied to this incident' });
           return;
         }
@@ -116,6 +120,9 @@ class WebSocketService {
         const roomName = `incident:${incidentId}`;
         socket.join(roomName);
         userInfo.incidentRooms.add(roomName);
+        
+        // Debug: log all rooms this socket is in
+        console.log(`🚪 [WS] Socket ${socket.id} rooms:`, Array.from(socket.rooms));
 
         // Notify others in the room
         socket.to(roomName).emit('participant:joined', {
@@ -128,8 +135,11 @@ class WebSocketService {
         // Send current participants in room to joining user
         const participantsInRoom = await this.getIncidentParticipantsOnline(incidentId);
         socket.emit('incident:participants', { incidentId, participants: participantsInRoom });
+        
+        // Confirm join to the user
+        socket.emit('incident:joined', { incidentId, roomName, success: true });
 
-        console.log(`👥 User ${userInfo.userId} joined incident room ${incidentId}`);
+        console.log(`👥 User ${userInfo.userId} joined incident room ${incidentId} (room: ${roomName})`);
       } catch (error) {
         console.error('Error joining incident:', error);
         socket.emit('error', { message: 'Failed to join incident room' });
@@ -845,6 +855,251 @@ class WebSocketService {
         ...data,
         userId: userInfo.userId,
         userName,
+        timestamp: new Date().toISOString(),
+      });
+    });
+
+    // ========================================
+    // VIDEO CALL EVENTS
+    // ========================================
+
+    // Video call started - notify incident/FMIR team members only
+    socket.on('video-call:started', async (data: { incidentId: string; roomUrl: string; roomName: string }) => {
+      console.log('📹 [WS] Video call started:', data.incidentId, 'from user:', socket.id);
+      const userInfo = this.connectedUsers.get(socket.id);
+      if (!userInfo) {
+        console.log('📹 [WS] No user info found for socket:', socket.id);
+        return;
+      }
+
+      const userName = `${userInfo.firstName || ''} ${userInfo.lastName || ''}`.trim() || 'Someone';
+
+      const payload = {
+        ...data,
+        startedBy: userInfo.userId,
+        startedByName: userName,
+        timestamp: new Date().toISOString(),
+      };
+
+      try {
+        const participantIds = new Set<string>();
+        
+        // First try to get incident participants (regular incidents)
+        const incident = await prisma.incident.findUnique({
+          where: { id: data.incidentId },
+          select: {
+            createdById: true,
+            fmirReportId: true, // Check if incident is linked to an FMIR
+            IncidentParticipant: {
+              select: { userId: true },
+            },
+          },
+        });
+
+        if (incident) {
+          // Regular incident - collect participants
+          if (incident.createdById) participantIds.add(incident.createdById);
+          incident.IncidentParticipant.forEach(p => participantIds.add(p.userId));
+          console.log('📹 [WS] Found incident with', participantIds.size, 'direct participants');
+          
+          // If incident is linked to an FMIR, also include FMIR collaborators
+          if (incident.fmirReportId) {
+            const linkedFmir = await prisma.foreignMaterialIncident.findUnique({
+              where: { id: incident.fmirReportId },
+              select: {
+                createdById: true,
+                collaboratorIds: true,
+              },
+            });
+            
+            if (linkedFmir) {
+              if (linkedFmir.createdById) participantIds.add(linkedFmir.createdById);
+              if (linkedFmir.collaboratorIds && Array.isArray(linkedFmir.collaboratorIds)) {
+                linkedFmir.collaboratorIds.forEach((id: string) => participantIds.add(id));
+              }
+              console.log('📹 [WS] Added FMIR collaborators, total:', participantIds.size);
+            }
+          }
+        } else {
+          // Try FMIR - the incidentId might be an FMIR ID
+          const fmir = await prisma.foreignMaterialIncident.findUnique({
+            where: { id: data.incidentId },
+            select: {
+              createdById: true,
+              collaboratorIds: true,
+            },
+          });
+
+          if (fmir) {
+            // FMIR - collect creator and collaborators
+            if (fmir.createdById) participantIds.add(fmir.createdById);
+            if (fmir.collaboratorIds && Array.isArray(fmir.collaboratorIds)) {
+              fmir.collaboratorIds.forEach((id: string) => participantIds.add(id));
+            }
+            console.log('📹 [WS] Found FMIR with', participantIds.size, 'participants');
+          } else {
+            console.log('📹 [WS] Neither incident nor FMIR found:', data.incidentId);
+            return;
+          }
+        }
+
+        console.log('📹 [WS] Broadcasting video-call:started to', participantIds.size, 'participants');
+
+        // Send to each participant's sockets (excluding the sender)
+        for (const participantId of participantIds) {
+          if (participantId === userInfo.userId) continue; // Don't send to self
+          
+          const participantSockets = this.userSockets.get(participantId);
+          if (participantSockets) {
+            participantSockets.forEach(socketId => {
+              this.io?.to(socketId).emit('video-call:started', payload);
+            });
+            console.log('📹 [WS] Sent to participant:', participantId);
+          }
+        }
+      } catch (error) {
+        console.error('📹 [WS] Error broadcasting video call:', error);
+      }
+    });
+
+    // Video call ended
+    socket.on('video-call:ended', async (data: { incidentId: string; roomName: string }) => {
+      console.log('📹 [WS] Video call ended:', data.incidentId);
+      const userInfo = this.connectedUsers.get(socket.id);
+      if (!userInfo) return;
+
+      // Clear room from cache
+      clearRoomFromCache(data.incidentId, data.roomName);
+
+      try {
+        const participantIds = new Set<string>();
+        
+        // First try regular incident
+        const incident = await prisma.incident.findUnique({
+          where: { id: data.incidentId },
+          select: {
+            createdById: true,
+            fmirReportId: true, // Check if linked to FMIR
+            IncidentParticipant: {
+              select: { userId: true },
+            },
+          },
+        });
+
+        if (incident) {
+          if (incident.createdById) participantIds.add(incident.createdById);
+          incident.IncidentParticipant.forEach(p => participantIds.add(p.userId));
+          
+          // If incident is linked to an FMIR, also include FMIR collaborators
+          if (incident.fmirReportId) {
+            const linkedFmir = await prisma.foreignMaterialIncident.findUnique({
+              where: { id: incident.fmirReportId },
+              select: {
+                createdById: true,
+                collaboratorIds: true,
+              },
+            });
+            
+            if (linkedFmir) {
+              if (linkedFmir.createdById) participantIds.add(linkedFmir.createdById);
+              if (linkedFmir.collaboratorIds && Array.isArray(linkedFmir.collaboratorIds)) {
+                linkedFmir.collaboratorIds.forEach((id: string) => participantIds.add(id));
+              }
+            }
+          }
+        } else {
+          // Try FMIR
+          const fmir = await prisma.foreignMaterialIncident.findUnique({
+            where: { id: data.incidentId },
+            select: {
+              createdById: true,
+              collaboratorIds: true,
+            },
+          });
+
+          if (fmir) {
+            if (fmir.createdById) participantIds.add(fmir.createdById);
+            if (fmir.collaboratorIds && Array.isArray(fmir.collaboratorIds)) {
+              fmir.collaboratorIds.forEach((id: string) => participantIds.add(id));
+            }
+          } else {
+            return; // Neither found
+          }
+        }
+
+        const payload = {
+          ...data,
+          endedBy: userInfo.userId,
+          timestamp: new Date().toISOString(),
+        };
+
+        // Send to each participant
+        for (const participantId of participantIds) {
+          const participantSockets = this.userSockets.get(participantId);
+          if (participantSockets) {
+            participantSockets.forEach(socketId => {
+              this.io?.to(socketId).emit('video-call:ended', payload);
+            });
+          }
+        }
+      } catch (error) {
+        console.error('📹 [WS] Error broadcasting video call ended:', error);
+      }
+    });
+
+    // User joined call
+    socket.on('video-call:user-joined', (data: { incidentId: string; roomName: string }) => {
+      console.log('📹 [WS] User joined video call:', data.incidentId);
+      const userInfo = this.connectedUsers.get(socket.id);
+      if (!userInfo) return;
+
+      const userName = `${userInfo.firstName || ''} ${userInfo.lastName || ''}`.trim() || 'Someone';
+
+      socket.to(`incident:${data.incidentId}`).emit('video-call:user-joined', {
+        ...data,
+        userId: userInfo.userId,
+        userName,
+        timestamp: new Date().toISOString(),
+      });
+    });
+
+    // User left call
+    socket.on('video-call:user-left', (data: { incidentId: string; roomName: string }) => {
+      console.log('📹 [WS] User left video call:', data.incidentId);
+      const userInfo = this.connectedUsers.get(socket.id);
+      if (!userInfo) return;
+
+      socket.to(`incident:${data.incidentId}`).emit('video-call:user-left', {
+        ...data,
+        userId: userInfo.userId,
+        timestamp: new Date().toISOString(),
+      });
+    });
+
+    // Spotlight evidence navigation sync
+    socket.on('spotlight:evidence-changed', (data: { roomName: string; spotlightId: string; evidenceId: string; selectedIndex: number }) => {
+      console.log('🔦 [WS] Spotlight evidence changed:', data.spotlightId, 'index:', data.selectedIndex);
+      const userInfo = this.connectedUsers.get(socket.id);
+      if (!userInfo) return;
+
+      // Extract incidentId from roomName (format: "spotlight_<incidentId>_<timestamp>" or just use roomName)
+      // Broadcast to all other users in the same room
+      socket.broadcast.emit('spotlight:evidence-changed', {
+        ...data,
+        userId: userInfo.userId,
+        timestamp: new Date().toISOString(),
+      });
+    });
+
+    // Spotlight view state (zoom/pan) sync
+    socket.on('spotlight:viewChange', (data: { incidentId: string; evidenceId: string; spotlightId: string; viewState: { zoom: number; panX: number; panY: number }; userId: string }) => {
+      const userInfo = this.connectedUsers.get(socket.id);
+      if (!userInfo) return;
+
+      // Broadcast zoom/pan changes to all other users in the incident room
+      const roomName = `incident:${data.incidentId}`;
+      socket.to(roomName).emit('spotlight:viewChanged', {
+        ...data,
         timestamp: new Date().toISOString(),
       });
     });

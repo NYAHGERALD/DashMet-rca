@@ -69,7 +69,7 @@ model Area {
   description  String?
   facilityId   String?
   createdAt    DateTime    @default(now())
-  updatedAt    DateTime @updatedAt
+  updatedAt    DateTime    @updatedAt
   departmentId String?
   Department   Department? @relation(fields: [departmentId], references: [id], onDelete: Cascade)
   Facility     Facility?   @relation(fields: [facilityId], references: [id], onDelete: Cascade)
@@ -97,7 +97,7 @@ model AssignmentRule {
   slaResponseHours   Int?
   slaResolutionHours Int?
   createdAt          DateTime      @default(now())
-  updatedAt          DateTime @updatedAt
+  updatedAt          DateTime      @updatedAt
 
   @@index([incidentType])
   @@index([organizationId, isActive])
@@ -143,7 +143,7 @@ model CAPAction {
   resourceImpact          String?
   rcaAnalysisId           String?
   createdAt               DateTime       @default(now())
-  updatedAt               DateTime @updatedAt
+  updatedAt               DateTime       @updatedAt
   completedById           String?
   completionEvidence      String?
   completionNotes         String?
@@ -196,7 +196,7 @@ model Category {
   sortOrder        Int          @default(0)
   isActive         Boolean      @default(true)
   createdAt        DateTime     @default(now())
-  updatedAt        DateTime @updatedAt
+  updatedAt        DateTime     @updatedAt
   Organization     Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
   Category         Category?    @relation("CategoryToCategory", fields: [parentId], references: [id])
   other_Category   Category[]   @relation("CategoryToCategory")
@@ -218,7 +218,7 @@ model ChatMessage {
   attachments         Json?
   readBy              String[]              @default([])
   createdAt           DateTime              @default(now())
-  updatedAt           DateTime @updatedAt
+  updatedAt           DateTime              @updatedAt
   isPinned            Boolean               @default(false)
   mentions            String[]              @default([])
   pinnedAt            DateTime?
@@ -274,7 +274,7 @@ model ChatMessageTemplate {
   usageCount Int       @default(0)
   lastUsedAt DateTime?
   createdAt  DateTime  @default(now())
-  updatedAt  DateTime @updatedAt
+  updatedAt  DateTime  @updatedAt
   User       User      @relation(fields: [userId], references: [id], onDelete: Cascade)
 
   @@index([category])
@@ -289,7 +289,7 @@ model Comment {
   incidentId    String?
   rcaAnalysisId String?
   createdAt     DateTime     @default(now())
-  updatedAt     DateTime @updatedAt
+  updatedAt     DateTime     @updatedAt
   Incident      Incident?    @relation(fields: [incidentId], references: [id], onDelete: Cascade)
   RCAAnalysis   RCAAnalysis? @relation(fields: [rcaAnalysisId], references: [id], onDelete: Cascade)
   User          User         @relation(fields: [userId], references: [id])
@@ -311,7 +311,7 @@ model DefaultPrivilege {
   category    String?
   sortOrder   Int             @default(0)
   createdAt   DateTime        @default(now())
-  updatedAt   DateTime @updatedAt
+  updatedAt   DateTime        @updatedAt
 
   @@unique([role, featureKey])
   @@index([featureKey])
@@ -325,7 +325,7 @@ model Department {
   description String?
   facilityId  String
   createdAt   DateTime   @default(now())
-  updatedAt   DateTime @updatedAt
+  updatedAt   DateTime   @updatedAt
   Area        Area[]
   Facility    Facility   @relation(fields: [facilityId], references: [id], onDelete: Cascade)
   Incident    Incident[]
@@ -346,7 +346,7 @@ model DropdownOption {
   placeholder    String?
   organizationId String
   createdAt      DateTime     @default(now())
-  updatedAt      DateTime @updatedAt
+  updatedAt      DateTime     @updatedAt
   Organization   Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
 
   @@unique([organizationId, optionType, value])
@@ -355,19 +355,21 @@ model DropdownOption {
 }
 
 model Evidence {
-  id            String       @id @default(uuid())
-  type          EvidenceType
-  fileName      String
-  filePath      String
-  fileSize      Int
-  mimeType      String
-  transcription String?
-  incidentId    String?
-  rcaAnalysisId String?
-  uploadedById  String
-  uploadedAt    DateTime     @default(now())
-  Incident      Incident?    @relation(fields: [incidentId], references: [id], onDelete: Cascade)
-  RCAAnalysis   RCAAnalysis? @relation(fields: [rcaAnalysisId], references: [id], onDelete: Cascade)
+  id                String              @id @default(uuid())
+  type              EvidenceType
+  fileName          String
+  filePath          String
+  fileSize          Int
+  mimeType          String
+  transcription     String?
+  incidentId        String?
+  rcaAnalysisId     String?
+  uploadedById      String
+  uploadedAt        DateTime            @default(now())
+  DiscussionMarker  DiscussionMarker[]
+  Incident          Incident?           @relation(fields: [incidentId], references: [id], onDelete: Cascade)
+  RCAAnalysis       RCAAnalysis?        @relation(fields: [rcaAnalysisId], references: [id], onDelete: Cascade)
+  EvidenceSpotlight EvidenceSpotlight[]
 
   @@index([incidentId])
   @@index([rcaAnalysisId])
@@ -418,7 +420,7 @@ model FMIRComment {
   authorId                String
   visibleToIds            String[]                @default([])
   createdAt               DateTime                @default(now())
-  updatedAt               DateTime @updatedAt
+  updatedAt               DateTime                @updatedAt
   User                    User                    @relation(fields: [authorId], references: [id])
   ForeignMaterialIncident ForeignMaterialIncident @relation(fields: [fmirId], references: [id], onDelete: Cascade)
 
@@ -444,20 +446,20 @@ model FMIREvidence {
 }
 
 model FMIRAIValidation {
-  id                      String                  @id @default(uuid())
-  fmirId                  String                  @unique
-  complianceScore         Int
-  overallCompliance       String                  // COMPLIANT, NEEDS_IMPROVEMENT, NON_COMPLIANT
-  summary                 String
-  aiExplanation           String?
-  fieldAnalysis           Json                    // Array of {field, section, issue, recommendation, regulatoryReference}
-  evidenceAnalysis        Json                    // {adequate, summary, recommendations[]}
-  causeAnalysis           Json?                   // {finding, recommendation, regulatoryReference}
-  correctiveActionAnalysis Json?                  // {finding, recommendation, regulatoryReference}
-  productHoldAnalysis     Json?                   // {finding, recommendation, regulatoryReference}
-  createdAt               DateTime                @default(now())
-  updatedAt               DateTime                @updatedAt
-  ForeignMaterialIncident ForeignMaterialIncident @relation(fields: [fmirId], references: [id], onDelete: Cascade)
+  id                       String                  @id @default(uuid())
+  fmirId                   String                  @unique
+  complianceScore          Int
+  overallCompliance        String
+  summary                  String
+  aiExplanation            String?
+  fieldAnalysis            Json
+  evidenceAnalysis         Json
+  causeAnalysis            Json?
+  correctiveActionAnalysis Json?
+  productHoldAnalysis      Json?
+  createdAt                DateTime                @default(now())
+  updatedAt                DateTime                @updatedAt
+  ForeignMaterialIncident  ForeignMaterialIncident @relation(fields: [fmirId], references: [id], onDelete: Cascade)
 
   @@index([fmirId])
   @@index([complianceScore])
@@ -471,7 +473,7 @@ model Facility {
   address                 String?
   organizationId          String
   createdAt               DateTime                  @default(now())
-  updatedAt               DateTime @updatedAt
+  updatedAt               DateTime                  @updatedAt
   Area                    Area[]
   Department              Department[]
   Organization            Organization              @relation(fields: [organizationId], references: [id], onDelete: Cascade)
@@ -496,7 +498,7 @@ model FieldConfiguration {
   isActive       Boolean      @default(true)
   organizationId String
   createdAt      DateTime     @default(now())
-  updatedAt      DateTime @updatedAt
+  updatedAt      DateTime     @updatedAt
   Organization   Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
 
   @@unique([organizationId, incidentType, fieldName])
@@ -567,7 +569,7 @@ model ForeignMaterialIncident {
   createdById                                      String
   rcaAnalysisId                                    String?
   createdAt                                        DateTime          @default(now())
-  updatedAt                                        DateTime @updatedAt
+  updatedAt                                        DateTime          @updatedAt
   submittedAt                                      DateTime?
   fmSourceCategory                                 String?
   fmSourceType                                     String?
@@ -579,15 +581,15 @@ model ForeignMaterialIncident {
   area                                             String?
   line                                             String?
   submittedById                                    String?
-  FMIRAuditReport                                  FMIRAuditReport[]
   FMIRAIValidation                                 FMIRAIValidation?
+  FMIRAuditReport                                  FMIRAuditReport[]
   FMIRComment                                      FMIRComment[]
   FMIREvidence                                     FMIREvidence[]
-  LinkedIncident                                   Incident?         @relation("IncidentToFMIR")
   User_ForeignMaterialIncident_createdByIdToUser   User              @relation("ForeignMaterialIncident_createdByIdToUser", fields: [createdById], references: [id])
   Facility                                         Facility?         @relation(fields: [facilityId], references: [id])
   Organization                                     Organization      @relation(fields: [organizationId], references: [id], onDelete: Cascade)
   User_ForeignMaterialIncident_submittedByIdToUser User?             @relation("ForeignMaterialIncident_submittedByIdToUser", fields: [submittedById], references: [id])
+  LinkedIncident                                   Incident?         @relation("IncidentToFMIR")
 
   @@index([createdById])
   @@index([facilityId])
@@ -598,8 +600,8 @@ model ForeignMaterialIncident {
 }
 
 model Incident {
-  id                                             String                @id @default(uuid())
-  incidentNumber                                 String                @unique
+  id                                             String                   @id @default(uuid())
+  incidentNumber                                 String                   @unique
   type                                           IncidentType
   categoryId                                     String
   customTitle                                    String?
@@ -613,25 +615,24 @@ model Incident {
   description                                    String
   aiSummary                                      String?
   occurredAt                                     DateTime
-  reportedAt                                     DateTime              @default(now())
-  status                                         IncidentStatus        @default(DRAFT)
+  reportedAt                                     DateTime                 @default(now())
+  status                                         IncidentStatus           @default(DRAFT)
   severity                                       Severity?
   aiSuggestedSeverity                            Severity?
   createdById                                    String
   assignedToId                                   String?
   dueDate                                        DateTime?
   organizationId                                 String
-  createdAt                                      DateTime              @default(now())
-  updatedAt                                      DateTime @updatedAt
+  createdAt                                      DateTime                 @default(now())
+  updatedAt                                      DateTime                 @updatedAt
   departmentId                                   String?
-  fmirReportId                                   String?               @unique
   additionalEmployerHours                        String?
   additionalEmployerStartDate                    DateTime?
   additionalEmployers                            String?
   allBodyPartsInjured                            String?
   areaSecured                                    String?
   assignmentRuleId                               String?
-  autoAssigned                                   Boolean               @default(false)
+  autoAssigned                                   Boolean                  @default(false)
   bodyPartsAffected                              String[]
   caseClassification                             String?
   contributingActsConditions                     String?
@@ -700,9 +701,9 @@ model Incident {
   siteRevealExplanation                          String?
   siteViewDate                                   DateTime?
   siteViewTime                                   String?
-  slaResolutionBreached                          Boolean               @default(false)
+  slaResolutionBreached                          Boolean                  @default(false)
   slaResolutionDeadline                          DateTime?
-  slaResponseBreached                            Boolean               @default(false)
+  slaResponseBreached                            Boolean                  @default(false)
   slaResponseDeadline                            DateTime?
   sopAvailable                                   Boolean?
   sopFollowed                                    Boolean?
@@ -746,8 +747,8 @@ model Incident {
   wasEmployeeInstructedInSOP                     Boolean?
   wasProperProcedureFollowed                     Boolean?
   wasViolationOfSafetyRules                      Boolean?
-  isTeamIncident                                 Boolean               @default(false)
-  visibility                                     IncidentVisibility    @default(PRIVATE)
+  isTeamIncident                                 Boolean                  @default(false)
+  visibility                                     IncidentVisibility       @default(PRIVATE)
   contributingFactorTypes                        String[]
   correctiveActionTypes                          String[]
   incidentPattern                                String?
@@ -755,26 +756,30 @@ model Incident {
   taskRoutineType                                String?
   aiAnalysisData                                 Json?
   sharedWithUserIds                              String[]
-  isPublic                                       Boolean               @default(false)
+  isPublic                                       Boolean                  @default(false)
+  fmirReportId                                   String?                  @unique
+  AIFishboneSession                              AIFishboneSession[]
   ArchivedChatMessage                            ArchivedChatMessage[]
   ChatMessage                                    ChatMessage[]
   Comment                                        Comment[]
+  DiscussionMarker                               DiscussionMarker[]
   Evidence                                       Evidence[]
-  Area                                           Area?                 @relation(fields: [areaId], references: [id])
-  User_Incident_assignedToIdToUser               User?                 @relation("Incident_assignedToIdToUser", fields: [assignedToId], references: [id])
-  Category                                       Category              @relation(fields: [categoryId], references: [id])
-  User_Incident_createdByIdToUser                User                  @relation("Incident_createdByIdToUser", fields: [createdById], references: [id])
-  Department                                     Department?           @relation(fields: [departmentId], references: [id])
-  Facility                                       Facility              @relation(fields: [facilityId], references: [id])
+  EvidenceSpotlight                              EvidenceSpotlight[]
+  MeetingRecording                               MeetingRecording[]
+  Area                                           Area?                    @relation(fields: [areaId], references: [id])
+  User_Incident_assignedToIdToUser               User?                    @relation("Incident_assignedToIdToUser", fields: [assignedToId], references: [id])
+  Category                                       Category                 @relation(fields: [categoryId], references: [id])
+  User_Incident_createdByIdToUser                User                     @relation("Incident_createdByIdToUser", fields: [createdById], references: [id])
+  Department                                     Department?              @relation(fields: [departmentId], references: [id])
+  Facility                                       Facility                 @relation(fields: [facilityId], references: [id])
   FMIRReport                                     ForeignMaterialIncident? @relation("IncidentToFMIR", fields: [fmirReportId], references: [id])
-  User_Incident_investigationSubmittedByIdToUser User?                 @relation("Incident_investigationSubmittedByIdToUser", fields: [investigationSubmittedById], references: [id])
-  Line                                           Line?                 @relation(fields: [lineId], references: [id])
-  Organization                                   Organization          @relation(fields: [organizationId], references: [id], onDelete: Cascade)
-  Shift                                          Shift?                @relation(fields: [shiftId], references: [id])
+  User_Incident_investigationSubmittedByIdToUser User?                    @relation("Incident_investigationSubmittedByIdToUser", fields: [investigationSubmittedById], references: [id])
+  Line                                           Line?                    @relation(fields: [lineId], references: [id])
+  Organization                                   Organization             @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  Shift                                          Shift?                   @relation(fields: [shiftId], references: [id])
   IncidentParticipant                            IncidentParticipant[]
   Notification                                   Notification[]
   RCAAnalysis                                    RCAAnalysis[]
-  AIFishboneSession                              AIFishboneSession[]
 
   @@index([assignedToId])
   @@index([createdById])
@@ -800,7 +805,7 @@ model IncidentParticipant {
   canChat                                  Boolean          @default(true)
   lastViewedAt                             DateTime?
   createdAt                                DateTime         @default(now())
-  updatedAt                                DateTime @updatedAt
+  updatedAt                                DateTime         @updatedAt
   invitationStatus                         InvitationStatus @default(PENDING)
   invitedAt                                DateTime         @default(now())
   respondedAt                              DateTime?
@@ -828,7 +833,7 @@ model KnowledgeArticle {
   viewCount         Int          @default(0)
   helpfulCount      Int          @default(0)
   createdAt         DateTime     @default(now())
-  updatedAt         DateTime @updatedAt
+  updatedAt         DateTime     @updatedAt
 
   @@index([incidentType])
   @@index([keywords])
@@ -841,7 +846,7 @@ model Line {
   machineIds  String[]
   areaId      String
   createdAt   DateTime    @default(now())
-  updatedAt   DateTime @updatedAt
+  updatedAt   DateTime    @updatedAt
   lineNumber  String?
   Incident    Incident[]
   Area        Area        @relation(fields: [areaId], references: [id], onDelete: Cascade)
@@ -873,7 +878,7 @@ model Organization {
   isActive                Boolean                   @default(true)
   regulatoryRuleset       String?
   createdAt               DateTime                  @default(now())
-  updatedAt               DateTime @updatedAt
+  updatedAt               DateTime                  @updatedAt
   isPublic                Boolean                   @default(false)
   signupCode              String?                   @unique
   AuditLog                AuditLog[]
@@ -904,7 +909,7 @@ model OrganizationAccessCode {
   usedCount      Int          @default(0)
   maxUses        Int          @default(100)
   createdAt      DateTime     @default(now())
-  updatedAt      DateTime @updatedAt
+  updatedAt      DateTime     @updatedAt
   createdById    String?
   User           User?        @relation(fields: [createdById], references: [id])
   Organization   Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
@@ -924,7 +929,7 @@ model PolicyDocument {
   publishedAt     DateTime?
   updatedByUserId String?
   createdAt       DateTime         @default(now())
-  updatedAt       DateTime @updatedAt
+  updatedAt       DateTime         @updatedAt
   User            User?            @relation(fields: [updatedByUserId], references: [id])
   PolicyRevision  PolicyRevision[]
 
@@ -990,21 +995,21 @@ model RCAAnalysis {
   rootCauseStatement     String?
   fiveWhysData           Json?
   fishboneData           Json?
-  fiveWhysModalState     Json?              // Stores current 5 Whys modal state for real-time sync
   isValidated            Boolean            @default(false)
   validatedAt            DateTime?
   validatedById          String?
   analystId              String
   createdAt              DateTime           @default(now())
-  updatedAt              DateTime @updatedAt
+  updatedAt              DateTime           @updatedAt
+  fiveWhysModalState     Json?
+  AIFishboneSession      AIFishboneSession?
   CAPAction              CAPAction[]
   Comment                Comment[]
   Evidence               Evidence[]
+  FiveWhysAnalyses       FiveWhysAnalysis[]
   User                   User               @relation(fields: [analystId], references: [id])
   Incident               Incident           @relation(fields: [incidentId], references: [id], onDelete: Cascade)
   RCAVersion             RCAVersion[]
-  AIFishboneSession      AIFishboneSession?
-  FiveWhysAnalyses       FiveWhysAnalysis[]
 
   @@index([incidentId])
   @@index([status])
@@ -1023,42 +1028,29 @@ model RCAVersion {
   @@index([rcaAnalysisId])
 }
 
-// AI-Assisted Fishbone Analysis Session - Persists AI workflow state for collaboration and auto-save
 model AIFishboneSession {
-  id                       String                @id @default(cuid())
-  rcaAnalysisId            String                @unique
-  incidentId               String
-  
-  // AI Workflow State
-  workflowStep             AIFishboneWorkflowStep @default(IDLE)
-  
-  // Problem Validation State
-  problemValidation        Json?                 // { isValid, needsClarification, clarificationQuestions[], feedback, suggestedRevision, canProceed }
-  clarificationAnswers     String[]              @default([])
-  
-  // AI Analysis Result
-  aiAnalysisResult         Json?                 // { problem, categories, primaryRootCauses, rootCauseText, confidence, rationale, recommendations, actionPlans }
-  
-  // Track who started and last updated
-  startedById              String?
-  startedByFirstName       String?
-  startedByLastName        String?
-  lastUpdatedById          String?
-  lastUpdatedByFirstName   String?
-  lastUpdatedByLastName    String?
-  
-  // Timestamps
-  startedAt                DateTime?
-  completedAt              DateTime?
-  createdAt                DateTime              @default(now())
-  updatedAt                DateTime              @updatedAt
-  
-  // Relations
-  RCAAnalysis              RCAAnalysis           @relation(fields: [rcaAnalysisId], references: [id], onDelete: Cascade)
-  Incident                 Incident              @relation(fields: [incidentId], references: [id], onDelete: Cascade)
-  StartedBy                User?                 @relation("AIFishboneSessionStartedBy", fields: [startedById], references: [id])
-  LastUpdatedBy            User?                 @relation("AIFishboneSessionUpdatedBy", fields: [lastUpdatedById], references: [id])
-  
+  id                     String                 @id @default(cuid())
+  rcaAnalysisId          String                 @unique
+  incidentId             String
+  workflowStep           AIFishboneWorkflowStep @default(IDLE)
+  problemValidation      Json?
+  clarificationAnswers   String[]               @default([])
+  aiAnalysisResult       Json?
+  startedById            String?
+  startedByFirstName     String?
+  startedByLastName      String?
+  lastUpdatedById        String?
+  lastUpdatedByFirstName String?
+  lastUpdatedByLastName  String?
+  startedAt              DateTime?
+  completedAt            DateTime?
+  createdAt              DateTime               @default(now())
+  updatedAt              DateTime               @updatedAt
+  Incident               Incident               @relation(fields: [incidentId], references: [id], onDelete: Cascade)
+  LastUpdatedBy          User?                  @relation("AIFishboneSessionUpdatedBy", fields: [lastUpdatedById], references: [id])
+  RCAAnalysis            RCAAnalysis            @relation(fields: [rcaAnalysisId], references: [id], onDelete: Cascade)
+  StartedBy              User?                  @relation("AIFishboneSessionStartedBy", fields: [startedById], references: [id])
+
   @@index([rcaAnalysisId])
   @@index([incidentId])
   @@index([startedById])
@@ -1120,7 +1112,7 @@ model RolePrivilege {
   isEnabled      Boolean         @default(true)
   description    String?
   createdAt      DateTime        @default(now())
-  updatedAt      DateTime @updatedAt
+  updatedAt      DateTime        @updatedAt
   createdById    String?
   Organization   Organization    @relation(fields: [organizationId], references: [id], onDelete: Cascade)
 
@@ -1169,7 +1161,7 @@ model Shift {
   endTime    String
   facilityId String?
   createdAt  DateTime    @default(now())
-  updatedAt  DateTime @updatedAt
+  updatedAt  DateTime    @updatedAt
   lineId     String?
   Incident   Incident[]
   Facility   Facility?   @relation(fields: [facilityId], references: [id], onDelete: Cascade)
@@ -1201,7 +1193,7 @@ model SupportRequest {
   status                                      SupportRequestStatus                 @default(OPEN)
   internalNotes                               String?
   createdAt                                   DateTime                             @default(now())
-  updatedAt                                   DateTime @updatedAt
+  updatedAt                                   DateTime                             @updatedAt
   resolvedAt                                  DateTime?
   resolvedByUserId                            String?
   subject                                     String
@@ -1273,21 +1265,29 @@ model User {
   passwordResetExpires                                                DateTime?
   organizationId                                                      String?
   createdAt                                                           DateTime                             @default(now())
-  updatedAt                                                           DateTime @updatedAt
+  updatedAt                                                           DateTime                             @updatedAt
   firebaseUid                                                         String?                              @unique
   isOnline                                                            Boolean                              @default(false)
   lastSeenAt                                                          DateTime?
   socketId                                                            String?
   profilePicture                                                      String?
   autoSaveEnabled                                                     Boolean                              @default(false)
+  AIFishboneSessionsUpdated                                           AIFishboneSession[]                  @relation("AIFishboneSessionUpdatedBy")
+  AIFishboneSessionsStarted                                           AIFishboneSession[]                  @relation("AIFishboneSessionStartedBy")
   AuditLog                                                            AuditLog[]
   CAPAction                                                           CAPAction[]
   ChatMessage                                                         ChatMessage[]
   ChatMessageReaction                                                 ChatMessageReaction[]
   ChatMessageTemplate                                                 ChatMessageTemplate[]
   Comment                                                             Comment[]
+  MarkersCreated                                                      DiscussionMarker[]                   @relation("MarkerCreatedBy")
+  AnnotationsCreated                                                  EvidenceAnnotation[]                 @relation("AnnotationCreatedBy")
+  SpotlightsPresented                                                 EvidenceSpotlight[]                  @relation("SpotlightPresentedBy")
+  RecordingsCreated                                                   MeetingRecording[]                   @relation("RecordingRecordedBy")
   FMIRAuditReport                                                     FMIRAuditReport[]
   FMIRComment                                                         FMIRComment[]
+  FiveWhysAnalysisCreated                                             FiveWhysAnalysis[]                   @relation("FiveWhysAnalysisCreatedBy")
+  FiveWhysStepsAnswered                                               FiveWhysStep[]                       @relation("FiveWhysStepAnsweredBy")
   ForeignMaterialIncident_ForeignMaterialIncident_createdByIdToUser   ForeignMaterialIncident[]            @relation("ForeignMaterialIncident_createdByIdToUser")
   ForeignMaterialIncident_ForeignMaterialIncident_submittedByIdToUser ForeignMaterialIncident[]            @relation("ForeignMaterialIncident_submittedByIdToUser")
   Incident_Incident_assignedToIdToUser                                Incident[]                           @relation("Incident_assignedToIdToUser")
@@ -1304,16 +1304,139 @@ model User {
   SupportRequest_SupportRequest_submittedByUserIdToUser               SupportRequest[]                     @relation("SupportRequest_submittedByUserIdToUser")
   SupportRequestAlertDismissal                                        SupportRequestAlertDismissal[]
   SupportStatusNotificationDismissal                                  SupportStatusNotificationDismissal[]
-  AIFishboneSessionsStarted                                           AIFishboneSession[]                  @relation("AIFishboneSessionStartedBy")
-  AIFishboneSessionsUpdated                                           AIFishboneSession[]                  @relation("AIFishboneSessionUpdatedBy")
-  FiveWhysAnalysisCreated                                             FiveWhysAnalysis[]                   @relation("FiveWhysAnalysisCreatedBy")
-  FiveWhysStepsAnswered                                               FiveWhysStep[]                       @relation("FiveWhysStepAnsweredBy")
   Organization                                                        Organization?                        @relation(fields: [organizationId], references: [id], onDelete: Cascade)
 
   @@index([email])
   @@index([isOnline])
   @@index([organizationId])
   @@index([role])
+}
+
+model FiveWhysAnalysis {
+  id             String         @id @default(cuid())
+  rcaAnalysisId  String
+  causeId        String         @unique
+  causeText      String
+  categoryId     String
+  categoryName   String
+  rootCause      String?
+  isComplete     Boolean        @default(false)
+  isValidated    Boolean        @default(false)
+  recommendation String?
+  createdAt      DateTime       @default(now())
+  updatedAt      DateTime       @updatedAt
+  createdById    String?
+  analysisMethod String?
+  createdBy      User?          @relation("FiveWhysAnalysisCreatedBy", fields: [createdById], references: [id])
+  rcaAnalysis    RCAAnalysis    @relation(fields: [rcaAnalysisId], references: [id], onDelete: Cascade)
+  steps          FiveWhysStep[]
+
+  @@index([rcaAnalysisId])
+  @@index([causeId])
+}
+
+model FiveWhysStep {
+  id           String           @id @default(cuid())
+  analysisId   String
+  stepNumber   Int
+  question     String
+  answer       String?
+  answeredAt   DateTime?
+  answeredById String?
+  createdAt    DateTime         @default(now())
+  updatedAt    DateTime         @updatedAt
+  analysis     FiveWhysAnalysis @relation(fields: [analysisId], references: [id], onDelete: Cascade)
+  answeredBy   User?            @relation("FiveWhysStepAnsweredBy", fields: [answeredById], references: [id])
+
+  @@unique([analysisId, stepNumber])
+  @@index([analysisId])
+}
+
+model EvidenceSpotlight {
+  id             String               @id @default(cuid())
+  incidentId     String
+  evidenceId     String?
+  roomName       String
+  presentedById  String
+  presentedAt    DateTime             @default(now())
+  endedAt        DateTime?
+  duration       Int?
+  createdAt      DateTime             @default(now())
+  updatedAt      DateTime             @updatedAt
+  fmirEvidenceId String?
+  annotations    EvidenceAnnotation[]
+  evidence       Evidence?            @relation(fields: [evidenceId], references: [id], onDelete: Cascade)
+  incident       Incident             @relation(fields: [incidentId], references: [id], onDelete: Cascade)
+  presentedBy    User                 @relation("SpotlightPresentedBy", fields: [presentedById], references: [id])
+
+  @@index([incidentId])
+  @@index([roomName])
+  @@index([evidenceId])
+  @@index([fmirEvidenceId])
+}
+
+model EvidenceAnnotation {
+  id             String            @id @default(cuid())
+  spotlightId    String
+  userId         String
+  annotationType String
+  data           Json
+  color          String            @default("#FF0000")
+  strokeWidth    Int               @default(2)
+  createdAt      DateTime          @default(now())
+  spotlight      EvidenceSpotlight @relation(fields: [spotlightId], references: [id], onDelete: Cascade)
+  user           User              @relation("AnnotationCreatedBy", fields: [userId], references: [id])
+
+  @@index([spotlightId])
+}
+
+model DiscussionMarker {
+  id          String    @id @default(cuid())
+  incidentId  String
+  roomName    String
+  evidenceId  String?
+  markerType  String
+  title       String
+  description String?
+  timestamp   DateTime  @default(now())
+  callOffset  Int?
+  createdById String
+  createdAt   DateTime  @default(now())
+  createdBy   User      @relation("MarkerCreatedBy", fields: [createdById], references: [id])
+  evidence    Evidence? @relation(fields: [evidenceId], references: [id])
+  incident    Incident  @relation(fields: [incidentId], references: [id], onDelete: Cascade)
+
+  @@index([incidentId])
+  @@index([roomName])
+  @@index([evidenceId])
+}
+
+model MeetingRecording {
+  id              String    @id @default(cuid())
+  incidentId      String
+  roomName        String
+  title           String?
+  description     String?
+  fileName        String
+  fileUrl         String
+  firebasePath    String
+  fileSize        Int
+  duration        Int?      // Duration in seconds
+  mimeType        String    @default("video/webm")
+  recordingType   String    @default("screen") // screen, camera, mixed
+  thumbnailUrl    String?
+  status          String    @default("ready") // uploading, processing, ready, failed
+  recordedById    String
+  startedAt       DateTime
+  endedAt         DateTime?
+  createdAt       DateTime  @default(now())
+  
+  recordedBy      User      @relation("RecordingRecordedBy", fields: [recordedById], references: [id])
+  incident        Incident  @relation(fields: [incidentId], references: [id], onDelete: Cascade)
+
+  @@index([incidentId])
+  @@index([roomName])
+  @@index([recordedById])
 }
 
 enum ActionPriority {
@@ -1590,49 +1713,4 @@ enum UserRole {
   SYSTEM_ADMIN
   SAFETY_SECURITY_MANAGER
   QUALITY_CONTROL_MANAGER
-}
-
-// Individual 5 Whys Analysis for each fishbone cause
-// Each cause can have its own 5 Whys analysis that is persisted and synced across team members
-model FiveWhysAnalysis {
-  id             String    @id @default(cuid())
-  rcaAnalysisId  String
-  causeId        String    @unique  // The fishbone cause ID (from categories.causes[].id)
-  causeText      String    // The cause text for reference
-  categoryId     String    // The category ID this cause belongs to
-  categoryName   String    // The category name for reference
-  analysisMethod String?   // 'manual' or 'ai' - which method was used for this analysis
-  rootCause      String?   // The final root cause conclusion
-  isComplete     Boolean   @default(false)  // True when all steps answered and root cause provided
-  isValidated    Boolean   @default(false)  // True when marked as validated root cause
-  recommendation String?   // 'keep' or 'eliminate' - the final recommendation for the cause
-  createdAt      DateTime  @default(now())
-  updatedAt      DateTime  @updatedAt
-  createdById    String?
-  
-  rcaAnalysis   RCAAnalysis @relation(fields: [rcaAnalysisId], references: [id], onDelete: Cascade)
-  createdBy     User?       @relation("FiveWhysAnalysisCreatedBy", fields: [createdById], references: [id])
-  steps         FiveWhysStep[]
-  
-  @@index([rcaAnalysisId])
-  @@index([causeId])
-}
-
-// Individual step (Why 1-5) within a 5 Whys Analysis
-model FiveWhysStep {
-  id            String    @id @default(cuid())
-  analysisId    String
-  stepNumber    Int       // 1-5
-  question      String    // The "Why ...?" question (dynamic based on previous answer)
-  answer        String?   // The answer (nullable until filled)
-  answeredAt    DateTime? // When the answer was provided
-  answeredById  String?   // Who provided the answer
-  createdAt     DateTime  @default(now())
-  updatedAt     DateTime  @updatedAt
-  
-  analysis      FiveWhysAnalysis @relation(fields: [analysisId], references: [id], onDelete: Cascade)
-  answeredBy    User?     @relation("FiveWhysStepAnsweredBy", fields: [answeredById], references: [id])
-  
-  @@unique([analysisId, stepNumber])
-  @@index([analysisId])
 }

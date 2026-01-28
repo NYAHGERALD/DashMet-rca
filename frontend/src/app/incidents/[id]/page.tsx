@@ -291,6 +291,57 @@ interface Incident {
   } | null;
 }
 
+// Helper function to parse and render FMIR-formatted descriptions
+// Removes decorative unicode lines and parses sections for cleaner rendering
+const parseFormattedDescription = (description: string) => {
+  // Remove decorative unicode box-drawing characters - comprehensive list
+  const cleanedDescription = description
+    .replace(/[═─━│┃┄┅┆┇┈┉┊┋╌╍╎╏┌┐└┘├┤┬┴┼╔╗╚╝╠╣╦╩╬╭╮╯╰▀▄█▌▐░▒▓■□▪▫●○◘◙♦♣♠♥—–―_]+/g, '') // Remove all box-drawing and decorative characters
+    .replace(/[\u2500-\u257F]+/g, '') // Remove box drawing block (U+2500 to U+257F)
+    .replace(/[\u2580-\u259F]+/g, '') // Remove block elements
+    .replace(/\s*=+\s*/g, ' ') // Replace equals signs used as dividers with space
+    .replace(/\s*-{3,}\s*/g, ' ') // Replace dashes used as dividers with space
+    .replace(/\n{3,}/g, '\n\n') // Collapse multiple newlines
+    .replace(/^\s*$/gm, '') // Remove empty lines
+    .trim();
+  
+  // Parse sections if they exist (GENERAL INFORMATION, FOREIGN MATERIAL DESCRIPTION, etc.)
+  const sectionRegex = /^([A-Z][A-Z\s&]+)$/gm;
+  const lines = cleanedDescription.split('\n');
+  const sections: { title: string; content: string }[] = [];
+  let currentSection: { title: string; content: string[] } | null = null;
+  
+  for (const line of lines) {
+    const trimmedLine = line.trim();
+    if (sectionRegex.test(trimmedLine)) {
+      sectionRegex.lastIndex = 0; // Reset regex
+      if (currentSection) {
+        sections.push({ 
+          title: currentSection.title, 
+          content: currentSection.content.join('\n').trim() 
+        });
+      }
+      currentSection = { title: trimmedLine, content: [] };
+    } else if (currentSection) {
+      currentSection.content.push(line);
+    } else if (trimmedLine) {
+      // Content before any section
+      if (!currentSection) {
+        currentSection = { title: '', content: [line] };
+      }
+    }
+  }
+  
+  if (currentSection) {
+    sections.push({ 
+      title: currentSection.title, 
+      content: currentSection.content.join('\n').trim() 
+    });
+  }
+  
+  return { cleanedDescription, sections };
+};
+
 export default function IncidentDetailPage() {
   const params = useParams();
   const router = useRouter();
@@ -310,7 +361,7 @@ export default function IncidentDetailPage() {
   const shouldShowAccessDenied = !privilegesLoading && !canViewIncident;
 
   // WebSocket for team collaboration
-  const { connect, isConnected, joinIncident, leaveIncident, onlineUsers, onParticipantsUpdated, onParticipantRoleUpdated, onInvitationDeclined, onVisibilityChanged, onRCACreated, onRCAMethodologyAnalysisStarted, onRCAMethodologyAnalysisComplete, onRCAModalState, emitRCAModalState } = useWebSocket();
+  const { connect, isConnected, joinIncident, leaveIncident, onlineUsers, onParticipantsUpdated, onParticipantRoleUpdated, onInvitationDeclined, onVisibilityChanged, onRCACreated, onRCAMethodologyAnalysisStarted, onRCAMethodologyAnalysisComplete, onRCAModalState, emitRCAModalState, onIncidentEvidenceAdded } = useWebSocket();
 
   const [incident, setIncident] = useState<Incident | null>(null);
   const [loading, setLoading] = useState(true);
@@ -370,6 +421,10 @@ export default function IncidentDetailPage() {
   // FMIR Evidence media URLs - store blob URLs for authenticated file access
   const [fmirEvidenceUrls, setFmirEvidenceUrls] = useState<Record<string, string>>({});
   const [loadingFmirEvidence, setLoadingFmirEvidence] = useState(false);
+  
+  // Incident Evidence media URLs - store blob URLs for authenticated file access
+  const [incidentEvidenceUrls, setIncidentEvidenceUrls] = useState<Record<string, string>>({});
+  const [loadingIncidentEvidence, setLoadingIncidentEvidence] = useState(false);
 
   // Check if current user is the incident owner
   const isOwner = Boolean(user?.id && incident?.User_Incident_createdByIdToUser?.id === user.id);
@@ -588,6 +643,37 @@ export default function IncidentDetailPage() {
     return unsubscribe;
   }, [incidentId, onRCAMethodologyAnalysisComplete]);
 
+  // Listen for incident evidence added (when chat attachment is uploaded)
+  useEffect(() => {
+    const unsubscribe = onIncidentEvidenceAdded((data) => {
+      if (data.incidentId === incidentId) {
+        console.log('📎 Evidence added via chat, updating incident:', data);
+        // Add the new evidence to the incident's Evidence array
+        setIncident(prev => {
+          if (!prev) return prev;
+          const newEvidence = {
+            id: data.evidence.id,
+            type: data.evidence.type,
+            fileName: data.evidence.fileName,
+            filePath: data.evidence.filePath,
+            mimeType: data.evidence.mimeType,
+            uploadedById: data.evidence.uploadedById,
+            uploadedAt: data.timestamp,
+          };
+          // Check if evidence already exists (avoid duplicates)
+          if (prev.Evidence.some(e => e.id === newEvidence.id)) {
+            return prev;
+          }
+          return {
+            ...prev,
+            Evidence: [...prev.Evidence, newEvidence],
+          };
+        });
+      }
+    });
+    return unsubscribe;
+  }, [incidentId, onIncidentEvidenceAdded]);
+
   useEffect(() => {
     fetchIncident();
   }, [incidentId]);
@@ -663,6 +749,74 @@ export default function IncidentDetailPage() {
       URL.revokeObjectURL(blobUrl);
     } catch (err) {
       console.error('Error downloading FMIR evidence:', err);
+    }
+  };
+
+  // Load Incident evidence media with authentication (Firebase Storage files need to be fetched via backend)
+  const loadIncidentEvidenceMedia = useCallback(async (incidentId: string, evidenceId: string, mimeType: string, fileName: string) => {
+    // Only load images and videos
+    const isImage = mimeType?.startsWith('image/') || /\.(jpg|jpeg|png|gif|webp)$/i.test(fileName);
+    const isVideo = mimeType?.startsWith('video/') || /\.(mp4|mov|avi|webm)$/i.test(fileName);
+    if (!isImage && !isVideo) return;
+    if (incidentEvidenceUrls[evidenceId]) return; // Already loaded
+    
+    try {
+      const response = await api.get(`/incidents/${incidentId}/evidence/${evidenceId}/download`, {
+        responseType: 'blob',
+      });
+      
+      const blobUrl = URL.createObjectURL(response.data);
+      setIncidentEvidenceUrls(prev => ({ ...prev, [evidenceId]: blobUrl }));
+    } catch (err) {
+      console.error('Error loading incident evidence media:', err);
+    }
+  }, [incidentEvidenceUrls]);
+
+  // Load Incident evidence media when incident with evidence is loaded
+  useEffect(() => {
+    if (incident?.Evidence && incident.Evidence.length > 0) {
+      setLoadingIncidentEvidence(true);
+      const incidentId = incident.id;
+      
+      // Load all image/video evidence
+      const mediaEvidence = incident.Evidence.filter((e: any) => {
+        const isImage = e.mimeType?.startsWith('image/') || e.fileType?.startsWith('image/') || /\.(jpg|jpeg|png|gif|webp)$/i.test(e.fileName);
+        const isVideo = e.mimeType?.startsWith('video/') || e.fileType?.startsWith('video/') || /\.(mp4|mov|avi|webm)$/i.test(e.fileName);
+        return isImage || isVideo;
+      });
+      
+      Promise.all(
+        mediaEvidence.map((e: any) => loadIncidentEvidenceMedia(incidentId, e.id, e.mimeType || e.fileType || '', e.fileName))
+      ).finally(() => {
+        setLoadingIncidentEvidence(false);
+      });
+    }
+
+    // Cleanup blob URLs when component unmounts
+    return () => {
+      Object.values(incidentEvidenceUrls).forEach(url => {
+        URL.revokeObjectURL(url);
+      });
+    };
+  }, [incident?.id, incident?.Evidence]);
+
+  // Handle Incident evidence download
+  const handleIncidentEvidenceDownload = async (incidentId: string, evidenceId: string, fileName: string) => {
+    try {
+      const response = await api.get(`/incidents/${incidentId}/evidence/${evidenceId}/download`, {
+        responseType: 'blob',
+      });
+      
+      const blobUrl = URL.createObjectURL(response.data);
+      const link = document.createElement('a');
+      link.href = blobUrl;
+      link.download = fileName;
+      document.body.appendChild(link);
+      link.click();
+      document.body.removeChild(link);
+      URL.revokeObjectURL(blobUrl);
+    } catch (err) {
+      console.error('Error downloading incident evidence:', err);
     }
   };
 
@@ -1134,59 +1288,59 @@ export default function IncidentDetailPage() {
 
       {/* Header */}
       <div className="bg-white dark:bg-gray-800 shadow">
-        <div className="w-full px-4 sm:px-6 lg:px-8 py-4">
-          <div className="flex items-center justify-between">
-            <div className="flex items-center space-x-4">
-              <div className="relative w-10 h-10">
+        <div className="w-full px-2 sm:px-4 lg:px-8 py-3 sm:py-4">
+          <div className="flex items-center justify-between gap-2">
+            <div className="flex items-center space-x-2 sm:space-x-4 min-w-0">
+              <div className="relative w-8 h-8 sm:w-10 sm:h-10 flex-shrink-0">
                 <Image src="/images/logo.png" alt="DASHMET Logo" fill className="object-contain" />
               </div>
               <Link
                 href="/dashboard"
-                className="text-gray-500 hover:text-gray-700 dark:text-gray-400 dark:hover:text-gray-200"
+                className="text-gray-500 hover:text-gray-700 dark:text-gray-400 dark:hover:text-gray-200 flex-shrink-0"
               >
-                <svg className="w-6 h-6" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                <svg className="w-5 h-5 sm:w-6 sm:h-6" fill="none" viewBox="0 0 24 24" stroke="currentColor">
                   <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M10 19l-7-7m0 0l7-7m-7 7h18" />
                 </svg>
               </Link>
-              <div>
-                <h1 className="text-xl font-bold text-gray-900 dark:text-white">
+              <div className="min-w-0">
+                <h1 className="text-base sm:text-xl font-bold text-gray-900 dark:text-white truncate">
                   {incident.incidentNumber}
                 </h1>
-                <p className="text-sm text-gray-500 dark:text-gray-400">
+                <p className="text-xs sm:text-sm text-gray-500 dark:text-gray-400 truncate">
                   {incident.Category?.name} • {incident.Facility?.name}
                 </p>
               </div>
             </div>
-            <div className="flex items-center space-x-3">
+            <div className="flex items-center space-x-1.5 sm:space-x-3 flex-shrink-0">
               {/* Edit button for draft incidents - disabled for public read-only */}
               {incident.status === 'DRAFT' && isOwner && !isPublicReadOnly && (
                 <Link
                   href={`/incidents/new?edit=${incident.id}`}
-                  className="inline-flex items-center px-4 py-2 border border-gray-300 dark:border-gray-600 rounded-md shadow-sm text-sm font-medium text-gray-700 dark:text-gray-200 bg-white dark:bg-gray-700 hover:bg-gray-50 dark:hover:bg-gray-600 cursor-pointer"
+                  className="hidden sm:inline-flex items-center px-3 sm:px-4 py-1.5 sm:py-2 border border-gray-300 dark:border-gray-600 rounded-md shadow-sm text-xs sm:text-sm font-medium text-gray-700 dark:text-gray-200 bg-white dark:bg-gray-700 hover:bg-gray-50 dark:hover:bg-gray-600 cursor-pointer"
                 >
-                  <svg className="w-4 h-4 mr-2" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                  <svg className="w-3.5 h-3.5 sm:w-4 sm:h-4 mr-1 sm:mr-2" fill="none" viewBox="0 0 24 24" stroke="currentColor">
                     <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M11 5H6a2 2 0 00-2 2v11a2 2 0 002 2h11a2 2 0 002-2v-5m-1.414-9.414a2 2 0 112.828 2.828L11.828 15H9v-2.828l8.586-8.586z" />
                   </svg>
-                  Edit Draft
+                  <span className="hidden xs:inline">Edit Draft</span>
                 </Link>
               )}
               {/* Complete Investigation button for Workplace Safety with pending investigation - disabled for public read-only */}
               {isWorkplaceSafety && incidentReportSubmitted && !investigationSubmitted && isOwner && !isPublicReadOnly && (
                 <Link
                   href={`/incidents/new?edit=${incident.id}&section=investigation`}
-                  className="inline-flex items-center px-4 py-2 border border-amber-300 dark:border-amber-600 rounded-md shadow-sm text-sm font-medium text-amber-700 dark:text-amber-200 bg-amber-50 dark:bg-amber-900/30 hover:bg-amber-100 dark:hover:bg-amber-900/50 cursor-pointer"
+                  className="hidden sm:inline-flex items-center px-3 sm:px-4 py-1.5 sm:py-2 border border-amber-300 dark:border-amber-600 rounded-md shadow-sm text-xs sm:text-sm font-medium text-amber-700 dark:text-amber-200 bg-amber-50 dark:bg-amber-900/30 hover:bg-amber-100 dark:hover:bg-amber-900/50 cursor-pointer"
                 >
-                  <svg className="w-4 h-4 mr-2" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                  <svg className="w-3.5 h-3.5 sm:w-4 sm:h-4 mr-1 sm:mr-2" fill="none" viewBox="0 0 24 24" stroke="currentColor">
                     <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 5H7a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2V7a2 2 0 00-2-2h-2M9 5a2 2 0 002 2h2a2 2 0 002-2M9 5a2 2 0 012-2h2a2 2 0 012 2m-6 9l2 2 4-4" />
                   </svg>
-                  Complete Investigation
+                  <span className="hidden xs:inline">Complete Investigation</span>
                 </Link>
               )}
-              <span className={`px-3 py-1 rounded-full text-sm font-medium ${getStatusColor(incident.status)}`}>
+              <span className={`px-2 sm:px-3 py-0.5 sm:py-1 rounded-full text-xs sm:text-sm font-medium ${getStatusColor(incident.status)}`}>
                 {incident.status.replace('_', ' ')}
               </span>
               {incident.severity && (
-                <span className={`px-3 py-1 rounded-full text-sm font-medium ${getSeverityColor(incident.severity)}`}>
+                <span className={`px-2 sm:px-3 py-0.5 sm:py-1 rounded-full text-xs sm:text-sm font-medium ${getSeverityColor(incident.severity)}`}>
                   {incident.severity}
                 </span>
               )}
@@ -1226,10 +1380,10 @@ export default function IncidentDetailPage() {
         )}
 
         {/* Visibility Badge Bar */}
-        <div className="bg-white dark:bg-gray-800 rounded-lg shadow p-4 mb-6 flex items-center justify-between">
-          <div className="flex items-center gap-3">
-            <span className="text-sm text-gray-500 dark:text-gray-400">Visibility:</span>
-            <span className={`inline-flex items-center gap-1.5 px-3 py-1 rounded-full text-sm font-medium ${
+        <div className="bg-white dark:bg-gray-800 rounded-lg shadow p-3 sm:p-4 mb-4 sm:mb-6 flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3">
+          <div className="flex items-center gap-2 sm:gap-3 flex-wrap">
+            <span className="text-xs sm:text-sm text-gray-500 dark:text-gray-400">Visibility:</span>
+            <span className={`inline-flex items-center gap-1 sm:gap-1.5 px-2 sm:px-3 py-0.5 sm:py-1 rounded-full text-xs sm:text-sm font-medium ${
               incident.visibility === 'PRIVATE' 
                 ? 'bg-blue-100 text-blue-800 dark:bg-blue-900/50 dark:text-blue-200'
                 : incident.visibility === 'TEAM'
@@ -1242,7 +1396,7 @@ export default function IncidentDetailPage() {
               {incident.visibility === 'PRIVATE' ? 'Private' : incident.visibility === 'TEAM' ? 'Team' : 'Public'}
             </span>
             {incident.isTeamIncident && incident.IncidentParticipant && incident.IncidentParticipant.length > 0 && (
-              <span className="text-sm text-gray-500 dark:text-gray-400">
+              <span className="text-xs sm:text-sm text-gray-500 dark:text-gray-400">
                 • {incident.IncidentParticipant.length} team member{incident.IncidentParticipant.length !== 1 ? 's' : ''}
               </span>
             )}
@@ -1250,40 +1404,40 @@ export default function IncidentDetailPage() {
           
           {/* Visibility change controls - only for owner */}
           {isOwner && (
-            <div className="flex items-center gap-2">
-              <span className="text-sm text-gray-500 dark:text-gray-400 mr-2">Change:</span>
+            <div className="flex items-center gap-1.5 sm:gap-2 flex-wrap">
+              <span className="text-xs sm:text-sm text-gray-500 dark:text-gray-400 mr-1 sm:mr-2">Change:</span>
               <button
                 onClick={() => handleVisibilityRequest('PRIVATE')}
                 disabled={changingVisibility || incident.visibility === 'PRIVATE'}
-                className={`px-3 py-1 rounded text-sm font-medium transition-colors ${
+                className={`px-2 sm:px-3 py-0.5 sm:py-1 rounded text-xs sm:text-sm font-medium transition-colors ${
                   incident.visibility === 'PRIVATE'
                     ? 'bg-blue-500 text-white cursor-default'
                     : 'bg-gray-100 dark:bg-gray-700 text-gray-700 dark:text-gray-300 hover:bg-blue-100 dark:hover:bg-blue-900/30'
                 } disabled:opacity-50`}
               >
-                🔐 Private
+                🔐 <span className="hidden xs:inline">Private</span>
               </button>
               <button
                 onClick={() => handleVisibilityRequest('TEAM')}
                 disabled={changingVisibility || incident.visibility === 'TEAM'}
-                className={`px-3 py-1 rounded text-sm font-medium transition-colors ${
+                className={`px-2 sm:px-3 py-0.5 sm:py-1 rounded text-xs sm:text-sm font-medium transition-colors ${
                   incident.visibility === 'TEAM'
                     ? 'bg-purple-500 text-white cursor-default'
                     : 'bg-gray-100 dark:bg-gray-700 text-gray-700 dark:text-gray-300 hover:bg-purple-100 dark:hover:bg-purple-900/30'
                 } disabled:opacity-50`}
               >
-                👥 Team
+                👥 <span className="hidden xs:inline">Team</span>
               </button>
               <button
                 onClick={() => handleVisibilityRequest('PUBLIC')}
                 disabled={changingVisibility || incident.visibility === 'PUBLIC'}
-                className={`px-3 py-1 rounded text-sm font-medium transition-colors ${
+                className={`px-2 sm:px-3 py-0.5 sm:py-1 rounded text-xs sm:text-sm font-medium transition-colors ${
                   incident.visibility === 'PUBLIC'
                     ? 'bg-green-500 text-white cursor-default'
                     : 'bg-gray-100 dark:bg-gray-700 text-gray-700 dark:text-gray-300 hover:bg-green-100 dark:hover:bg-green-900/30'
                 } disabled:opacity-50`}
               >
-                🌐 Public
+                🌐 <span className="hidden xs:inline">Public</span>
               </button>
               {changingVisibility && (
                 <div className="w-4 h-4 border-2 border-blue-500 border-t-transparent rounded-full animate-spin ml-2"></div>
@@ -1292,9 +1446,9 @@ export default function IncidentDetailPage() {
           )}
         </div>
 
-        <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
+        <div className="grid grid-cols-1 lg:grid-cols-3 gap-4 sm:gap-6">
           {/* Main Details */}
-          <div className="lg:col-span-2 space-y-6">
+          <div className="lg:col-span-2 space-y-4 sm:space-y-6">
             {/* Workplace Safety Tabs */}
             {isWorkplaceSafety && (
               <div className="bg-white dark:bg-gray-800 rounded-lg shadow">
@@ -1303,17 +1457,17 @@ export default function IncidentDetailPage() {
                   <nav className="flex -mb-px">
                     <button
                       onClick={() => setActiveWsTab('incident')}
-                      className={`flex-1 py-4 px-6 text-center border-b-2 font-medium text-sm transition-colors ${
+                      className={`flex-1 py-2 sm:py-4 px-2 sm:px-6 text-center border-b-2 font-medium text-xs sm:text-sm transition-colors ${
                         activeWsTab === 'incident'
                           ? 'border-blue-500 text-blue-600 dark:text-blue-400 bg-blue-50/50 dark:bg-blue-900/20'
                           : 'border-transparent text-gray-500 dark:text-gray-400 hover:text-gray-700 dark:hover:text-gray-300 hover:border-gray-300 dark:hover:border-gray-600'
                       }`}
                     >
-                      <div className="flex items-center justify-center gap-2">
-                        <span className="text-lg">📋</span>
-                        <span>Incident Report</span>
+                      <div className="flex items-center justify-center gap-1 sm:gap-2">
+                        <span className="text-sm sm:text-lg">📋</span>
+                        <span className="text-xs sm:text-sm">Incident Report</span>
                         {incidentReportSubmitted && (
-                          <span className="ml-1 px-1.5 py-0.5 bg-green-100 dark:bg-green-900/50 text-green-700 dark:text-green-300 text-xs rounded">
+                          <span className="hidden xs:inline ml-1 px-1 sm:px-1.5 py-0.5 bg-green-100 dark:bg-green-900/50 text-green-700 dark:text-green-300 text-[10px] sm:text-xs rounded">
                             Submitted
                           </span>
                         )}
@@ -1321,21 +1475,21 @@ export default function IncidentDetailPage() {
                     </button>
                     <button
                       onClick={() => setActiveWsTab('investigation')}
-                      className={`flex-1 py-4 px-6 text-center border-b-2 font-medium text-sm transition-colors ${
+                      className={`flex-1 py-2 sm:py-4 px-2 sm:px-6 text-center border-b-2 font-medium text-xs sm:text-sm transition-colors ${
                         activeWsTab === 'investigation'
                           ? 'border-amber-500 text-amber-600 dark:text-amber-400 bg-amber-50/50 dark:bg-amber-900/20'
                           : 'border-transparent text-gray-500 dark:text-gray-400 hover:text-gray-700 dark:hover:text-gray-300 hover:border-gray-300 dark:hover:border-gray-600'
                       }`}
                     >
-                      <div className="flex items-center justify-center gap-2">
-                        <span className="text-lg">🔍</span>
-                        <span>Investigation</span>
+                      <div className="flex items-center justify-center gap-1 sm:gap-2">
+                        <span className="text-sm sm:text-lg">🔍</span>
+                        <span className="text-xs sm:text-sm">Investigation</span>
                         {investigationSubmitted ? (
-                          <span className="ml-1 px-1.5 py-0.5 bg-green-100 dark:bg-green-900/50 text-green-700 dark:text-green-300 text-xs rounded">
+                          <span className="hidden xs:inline ml-1 px-1 sm:px-1.5 py-0.5 bg-green-100 dark:bg-green-900/50 text-green-700 dark:text-green-300 text-[10px] sm:text-xs rounded">
                             Completed
                           </span>
                         ) : (
-                          <span className="ml-1 px-1.5 py-0.5 bg-amber-100 dark:bg-amber-900/50 text-amber-700 dark:text-amber-300 text-xs rounded">
+                          <span className="hidden xs:inline ml-1 px-1 sm:px-1.5 py-0.5 bg-amber-100 dark:bg-amber-900/50 text-amber-700 dark:text-amber-300 text-[10px] sm:text-xs rounded">
                             Pending
                           </span>
                         )}
@@ -1347,22 +1501,76 @@ export default function IncidentDetailPage() {
             )}
 
             {/* Description Card - Always visible */}
-            <div className="bg-white dark:bg-gray-800 rounded-lg shadow p-6">
-              <h2 className="text-lg font-semibold text-gray-900 dark:text-white mb-4">
-                Incident Description
+            <div className="bg-white dark:bg-gray-800 rounded-lg shadow p-3 sm:p-6 overflow-hidden">
+              <h2 className="text-base sm:text-lg font-semibold text-gray-900 dark:text-white mb-3 sm:mb-4">
+                Incident Details
               </h2>
-              <p className="text-gray-700 dark:text-gray-300 whitespace-pre-wrap">
-                {incident.description}
-              </p>
+              
+              {/* Render parsed description with sections */}
+              {(() => {
+                const { sections } = parseFormattedDescription(incident.description);
+                
+                if (sections.length > 0 && sections.some(s => s.title)) {
+                  // Has formatted sections - render as cards
+                  return (
+                    <div className="space-y-3 sm:space-y-4">
+                      {sections.map((section, index) => (
+                        <div key={index}>
+                          {section.title && (
+                            <h3 className="text-xs sm:text-sm font-semibold text-blue-600 dark:text-blue-400 uppercase tracking-wide mb-1.5 sm:mb-2 flex items-center">
+                              <span className="w-1 h-4 sm:h-5 bg-blue-500 rounded-full mr-2"></span>
+                              {section.title}
+                            </h3>
+                          )}
+                          <p className="text-xs sm:text-sm text-gray-700 dark:text-gray-300 leading-relaxed pl-0 sm:pl-3 break-words">
+                            {section.content}
+                          </p>
+                        </div>
+                      ))}
+                    </div>
+                  );
+                }
+                
+                // Plain description without sections
+                return (
+                  <p className="text-xs sm:text-sm text-gray-700 dark:text-gray-300 whitespace-pre-wrap break-words">
+                    {incident.description}
+                  </p>
+                );
+              })()}
+              
+              {/* Type, Severity, Category, Reporter Info */}
+              <div className="mt-4 sm:mt-6 pt-4 sm:pt-6 border-t border-gray-200 dark:border-gray-700">
+                <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 sm:gap-4">
+                  <div>
+                    <span className="text-xs text-gray-500 dark:text-gray-400 block mb-0.5">Type</span>
+                    <p className="text-xs sm:text-sm font-medium text-gray-900 dark:text-white uppercase">{incident.type.replace('_', ' ')}</p>
+                  </div>
+                  <div>
+                    <span className="text-xs text-gray-500 dark:text-gray-400 block mb-0.5">Severity</span>
+                    <p className="text-xs sm:text-sm font-medium text-gray-900 dark:text-white">{incident.severity || 'N/A'}</p>
+                  </div>
+                  <div>
+                    <span className="text-xs text-gray-500 dark:text-gray-400 block mb-0.5">Category</span>
+                    <p className="text-xs sm:text-sm font-medium text-gray-900 dark:text-white">{incident.Category?.name}</p>
+                  </div>
+                  <div>
+                    <span className="text-xs text-gray-500 dark:text-gray-400 block mb-0.5">Reported By</span>
+                    <p className="text-xs sm:text-sm font-medium text-gray-900 dark:text-white truncate">
+                      {incident.User_Incident_createdByIdToUser?.firstName} {incident.User_Incident_createdByIdToUser?.lastName}
+                    </p>
+                  </div>
+                </div>
+              </div>
               
               {incident.aiSummary && (
-                <div className="mt-4 p-4 bg-blue-50 dark:bg-blue-900/30 rounded-lg">
-                  <div className="flex items-center justify-between mb-2">
+                <div className="mt-4 p-3 sm:p-4 bg-blue-50 dark:bg-blue-900/30 rounded-lg">
+                  <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-2 mb-2">
                     <div className="flex items-center space-x-2">
-                      <svg className="w-5 h-5 text-blue-600 dark:text-blue-400" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                      <svg className="w-4 h-4 sm:w-5 sm:h-5 text-blue-600 dark:text-blue-400" fill="none" viewBox="0 0 24 24" stroke="currentColor">
                         <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9.663 17h4.673M12 3v1m6.364 1.636l-.707.707M21 12h-1M4 12H3m3.343-5.657l-.707-.707m2.828 9.9a5 5 0 117.072 0l-.548.547A3.374 3.374 0 0014 18.469V19a2 2 0 11-4 0v-.531c0-.895-.356-1.754-.988-2.386l-.548-.547z" />
                       </svg>
-                      <span className="text-sm font-medium text-blue-700 dark:text-blue-300">AI Summary</span>
+                      <span className="text-xs sm:text-sm font-medium text-blue-700 dark:text-blue-300">AI Insights from Incident Analysis</span>
                     </div>
                     {isOwner && (
                       <button
@@ -1390,16 +1598,16 @@ export default function IncidentDetailPage() {
                       </button>
                     )}
                   </div>
-                  <p className="text-sm text-blue-800 dark:text-blue-200">{incident.aiSummary}</p>
+                  <p className="text-xs sm:text-sm text-blue-800 dark:text-blue-200">{incident.aiSummary}</p>
                   
                   {/* Show prompt to generate full insights if aiAnalysisData is missing */}
                   {!incident.aiAnalysisData && isOwner && (
                     <div className="mt-3 pt-3 border-t border-blue-200 dark:border-blue-700">
-                      <p className="text-xs text-blue-600 dark:text-blue-400 flex items-center gap-1.5">
-                        <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                      <p className="text-xs text-blue-600 dark:text-blue-400 flex items-start sm:items-center gap-1.5">
+                        <svg className="w-4 h-4 flex-shrink-0 mt-0.5 sm:mt-0" fill="none" viewBox="0 0 24 24" stroke="currentColor">
                           <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M13 16h-1v-4h-1m1-4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
                         </svg>
-                        Click &quot;Regenerate AI&quot; to generate full AI insights including key findings, investigation guidance, and RCA methodology recommendations.
+                        <span>Click &quot;Regenerate AI&quot; to generate full AI insights including key findings, investigation guidance, and RCA methodology recommendations.</span>
                       </p>
                     </div>
                   )}
@@ -1408,13 +1616,13 @@ export default function IncidentDetailPage() {
               
               {/* Show regenerate option when no AI data exists */}
               {!incident.aiSummary && !incident.aiAnalysisData && isOwner && (
-                <div className="mt-4 p-4 bg-gray-50 dark:bg-gray-700/30 rounded-lg border border-dashed border-gray-300 dark:border-gray-600">
-                  <div className="flex items-center justify-between">
+                <div className="mt-4 p-3 sm:p-4 bg-gray-50 dark:bg-gray-700/30 rounded-lg border border-dashed border-gray-300 dark:border-gray-600">
+                  <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
                     <div className="flex items-center space-x-2 text-gray-500 dark:text-gray-400">
-                      <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                      <svg className="w-4 h-4 sm:w-5 sm:h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
                         <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9.663 17h4.673M12 3v1m6.364 1.636l-.707.707M21 12h-1M4 12H3m3.343-5.657l-.707-.707m2.828 9.9a5 5 0 117.072 0l-.548.547A3.374 3.374 0 0014 18.469V19a2 2 0 11-4 0v-.531c0-.895-.356-1.754-.988-2.386l-.548-.547z" />
                       </svg>
-                      <span className="text-sm">No AI insights available</span>
+                      <span className="text-xs sm:text-sm">No AI insights available</span>
                     </div>
                     <button
                       onClick={handleRegenerateAIInsights}
@@ -1445,68 +1653,69 @@ export default function IncidentDetailPage() {
 
             {/* FMIR Report Card - Displayed when incident is linked to an FMIR */}
             {incident.FMIRReport && (
-              <div className="bg-gradient-to-br from-amber-50 to-orange-50 dark:from-amber-900/20 dark:to-orange-900/20 rounded-lg shadow p-6 border border-amber-200 dark:border-amber-800">
-                <div className="flex items-center justify-between mb-4">
+              <div className="bg-gradient-to-br from-amber-50 to-orange-50 dark:from-amber-900/20 dark:to-orange-900/20 rounded-lg shadow p-3 sm:p-6 border border-amber-200 dark:border-amber-800">
+                <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2 sm:gap-0 mb-3 sm:mb-4">
                   <div className="flex items-center space-x-2">
-                    <div className="w-8 h-8 bg-amber-100 dark:bg-amber-800 rounded-full flex items-center justify-center">
-                      <svg className="w-5 h-5 text-amber-600 dark:text-amber-400" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                    <div className="w-6 h-6 sm:w-8 sm:h-8 bg-amber-100 dark:bg-amber-800 rounded-full flex items-center justify-center flex-shrink-0">
+                      <svg className="w-4 h-4 sm:w-5 sm:h-5 text-amber-600 dark:text-amber-400" fill="none" viewBox="0 0 24 24" stroke="currentColor">
                         <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" />
                       </svg>
                     </div>
-                    <h2 className="text-lg font-semibold text-amber-900 dark:text-amber-100">
+                    <h2 className="text-sm sm:text-lg font-semibold text-amber-900 dark:text-amber-100">
                       Foreign Material Incident Report
                     </h2>
                   </div>
                   <Link
                     href={`/fmir/${incident.FMIRReport.id}`}
-                    className="text-xs text-amber-600 dark:text-amber-400 hover:text-amber-800 dark:hover:text-amber-200 flex items-center gap-1 bg-amber-100 dark:bg-amber-900/50 px-3 py-1.5 rounded-md"
+                    className="text-xs text-amber-600 dark:text-amber-400 hover:text-amber-800 dark:hover:text-amber-200 flex items-center gap-1 bg-amber-100 dark:bg-amber-900/50 px-2 sm:px-3 py-1 sm:py-1.5 rounded-md self-start sm:self-auto"
                   >
-                    <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                    <svg className="w-3 h-3 sm:w-3.5 sm:h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
                       <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M10 6H6a2 2 0 00-2 2v10a2 2 0 002 2h10a2 2 0 002-2v-4M14 4h6m0 0v6m0-6L10 14" />
                     </svg>
-                    View Full FMIR
+                    <span className="hidden xs:inline">View Full FMIR</span>
+                    <span className="xs:hidden">View</span>
                   </Link>
                 </div>
 
                 {/* FMIR Quick Info */}
-                <div className="grid grid-cols-2 md:grid-cols-4 gap-4 mb-4">
-                  <div className="bg-white/50 dark:bg-gray-800/50 rounded-lg p-3">
-                    <p className="text-xs text-amber-600 dark:text-amber-400 font-medium mb-1">Report Number</p>
-                    <p className="text-sm font-semibold text-amber-900 dark:text-amber-100">{incident.FMIRReport.reportNumber}</p>
+                <div className="grid grid-cols-2 gap-2 sm:gap-4 mb-3 sm:mb-4">
+                  <div className="bg-white/50 dark:bg-gray-800/50 rounded-lg p-2 sm:p-3">
+                    <p className="text-[10px] sm:text-xs text-amber-600 dark:text-amber-400 font-medium mb-0.5 sm:mb-1">Report Number</p>
+                    <p className="text-xs sm:text-sm font-semibold text-amber-900 dark:text-amber-100 truncate">{incident.FMIRReport.reportNumber}</p>
                   </div>
                   {incident.FMIRReport.productName && (
-                    <div className="bg-white/50 dark:bg-gray-800/50 rounded-lg p-3">
-                      <p className="text-xs text-amber-600 dark:text-amber-400 font-medium mb-1">Product</p>
-                      <p className="text-sm font-semibold text-amber-900 dark:text-amber-100">{incident.FMIRReport.productName}</p>
+                    <div className="bg-white/50 dark:bg-gray-800/50 rounded-lg p-2 sm:p-3">
+                      <p className="text-[10px] sm:text-xs text-amber-600 dark:text-amber-400 font-medium mb-0.5 sm:mb-1">Product</p>
+                      <p className="text-xs sm:text-sm font-semibold text-amber-900 dark:text-amber-100 truncate">{incident.FMIRReport.productName}</p>
                     </div>
                   )}
                   {incident.FMIRReport.productCodeBatchLot && (
-                    <div className="bg-white/50 dark:bg-gray-800/50 rounded-lg p-3">
-                      <p className="text-xs text-amber-600 dark:text-amber-400 font-medium mb-1">Batch/Lot</p>
-                      <p className="text-sm font-semibold text-amber-900 dark:text-amber-100">{incident.FMIRReport.productCodeBatchLot}</p>
+                    <div className="bg-white/50 dark:bg-gray-800/50 rounded-lg p-2 sm:p-3">
+                      <p className="text-[10px] sm:text-xs text-amber-600 dark:text-amber-400 font-medium mb-0.5 sm:mb-1">Batch/Lot</p>
+                      <p className="text-xs sm:text-sm font-semibold text-amber-900 dark:text-amber-100 truncate">{incident.FMIRReport.productCodeBatchLot}</p>
                     </div>
                   )}
                   {incident.FMIRReport.department && (
-                    <div className="bg-white/50 dark:bg-gray-800/50 rounded-lg p-3">
-                      <p className="text-xs text-amber-600 dark:text-amber-400 font-medium mb-1">Department</p>
-                      <p className="text-sm font-semibold text-amber-900 dark:text-amber-100">{incident.FMIRReport.department}</p>
+                    <div className="bg-white/50 dark:bg-gray-800/50 rounded-lg p-2 sm:p-3">
+                      <p className="text-[10px] sm:text-xs text-amber-600 dark:text-amber-400 font-medium mb-0.5 sm:mb-1">Department</p>
+                      <p className="text-xs sm:text-sm font-semibold text-amber-900 dark:text-amber-100 truncate">{incident.FMIRReport.department}</p>
                     </div>
                   )}
                 </div>
 
                 {/* Foreign Material Details */}
                 {incident.FMIRReport.foreignMaterialDescription && (
-                  <div className="mb-4">
-                    <h3 className="text-sm font-semibold text-amber-800 dark:text-amber-200 mb-2 flex items-center gap-2">
-                      <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                  <div className="mb-3 sm:mb-4">
+                    <h3 className="text-xs sm:text-sm font-semibold text-amber-800 dark:text-amber-200 mb-1.5 sm:mb-2 flex items-center gap-1.5 sm:gap-2">
+                      <svg className="w-3.5 h-3.5 sm:w-4 sm:h-4 flex-shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor">
                         <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z" />
                       </svg>
                       Foreign Material Description
                     </h3>
-                    <p className="text-sm text-amber-700 dark:text-amber-300 leading-relaxed bg-white/30 dark:bg-gray-800/30 p-3 rounded-lg">
+                    <p className="text-xs sm:text-sm text-amber-700 dark:text-amber-300 leading-relaxed bg-white/30 dark:bg-gray-800/30 p-2 sm:p-3 rounded-lg">
                       {incident.FMIRReport.foreignMaterialDescription}
                       {incident.FMIRReport.foreignMaterialSize && (
-                        <span className="ml-2 text-xs text-amber-600 dark:text-amber-400">(Size: {incident.FMIRReport.foreignMaterialSize})</span>
+                        <span className="ml-1 sm:ml-2 text-[10px] sm:text-xs text-amber-600 dark:text-amber-400">(Size: {incident.FMIRReport.foreignMaterialSize})</span>
                       )}
                     </p>
                   </div>
@@ -1514,21 +1723,21 @@ export default function IncidentDetailPage() {
 
                 {/* Cause & Source */}
                 {(incident.FMIRReport.possibleSource || incident.FMIRReport.howWhyOccurred) && (
-                  <div className="mb-4">
-                    <h3 className="text-sm font-semibold text-amber-800 dark:text-amber-200 mb-2 flex items-center gap-2">
-                      <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                  <div className="mb-3 sm:mb-4">
+                    <h3 className="text-xs sm:text-sm font-semibold text-amber-800 dark:text-amber-200 mb-1.5 sm:mb-2 flex items-center gap-1.5 sm:gap-2">
+                      <svg className="w-3.5 h-3.5 sm:w-4 sm:h-4 flex-shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor">
                         <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M8.228 9c.549-1.165 2.03-2 3.772-2 2.21 0 4 1.343 4 3 0 1.4-1.278 2.575-3.006 2.907-.542.104-.994.54-.994 1.093m0 3h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
                       </svg>
                       Cause Identification
                     </h3>
-                    <div className="bg-white/30 dark:bg-gray-800/30 p-3 rounded-lg space-y-2">
+                    <div className="bg-white/30 dark:bg-gray-800/30 p-2 sm:p-3 rounded-lg space-y-1.5 sm:space-y-2">
                       {incident.FMIRReport.possibleSource && (
-                        <p className="text-sm text-amber-700 dark:text-amber-300">
+                        <p className="text-xs sm:text-sm text-amber-700 dark:text-amber-300">
                           <span className="font-medium">Possible Source:</span> {incident.FMIRReport.possibleSource}
                         </p>
                       )}
                       {incident.FMIRReport.howWhyOccurred && (
-                        <p className="text-sm text-amber-700 dark:text-amber-300">
+                        <p className="text-xs sm:text-sm text-amber-700 dark:text-amber-300">
                           <span className="font-medium">How/Why:</span> {incident.FMIRReport.howWhyOccurred}
                         </p>
                       )}
@@ -1538,14 +1747,14 @@ export default function IncidentDetailPage() {
 
                 {/* Corrective Action */}
                 {incident.FMIRReport.correctiveAction && (
-                  <div className="mb-4">
-                    <h3 className="text-sm font-semibold text-amber-800 dark:text-amber-200 mb-2 flex items-center gap-2">
-                      <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                  <div className="mb-3 sm:mb-4">
+                    <h3 className="text-xs sm:text-sm font-semibold text-amber-800 dark:text-amber-200 mb-1.5 sm:mb-2 flex items-center gap-1.5 sm:gap-2">
+                      <svg className="w-3.5 h-3.5 sm:w-4 sm:h-4 flex-shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor">
                         <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z" />
                       </svg>
                       Corrective Action Taken
                     </h3>
-                    <p className="text-sm text-amber-700 dark:text-amber-300 leading-relaxed bg-white/30 dark:bg-gray-800/30 p-3 rounded-lg">
+                    <p className="text-xs sm:text-sm text-amber-700 dark:text-amber-300 leading-relaxed bg-white/30 dark:bg-gray-800/30 p-2 sm:p-3 rounded-lg">
                       {incident.FMIRReport.correctiveAction}
                     </p>
                   </div>
@@ -1553,13 +1762,13 @@ export default function IncidentDetailPage() {
 
                 {/* FMIR AI Validation Summary */}
                 {incident.FMIRReport.FMIRAIValidation && (
-                  <div className="mb-4 p-4 bg-amber-100/50 dark:bg-amber-900/30 rounded-lg border border-amber-300 dark:border-amber-700">
-                    <h3 className="text-sm font-semibold text-amber-800 dark:text-amber-200 mb-2 flex items-center gap-2">
-                      <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                  <div className="mb-3 sm:mb-4 p-2 sm:p-4 bg-amber-100/50 dark:bg-amber-900/30 rounded-lg border border-amber-300 dark:border-amber-700">
+                    <h3 className="text-xs sm:text-sm font-semibold text-amber-800 dark:text-amber-200 mb-1.5 sm:mb-2 flex flex-wrap items-center gap-1.5 sm:gap-2">
+                      <svg className="w-3.5 h-3.5 sm:w-4 sm:h-4 flex-shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor">
                         <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9.663 17h4.673M12 3v1m6.364 1.636l-.707.707M21 12h-1M4 12H3m3.343-5.657l-.707-.707m2.828 9.9a5 5 0 117.072 0l-.548.547A3.374 3.374 0 0014 18.469V19a2 2 0 11-4 0v-.531c0-.895-.356-1.754-.988-2.386l-.548-.547z" />
                       </svg>
-                      AI Compliance Validation
-                      <span className={`ml-2 px-2 py-0.5 rounded text-xs font-medium ${
+                      <span>AI Compliance Validation</span>
+                      <span className={`px-1.5 sm:px-2 py-0.5 rounded text-[10px] sm:text-xs font-medium ${
                         incident.FMIRReport.FMIRAIValidation.overallCompliance === 'COMPLIANT' 
                           ? 'bg-green-100 text-green-700 dark:bg-green-900/50 dark:text-green-300'
                           : incident.FMIRReport.FMIRAIValidation.overallCompliance === 'PARTIALLY_COMPLIANT'
@@ -1570,7 +1779,7 @@ export default function IncidentDetailPage() {
                       </span>
                     </h3>
                     {incident.FMIRReport.FMIRAIValidation.summary && (
-                      <p className="text-sm text-amber-700 dark:text-amber-300 leading-relaxed">
+                      <p className="text-xs sm:text-sm text-amber-700 dark:text-amber-300 leading-relaxed">
                         {incident.FMIRReport.FMIRAIValidation.summary}
                       </p>
                     )}
@@ -1579,26 +1788,26 @@ export default function IncidentDetailPage() {
 
                 {/* FMIR Evidence Gallery */}
                 {incident.FMIRReport.FMIREvidence && incident.FMIRReport.FMIREvidence.length > 0 && (
-                  <div className="mt-6 pt-6 border-t border-amber-200 dark:border-amber-800">
-                    <h3 className="text-base font-semibold text-amber-900 dark:text-amber-100 mb-4 flex items-center gap-2">
-                      <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                  <div className="mt-4 sm:mt-6 pt-4 sm:pt-6 border-t border-amber-200 dark:border-amber-800">
+                    <h3 className="text-sm sm:text-base font-semibold text-amber-900 dark:text-amber-100 mb-3 sm:mb-4 flex flex-wrap items-center gap-1.5 sm:gap-2">
+                      <svg className="w-4 h-4 sm:w-5 sm:h-5 flex-shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor">
                         <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 16l4.586-4.586a2 2 0 012.828 0L16 16m-2-2l1.586-1.586a2 2 0 012.828 0L20 14m-6-6h.01M6 20h12a2 2 0 002-2V6a2 2 0 00-2-2H6a2 2 0 00-2 2v12a2 2 0 002 2z" />
                       </svg>
-                      Evidence Attachments
-                      <span className="ml-2 px-2 py-0.5 bg-amber-200 dark:bg-amber-800 text-amber-800 dark:text-amber-200 text-xs font-medium rounded-full">
+                      <span>Evidence Attachments</span>
+                      <span className="px-1.5 sm:px-2 py-0.5 bg-amber-200 dark:bg-amber-800 text-amber-800 dark:text-amber-200 text-[10px] sm:text-xs font-medium rounded-full">
                         {incident.FMIRReport.FMIREvidence.length} file{incident.FMIRReport.FMIREvidence.length !== 1 ? 's' : ''}
                       </span>
                       {loadingFmirEvidence && (
-                        <span className="ml-2 text-xs text-amber-600 dark:text-amber-400 flex items-center gap-1">
+                        <span className="text-[10px] sm:text-xs text-amber-600 dark:text-amber-400 flex items-center gap-1">
                           <svg className="animate-spin w-3 h-3" viewBox="0 0 24 24" fill="none">
                             <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"/>
                             <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z"/>
                           </svg>
-                          Loading images...
+                          <span className="hidden xs:inline">Loading images...</span>
                         </span>
                       )}
                     </h3>
-                    <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
+                    <div className="grid grid-cols-1 xs:grid-cols-2 lg:grid-cols-3 gap-2 sm:gap-4">
                       {incident.FMIRReport.FMIREvidence.map((evidence: any, index: number) => {
                         const isImage = evidence.mimeType?.startsWith('image/');
                         const isVideo = evidence.mimeType?.startsWith('video/');
@@ -1607,7 +1816,7 @@ export default function IncidentDetailPage() {
                         return (
                           <div
                             key={evidence.id}
-                            className="group relative bg-white dark:bg-gray-800 rounded-xl overflow-hidden shadow-md hover:shadow-xl transition-all duration-300 border border-amber-200 dark:border-amber-700 hover:border-amber-400 dark:hover:border-amber-500"
+                            className="group relative bg-white dark:bg-gray-800 rounded-lg sm:rounded-xl overflow-hidden shadow-md hover:shadow-xl transition-all duration-300 border border-amber-200 dark:border-amber-700 hover:border-amber-400 dark:hover:border-amber-500"
                           >
                             {/* Image/Video Preview */}
                             {isImage ? (
@@ -1749,21 +1958,21 @@ export default function IncidentDetailPage() {
 
             {/* AI Insights Card - Key Findings & Investigation Guidance */}
             {incident.aiAnalysisData && ((incident.aiAnalysisData.keyFindings?.length ?? 0) > 0 || (incident.aiAnalysisData.investigationGuidance?.length ?? 0) > 0 || incident.aiAnalysisData.evidenceSummary) && (
-              <div className="bg-gradient-to-br from-emerald-50 to-teal-50 dark:from-emerald-900/20 dark:to-teal-900/20 rounded-lg shadow p-6 border border-emerald-200 dark:border-emerald-800">
-                <div className="flex items-center justify-between mb-4">
+              <div className="bg-gradient-to-br from-emerald-50 to-teal-50 dark:from-emerald-900/20 dark:to-teal-900/20 rounded-lg shadow p-3 sm:p-6 border border-emerald-200 dark:border-emerald-800">
+                <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-2 sm:gap-0 mb-3 sm:mb-4">
                   <div className="flex items-center space-x-2">
-                    <div className="w-8 h-8 bg-emerald-100 dark:bg-emerald-800 rounded-full flex items-center justify-center">
-                      <svg className="w-5 h-5 text-emerald-600 dark:text-emerald-400" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                    <div className="w-6 h-6 sm:w-8 sm:h-8 bg-emerald-100 dark:bg-emerald-800 rounded-full flex items-center justify-center flex-shrink-0">
+                      <svg className="w-4 h-4 sm:w-5 sm:h-5 text-emerald-600 dark:text-emerald-400" fill="none" viewBox="0 0 24 24" stroke="currentColor">
                         <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9.663 17h4.673M12 3v1m6.364 1.636l-.707.707M21 12h-1M4 12H3m3.343-5.657l-.707-.707m2.828 9.9a5 5 0 117.072 0l-.548.547A3.374 3.374 0 0014 18.469V19a2 2 0 11-4 0v-.531c0-.895-.356-1.754-.988-2.386l-.548-.547z" />
                       </svg>
                     </div>
-                    <h2 className="text-lg font-semibold text-emerald-900 dark:text-emerald-100">
+                    <h2 className="text-sm sm:text-lg font-semibold text-emerald-900 dark:text-emerald-100">
                       AI Insights
                     </h2>
                   </div>
-                  <div className="flex items-center gap-3">
+                  <div className="flex items-center gap-2 sm:gap-3 flex-wrap">
                     {incident.aiAnalysisData.generatedAt && (
-                      <span className="text-xs text-emerald-600 dark:text-emerald-400">
+                      <span className="text-[10px] sm:text-xs text-emerald-600 dark:text-emerald-400">
                         Generated: {formatDateTime(incident.aiAnalysisData.generatedAt)}
                       </span>
                     )}
@@ -1797,14 +2006,14 @@ export default function IncidentDetailPage() {
 
                 {/* Evidence Summary */}
                 {incident.aiAnalysisData.evidenceSummary && (
-                  <div className="mb-4">
-                    <h3 className="text-sm font-semibold text-emerald-800 dark:text-emerald-200 mb-2 flex items-center gap-2">
-                      <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                  <div className="mb-3 sm:mb-4">
+                    <h3 className="text-xs sm:text-sm font-semibold text-emerald-800 dark:text-emerald-200 mb-1.5 sm:mb-2 flex items-center gap-1.5 sm:gap-2">
+                      <svg className="w-3.5 h-3.5 sm:w-4 sm:h-4 flex-shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor">
                         <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" />
                       </svg>
                       Evidence Summary
                     </h3>
-                    <p className="text-sm text-emerald-700 dark:text-emerald-300 leading-relaxed">
+                    <p className="text-xs sm:text-sm text-emerald-700 dark:text-emerald-300 leading-relaxed">
                       {incident.aiAnalysisData.evidenceSummary}
                     </p>
                   </div>
@@ -1812,17 +2021,17 @@ export default function IncidentDetailPage() {
 
                 {/* Key Findings */}
                 {incident.aiAnalysisData.keyFindings && incident.aiAnalysisData.keyFindings.length > 0 && (
-                  <div className="mb-4">
-                    <h3 className="text-sm font-semibold text-emerald-800 dark:text-emerald-200 mb-2 flex items-center gap-2">
-                      <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                  <div className="mb-3 sm:mb-4">
+                    <h3 className="text-xs sm:text-sm font-semibold text-emerald-800 dark:text-emerald-200 mb-1.5 sm:mb-2 flex items-center gap-1.5 sm:gap-2">
+                      <svg className="w-3.5 h-3.5 sm:w-4 sm:h-4 flex-shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor">
                         <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 5H7a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2V7a2 2 0 00-2-2h-2M9 5a2 2 0 002 2h2a2 2 0 002-2M9 5a2 2 0 012-2h2a2 2 0 012 2m-6 9l2 2 4-4" />
                       </svg>
                       Key Findings ({incident.aiAnalysisData.keyFindings.length})
                     </h3>
-                    <ul className="space-y-2">
+                    <ul className="space-y-1.5 sm:space-y-2">
                       {incident.aiAnalysisData.keyFindings.map((finding, index) => (
-                        <li key={index} className="flex items-start gap-2 text-sm text-emerald-700 dark:text-emerald-300">
-                          <span className="flex-shrink-0 w-5 h-5 bg-emerald-200 dark:bg-emerald-700 rounded-full flex items-center justify-center text-xs font-medium text-emerald-800 dark:text-emerald-200">
+                        <li key={index} className="flex items-start gap-1.5 sm:gap-2 text-xs sm:text-sm text-emerald-700 dark:text-emerald-300">
+                          <span className="flex-shrink-0 w-4 h-4 sm:w-5 sm:h-5 bg-emerald-200 dark:bg-emerald-700 rounded-full flex items-center justify-center text-[10px] sm:text-xs font-medium text-emerald-800 dark:text-emerald-200">
                             {index + 1}
                           </span>
                           <span className="leading-relaxed">{finding}</span>
@@ -1835,17 +2044,17 @@ export default function IncidentDetailPage() {
                 {/* Investigation Guidance */}
                 {incident.aiAnalysisData.investigationGuidance && incident.aiAnalysisData.investigationGuidance.length > 0 && (
                   <div>
-                    <h3 className="text-sm font-semibold text-emerald-800 dark:text-emerald-200 mb-2 flex items-center gap-2">
-                      <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                    <h3 className="text-xs sm:text-sm font-semibold text-emerald-800 dark:text-emerald-200 mb-1.5 sm:mb-2 flex items-center gap-1.5 sm:gap-2">
+                      <svg className="w-3.5 h-3.5 sm:w-4 sm:h-4 flex-shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor">
                         <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M13 10V3L4 14h7v7l9-11h-7z" />
                       </svg>
                       Investigation Guidance ({incident.aiAnalysisData.investigationGuidance.length})
                     </h3>
-                    <ul className="space-y-2">
+                    <ul className="space-y-1.5 sm:space-y-2">
                       {incident.aiAnalysisData.investigationGuidance.map((guidance, index) => (
-                        <li key={index} className="flex items-start gap-2 text-sm text-emerald-700 dark:text-emerald-300">
+                        <li key={index} className="flex items-start gap-1.5 sm:gap-2 text-xs sm:text-sm text-emerald-700 dark:text-emerald-300">
                           <span className="flex-shrink-0 mt-0.5">
-                            <svg className="w-4 h-4 text-emerald-500" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                            <svg className="w-3.5 h-3.5 sm:w-4 sm:h-4 text-emerald-500" fill="none" viewBox="0 0 24 24" stroke="currentColor">
                               <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 5l7 7-7 7" />
                             </svg>
                           </span>
@@ -1860,53 +2069,53 @@ export default function IncidentDetailPage() {
 
             {/* AI Recommended RCA Methodology Card */}
             {incident.aiAnalysisData?.recommendedRCAMethodology && (
-              <div className="bg-gradient-to-br from-purple-50 to-indigo-50 dark:from-purple-900/20 dark:to-indigo-900/20 rounded-lg shadow p-6 border border-purple-200 dark:border-purple-800">
-                <div className="flex items-center space-x-2 mb-4">
-                  <div className="w-8 h-8 bg-purple-100 dark:bg-purple-800 rounded-full flex items-center justify-center">
-                    <svg className="w-5 h-5 text-purple-600 dark:text-purple-400" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+              <div className="bg-gradient-to-br from-purple-50 to-indigo-50 dark:from-purple-900/20 dark:to-indigo-900/20 rounded-lg shadow p-3 sm:p-6 border border-purple-200 dark:border-purple-800">
+                <div className="flex items-center space-x-2 mb-3 sm:mb-4">
+                  <div className="w-6 h-6 sm:w-8 sm:h-8 bg-purple-100 dark:bg-purple-800 rounded-full flex items-center justify-center flex-shrink-0">
+                    <svg className="w-4 h-4 sm:w-5 sm:h-5 text-purple-600 dark:text-purple-400" fill="none" viewBox="0 0 24 24" stroke="currentColor">
                       <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9.663 17h4.673M12 3v1m6.364 1.636l-.707.707M21 12h-1M4 12H3m3.343-5.657l-.707-.707m2.828 9.9a5 5 0 117.072 0l-.548.547A3.374 3.374 0 0014 18.469V19a2 2 0 11-4 0v-.531c0-.895-.356-1.754-.988-2.386l-.548-.547z" />
                     </svg>
                   </div>
-                  <h2 className="text-lg font-semibold text-purple-900 dark:text-purple-100">
+                  <h2 className="text-sm sm:text-lg font-semibold text-purple-900 dark:text-purple-100">
                     Recommended RCA Methodology
                   </h2>
                 </div>
 
-                <div className="flex items-start space-x-4">
+                <div className="flex flex-col sm:flex-row sm:items-start gap-3 sm:gap-4">
                   {/* Method Icon */}
-                  <div className="flex-shrink-0">
+                  <div className="flex-shrink-0 self-start">
                     {incident.aiAnalysisData.recommendedRCAMethodology.primary === 'FISHBONE' ? (
-                      <div className="w-12 h-12 bg-purple-100 dark:bg-purple-800 rounded-lg flex items-center justify-center">
-                        <span className="text-2xl">🐟</span>
+                      <div className="w-10 h-10 sm:w-12 sm:h-12 bg-purple-100 dark:bg-purple-800 rounded-lg flex items-center justify-center">
+                        <span className="text-xl sm:text-2xl">🐟</span>
                       </div>
                     ) : (
-                      <div className="w-12 h-12 bg-purple-100 dark:bg-purple-800 rounded-lg flex items-center justify-center">
-                        <span className="text-2xl">❓</span>
+                      <div className="w-10 h-10 sm:w-12 sm:h-12 bg-purple-100 dark:bg-purple-800 rounded-lg flex items-center justify-center">
+                        <span className="text-xl sm:text-2xl">❓</span>
                       </div>
                     )}
                   </div>
 
                   {/* Method Details */}
-                  <div className="flex-1">
-                    <div className="flex items-center gap-3 mb-2">
-                      <h3 className="text-lg font-bold text-purple-900 dark:text-purple-100">
+                  <div className="flex-1 min-w-0">
+                    <div className="flex flex-wrap items-center gap-2 sm:gap-3 mb-1.5 sm:mb-2">
+                      <h3 className="text-sm sm:text-lg font-bold text-purple-900 dark:text-purple-100">
                         {incident.aiAnalysisData.recommendedRCAMethodology.primary === 'FISHBONE' 
                           ? 'Fishbone (Ishikawa) Diagram' 
                           : '5 Whys Analysis'}
                       </h3>
-                      <span className="px-2 py-1 text-xs font-medium bg-purple-200 dark:bg-purple-700 text-purple-800 dark:text-purple-200 rounded-full">
+                      <span className="px-1.5 sm:px-2 py-0.5 sm:py-1 text-[10px] sm:text-xs font-medium bg-purple-200 dark:bg-purple-700 text-purple-800 dark:text-purple-200 rounded-full">
                         {incident.aiAnalysisData.recommendedRCAMethodology.confidence}% confidence
                       </span>
                     </div>
-                    <p className="text-sm text-purple-800 dark:text-purple-200 leading-relaxed">
+                    <p className="text-xs sm:text-sm text-purple-800 dark:text-purple-200 leading-relaxed">
                       {incident.aiAnalysisData.recommendedRCAMethodology.reason}
                     </p>
 
                     {/* Alternative Method */}
                     {incident.aiAnalysisData.recommendedRCAMethodology.alternativeMethod && (
-                      <div className="mt-4 pt-4 border-t border-purple-200 dark:border-purple-700">
-                        <p className="text-xs text-purple-600 dark:text-purple-400 mb-1">Alternative Method:</p>
-                        <p className="text-sm text-purple-700 dark:text-purple-300">
+                      <div className="mt-3 sm:mt-4 pt-3 sm:pt-4 border-t border-purple-200 dark:border-purple-700">
+                        <p className="text-[10px] sm:text-xs text-purple-600 dark:text-purple-400 mb-0.5 sm:mb-1">Alternative Method:</p>
+                        <p className="text-xs sm:text-sm text-purple-700 dark:text-purple-300">
                           <span className="font-medium">
                             {incident.aiAnalysisData.recommendedRCAMethodology.alternativeMethod === 'FISHBONE' 
                               ? 'Fishbone Diagram' 
@@ -1925,12 +2134,12 @@ export default function IncidentDetailPage() {
 
                 {/* Hint to Start RCA */}
                 {!hasActiveRCA && !hasValidatedRCA && canStartRCA && (
-                  <div className="mt-4 pt-4 border-t border-purple-200 dark:border-purple-700">
-                    <p className="text-xs text-purple-600 dark:text-purple-400 flex items-center gap-1">
-                      <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                  <div className="mt-3 sm:mt-4 pt-3 sm:pt-4 border-t border-purple-200 dark:border-purple-700">
+                    <p className="text-[10px] sm:text-xs text-purple-600 dark:text-purple-400 flex items-start sm:items-center gap-1">
+                      <svg className="w-3.5 h-3.5 sm:w-4 sm:h-4 flex-shrink-0 mt-0.5 sm:mt-0" fill="none" viewBox="0 0 24 24" stroke="currentColor">
                         <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M13 16h-1v-4h-1m1-4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
                       </svg>
-                      Click &quot;Start RCA&quot; below to begin Root Cause Analysis with this recommended method
+                      <span>Click &quot;Start RCA&quot; below to begin Root Cause Analysis with this recommended method</span>
                     </p>
                   </div>
                 )}
@@ -1939,69 +2148,69 @@ export default function IncidentDetailPage() {
 
             {/* Details Grid - Show on incident tab or for non-workplace safety */}
             {(!isWorkplaceSafety || activeWsTab === 'incident') && (
-            <div className="bg-white dark:bg-gray-800 rounded-lg shadow p-6">
-              <h2 className="text-lg font-semibold text-gray-900 dark:text-white mb-4">
+            <div className="bg-white dark:bg-gray-800 rounded-lg shadow p-3 sm:p-6">
+              <h2 className="text-sm sm:text-lg font-semibold text-gray-900 dark:text-white mb-3 sm:mb-4">
                 Details
               </h2>
-              <div className="grid grid-cols-2 gap-4">
+              <div className="grid grid-cols-2 gap-2 sm:gap-4">
                 <div>
-                  <span className="text-sm text-gray-500 dark:text-gray-400">Type</span>
-                  <p className="text-gray-900 dark:text-white">{incident.type.replace('_', ' ')}</p>
+                  <span className="text-xs sm:text-sm text-gray-500 dark:text-gray-400">Type</span>
+                  <p className="text-xs sm:text-sm text-gray-900 dark:text-white">{incident.type.replace('_', ' ')}</p>
                 </div>
                 <div>
-                  <span className="text-sm text-gray-500 dark:text-gray-400">Category</span>
-                  <p className="text-gray-900 dark:text-white">{incident.Category?.name}</p>
+                  <span className="text-xs sm:text-sm text-gray-500 dark:text-gray-400">Category</span>
+                  <p className="text-xs sm:text-sm text-gray-900 dark:text-white">{incident.Category?.name}</p>
                 </div>
                 <div>
-                  <span className="text-sm text-gray-500 dark:text-gray-400">Facility</span>
-                  <p className="text-gray-900 dark:text-white">{incident.Facility?.name}</p>
+                  <span className="text-xs sm:text-sm text-gray-500 dark:text-gray-400">Facility</span>
+                  <p className="text-xs sm:text-sm text-gray-900 dark:text-white">{incident.Facility?.name}</p>
                 </div>
                 {incident.Department && (
                   <div>
-                    <span className="text-sm text-gray-500 dark:text-gray-400">Department</span>
-                    <p className="text-gray-900 dark:text-white">{incident.Department.name}</p>
+                    <span className="text-xs sm:text-sm text-gray-500 dark:text-gray-400">Department</span>
+                    <p className="text-xs sm:text-sm text-gray-900 dark:text-white">{incident.Department.name}</p>
                   </div>
                 )}
                 {incident.Area && (
                   <div>
-                    <span className="text-sm text-gray-500 dark:text-gray-400">Area</span>
-                    <p className="text-gray-900 dark:text-white">{incident.Area.name}</p>
+                    <span className="text-xs sm:text-sm text-gray-500 dark:text-gray-400">Area</span>
+                    <p className="text-xs sm:text-sm text-gray-900 dark:text-white">{incident.Area.name}</p>
                   </div>
                 )}
                 {incident.Line && (
                   <div>
-                    <span className="text-sm text-gray-500 dark:text-gray-400">Line</span>
-                    <p className="text-gray-900 dark:text-white">{incident.Line.name}</p>
+                    <span className="text-xs sm:text-sm text-gray-500 dark:text-gray-400">Line</span>
+                    <p className="text-xs sm:text-sm text-gray-900 dark:text-white">{incident.Line.name}</p>
                   </div>
                 )}
                 {incident.Shift && (
                   <div>
-                    <span className="text-sm text-gray-500 dark:text-gray-400">Shift</span>
-                    <p className="text-gray-900 dark:text-white">{incident.Shift.name}</p>
+                    <span className="text-xs sm:text-sm text-gray-500 dark:text-gray-400">Shift</span>
+                    <p className="text-xs sm:text-sm text-gray-900 dark:text-white">{incident.Shift.name}</p>
                   </div>
                 )}
                 <div>
-                  <span className="text-sm text-gray-500 dark:text-gray-400">Occurred At</span>
-                  <p className="text-gray-900 dark:text-white">
+                  <span className="text-xs sm:text-sm text-gray-500 dark:text-gray-400">Occurred At</span>
+                  <p className="text-xs sm:text-sm text-gray-900 dark:text-white">
                     {formatDateTime(incident.occurredAt)}
                   </p>
                 </div>
                 {incident.productName && (
                   <div>
-                    <span className="text-sm text-gray-500 dark:text-gray-400">Product</span>
-                    <p className="text-gray-900 dark:text-white">{incident.productName}</p>
+                    <span className="text-xs sm:text-sm text-gray-500 dark:text-gray-400">Product</span>
+                    <p className="text-xs sm:text-sm text-gray-900 dark:text-white">{incident.productName}</p>
                   </div>
                 )}
                 {incident.lotNumber && (
                   <div>
-                    <span className="text-sm text-gray-500 dark:text-gray-400">Lot Number</span>
-                    <p className="text-gray-900 dark:text-white">{incident.lotNumber}</p>
+                    <span className="text-xs sm:text-sm text-gray-500 dark:text-gray-400">Lot Number</span>
+                    <p className="text-xs sm:text-sm text-gray-900 dark:text-white">{incident.lotNumber}</p>
                   </div>
                 )}
                 {incident.machineId && (
                   <div>
-                    <span className="text-sm text-gray-500 dark:text-gray-400">Machine ID</span>
-                    <p className="text-gray-900 dark:text-white">{incident.machineId}</p>
+                    <span className="text-xs sm:text-sm text-gray-500 dark:text-gray-400">Machine ID</span>
+                    <p className="text-xs sm:text-sm text-gray-900 dark:text-white">{incident.machineId}</p>
                   </div>
                 )}
               </div>
@@ -2011,20 +2220,20 @@ export default function IncidentDetailPage() {
             {/* ==================== WORKPLACE SAFETY - INCIDENT REPORT TAB ==================== */}
             {/* Section 1: Employee Information */}
             {isWorkplaceSafety && activeWsTab === 'incident' && (incident.employeeName || incident.employeeIdNumber || incident.employeeEmail || incident.employeePhone || incident.employeeHomeAddress || incident.employeeGender || incident.employeeLanguage || incident.employeeLastSSN4 || incident.ownedJobTitle || incident.jobAssignmentAtInjury || incident.positionAtTimeOfIncident || incident.departmentWhereInjury || incident.needsInterpreter !== null || incident.interpreterAssisting !== null) && (
-              <div className="bg-white dark:bg-gray-800 rounded-lg shadow p-6 border-l-4 border-blue-500">
-                <h2 className="text-lg font-semibold text-gray-900 dark:text-white mb-4 flex items-center gap-2">
-                  <span className="text-xl">👤</span> Employee Information
+              <div className="bg-white dark:bg-gray-800 rounded-lg shadow p-3 sm:p-6 border-l-4 border-blue-500">
+                <h2 className="text-sm sm:text-lg font-semibold text-gray-900 dark:text-white mb-3 sm:mb-4 flex items-center gap-1.5 sm:gap-2">
+                  <span className="text-base sm:text-xl">👤</span> Employee Information
                 </h2>
-                <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
+                <div className="grid grid-cols-1 xs:grid-cols-2 lg:grid-cols-3 gap-2 sm:gap-4">
                   {incident.employeeName && (
-                    <div className="bg-gray-50 dark:bg-gray-700/50 rounded-lg p-3">
-                      <span className="text-xs font-medium text-gray-500 dark:text-gray-400 uppercase tracking-wide">Employee Name</span>
-                      <p className="text-gray-900 dark:text-white font-medium mt-1">{incident.employeeName}</p>
+                    <div className="bg-gray-50 dark:bg-gray-700/50 rounded-lg p-2 sm:p-3">
+                      <span className="text-[10px] sm:text-xs font-medium text-gray-500 dark:text-gray-400 uppercase tracking-wide">Employee Name</span>
+                      <p className="text-xs sm:text-sm text-gray-900 dark:text-white font-medium mt-0.5 sm:mt-1">{incident.employeeName}</p>
                     </div>
                   )}
                   {incident.employeeIdNumber && (
-                    <div className="bg-gray-50 dark:bg-gray-700/50 rounded-lg p-3">
-                      <span className="text-xs font-medium text-gray-500 dark:text-gray-400 uppercase tracking-wide">Employee ID</span>
+                    <div className="bg-gray-50 dark:bg-gray-700/50 rounded-lg p-2 sm:p-3">
+                      <span className="text-[10px] sm:text-xs font-medium text-gray-500 dark:text-gray-400 uppercase tracking-wide">Employee ID</span>
                       <p className="text-gray-900 dark:text-white font-medium mt-1">{incident.employeeIdNumber}</p>
                     </div>
                   )}
@@ -3148,50 +3357,167 @@ export default function IncidentDetailPage() {
 
             {/* Evidence - Show on both tabs or for non-workplace safety */}
             {incident.Evidence.length > 0 && (
-              <div className="bg-white dark:bg-gray-800 rounded-lg shadow p-6">
-                <h2 className="text-lg font-semibold text-gray-900 dark:text-white mb-4">
-                  Evidence ({incident.Evidence.length})
-                </h2>
-                <div className="grid grid-cols-2 md:grid-cols-3 gap-4">
-                  {incident.Evidence.map((ev: any) => {
+              <div className="bg-white dark:bg-gray-800 rounded-lg shadow p-3 sm:p-6">
+                <h3 className="text-sm sm:text-base font-semibold text-gray-900 dark:text-white mb-3 sm:mb-4 flex flex-wrap items-center gap-1.5 sm:gap-2">
+                  <svg className="w-4 h-4 sm:w-5 sm:h-5 flex-shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 16l4.586-4.586a2 2 0 012.828 0L16 16m-2-2l1.586-1.586a2 2 0 012.828 0L20 14m-6-6h.01M6 20h12a2 2 0 002-2V6a2 2 0 00-2-2H6a2 2 0 00-2 2v12a2 2 0 002 2z" />
+                  </svg>
+                  <span>Evidence</span>
+                  <span className="px-1.5 sm:px-2 py-0.5 bg-blue-200 dark:bg-blue-800 text-blue-800 dark:text-blue-200 text-[10px] sm:text-xs font-medium rounded-full">
+                    {incident.Evidence.length} file{incident.Evidence.length !== 1 ? 's' : ''}
+                  </span>
+                  {loadingIncidentEvidence && (
+                    <span className="text-[10px] sm:text-xs text-blue-600 dark:text-blue-400 flex items-center gap-1">
+                      <svg className="animate-spin w-3 h-3" viewBox="0 0 24 24" fill="none">
+                        <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"/>
+                        <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z"/>
+                      </svg>
+                      <span className="hidden xs:inline">Loading images...</span>
+                    </span>
+                  )}
+                </h3>
+                <div className="grid grid-cols-1 xs:grid-cols-2 lg:grid-cols-3 gap-2 sm:gap-4">
+                  {incident.Evidence.map((ev: any, index: number) => {
                     const isImage = ev.mimeType?.startsWith('image/') || ev.fileType?.startsWith('image/') || /\.(jpg|jpeg|png|gif|webp)$/i.test(ev.fileName);
                     const isVideo = ev.mimeType?.startsWith('video/') || ev.fileType?.startsWith('video/') || /\.(mp4|mov|avi|webm)$/i.test(ev.fileName);
                     const isAudio = (ev.mimeType?.startsWith('audio/') || ev.fileType?.startsWith('audio/') || /\.(mp3|wav|ogg|webm)$/i.test(ev.fileName)) && !isVideo;
                     const canDelete = ev.uploadedById === user?.id || isOwner || ['ADMIN', 'SYSTEM_ADMIN'].includes(user?.role || '');
                     const isDeleting = deletingEvidenceId === ev.id;
+                    const mediaUrl = incidentEvidenceUrls[ev.id];
                     
                     return (
                       <div
                         key={ev.id}
-                        className="relative group p-3 bg-gray-50 dark:bg-gray-700 rounded-lg hover:bg-gray-100 dark:hover:bg-gray-600 transition-colors"
+                        className="group relative bg-white dark:bg-gray-800 rounded-lg sm:rounded-xl overflow-hidden shadow-md hover:shadow-xl transition-all duration-300 border border-blue-200 dark:border-blue-700 hover:border-blue-400 dark:hover:border-blue-500"
                       >
-                        <a
-                          href={ev.filePath}
-                          target="_blank"
-                          rel="noopener noreferrer"
-                          className="flex items-center space-x-2 cursor-pointer"
-                        >
-                          {isImage ? (
-                            <svg className="w-5 h-5 text-green-500 flex-shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 16l4.586-4.586a2 2 0 012.828 0L16 16m-2-2l1.586-1.586a2 2 0 012.828 0L20 14m-6-6h.01M6 20h12a2 2 0 002-2V6a2 2 0 00-2-2H6a2 2 0 00-2 2v12a2 2 0 002 2z" />
-                            </svg>
-                          ) : isVideo ? (
-                            <svg className="w-5 h-5 text-blue-500 flex-shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 10l4.553-2.276A1 1 0 0121 8.618v6.764a1 1 0 01-1.447.894L15 14M5 18h8a2 2 0 002-2V8a2 2 0 00-2-2H5a2 2 0 00-2 2v8a2 2 0 002 2z" />
-                            </svg>
-                          ) : isAudio ? (
-                            <svg className="w-5 h-5 text-purple-500 flex-shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 11a7 7 0 01-7 7m0 0a7 7 0 01-7-7m7 7v4m0 0H8m4 0h4m-4-8a3 3 0 01-3-3V5a3 3 0 116 0v6a3 3 0 01-3 3z" />
-                            </svg>
-                          ) : (
-                            <svg className="w-5 h-5 text-gray-400 flex-shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" />
-                            </svg>
-                          )}
-                          <span className="text-sm text-gray-700 dark:text-gray-300 truncate hover:text-primary-600 dark:hover:text-primary-400">
+                        {/* Image Preview */}
+                        {isImage ? (
+                          <div 
+                            className="relative aspect-video bg-gray-100 dark:bg-gray-700 overflow-hidden cursor-pointer"
+                            onClick={() => {
+                              if (mediaUrl) {
+                                window.open(mediaUrl, '_blank');
+                              } else {
+                                handleIncidentEvidenceDownload(incident.id, ev.id, ev.fileName);
+                              }
+                            }}
+                          >
+                            {mediaUrl ? (
+                              <img
+                                src={mediaUrl}
+                                alt={ev.fileName}
+                                className="w-full h-full object-cover group-hover:scale-105 transition-transform duration-300"
+                              />
+                            ) : (
+                              <div className="absolute inset-0 flex items-center justify-center">
+                                <svg className="animate-spin w-8 h-8 text-blue-500" viewBox="0 0 24 24" fill="none">
+                                  <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"/>
+                                  <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z"/>
+                                </svg>
+                              </div>
+                            )}
+                            {/* Hover overlay */}
+                            <div className="absolute inset-0 bg-gradient-to-t from-black/60 via-transparent to-transparent opacity-0 group-hover:opacity-100 transition-opacity duration-300 flex items-end justify-center pb-4">
+                              <span className="text-white text-sm font-medium flex items-center gap-1.5">
+                                <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 12a3 3 0 11-6 0 3 3 0 016 0z" />
+                                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M2.458 12C3.732 7.943 7.523 5 12 5c4.478 0 8.268 2.943 9.542 7-1.274 4.057-5.064 7-9.542 7-4.477 0-8.268-2.943-9.542-7z" />
+                                </svg>
+                                View Full Size
+                              </span>
+                            </div>
+                            {/* Evidence number badge */}
+                            <div className="absolute top-2 left-2 px-2 py-1 bg-blue-500 text-white text-xs font-bold rounded-md shadow">
+                              #{index + 1}
+                            </div>
+                          </div>
+                        ) : isVideo ? (
+                          <div 
+                            className="relative aspect-video bg-gray-100 dark:bg-gray-700 overflow-hidden cursor-pointer"
+                            onClick={() => {
+                              if (mediaUrl) {
+                                window.open(mediaUrl, '_blank');
+                              } else {
+                                handleIncidentEvidenceDownload(incident.id, ev.id, ev.fileName);
+                              }
+                            }}
+                          >
+                            {mediaUrl ? (
+                              <video
+                                src={mediaUrl}
+                                className="w-full h-full object-cover"
+                                controls={false}
+                                muted
+                              />
+                            ) : (
+                              <div className="absolute inset-0 flex items-center justify-center">
+                                <svg className="animate-spin w-8 h-8 text-blue-500" viewBox="0 0 24 24" fill="none">
+                                  <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"/>
+                                  <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z"/>
+                                </svg>
+                              </div>
+                            )}
+                            {/* Video play icon overlay */}
+                            <div className="absolute inset-0 flex items-center justify-center bg-black/30 group-hover:bg-black/40 transition-colors">
+                              <div className="w-12 h-12 bg-white/90 rounded-full flex items-center justify-center">
+                                <svg className="w-6 h-6 text-blue-600 ml-1" fill="currentColor" viewBox="0 0 24 24">
+                                  <path d="M8 5v14l11-7z"/>
+                                </svg>
+                              </div>
+                            </div>
+                            {/* Evidence number badge */}
+                            <div className="absolute top-2 left-2 px-2 py-1 bg-blue-500 text-white text-xs font-bold rounded-md shadow">
+                              #{index + 1}
+                            </div>
+                          </div>
+                        ) : (
+                          /* Non-image/video file placeholder */
+                          <div 
+                            className="relative aspect-video bg-gray-100 dark:bg-gray-700 overflow-hidden cursor-pointer flex items-center justify-center"
+                            onClick={() => handleIncidentEvidenceDownload(incident.id, ev.id, ev.fileName)}
+                          >
+                            <div className="text-center p-4">
+                              {isAudio ? (
+                                <svg className="w-12 h-12 text-purple-500 mx-auto mb-2" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 11a7 7 0 01-7 7m0 0a7 7 0 01-7-7m7 7v4m0 0H8m4 0h4m-4-8a3 3 0 01-3-3V5a3 3 0 116 0v6a3 3 0 01-3 3z" />
+                                </svg>
+                              ) : (
+                                <svg className="w-12 h-12 text-gray-400 mx-auto mb-2" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" />
+                                </svg>
+                              )}
+                              <span className="text-sm text-gray-500 dark:text-gray-400">Click to download</span>
+                            </div>
+                            {/* Evidence number badge */}
+                            <div className="absolute top-2 left-2 px-2 py-1 bg-blue-500 text-white text-xs font-bold rounded-md shadow">
+                              #{index + 1}
+                            </div>
+                          </div>
+                        )}
+                        
+                        {/* File info footer */}
+                        <div className="p-3 bg-white dark:bg-gray-800">
+                          <p className="text-sm font-medium text-gray-900 dark:text-gray-100 truncate group-hover:text-blue-600 dark:group-hover:text-blue-400 transition-colors" title={ev.fileName}>
                             {ev.fileName}
-                          </span>
-                        </a>
+                          </p>
+                          <div className="flex items-center justify-between mt-2 pt-2 border-t border-gray-100 dark:border-gray-700">
+                            <span className="text-xs text-gray-400 dark:text-gray-500">
+                              {ev.fileSize ? `${(ev.fileSize / 1024).toFixed(1)} KB` : (ev.mimeType || ev.fileType || 'File')}
+                            </span>
+                            <button
+                              onClick={(e) => {
+                                e.stopPropagation();
+                                handleIncidentEvidenceDownload(incident.id, ev.id, ev.fileName);
+                              }}
+                              className="text-xs text-blue-600 dark:text-blue-400 flex items-center gap-1 hover:text-blue-700 dark:hover:text-blue-300 transition-colors"
+                            >
+                              <svg className="w-3 h-3" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4" />
+                              </svg>
+                              Download
+                            </button>
+                          </div>
+                        </div>
                         
                         {/* Delete button - only visible for own uploads or admins */}
                         {canDelete && (
@@ -3202,7 +3528,7 @@ export default function IncidentDetailPage() {
                               handleDeleteEvidence(ev.id, ev.fileName);
                             }}
                             disabled={isDeleting}
-                            className="absolute top-1 right-1 p-1.5 rounded-full bg-red-100 dark:bg-red-900/30 text-red-600 dark:text-red-400 opacity-0 group-hover:opacity-100 hover:bg-red-200 dark:hover:bg-red-900/50 transition-all disabled:opacity-50"
+                            className="absolute top-2 right-2 p-1.5 rounded-full bg-red-500/80 text-white opacity-0 group-hover:opacity-100 hover:bg-red-600 transition-all disabled:opacity-50 z-10"
                             title="Delete evidence"
                           >
                             {isDeleting ? (
@@ -3226,52 +3552,52 @@ export default function IncidentDetailPage() {
           </div>
 
           {/* Sidebar */}
-          <div className="space-y-6">
+          <div className="space-y-4 sm:space-y-6">
             {/* Visibility Settings - Only visible to owner */}
             {isOwner && (
-              <div className="bg-white dark:bg-gray-800 rounded-lg shadow p-6">
-                <h3 className="text-sm font-semibold text-gray-900 dark:text-white mb-4">
+              <div className="bg-white dark:bg-gray-800 rounded-lg shadow p-4 sm:p-6">
+                <h3 className="text-xs sm:text-sm font-semibold text-gray-900 dark:text-white mb-3 sm:mb-4">
                   Visibility Settings
                 </h3>
-                <div className="space-y-3">
+                <div className="space-y-2 sm:space-y-3">
                   {(['PRIVATE', 'TEAM', 'PUBLIC'] as const).map((vis) => (
                     <button
                       key={vis}
                       onClick={() => handleVisibilityRequest(vis)}
                       disabled={changingVisibility || incident.visibility === vis}
-                      className={`w-full flex items-center justify-between p-3 rounded-lg border-2 transition-colors ${
+                      className={`w-full flex items-center justify-between p-2.5 sm:p-3 rounded-lg border-2 transition-colors ${
                         incident.visibility === vis
                           ? 'border-primary-500 bg-primary-50 dark:bg-primary-900/20'
                           : 'border-gray-200 dark:border-gray-600 hover:border-gray-300 dark:hover:border-gray-500'
                       } ${changingVisibility ? 'opacity-50 cursor-not-allowed' : ''}`}
                     >
-                      <div className="flex items-center gap-3">
-                        <div className={`w-8 h-8 rounded-full flex items-center justify-center ${
+                      <div className="flex items-center gap-2 sm:gap-3">
+                        <div className={`w-7 h-7 sm:w-8 sm:h-8 rounded-full flex items-center justify-center ${
                           vis === 'PRIVATE' ? 'bg-gray-100 dark:bg-gray-700' :
                           vis === 'TEAM' ? 'bg-blue-100 dark:bg-blue-900' :
                           'bg-green-100 dark:bg-green-900'
                         }`}>
                           {vis === 'PRIVATE' && (
-                            <svg className="w-4 h-4 text-gray-600 dark:text-gray-300" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                            <svg className="w-3.5 h-3.5 sm:w-4 sm:h-4 text-gray-600 dark:text-gray-300" fill="none" viewBox="0 0 24 24" stroke="currentColor">
                               <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 15v2m-6 4h12a2 2 0 002-2v-6a2 2 0 00-2-2H6a2 2 0 00-2 2v6a2 2 0 002 2zm10-10V7a4 4 0 00-8 0v4h8z" />
                             </svg>
                           )}
                           {vis === 'TEAM' && (
-                            <svg className="w-4 h-4 text-blue-600 dark:text-blue-300" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                            <svg className="w-3.5 h-3.5 sm:w-4 sm:h-4 text-blue-600 dark:text-blue-300" fill="none" viewBox="0 0 24 24" stroke="currentColor">
                               <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M17 20h5v-2a3 3 0 00-5.356-1.857M17 20H7m10 0v-2c0-.656-.126-1.283-.356-1.857M7 20H2v-2a3 3 0 015.356-1.857M7 20v-2c0-.656.126-1.283.356-1.857m0 0a5.002 5.002 0 019.288 0M15 7a3 3 0 11-6 0 3 3 0 016 0zm6 3a2 2 0 11-4 0 2 2 0 014 0zM7 10a2 2 0 11-4 0 2 2 0 014 0z" />
                             </svg>
                           )}
                           {vis === 'PUBLIC' && (
-                            <svg className="w-4 h-4 text-green-600 dark:text-green-300" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                            <svg className="w-3.5 h-3.5 sm:w-4 sm:h-4 text-green-600 dark:text-green-300" fill="none" viewBox="0 0 24 24" stroke="currentColor">
                               <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M3.055 11H5a2 2 0 012 2v1a2 2 0 002 2 2 2 0 012 2v2.945M8 3.935V5.5A2.5 2.5 0 0010.5 8h.5a2 2 0 012 2 2 2 0 104 0 2 2 0 012-2h1.064M15 20.488V18a2 2 0 012-2h3.064M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
                             </svg>
                           )}
                         </div>
                         <div className="text-left">
-                          <p className="text-sm font-medium text-gray-900 dark:text-white">
+                          <p className="text-xs sm:text-sm font-medium text-gray-900 dark:text-white">
                             {vis === 'PRIVATE' ? 'Private' : vis === 'TEAM' ? 'Team' : 'Public'}
                           </p>
-                          <p className="text-xs text-gray-500 dark:text-gray-400">
+                          <p className="text-[10px] sm:text-xs text-gray-500 dark:text-gray-400">
                             {vis === 'PRIVATE' && 'Only you can see this incident'}
                             {vis === 'TEAM' && 'Invite collaborators to work together'}
                             {vis === 'PUBLIC' && 'Visible to all authorized users'}
@@ -3290,27 +3616,27 @@ export default function IncidentDetailPage() {
             )}
 
             {/* People */}
-            <div className="bg-white dark:bg-gray-800 rounded-lg shadow p-6">
-              <h3 className="text-sm font-semibold text-gray-900 dark:text-white mb-4">
+            <div className="bg-white dark:bg-gray-800 rounded-lg shadow p-4 sm:p-6">
+              <h3 className="text-xs sm:text-sm font-semibold text-gray-900 dark:text-white mb-3 sm:mb-4">
                 People
               </h3>
-              <div className="space-y-4">
+              <div className="space-y-3 sm:space-y-4">
                 <div>
-                  <span className="text-xs text-gray-500 dark:text-gray-400">Reported By</span>
-                  <p className="text-sm text-gray-900 dark:text-white">
+                  <span className="text-[10px] sm:text-xs text-gray-500 dark:text-gray-400">Reported By</span>
+                  <p className="text-xs sm:text-sm text-gray-900 dark:text-white">
                     {incident.User_Incident_createdByIdToUser.firstName} {incident.User_Incident_createdByIdToUser.lastName}
                   </p>
-                  <p className="text-xs text-gray-500 dark:text-gray-400">
+                  <p className="text-[10px] sm:text-xs text-gray-500 dark:text-gray-400 truncate">
                     {incident.User_Incident_createdByIdToUser.email}
                   </p>
                 </div>
                 {incident.User_Incident_assignedToIdToUser && (
                   <div>
-                    <span className="text-xs text-gray-500 dark:text-gray-400">Assigned To</span>
-                    <p className="text-sm text-gray-900 dark:text-white">
+                    <span className="text-[10px] sm:text-xs text-gray-500 dark:text-gray-400">Assigned To</span>
+                    <p className="text-xs sm:text-sm text-gray-900 dark:text-white">
                       {incident.User_Incident_assignedToIdToUser.firstName} {incident.User_Incident_assignedToIdToUser.lastName}
                     </p>
-                    <p className="text-xs text-gray-500 dark:text-gray-400">
+                    <p className="text-[10px] sm:text-xs text-gray-500 dark:text-gray-400 truncate">
                       {incident.User_Incident_assignedToIdToUser.email}
                     </p>
                   </div>
@@ -3319,14 +3645,14 @@ export default function IncidentDetailPage() {
             </div>
 
             {/* RCA Section */}
-            <div className="bg-white dark:bg-gray-800 rounded-lg shadow p-6">
-              <h3 className="text-sm font-semibold text-gray-900 dark:text-white mb-4">
+            <div className="bg-white dark:bg-gray-800 rounded-lg shadow p-4 sm:p-6">
+              <h3 className="text-xs sm:text-sm font-semibold text-gray-900 dark:text-white mb-3 sm:mb-4">
                 Root Cause Analysis
               </h3>
 
               {rcaAnalyses.length === 0 ? (
-                <div className="text-center py-4">
-                  <svg className="mx-auto h-10 w-10 text-gray-400" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                <div className="text-center py-3 sm:py-4">
+                  <svg className="mx-auto h-8 w-8 sm:h-10 sm:w-10 text-gray-400" fill="none" viewBox="0 0 24 24" stroke="currentColor">
                     <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9.663 17h4.673M12 3v1m6.364 1.636l-.707.707M21 12h-1M4 12H3m3.343-5.657l-.707-.707m2.828 9.9a5 5 0 117.072 0l-.548.547A3.374 3.374 0 0014 18.469V19a2 2 0 11-4 0v-.531c0-.895-.356-1.754-.988-2.386l-.548-.547z" />
                   </svg>
                   <p className="mt-2 text-sm text-gray-500 dark:text-gray-400">
@@ -3439,21 +3765,21 @@ export default function IncidentDetailPage() {
             </div>
 
             {/* Dates */}
-            <div className="bg-white dark:bg-gray-800 rounded-lg shadow p-6">
-              <h3 className="text-sm font-semibold text-gray-900 dark:text-white mb-4">
+            <div className="bg-white dark:bg-gray-800 rounded-lg shadow p-4 sm:p-6">
+              <h3 className="text-xs sm:text-sm font-semibold text-gray-900 dark:text-white mb-3 sm:mb-4">
                 Dates
               </h3>
-              <div className="space-y-3">
+              <div className="space-y-2 sm:space-y-3">
                 <div>
-                  <span className="text-xs text-gray-500 dark:text-gray-400">Reported</span>
-                  <p className="text-sm text-gray-900 dark:text-white">
+                  <span className="text-[10px] sm:text-xs text-gray-500 dark:text-gray-400">Reported</span>
+                  <p className="text-xs sm:text-sm text-gray-900 dark:text-white">
                     {formatDateTime(incident.reportedAt)}
                   </p>
                 </div>
                 {incident.dueDate && (
                   <div>
-                    <span className="text-xs text-gray-500 dark:text-gray-400">Due Date</span>
-                    <p className="text-sm text-gray-900 dark:text-white">
+                    <span className="text-[10px] sm:text-xs text-gray-500 dark:text-gray-400">Due Date</span>
+                    <p className="text-xs sm:text-sm text-gray-900 dark:text-white">
                       {formatDate(incident.dueDate)}
                     </p>
                   </div>

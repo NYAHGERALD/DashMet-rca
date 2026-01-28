@@ -31,6 +31,12 @@ import systemAdminRoutes from './systemAdminRoutes';
 import systemAdminAuthRoutes from './systemAdminAuthRoutes';
 import fmirRoutes from './fmirRoutes';
 import privilegeRoutes from './privilegeRoutes';
+import videoCallRoutes from './videoCallRoutes';
+import transcriptRoutes from './transcriptRoutes';
+import spotlightRoutes from './spotlight';
+import recordingsRoutes from './recordings';
+import { authenticate } from '../middleware/auth';
+import { getIncidentTranscripts } from '../controllers/transcriptController';
 
 const router = Router();
 
@@ -150,5 +156,20 @@ router.use('/fmir', fmirRoutes);
 
 // Privilege Management routes (Role-based access control)
 router.use('/privileges', privilegeRoutes);
+
+// Video Call routes (Daily.co integration for team collaboration)
+router.use('/video-call', videoCallRoutes);
+
+// Meeting Transcript routes (AI transcription & smart summaries)
+router.use('/transcripts', transcriptRoutes);
+
+// Evidence Spotlight routes (present evidence during video calls with annotations)
+router.use('/evidence', spotlightRoutes);
+
+// Meeting Recordings routes (record and store meeting videos)
+router.use('/recordings', recordingsRoutes);
+
+// Get transcripts for a specific incident (nested under incidents for convenience)
+router.get('/incidents/:incidentId/transcripts', authenticate, getIncidentTranscripts);
 
 export default router;

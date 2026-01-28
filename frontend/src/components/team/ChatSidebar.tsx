@@ -4,6 +4,7 @@ import React, { useState, useEffect, useRef, useCallback } from 'react';
 import { useWebSocket } from '@/lib/websocket';
 import { chatUnreadStore } from '@/lib/chatUnreadStore';
 import { useBrowserNotifications } from '@/components/providers/BrowserNotificationProvider';
+import { useVideoCall } from '@/components/providers/VideoCallProvider';
 import api from '@/lib/api';
 import {
   MessageCircle,
@@ -15,11 +16,18 @@ import {
   Clock,
   Maximize2,
   Minimize2,
+  Video,
+  Phone,
+  PhoneCall,
+  Film,
+  History,
 } from 'lucide-react';
 import IncidentChatPanel from './IncidentChatPanel';
 import TeamParticipantSelector from './TeamParticipantSelector';
 import ArchivedChatPanel from './ArchivedChatPanel';
 import ActivityLogPanel from './ActivityLogPanel';
+import RecordingHistoryPanel from './RecordingHistoryPanel';
+import DiscussionHistoryPanel from './DiscussionHistoryPanel';
 
 interface Participant {
   id: string;
@@ -56,7 +64,7 @@ interface ChatSidebarProps {
   ownerId?: string; // To exclude owner from team member count
 }
 
-type TabType = 'chat' | 'archived' | 'team' | 'activity';
+type TabType = 'chat' | 'archived' | 'team' | 'activity' | 'recordings' | 'discussions';
 
 export default function ChatSidebar({
   incidentId,
@@ -86,6 +94,61 @@ export default function ChatSidebar({
 
   const { isConnected, socket, markMessagesRead } = useWebSocket();
   const { setChatOpen } = useBrowserNotifications();
+  const { startCall, isCallActive, joinCall, terminateCall } = useVideoCall();
+  
+  // Track if there's an active call for this incident that user can join
+  const [activeCallInfo, setActiveCallInfo] = useState<{
+    roomUrl: string;
+    roomName: string;
+    createdBy: string;
+  } | null>(null);
+  const [isEndingCall, setIsEndingCall] = useState(false);
+  
+  // Check for active call when component mounts and periodically
+  useEffect(() => {
+    const checkActiveCall = async () => {
+      try {
+        const response = await api.get(`/video-call/incident/${incidentId}/active-call`);
+        if (response.data.success && response.data.hasActiveCall && response.data.room) {
+          setActiveCallInfo({
+            roomUrl: response.data.room.roomUrl,
+            roomName: response.data.room.roomName,
+            createdBy: response.data.room.createdBy,
+          });
+        } else {
+          setActiveCallInfo(null);
+        }
+      } catch (err) {
+        console.log('📹 Could not check for active call:', err);
+      }
+    };
+    
+    // Check immediately
+    checkActiveCall();
+    
+    // Check every 30 seconds
+    const intervalId = setInterval(checkActiveCall, 30000);
+    
+    return () => clearInterval(intervalId);
+  }, [incidentId]);
+
+  // Listen for video-call:ended websocket event to clear active call info
+  useEffect(() => {
+    if (!socket) return;
+    
+    const handleCallEnded = (data: { incidentId: string; roomName: string }) => {
+      console.log('📹 [ChatSidebar] Received video-call:ended event:', data);
+      if (data.incidentId === incidentId) {
+        setActiveCallInfo(null);
+      }
+    };
+    
+    socket.on('video-call:ended', handleCallEnded);
+    
+    return () => {
+      socket.off('video-call:ended', handleCallEnded);
+    };
+  }, [socket, incidentId]);
 
   // Subscribe to persistent unread count changes
   useEffect(() => {
@@ -323,6 +386,8 @@ export default function ChatSidebar({
       case 'archived': return 'Archived';
       case 'team': return 'Team';
       case 'activity': return 'Activity';
+      case 'recordings': return 'Recordings';
+      case 'discussions': return 'Discussions';
       default: return '';
     }
   };
@@ -478,6 +543,42 @@ export default function ChatSidebar({
                 <div className="absolute bottom-0 left-0 right-0 h-0.5 bg-white"></div>
               )}
             </button>
+
+            {/* Recordings Tab */}
+            <button
+              onClick={() => handleTabChange('recordings')}
+              className={`flex-1 px-3 py-3 text-sm font-medium transition-colors relative ${
+                activeTab === 'recordings'
+                  ? 'bg-white/20'
+                  : 'hover:bg-white/10'
+              }`}
+            >
+              <div className="flex items-center justify-center space-x-1.5">
+                <Film className="w-4 h-4" />
+                <span>Recordings</span>
+              </div>
+              {activeTab === 'recordings' && (
+                <div className="absolute bottom-0 left-0 right-0 h-0.5 bg-white"></div>
+              )}
+            </button>
+
+            {/* Discussions Tab */}
+            <button
+              onClick={() => handleTabChange('discussions')}
+              className={`flex-1 px-3 py-3 text-sm font-medium transition-colors relative ${
+                activeTab === 'discussions'
+                  ? 'bg-white/20'
+                  : 'hover:bg-white/10'
+              }`}
+            >
+              <div className="flex items-center justify-center space-x-1.5">
+                <History className="w-4 h-4" />
+                <span>Discussions</span>
+              </div>
+              {activeTab === 'discussions' && (
+                <div className="absolute bottom-0 left-0 right-0 h-0.5 bg-white"></div>
+              )}
+            </button>
           </div>
         </div>
 
@@ -509,15 +610,97 @@ export default function ChatSidebar({
             <div className="h-full">
               <ActivityLogPanel incidentId={incidentId} />
             </div>
+          ) : activeTab === 'recordings' ? (
+            <div className="h-full">
+              <RecordingHistoryPanel incidentId={incidentId} />
+            </div>
+          ) : activeTab === 'discussions' ? (
+            <div className="h-full">
+              <DiscussionHistoryPanel incidentId={incidentId} />
+            </div>
           ) : (
             <div className="h-full overflow-y-auto p-6 bg-gray-50 dark:bg-slate-800">
               <div className="mb-4">
-                <h3 className="text-lg font-semibold text-gray-900 dark:text-white mb-2">
-                  Team Management
-                </h3>
+                <div className="flex items-center justify-between mb-2">
+                  <h3 className="text-lg font-semibold text-gray-900 dark:text-white">
+                    Team Management
+                  </h3>
+                  {/* Video Call Buttons */}
+                  <div className="flex items-center gap-2">
+                    {/* Join Active Call Button - Shows when there's an active call and user is not in it */}
+                    {activeCallInfo && !isCallActive && (
+                      <button
+                        onClick={() => joinCall(
+                          activeCallInfo.roomUrl,
+                          activeCallInfo.roomName,
+                          incidentId
+                        )}
+                        className="flex items-center space-x-2 px-3 py-2 text-white text-sm font-medium rounded-lg transition-all bg-gradient-to-r from-green-500 to-emerald-600 hover:from-green-600 hover:to-emerald-700 shadow-lg animate-pulse hover:animate-none"
+                        title="Join the active team call"
+                      >
+                        <PhoneCall className="w-4 h-4" />
+                        <span>Join Call</span>
+                      </button>
+                    )}
+                    {/* End Call Button - Shows when there's an active call and user is not in it */}
+                    {activeCallInfo && !isCallActive && (
+                      <button
+                        onClick={async () => {
+                          if (confirm('Are you sure you want to end this call for everyone?')) {
+                            setIsEndingCall(true);
+                            const success = await terminateCall(incidentId, activeCallInfo.roomName);
+                            if (success) {
+                              setActiveCallInfo(null);
+                            }
+                            setIsEndingCall(false);
+                          }
+                        }}
+                        disabled={isEndingCall}
+                        className="flex items-center space-x-2 px-3 py-2 text-white text-sm font-medium rounded-lg transition-colors bg-red-600 hover:bg-red-700 disabled:opacity-50"
+                        title="End call for everyone"
+                      >
+                        <Phone className="w-4 h-4" />
+                        <span>{isEndingCall ? 'Ending...' : 'End Call'}</span>
+                      </button>
+                    )}
+                    {/* Start Call Button */}
+                    <button
+                      onClick={() => startCall(incidentId)}
+                      disabled={isCallActive || !!activeCallInfo}
+                      className={`flex items-center space-x-2 px-3 py-2 text-white text-sm font-medium rounded-lg transition-colors ${
+                        isCallActive 
+                          ? 'bg-gray-400 cursor-not-allowed' 
+                          : activeCallInfo 
+                            ? 'bg-gray-400 cursor-not-allowed' 
+                            : 'bg-green-600 hover:bg-green-700'
+                      }`}
+                      title={isCallActive ? 'Call in progress' : activeCallInfo ? 'A call is already active - join or end it first' : 'Start video call with team'}
+                    >
+                      <Video className="w-4 h-4" />
+                      <span>{isCallActive ? 'In Call' : 'Start Call'}</span>
+                    </button>
+                  </div>
+                </div>
                 <p className="text-sm text-gray-600 dark:text-gray-400">
                   Add or remove team members and manage their roles for this incident and RCA.
                 </p>
+                {/* Active Call Banner */}
+                {activeCallInfo && !isCallActive && (
+                  <div className="mt-3 p-3 bg-green-50 dark:bg-green-900/30 border border-green-200 dark:border-green-800 rounded-lg">
+                    <div className="flex items-center justify-between">
+                      <div className="flex items-center gap-2 text-green-700 dark:text-green-300">
+                        <span className="relative flex h-2 w-2">
+                          <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-green-400 opacity-75"></span>
+                          <span className="relative inline-flex rounded-full h-2 w-2 bg-green-500"></span>
+                        </span>
+                        <span className="text-sm font-medium">Team call in progress</span>
+                      </div>
+                    </div>
+                    <p className="text-xs text-green-600 dark:text-green-400 mt-1">
+                      Click &quot;Join Call&quot; to connect, or &quot;End Call&quot; to terminate the call for everyone.
+                    </p>
+                  </div>
+                )}
               </div>
 
               <TeamParticipantSelector
@@ -569,6 +752,8 @@ export default function ChatSidebar({
                     {detachedTab === 'archived' && <Archive className="w-4 h-4 sm:w-5 sm:h-5" />}
                     {detachedTab === 'team' && <Users className="w-4 h-4 sm:w-5 sm:h-5" />}
                     {detachedTab === 'activity' && <Clock className="w-4 h-4 sm:w-5 sm:h-5" />}
+                    {detachedTab === 'recordings' && <Film className="w-4 h-4 sm:w-5 sm:h-5" />}
+                    {detachedTab === 'discussions' && <History className="w-4 h-4 sm:w-5 sm:h-5" />}
                   </div>
                   <div className="min-w-0 flex-1">
                     <h2 className="font-semibold text-base sm:text-lg truncate">
@@ -630,6 +815,14 @@ export default function ChatSidebar({
               ) : detachedTab === 'activity' ? (
                 <div className="h-full">
                   <ActivityLogPanel incidentId={incidentId} />
+                </div>
+              ) : detachedTab === 'recordings' ? (
+                <div className="h-full">
+                  <RecordingHistoryPanel incidentId={incidentId} />
+                </div>
+              ) : detachedTab === 'discussions' ? (
+                <div className="h-full">
+                  <DiscussionHistoryPanel incidentId={incidentId} />
                 </div>
               ) : (
                 <div className="h-full overflow-y-auto p-4 sm:p-6 md:p-8 bg-gray-50 dark:bg-slate-800">

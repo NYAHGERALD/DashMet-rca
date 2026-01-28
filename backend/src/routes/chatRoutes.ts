@@ -1042,24 +1042,53 @@ router.get('/:incidentId/evidence', asyncHandler(async (req, res) => {
   const { incidentId } = req.params;
   const user = (req as any).user;
 
-  // Verify access
+  // Verify access and check if incident has linked FMIR
   const incident = await prisma.incident.findUnique({
     where: { id: incidentId },
-    select: { organizationId: true, createdById: true },
+    select: { organizationId: true, createdById: true, fmirReportId: true },
   });
 
   if (!incident || incident.organizationId !== user.organizationId) {
     throw new ValidationError('You do not have access to this incident');
   }
 
-  const evidence = await prisma.evidence.findMany({
+  // Get regular incident evidence
+  const incidentEvidence = await prisma.evidence.findMany({
     where: { incidentId },
     orderBy: { uploadedAt: 'desc' },
   });
 
+  // If incident was created from FMIR, also get FMIR evidence
+  let allEvidence: any[] = [...incidentEvidence];
+  
+  if (incident.fmirReportId) {
+    const fmirEvidence = await prisma.fMIREvidence.findMany({
+      where: { fmirId: incident.fmirReportId },
+      orderBy: { uploadedAt: 'desc' },
+    });
+    
+    // Map FMIR evidence to match the Evidence interface
+    // Add a flag to identify source and prefix ID to avoid conflicts
+    const mappedFmirEvidence = fmirEvidence.map(fe => ({
+      id: `fmir_${fe.id}`, // Prefix to distinguish from regular evidence
+      incidentId: incidentId, // Associate with current incident
+      type: fe.type,
+      fileName: fe.fileName,
+      filePath: fe.filePath,
+      fileSize: fe.fileSize,
+      mimeType: fe.mimeType,
+      transcription: fe.description || null,
+      uploadedAt: fe.uploadedAt,
+      uploadedById: fe.uploadedById,
+      source: 'FMIR', // Mark the source
+    }));
+    
+    allEvidence = [...incidentEvidence, ...mappedFmirEvidence];
+  }
+
   res.json({
     success: true,
-    data: evidence,
+    data: allEvidence,
   });
 }));
 
@@ -1073,13 +1102,52 @@ router.post('/:incidentId/messages/evidence', asyncHandler(async (req, res) => {
     throw new ValidationError('Evidence ID is required');
   }
 
-  // Verify evidence exists and belongs to this incident
-  const evidence = await prisma.evidence.findUnique({
-    where: { id: evidenceId },
-  });
+  let evidenceData: { type: string; fileName: string; transcription?: string | null; filePath: string } | null = null;
+  let actualEvidenceId: string | null = evidenceId;
+  let isFmirEvidence = false;
 
-  if (!evidence || evidence.incidentId !== incidentId) {
-    throw new NotFoundError('Evidence not found');
+  // Check if this is FMIR evidence (prefixed with 'fmir_')
+  if (evidenceId.startsWith('fmir_')) {
+    isFmirEvidence = true;
+    const fmirEvidenceId = evidenceId.replace('fmir_', '');
+    
+    // Get the incident to verify FMIR link
+    const incident = await prisma.incident.findUnique({
+      where: { id: incidentId },
+      select: { fmirReportId: true },
+    });
+    
+    if (!incident?.fmirReportId) {
+      throw new NotFoundError('FMIR evidence not found for this incident');
+    }
+    
+    const fmirEvidence = await prisma.fMIREvidence.findUnique({
+      where: { id: fmirEvidenceId },
+    });
+    
+    if (!fmirEvidence || fmirEvidence.fmirId !== incident.fmirReportId) {
+      throw new NotFoundError('FMIR evidence not found');
+    }
+    
+    evidenceData = {
+      type: fmirEvidence.type,
+      fileName: fmirEvidence.fileName,
+      transcription: fmirEvidence.description,
+      filePath: fmirEvidence.filePath,
+    };
+    // For FMIR evidence, we don't store evidenceId in the message (it's a different table)
+    actualEvidenceId = null;
+  } else {
+    // Regular incident evidence
+    const evidence = await prisma.evidence.findUnique({
+      where: { id: evidenceId },
+    });
+
+    if (!evidence || evidence.incidentId !== incidentId) {
+      throw new NotFoundError('Evidence not found');
+    }
+    
+    evidenceData = evidence;
   }
 
   // Build content with evidence details
@@ -1089,11 +1157,11 @@ router.post('/:incidentId/messages/evidence', asyncHandler(async (req, res) => {
     'DOCUMENT': '📄',
     'AUDIO': '🎙️',
   };
-  const evidenceTypeIcon = evidenceTypeIcons[evidence.type] || '📎';
+  const evidenceTypeIcon = evidenceTypeIcons[evidenceData.type] || '📎';
   
-  let content = `${evidenceTypeIcon} Evidence Shared\n📁 ${evidence.fileName}`;
-  if (evidence.transcription) {
-    content += `\n📝 ${evidence.transcription.substring(0, 200)}${evidence.transcription.length > 200 ? '...' : ''}`;
+  let content = `${evidenceTypeIcon} Evidence Shared${isFmirEvidence ? ' (from FMIR)' : ''}\n📁 ${evidenceData.fileName}`;
+  if (evidenceData.transcription) {
+    content += `\n📝 ${evidenceData.transcription.substring(0, 200)}${evidenceData.transcription.length > 200 ? '...' : ''}`;
   }
   if (comment && comment.trim()) {
     content += `\n\n💬 Comment: ${comment.trim()}`;
@@ -1108,7 +1176,7 @@ router.post('/:incidentId/messages/evidence', asyncHandler(async (req, res) => {
       userId: user.id,
       content,
       messageType: 'EVIDENCE_LINK',
-      evidenceId,
+      evidenceId: actualEvidenceId, // null for FMIR evidence
       readBy: [user.id],
     },
     include: {
@@ -1130,13 +1198,14 @@ router.post('/:incidentId/messages/evidence', asyncHandler(async (req, res) => {
   const messageWithEvidence = {
     ...message,
     Evidence: {
-      id: evidence.id,
-      type: evidence.type,
-      fileName: evidence.fileName,
-      filePath: evidence.filePath,
-      mimeType: evidence.mimeType,
-      fileSize: evidence.fileSize,
-      transcription: evidence.transcription,
+      id: evidenceId,
+      type: evidenceData.type,
+      fileName: evidenceData.fileName,
+      filePath: evidenceData.filePath,
+      mimeType: (evidenceData as any).mimeType || null,
+      fileSize: (evidenceData as any).fileSize || 0,
+      transcription: evidenceData.transcription,
+      source: isFmirEvidence ? 'FMIR' : 'INCIDENT',
     },
   };
   
@@ -2543,9 +2612,10 @@ router.post('/:incidentId/upload', upload.single('file'), handleMulterError, asy
       evidenceType = 'VOICE_RECORDING';
     }
 
-    await prisma.evidence.create({
+    const evidenceId = uuidv4();
+    const createdEvidence = await prisma.evidence.create({
       data: {
-        id: uuidv4(),
+        id: evidenceId,
         incidentId,
         type: evidenceType,
         fileName: file.originalname,
@@ -2554,6 +2624,25 @@ router.post('/:incidentId/upload', upload.single('file'), handleMulterError, asy
         mimeType: file.mimetype,
         uploadedById: user.id,
       },
+    });
+
+    // Emit incident:evidence:added event to notify incident detail page
+    websocketService.emitToIncident(incidentId, 'incident:evidence:added', {
+      incidentId,
+      evidence: {
+        id: createdEvidence.id,
+        type: createdEvidence.type,
+        fileName: createdEvidence.fileName,
+        filePath: createdEvidence.filePath,
+        mimeType: createdEvidence.mimeType,
+        uploadedById: createdEvidence.uploadedById,
+      },
+      uploadedBy: {
+        id: user.id,
+        firstName: user.firstName,
+        lastName: user.lastName,
+      },
+      timestamp: new Date().toISOString(),
     });
   }
 
@@ -2674,9 +2763,10 @@ router.post('/:incidentId/upload-multiple', upload.array('files', 10), handleMul
       evidenceType = 'VOICE_RECORDING';
     }
 
-    await prisma.evidence.create({
+    const multiEvidenceId = uuidv4();
+    const createdMultiEvidence = await prisma.evidence.create({
       data: {
-        id: uuidv4(),
+        id: multiEvidenceId,
         incidentId,
         type: evidenceType,
         fileName: file.originalname,
@@ -2685,6 +2775,25 @@ router.post('/:incidentId/upload-multiple', upload.array('files', 10), handleMul
         mimeType: file.mimetype,
         uploadedById: user.id,
       },
+    });
+
+    // Emit incident:evidence:added event to notify incident detail page
+    websocketService.emitToIncident(incidentId, 'incident:evidence:added', {
+      incidentId,
+      evidence: {
+        id: createdMultiEvidence.id,
+        type: createdMultiEvidence.type,
+        fileName: createdMultiEvidence.fileName,
+        filePath: createdMultiEvidence.filePath,
+        mimeType: createdMultiEvidence.mimeType,
+        uploadedById: createdMultiEvidence.uploadedById,
+      },
+      uploadedBy: {
+        id: user.id,
+        firstName: user.firstName,
+        lastName: user.lastName,
+      },
+      timestamp: new Date().toISOString(),
     });
 
     // Create the message
