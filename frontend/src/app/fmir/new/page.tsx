@@ -3244,8 +3244,8 @@ function FMIRNewPageContent() {
               onAddComment={() => handleOpenCommentModal(1)}
               onViewComments={(e) => handleViewComments(1, e)}
             >
-              {/* Row 1: Date, Time, Facility, Department, Area, Line */}
-              <div className="grid grid-cols-2 sm:grid-cols-6 gap-3 sm:gap-4">
+              {/* Row 1: Date and Time */}
+              <div className="grid grid-cols-2 gap-3 sm:gap-4">
                 <FormInput
                   label="Date"
                   name="incidentDate"
@@ -3261,8 +3261,12 @@ function FMIRNewPageContent() {
                   value={formData.incidentTime}
                   onChange={handleChange}
                 />
+              </div>
+
+              {/* Row 2: Facility and Department */}
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 sm:gap-4">
                 <div>
-                  <label className="block text-sm font-semibold text-gray-700 dark:text-gray-300 mb-1.5">
+                  <label className="block text-xs sm:text-sm font-semibold text-gray-700 dark:text-gray-300 mb-1 sm:mb-1.5">
                     Facility
                   </label>
                   <select
@@ -3275,7 +3279,7 @@ function FMIRNewPageContent() {
                         setFormData(prev => ({ ...prev, department: '', area: '', line: '' }));
                       }
                     }}
-                    className="w-full px-3 py-2.5 bg-white dark:bg-gray-700/80 border-2 border-gray-200 dark:border-gray-600 rounded-lg text-gray-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-primary-500 text-sm"
+                    className="w-full px-3 py-2 sm:py-2.5 bg-white dark:bg-gray-700/80 border-2 border-gray-200 dark:border-gray-600 rounded-lg text-gray-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-primary-500 text-sm"
                   >
                     <option value="">Select facility</option>
                     {Array.isArray(facilities) && facilities.map((facility) => (
@@ -3286,7 +3290,7 @@ function FMIRNewPageContent() {
                   </select>
                 </div>
                 <div>
-                  <label className="block text-sm font-semibold text-gray-700 dark:text-gray-300 mb-1.5">
+                  <label className="block text-xs sm:text-sm font-semibold text-gray-700 dark:text-gray-300 mb-1 sm:mb-1.5">
                     Department
                   </label>
                   <select
@@ -3300,7 +3304,7 @@ function FMIRNewPageContent() {
                       }
                     }}
                     disabled={!formData.facilityId}
-                    className="w-full px-3 py-2.5 bg-white dark:bg-gray-700/80 border-2 border-gray-200 dark:border-gray-600 rounded-lg text-gray-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-primary-500 text-sm disabled:opacity-50 disabled:cursor-not-allowed"
+                    className="w-full px-3 py-2 sm:py-2.5 bg-white dark:bg-gray-700/80 border-2 border-gray-200 dark:border-gray-600 rounded-lg text-gray-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-primary-500 text-sm disabled:opacity-50 disabled:cursor-not-allowed"
                   >
                     <option value="">Select department</option>
                     {Array.isArray(departments) && departments
@@ -3312,8 +3316,12 @@ function FMIRNewPageContent() {
                       ))}
                   </select>
                 </div>
+              </div>
+
+              {/* Row 3: Area and Line */}
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 sm:gap-4">
                 <div>
-                  <label className="block text-sm font-semibold text-gray-700 dark:text-gray-300 mb-1.5">
+                  <label className="block text-xs sm:text-sm font-semibold text-gray-700 dark:text-gray-300 mb-1 sm:mb-1.5">
                     Area
                   </label>
                   <select
@@ -3327,7 +3335,7 @@ function FMIRNewPageContent() {
                       }
                     }}
                     disabled={!formData.department}
-                    className="w-full px-3 py-2.5 bg-white dark:bg-gray-700/80 border-2 border-gray-200 dark:border-gray-600 rounded-lg text-gray-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-primary-500 text-sm disabled:opacity-50 disabled:cursor-not-allowed"
+                    className="w-full px-3 py-2 sm:py-2.5 bg-white dark:bg-gray-700/80 border-2 border-gray-200 dark:border-gray-600 rounded-lg text-gray-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-primary-500 text-sm disabled:opacity-50 disabled:cursor-not-allowed"
                   >
                     <option value="">Select area</option>
                     {Array.isArray(areas) && areas.map((area) => (
@@ -3338,7 +3346,7 @@ function FMIRNewPageContent() {
                   </select>
                 </div>
                 <div>
-                  <label className="block text-sm font-semibold text-gray-700 dark:text-gray-300 mb-1.5">
+                  <label className="block text-xs sm:text-sm font-semibold text-gray-700 dark:text-gray-300 mb-1 sm:mb-1.5">
                     Line
                   </label>
                   <select
@@ -3346,7 +3354,7 @@ function FMIRNewPageContent() {
                     value={formData.line}
                     onChange={handleChange}
                     disabled={!formData.area}
-                    className="w-full px-3 py-2.5 bg-white dark:bg-gray-700/80 border-2 border-gray-200 dark:border-gray-600 rounded-lg text-gray-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-primary-500 text-sm disabled:opacity-50 disabled:cursor-not-allowed"
+                    className="w-full px-3 py-2 sm:py-2.5 bg-white dark:bg-gray-700/80 border-2 border-gray-200 dark:border-gray-600 rounded-lg text-gray-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-primary-500 text-sm disabled:opacity-50 disabled:cursor-not-allowed"
                   >
                     <option value="">Select line</option>
                     {Array.isArray(lines) && lines.map((line) => (
@@ -3358,10 +3366,10 @@ function FMIRNewPageContent() {
                 </div>
               </div>
 
-              {/* Row 2: FM Source Category, FM Source Type, Item Number, Amount */}
-              <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 sm:gap-4">
+              {/* Row 4: FM Source Category and FM Source Type */}
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 sm:gap-4">
                 <div>
-                  <label className="block text-sm font-semibold text-gray-700 dark:text-gray-300 mb-1.5">
+                  <label className="block text-xs sm:text-sm font-semibold text-gray-700 dark:text-gray-300 mb-1 sm:mb-1.5">
                     FM Source Category
                   </label>
                   <select
@@ -3374,7 +3382,7 @@ function FMIRNewPageContent() {
                         setFormData(prev => ({ ...prev, fmSourceType: '' }));
                       }
                     }}
-                    className="w-full px-3 py-2.5 bg-white dark:bg-gray-700/80 border-2 border-gray-200 dark:border-gray-600 rounded-lg text-gray-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-primary-500 text-sm"
+                    className="w-full px-3 py-2 sm:py-2.5 bg-white dark:bg-gray-700/80 border-2 border-gray-200 dark:border-gray-600 rounded-lg text-gray-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-primary-500 text-sm"
                   >
                     <option value="">Select category</option>
                     {Array.isArray(fmSourceCategories) && fmSourceCategories.map((cat) => (
@@ -3385,7 +3393,7 @@ function FMIRNewPageContent() {
                   </select>
                 </div>
                 <div>
-                  <label className="block text-sm font-semibold text-gray-700 dark:text-gray-300 mb-1.5">
+                  <label className="block text-xs sm:text-sm font-semibold text-gray-700 dark:text-gray-300 mb-1 sm:mb-1.5">
                     FM Source Type
                   </label>
                   <select
@@ -3393,7 +3401,7 @@ function FMIRNewPageContent() {
                     value={formData.fmSourceType}
                     onChange={handleChange}
                     disabled={!formData.fmSourceCategory}
-                    className="w-full px-3 py-2.5 bg-white dark:bg-gray-700/80 border-2 border-gray-200 dark:border-gray-600 rounded-lg text-gray-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-primary-500 text-sm disabled:opacity-50 disabled:cursor-not-allowed"
+                    className="w-full px-3 py-2 sm:py-2.5 bg-white dark:bg-gray-700/80 border-2 border-gray-200 dark:border-gray-600 rounded-lg text-gray-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-primary-500 text-sm disabled:opacity-50 disabled:cursor-not-allowed"
                   >
                     <option value="">Select type</option>
                     {Array.isArray(fmSourceTypes) && fmSourceTypes.map((type) => (
@@ -3403,6 +3411,10 @@ function FMIRNewPageContent() {
                     ))}
                   </select>
                 </div>
+              </div>
+
+              {/* Row 5: Item Number and Amount */}
+              <div className="grid grid-cols-2 gap-3 sm:gap-4">
                 <FormInput
                   label="Item Number"
                   name="productItemNumber"
