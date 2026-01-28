@@ -41,7 +41,7 @@ interface OrganizationAccessCode {
   usedCount: number;
   maxUses: number;
   createdAt: string;
-  CreatedBy?: {
+  User?: {
     id: string;
     firstName: string;
     lastName: string;

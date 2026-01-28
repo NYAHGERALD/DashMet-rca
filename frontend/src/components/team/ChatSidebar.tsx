@@ -459,13 +459,13 @@ export default function ChatSidebar({
             </div>
           </div>
 
-          {/* Tabs */}
-          <div className="flex border-t border-white/20">
+          {/* Tabs - Scrollable on mobile */}
+          <div className="flex border-t border-white/20 overflow-x-auto scrollbar-hide">
             {/* Chat Tab - Only show when visibility is TEAM */}
             {visibility === 'TEAM' && (
               <button
                 onClick={() => handleTabChange('chat')}
-                className={`flex-1 px-3 py-3 text-sm font-medium transition-colors relative ${
+                className={`flex-shrink-0 px-3 py-3 text-sm font-medium transition-colors relative ${
                   activeTab === 'chat'
                     ? 'bg-white/20'
                     : 'hover:bg-white/10'
@@ -473,7 +473,7 @@ export default function ChatSidebar({
               >
                 <div className="flex items-center justify-center space-x-1.5">
                   <MessageSquare className="w-4 h-4" />
-                  <span>Chat</span>
+                  <span className="whitespace-nowrap">Chat</span>
                   {unreadCount > 0 && activeTab !== 'chat' && (
                     <span className="ml-1 px-1.5 py-0.5 bg-red-500 text-white text-xs rounded-full">
                       {unreadCount}
@@ -490,7 +490,7 @@ export default function ChatSidebar({
             {hasArchivedMessages && (
               <button
                 onClick={() => handleTabChange('archived')}
-                className={`flex-1 px-3 py-3 text-sm font-medium transition-colors relative ${
+                className={`flex-shrink-0 px-3 py-3 text-sm font-medium transition-colors relative ${
                   activeTab === 'archived'
                     ? 'bg-white/20'
                     : 'hover:bg-white/10'
@@ -498,7 +498,7 @@ export default function ChatSidebar({
               >
                 <div className="flex items-center justify-center space-x-1.5">
                   <Archive className="w-4 h-4" />
-                  <span>Archive</span>
+                  <span className="whitespace-nowrap">Archive</span>
                 </div>
                 {activeTab === 'archived' && (
                   <div className="absolute bottom-0 left-0 right-0 h-0.5 bg-white"></div>
@@ -508,7 +508,7 @@ export default function ChatSidebar({
             
             <button
               onClick={() => handleTabChange('team')}
-              className={`flex-1 px-3 py-3 text-sm font-medium transition-colors relative ${
+              className={`flex-shrink-0 px-3 py-3 text-sm font-medium transition-colors relative ${
                 activeTab === 'team'
                   ? 'bg-white/20'
                   : 'hover:bg-white/10'
@@ -516,7 +516,7 @@ export default function ChatSidebar({
             >
               <div className="flex items-center justify-center space-x-1.5">
                 <Users className="w-4 h-4" />
-                <span>Team</span>
+                <span className="whitespace-nowrap">Team</span>
                 <span className="text-xs opacity-75">
                   ({participants.length})
                 </span>
@@ -529,7 +529,7 @@ export default function ChatSidebar({
             {/* Activity Tab */}
             <button
               onClick={() => handleTabChange('activity')}
-              className={`flex-1 px-3 py-3 text-sm font-medium transition-colors relative ${
+              className={`flex-shrink-0 px-3 py-3 text-sm font-medium transition-colors relative ${
                 activeTab === 'activity'
                   ? 'bg-white/20'
                   : 'hover:bg-white/10'
@@ -537,7 +537,7 @@ export default function ChatSidebar({
             >
               <div className="flex items-center justify-center space-x-1.5">
                 <Clock className="w-4 h-4" />
-                <span>Activity</span>
+                <span className="whitespace-nowrap">Activity</span>
               </div>
               {activeTab === 'activity' && (
                 <div className="absolute bottom-0 left-0 right-0 h-0.5 bg-white"></div>
@@ -547,7 +547,7 @@ export default function ChatSidebar({
             {/* Recordings Tab */}
             <button
               onClick={() => handleTabChange('recordings')}
-              className={`flex-1 px-3 py-3 text-sm font-medium transition-colors relative ${
+              className={`flex-shrink-0 px-3 py-3 text-sm font-medium transition-colors relative ${
                 activeTab === 'recordings'
                   ? 'bg-white/20'
                   : 'hover:bg-white/10'
@@ -555,7 +555,7 @@ export default function ChatSidebar({
             >
               <div className="flex items-center justify-center space-x-1.5">
                 <Film className="w-4 h-4" />
-                <span>Recordings</span>
+                <span className="whitespace-nowrap">Recordings</span>
               </div>
               {activeTab === 'recordings' && (
                 <div className="absolute bottom-0 left-0 right-0 h-0.5 bg-white"></div>
@@ -565,7 +565,7 @@ export default function ChatSidebar({
             {/* Discussions Tab */}
             <button
               onClick={() => handleTabChange('discussions')}
-              className={`flex-1 px-3 py-3 text-sm font-medium transition-colors relative ${
+              className={`flex-shrink-0 px-3 py-3 text-sm font-medium transition-colors relative ${
                 activeTab === 'discussions'
                   ? 'bg-white/20'
                   : 'hover:bg-white/10'
@@ -573,7 +573,7 @@ export default function ChatSidebar({
             >
               <div className="flex items-center justify-center space-x-1.5">
                 <History className="w-4 h-4" />
-                <span>Discussions</span>
+                <span className="whitespace-nowrap">Discussions</span>
               </div>
               {activeTab === 'discussions' && (
                 <div className="absolute bottom-0 left-0 right-0 h-0.5 bg-white"></div>

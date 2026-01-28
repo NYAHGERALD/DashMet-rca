@@ -342,18 +342,18 @@ export function VideoCallProvider({ children }: VideoCallProviderProps) {
 
       {/* Rejoin Call Prompt - Shows after page refresh if user was in a call */}
       {rejoinPrompt && !currentCall?.isActive && (
-        <div className="fixed top-4 left-1/2 transform -translate-x-1/2 z-[60] animate-slide-down">
-          <div className="bg-gradient-to-r from-amber-500 to-orange-600 text-white px-6 py-4 rounded-xl shadow-2xl flex items-center space-x-4 min-w-[400px]">
-            <div className="flex-shrink-0">
+        <div className="fixed top-4 left-4 right-4 sm:left-1/2 sm:right-auto sm:transform sm:-translate-x-1/2 z-[60] animate-slide-down">
+          <div className="bg-gradient-to-r from-amber-500 to-orange-600 text-white px-4 sm:px-6 py-3 sm:py-4 rounded-xl shadow-2xl flex items-center space-x-3 sm:space-x-4 sm:min-w-[400px]">
+            <div className="flex-shrink-0 hidden sm:block">
               <div className="w-12 h-12 bg-white/20 rounded-full flex items-center justify-center">
                 <svg className="w-6 h-6" fill="none" viewBox="0 0 24 24" stroke="currentColor">
                   <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15" />
                 </svg>
               </div>
             </div>
-            <div className="flex-1">
-              <p className="font-semibold text-lg">Rejoin Team Call?</p>
-              <p className="text-white/90 text-sm">
+            <div className="flex-1 min-w-0">
+              <p className="font-semibold text-base sm:text-lg">Rejoin Team Call?</p>
+              <p className="text-white/90 text-xs sm:text-sm truncate">
                 You were disconnected from a call. Would you like to rejoin?
               </p>
             </div>
@@ -383,18 +383,18 @@ export function VideoCallProvider({ children }: VideoCallProviderProps) {
       
       {/* Incoming Call Notification Banner */}
       {incomingCall && (
-        <div className="fixed top-4 left-1/2 transform -translate-x-1/2 z-[60] animate-slide-down">
-          <div className="bg-gradient-to-r from-green-600 to-green-700 text-white px-6 py-4 rounded-xl shadow-2xl flex items-center space-x-4 min-w-[400px]">
-            <div className="flex-shrink-0">
+        <div className="fixed top-4 left-4 right-4 sm:left-1/2 sm:right-auto sm:transform sm:-translate-x-1/2 z-[60] animate-slide-down">
+          <div className="bg-gradient-to-r from-green-600 to-green-700 text-white px-4 sm:px-6 py-3 sm:py-4 rounded-xl shadow-2xl flex items-center space-x-3 sm:space-x-4 sm:min-w-[400px]">
+            <div className="flex-shrink-0 hidden sm:block">
               <div className="w-12 h-12 bg-white/20 rounded-full flex items-center justify-center animate-pulse">
                 <svg className="w-6 h-6" fill="none" viewBox="0 0 24 24" stroke="currentColor">
                   <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 10l4.553-2.276A1 1 0 0121 8.618v6.764a1 1 0 01-1.447.894L15 14M5 18h8a2 2 0 002-2V8a2 2 0 00-2-2H5a2 2 0 00-2 2v8a2 2 0 002 2z" />
                 </svg>
               </div>
             </div>
-            <div className="flex-1">
-              <p className="font-semibold text-lg">Team Video Call</p>
-              <p className="text-white/90 text-sm">
+            <div className="flex-1 min-w-0">
+              <p className="font-semibold text-base sm:text-lg">Team Video Call</p>
+              <p className="text-white/90 text-xs sm:text-sm truncate">
                 {incomingCall.startedBy?.name || 'A team member'} started a call
               </p>
             </div>

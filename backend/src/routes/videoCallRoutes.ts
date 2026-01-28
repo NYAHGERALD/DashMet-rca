@@ -40,10 +40,21 @@ router.post('/create-room', authenticate, async (req: AuthRequest, res: Response
     const { incidentId, rcaId, roomName } = req.body;
     const userId = req.user?.id;
 
+    console.log('📹 [create-room] Request received:', { incidentId, rcaId, roomName, userId: userId || 'unknown', userEmail: req.user?.email });
+
     if (!DAILY_API_KEY) {
       return res.status(500).json({
         success: false,
         error: 'Video call service not configured',
+      });
+    }
+
+    // Validate required parameter
+    if (!incidentId) {
+      console.log('📹 [create-room] ERROR: No incidentId provided');
+      return res.status(400).json({
+        success: false,
+        error: 'Incident ID is required',
       });
     }
 
@@ -139,8 +150,12 @@ router.post('/create-room', authenticate, async (req: AuthRequest, res: Response
 
       if (!response.ok) {
         const errorData = await response.json();
-        console.error('Daily.co API error:', errorData);
-        throw new Error('Failed to create video room');
+        console.error('📹 [create-room] Daily.co API error:', {
+          status: response.status,
+          statusText: response.statusText,
+          error: errorData
+        });
+        throw new Error(`Daily.co API error (${response.status}): ${JSON.stringify(errorData)}`);
       }
 
       const roomData = await response.json() as { name: string; url: string; id: string };
@@ -179,10 +194,15 @@ router.post('/create-room', authenticate, async (req: AuthRequest, res: Response
       pendingRoomCreations.delete(incidentId);
     }
   } catch (error) {
-    console.error('Error creating video room:', error);
-    return res.status(500).json({
+    console.error('📹 [create-room] Error creating video room:', error);
+    const errorMessage = error instanceof Error ? error.message : 'Failed to create video room';
+    // If it's a Daily.co API error, extract the status code
+    const status = errorMessage.includes('Daily.co API error (400)') ? 400 : 
+                   errorMessage.includes('Daily.co API error (401)') ? 401 : 
+                   errorMessage.includes('Daily.co API error (403)') ? 403 : 500;
+    return res.status(status).json({
       success: false,
-      error: 'Failed to create video room',
+      error: errorMessage,
     });
   }
 });
@@ -240,10 +260,15 @@ router.post('/get-token', authenticate, async (req: AuthRequest, res: Response) 
 
     if (!response.ok) {
       const errorData = await response.json();
-      console.error('Daily.co token error:', errorData);
+      console.error('📹 [get-token] Daily.co token error:', {
+        status: response.status,
+        statusText: response.statusText,
+        roomName,
+        error: errorData
+      });
       return res.status(response.status).json({
         success: false,
-        error: 'Failed to generate meeting token',
+        error: `Failed to generate meeting token: ${errorData.error || errorData.info || 'Unknown error'}`,
       });
     }
 

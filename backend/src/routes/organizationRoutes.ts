@@ -533,7 +533,7 @@ router.get('/:id/access-codes', authenticate, requireMinimumRole(UserRole.ADMIN)
   const accessCodes = await prisma.organizationAccessCode.findMany({
     where: { organizationId: id },
     include: {
-      CreatedBy: {
+      User: {
         select: {
           id: true,
           firstName: true,
@@ -628,7 +628,7 @@ router.post('/:id/access-codes', authenticate, requireMinimumRole(UserRole.ADMIN
       createdById: currentUser.id,
     },
     include: {
-      CreatedBy: {
+      User: {
         select: {
           id: true,
           firstName: true,
