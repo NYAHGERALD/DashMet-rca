@@ -513,11 +513,11 @@ router.patch(
   })
 );
 
-// DELETE /api/users/:id - Delete user (System Admin only)
+// DELETE /api/users/:id - Delete user and all their assets (Admin or System Admin)
 router.delete(
   '/:id',
   authenticate,
-  requireSystemAdmin,
+  requireAdmin,
   asyncHandler(async (req: AuthRequest, res): Promise<void> => {
     const { id } = req.params;
 
@@ -530,13 +530,118 @@ router.delete(
       return;
     }
 
-    await prisma.user.delete({
+    // Get target user info
+    const targetUser = await prisma.user.findUnique({
       where: { id },
+      select: { 
+        id: true,
+        email: true, 
+        firstName: true,
+        lastName: true,
+        role: true, 
+        organizationId: true,
+        firebaseUid: true,
+      },
+    });
+
+    if (!targetUser) {
+      res.status(404).json({
+        success: false,
+        error: 'User not found',
+      });
+      return;
+    }
+
+    // Non-system-admins can only delete users in their own organization
+    if (req.user!.role !== 'SYSTEM_ADMIN' && targetUser.organizationId !== req.user!.organizationId) {
+      res.status(403).json({
+        success: false,
+        error: 'Cannot delete users from another organization',
+      });
+      return;
+    }
+
+    // Only SYSTEM_ADMIN can delete other SYSTEM_ADMINs or ADMINs
+    if ((targetUser.role === 'SYSTEM_ADMIN' || targetUser.role === 'ADMIN') && req.user!.role !== 'SYSTEM_ADMIN') {
+      res.status(403).json({
+        success: false,
+        error: 'Only System Admins can delete Admin or System Admin users',
+      });
+      return;
+    }
+
+    // Delete user's related data in a transaction
+    await prisma.$transaction(async (tx) => {
+      // Delete sessions
+      await tx.session.deleteMany({ where: { userId: id } });
+      
+      // Delete chat messages
+      await tx.chatMessage.deleteMany({ where: { userId: id } });
+      
+      // Delete notifications
+      await tx.notification.deleteMany({ where: { userId: id } });
+      
+      // Update incidents - set assignedToUserId to null instead of deleting
+      await tx.incident.updateMany({ 
+        where: { assignedToUserId: id },
+        data: { assignedToUserId: null }
+      });
+      
+      // Update incidents - set reportedByUserId to null 
+      await tx.incident.updateMany({ 
+        where: { reportedByUserId: id },
+        data: { reportedByUserId: null }
+      });
+      
+      // Update RCA analyses - set leadAnalystId to null
+      await tx.rCAAnalysis.updateMany({ 
+        where: { leadAnalystId: id },
+        data: { leadAnalystId: null }
+      });
+      
+      // Delete RCA participants
+      await tx.rCAParticipant.deleteMany({ where: { userId: id } });
+      
+      // Update CAP actions - reassign ownership is complex, so we'll keep them but nullify
+      // Note: CAPAction has required ownerId, so we cannot nullify - delete orphan actions
+      await tx.cAPAction.deleteMany({ where: { ownerId: id } });
+      
+      // Set audit log userId to null (keep audit trail)
+      await tx.auditLog.updateMany({ 
+        where: { userId: id },
+        data: { userId: null }
+      });
+      
+      // Remove user from FMIR collaboratorIds (JSON array field)
+      const fmirReports = await tx.foreignMaterialIncident.findMany({
+        where: { collaboratorIds: { has: id } },
+        select: { id: true, collaboratorIds: true }
+      });
+      
+      for (const report of fmirReports) {
+        await tx.foreignMaterialIncident.update({
+          where: { id: report.id },
+          data: { 
+            collaboratorIds: report.collaboratorIds.filter((cid: string) => cid !== id)
+          }
+        });
+      }
+      
+      // Finally delete the user
+      await tx.user.delete({ where: { id } });
+    });
+
+    // Audit log the deletion
+    await logAuditFromRequest(req, 'DELETE', 'User', id, {
+      action: 'USER_DELETED',
+      deletedUserEmail: targetUser.email,
+      deletedUserName: `${targetUser.firstName} ${targetUser.lastName}`,
+      deletedUserRole: targetUser.role,
     });
 
     res.json({
       success: true,
-      message: 'User deleted successfully',
+      message: `User ${targetUser.firstName} ${targetUser.lastName} and their associated data have been deleted successfully`,
     });
   })
 );
