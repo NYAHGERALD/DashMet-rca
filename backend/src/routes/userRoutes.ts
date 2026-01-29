@@ -570,74 +570,57 @@ router.delete(
       return;
     }
 
-    // Delete user's related data in a transaction
-    await prisma.$transaction(async (tx) => {
-      // Delete sessions
-      await tx.session.deleteMany({ where: { userId: id } });
-      
-      // Delete chat messages
-      await tx.chatMessage.deleteMany({ where: { userId: id } });
-      
-      // Delete notifications
-      await tx.notification.deleteMany({ where: { userId: id } });
-      
-      // Update incidents - set assignedToUserId to null instead of deleting
-      await tx.incident.updateMany({ 
-        where: { assignedToUserId: id },
-        data: { assignedToUserId: null }
-      });
-      
-      // Update incidents - set reportedByUserId to null 
-      await tx.incident.updateMany({ 
-        where: { reportedByUserId: id },
-        data: { reportedByUserId: null }
-      });
-      
-      // Update RCA analyses - set leadAnalystId to null
-      await tx.rCAAnalysis.updateMany({ 
-        where: { leadAnalystId: id },
-        data: { leadAnalystId: null }
-      });
-      
-      // Delete RCA participants
-      await tx.rCAParticipant.deleteMany({ where: { userId: id } });
-      
-      // Update CAP actions - reassign ownership is complex, so we'll keep them but nullify
-      // Note: CAPAction has required ownerId, so we cannot nullify - delete orphan actions
-      await tx.cAPAction.deleteMany({ where: { ownerId: id } });
-      
-      // Set audit log userId to null (keep audit trail)
-      await tx.auditLog.updateMany({ 
-        where: { userId: id },
-        data: { userId: null }
-      });
-      
-      // Remove user from FMIR collaboratorIds (JSON array field)
-      const fmirReports = await tx.foreignMaterialIncident.findMany({
-        where: { collaboratorIds: { has: id } },
-        select: { id: true, collaboratorIds: true }
-      });
-      
-      for (const report of fmirReports) {
-        await tx.foreignMaterialIncident.update({
-          where: { id: report.id },
-          data: { 
-            collaboratorIds: report.collaboratorIds.filter((cid: string) => cid !== id)
-          }
-        });
-      }
-      
-      // Finally delete the user
-      await tx.user.delete({ where: { id } });
-    });
-
-    // Audit log the deletion
+    // Audit log the deletion first (before user data is gone)
     await logAuditFromRequest(req, 'DELETE', 'User', id, {
       action: 'USER_DELETED',
       deletedUserEmail: targetUser.email,
       deletedUserName: `${targetUser.firstName} ${targetUser.lastName}`,
       deletedUserRole: targetUser.role,
     });
+
+    // Delete user and all related data with extended timeout
+    await prisma.$transaction(async (tx) => {
+      // Nullify optional FKs first
+      await tx.incident.updateMany({ where: { assignedToId: id }, data: { assignedToId: null } });
+      await tx.incident.updateMany({ where: { escalatedToId: id }, data: { escalatedToId: null } });
+      await tx.incident.updateMany({ where: { investigationSubmittedById: id }, data: { investigationSubmittedById: null } });
+      await tx.foreignMaterialIncident.updateMany({ where: { submittedById: id }, data: { submittedById: null } });
+      await tx.auditLog.updateMany({ where: { userId: id }, data: { userId: null } });
+      await tx.supportRequest.updateMany({ where: { resolvedByUserId: id }, data: { resolvedByUserId: null } });
+      await tx.supportRequest.updateMany({ where: { submittedByUserId: id }, data: { submittedByUserId: null } });
+      await tx.aIFishboneSession.updateMany({ where: { lastUpdatedById: id }, data: { lastUpdatedById: null } });
+      await tx.policyDocument.updateMany({ where: { updatedByUserId: id }, data: { updatedByUserId: null } });
+      await tx.policyRevision.updateMany({ where: { createdByUserId: id }, data: { createdByUserId: null } });
+      await tx.organizationAccessCode.updateMany({ where: { createdById: id }, data: { createdById: null } });
+      
+      // Delete related records
+      await tx.session.deleteMany({ where: { userId: id } });
+      await tx.notification.deleteMany({ where: { userId: id } });
+      await tx.chatMessageReaction.deleteMany({ where: { userId: id } });
+      await tx.chatMessage.deleteMany({ where: { userId: id } });
+      await tx.chatMessageTemplate.deleteMany({ where: { userId: id } });
+      await tx.incidentParticipant.deleteMany({ where: { userId: id } });
+      await tx.comment.deleteMany({ where: { userId: id } });
+      await tx.evidenceAnnotation.deleteMany({ where: { userId: id } });
+      await tx.evidenceSpotlight.deleteMany({ where: { presentedById: id } });
+      await tx.meetingRecording.deleteMany({ where: { recordedById: id } });
+      await tx.discussionMarker.deleteMany({ where: { createdById: id } });
+      await tx.fiveWhysStep.deleteMany({ where: { answeredById: id } });
+      await tx.fiveWhysAnalysis.deleteMany({ where: { createdById: id } });
+      await tx.aIFishboneSession.deleteMany({ where: { startedById: id } });
+      await tx.cAPAction.deleteMany({ where: { ownerId: id } });
+      await tx.rCAAnalysis.deleteMany({ where: { analystId: id } });
+      await tx.fMIRAuditReport.deleteMany({ where: { auditedById: id } });
+      await tx.fMIRComment.deleteMany({ where: { authorId: id } });
+      await tx.regulatoryTracking.deleteMany({ where: { createdBy: id } });
+      await tx.supportRequestAlertDismissal.deleteMany({ where: { userId: id } });
+      await tx.supportStatusNotificationDismissal.deleteMany({ where: { userId: id } });
+      await tx.incident.deleteMany({ where: { createdById: id } });
+      await tx.foreignMaterialIncident.deleteMany({ where: { createdById: id } });
+      
+      // Finally delete the user
+      await tx.user.delete({ where: { id } });
+    }, { timeout: 30000 });
 
     res.json({
       success: true,

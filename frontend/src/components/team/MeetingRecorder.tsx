@@ -97,6 +97,13 @@ export default function MeetingRecorder({
 
   // Start screen selection
   const handleStartRecording = async () => {
+    // Check if screen sharing is supported (not available on mobile)
+    if (!navigator.mediaDevices?.getDisplayMedia) {
+      setErrorMessage('Screen recording is not supported on this device. Please use a desktop browser.');
+      setRecordingState('error');
+      onError?.('Screen recording is not supported on mobile devices');
+      return;
+    }
     setShowSourceSelector(true);
     setRecordingState('selecting');
     setErrorMessage(null);
@@ -112,6 +119,15 @@ export default function MeetingRecorder({
   // Start recording with selected source
   const startRecordingWithSource = async (sourceType: 'screen' | 'window' | 'tab') => {
     try {
+      // Check if screen sharing is supported (not available on mobile)
+      if (!navigator.mediaDevices?.getDisplayMedia) {
+        setErrorMessage('Screen recording is not supported on this device. Please use a desktop browser.');
+        setRecordingState('error');
+        setShowSourceSelector(false);
+        onError?.('Screen recording is not supported on mobile devices');
+        return;
+      }
+
       setRecordingState('recording');
       setShowSourceSelector(false);
 

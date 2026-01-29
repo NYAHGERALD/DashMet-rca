@@ -509,10 +509,23 @@ export default function VideoCall({ incidentId, rcaId, onClose, roomUrl: initial
     if (callFrameRef.current) {
       if (isScreenSharing) {
         callFrameRef.current.stopScreenShare();
+        setIsScreenSharing(false);
       } else {
-        await callFrameRef.current.startScreenShare();
+        // Check if screen sharing is supported (not available on mobile)
+        if (!navigator.mediaDevices?.getDisplayMedia) {
+          alert('Screen sharing is not supported on mobile devices. Please use a desktop browser.');
+          return;
+        }
+        try {
+          await callFrameRef.current.startScreenShare();
+          setIsScreenSharing(true);
+        } catch (error: any) {
+          console.error('Screen share error:', error);
+          if (error.message?.includes('getDisplayMedia') || error.name === 'NotAllowedError') {
+            alert('Screen sharing is not available on this device or was denied.');
+          }
+        }
       }
-      setIsScreenSharing(!isScreenSharing);
     }
   };
 
