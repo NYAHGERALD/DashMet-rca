@@ -320,15 +320,16 @@ model DefaultPrivilege {
 }
 
 model Department {
-  id          String     @id @default(uuid())
-  name        String
-  description String?
-  facilityId  String
-  createdAt   DateTime   @default(now())
-  updatedAt   DateTime   @updatedAt
-  Area        Area[]
-  Facility    Facility   @relation(fields: [facilityId], references: [id], onDelete: Cascade)
-  Incident    Incident[]
+  id                        String                      @id @default(uuid())
+  name                      String
+  description               String?
+  facilityId                String
+  createdAt                 DateTime                    @default(now())
+  updatedAt                 DateTime                    @updatedAt
+  Area                      Area[]
+  Facility                  Facility                    @relation(fields: [facilityId], references: [id], onDelete: Cascade)
+  Incident                  Incident[]
+  WorkplaceSafetyAssessment WorkplaceSafetyAssessment[]
 
   @@index([facilityId])
 }
@@ -467,20 +468,22 @@ model FMIRAIValidation {
 }
 
 model Facility {
-  id                      String                    @id @default(uuid())
-  name                    String
-  timezone                String                    @default("America/New_York")
-  address                 String?
-  organizationId          String
-  createdAt               DateTime                  @default(now())
-  updatedAt               DateTime                  @updatedAt
-  Area                    Area[]
-  Department              Department[]
-  Organization            Organization              @relation(fields: [organizationId], references: [id], onDelete: Cascade)
-  ForeignMaterialIncident ForeignMaterialIncident[]
-  Incident                Incident[]
-  RegulatoryTracking      RegulatoryTracking[]
-  Shift                   Shift[]
+  id                        String                      @id @default(uuid())
+  name                      String
+  timezone                  String                      @default("America/New_York")
+  address                   String?
+  organizationId            String
+  createdAt                 DateTime                    @default(now())
+  updatedAt                 DateTime                    @updatedAt
+  Area                      Area[]
+  Department                Department[]
+  Organization              Organization                @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  ForeignMaterialIncident   ForeignMaterialIncident[]
+  Incident                  Incident[]
+  RegulatoryTracking        RegulatoryTracking[]
+  Shift                     Shift[]
+  WorkplaceSafetyAssessment WorkplaceSafetyAssessment[]
+  Task                      Task[]
 
   @@index([organizationId])
 }
@@ -765,7 +768,6 @@ model Incident {
   DiscussionMarker                               DiscussionMarker[]
   Evidence                                       Evidence[]
   EvidenceSpotlight                              EvidenceSpotlight[]
-  MeetingRecording                               MeetingRecording[]
   Area                                           Area?                    @relation(fields: [areaId], references: [id])
   User_Incident_assignedToIdToUser               User?                    @relation("Incident_assignedToIdToUser", fields: [assignedToId], references: [id])
   Category                                       Category                 @relation(fields: [categoryId], references: [id])
@@ -778,6 +780,7 @@ model Incident {
   Organization                                   Organization             @relation(fields: [organizationId], references: [id], onDelete: Cascade)
   Shift                                          Shift?                   @relation(fields: [shiftId], references: [id])
   IncidentParticipant                            IncidentParticipant[]
+  MeetingRecording                               MeetingRecording[]
   Notification                                   Notification[]
   RCAAnalysis                                    RCAAnalysis[]
 
@@ -871,30 +874,35 @@ model Notification {
 }
 
 model Organization {
-  id                      String                    @id @default(uuid())
-  name                    String
-  region                  Region
-  defaultLanguage         Language                  @default(ENGLISH)
-  isActive                Boolean                   @default(true)
-  regulatoryRuleset       String?
-  createdAt               DateTime                  @default(now())
-  updatedAt               DateTime                  @updatedAt
-  isPublic                Boolean                   @default(false)
-  signupCode              String?                   @unique
-  AuditLog                AuditLog[]
-  Category                Category[]
-  DropdownOption          DropdownOption[]
-  FMIRAuditReport         FMIRAuditReport[]
-  Facility                Facility[]
-  FieldConfiguration      FieldConfiguration[]
-  ForeignMaterialIncident ForeignMaterialIncident[]
-  Incident                Incident[]
-  OrganizationAccessCode  OrganizationAccessCode[]
-  PrivilegeAuditLog       PrivilegeAuditLog[]
-  RegulatoryTracking      RegulatoryTracking[]
-  RolePrivilege           RolePrivilege[]
-  SupportRequest          SupportRequest[]
-  User                    User[]
+  id                        String                      @id @default(uuid())
+  name                      String
+  region                    Region
+  defaultLanguage           Language                    @default(ENGLISH)
+  isActive                  Boolean                     @default(true)
+  regulatoryRuleset         String?
+  createdAt                 DateTime                    @default(now())
+  updatedAt                 DateTime                    @updatedAt
+  isPublic                  Boolean                     @default(false)
+  signupCode                String?                     @unique
+  AuditLog                  AuditLog[]
+  Category                  Category[]
+  DropdownOption            DropdownOption[]
+  FMIRAuditReport           FMIRAuditReport[]
+  Facility                  Facility[]
+  FieldConfiguration        FieldConfiguration[]
+  ForeignMaterialIncident   ForeignMaterialIncident[]
+  Incident                  Incident[]
+  OrganizationAccessCode    OrganizationAccessCode[]
+  PrivilegeAuditLog         PrivilegeAuditLog[]
+  RegulatoryTracking        RegulatoryTracking[]
+  RolePrivilege             RolePrivilege[]
+  SupportRequest            SupportRequest[]
+  User                      User[]
+  WorkOrder                 WorkOrder[]
+  WorkOrderSettings         WorkOrderSettings?
+  WorkOrderTemplate         WorkOrderTemplate[]
+  WorkplaceSafetyAssessment WorkplaceSafetyAssessment[]
+  Task                      Task[]
 
   @@index([name])
   @@index([signupCode])
@@ -1241,49 +1249,10 @@ model SupportStatusNotificationDismissal {
   @@index([userId])
 }
 
-// =============================================================================
-// MEETING INTELLIGENCE - Task Model for AI Meeting App
-// =============================================================================
-model Task {
-  id              String       @id @default(uuid())
-  title           String
-  description     String?
-  status          TaskStatus   @default(PENDING)
-  priority        TaskPriority @default(MEDIUM)
-  dueDate         DateTime?
-  completedAt     DateTime?
-  
-  // Ownership
-  ownerId         String
-  owner           User         @relation("TaskOwner", fields: [ownerId], references: [id], onDelete: Cascade)
-  
-  // Assignment
-  assigneeId      String?
-  assignee        User?        @relation("TaskAssignee", fields: [assigneeId], references: [id])
-  
-  // Organization context
-  organizationId  String
-  facilityId      String?
-  
-  // Meeting reference (for tasks created from meetings)
-  meetingId       String?
-  
-  // Metadata
-  createdAt       DateTime     @default(now())
-  updatedAt       DateTime     @updatedAt
-
-  @@index([ownerId])
-  @@index([assigneeId])
-  @@index([organizationId])
-  @@index([status])
-  @@index([dueDate])
-}
-
 model User {
   id                                                                  String                               @id @default(uuid())
   email                                                               String                               @unique
   password                                                            String?
-  phone                                                               String?                              @db.VarChar(20)
   workEmail                                                           String?
   firstName                                                           String
   lastName                                                            String
@@ -1311,6 +1280,7 @@ model User {
   socketId                                                            String?
   profilePicture                                                      String?
   autoSaveEnabled                                                     Boolean                              @default(false)
+  phone                                                               String?                              @unique
   AIFishboneSessionsUpdated                                           AIFishboneSession[]                  @relation("AIFishboneSessionUpdatedBy")
   AIFishboneSessionsStarted                                           AIFishboneSession[]                  @relation("AIFishboneSessionStartedBy")
   AuditLog                                                            AuditLog[]
@@ -1322,7 +1292,6 @@ model User {
   MarkersCreated                                                      DiscussionMarker[]                   @relation("MarkerCreatedBy")
   AnnotationsCreated                                                  EvidenceAnnotation[]                 @relation("AnnotationCreatedBy")
   SpotlightsPresented                                                 EvidenceSpotlight[]                  @relation("SpotlightPresentedBy")
-  RecordingsCreated                                                   MeetingRecording[]                   @relation("RecordingRecordedBy")
   FMIRAuditReport                                                     FMIRAuditReport[]
   FMIRComment                                                         FMIRComment[]
   FiveWhysAnalysisCreated                                             FiveWhysAnalysis[]                   @relation("FiveWhysAnalysisCreatedBy")
@@ -1334,6 +1303,7 @@ model User {
   Incident_Incident_investigationSubmittedByIdToUser                  Incident[]                           @relation("Incident_investigationSubmittedByIdToUser")
   IncidentParticipant_IncidentParticipant_addedByIdToUser             IncidentParticipant[]                @relation("IncidentParticipant_addedByIdToUser")
   IncidentParticipant_IncidentParticipant_userIdToUser                IncidentParticipant[]                @relation("IncidentParticipant_userIdToUser")
+  RecordingsCreated                                                   MeetingRecording[]                   @relation("RecordingRecordedBy")
   OrganizationAccessCode                                              OrganizationAccessCode[]
   PolicyDocument                                                      PolicyDocument[]
   PolicyRevision                                                      PolicyRevision[]
@@ -1344,8 +1314,11 @@ model User {
   SupportRequestAlertDismissal                                        SupportRequestAlertDismissal[]
   SupportStatusNotificationDismissal                                  SupportStatusNotificationDismissal[]
   Organization                                                        Organization?                        @relation(fields: [organizationId], references: [id], onDelete: Cascade)
-  
-  // Meeting Intelligence - Tasks
+  WorkOrder_WorkOrder_assignedByIdToUser                              WorkOrder[]                          @relation("WorkOrder_assignedByIdToUser")
+  WorkOrder_WorkOrder_createdByIdToUser                               WorkOrder[]                          @relation("WorkOrder_createdByIdToUser")
+  WorkOrderStatusHistory                                              WorkOrderStatusHistory[]
+  WorkOrderTemplate                                                   WorkOrderTemplate[]
+  WorkplaceSafetyAssessment                                           WorkplaceSafetyAssessment[]
   TasksOwned                                                          Task[]                               @relation("TaskOwner")
   TasksAssigned                                                       Task[]                               @relation("TaskAssignee")
 
@@ -1455,31 +1428,221 @@ model DiscussionMarker {
 }
 
 model MeetingRecording {
-  id              String    @id @default(cuid())
-  incidentId      String
-  roomName        String
-  title           String?
-  description     String?
-  fileName        String
-  fileUrl         String
-  firebasePath    String
-  fileSize        Int
-  duration        Int?      // Duration in seconds
-  mimeType        String    @default("video/webm")
-  recordingType   String    @default("screen") // screen, camera, mixed
-  thumbnailUrl    String?
-  status          String    @default("ready") // uploading, processing, ready, failed
-  recordedById    String
-  startedAt       DateTime
-  endedAt         DateTime?
-  createdAt       DateTime  @default(now())
-  
-  recordedBy      User      @relation("RecordingRecordedBy", fields: [recordedById], references: [id])
-  incident        Incident  @relation(fields: [incidentId], references: [id], onDelete: Cascade)
+  id            String    @id @default(cuid())
+  incidentId    String
+  roomName      String
+  title         String?
+  description   String?
+  fileName      String
+  fileUrl       String
+  firebasePath  String
+  fileSize      Int
+  duration      Int?
+  mimeType      String    @default("video/webm")
+  recordingType String    @default("screen")
+  thumbnailUrl  String?
+  status        String    @default("ready")
+  recordedById  String
+  startedAt     DateTime
+  endedAt       DateTime?
+  createdAt     DateTime  @default(now())
+  incident      Incident  @relation(fields: [incidentId], references: [id], onDelete: Cascade)
+  recordedBy    User      @relation("RecordingRecordedBy", fields: [recordedById], references: [id])
 
   @@index([incidentId])
   @@index([roomName])
   @@index([recordedById])
+}
+
+model WSAItem {
+  id                   String     @id
+  sectionId            String
+  itemId               String
+  description          String
+  status               String?
+  deficiency           String?
+  correctiveAction     String?
+  dynamicEntries       Json?
+  workOrderPlaced      Boolean?   @default(false)
+  reportedViaSafetyApp Boolean?   @default(false)
+  safetyAppReportDate  DateTime?
+  workOrderDateCreated DateTime?
+  workOrderAssignedTo  String?
+  workOrderAttachment  Json?
+  sortOrder            Int        @default(0)
+  WSASection           WSASection @relation(fields: [sectionId], references: [id], onDelete: Cascade)
+
+  @@unique([sectionId, itemId])
+  @@index([sectionId])
+}
+
+model WSAPhoto {
+  id                        String                    @id
+  assessmentId              String
+  itemId                    String?
+  sectionId                 String?
+  fileName                  String
+  fileUrl                   String
+  fileSize                  Int?
+  mimeType                  String?
+  caption                   String?
+  uploadedAt                DateTime                  @default(now())
+  WorkplaceSafetyAssessment WorkplaceSafetyAssessment @relation(fields: [assessmentId], references: [id], onDelete: Cascade)
+
+  @@index([assessmentId])
+  @@index([itemId])
+}
+
+model WSASection {
+  id                        String                    @id
+  assessmentId              String
+  sectionId                 String
+  title                     String
+  sortOrder                 Int                       @default(0)
+  WSAItem                   WSAItem[]
+  WorkplaceSafetyAssessment WorkplaceSafetyAssessment @relation(fields: [assessmentId], references: [id], onDelete: Cascade)
+
+  @@unique([assessmentId, sectionId])
+  @@index([assessmentId])
+}
+
+model WorkOrder {
+  id                                String                    @id
+  woNumber                          String                    @unique
+  type                              WorkOrderType
+  assessmentId                      String
+  assessmentNumber                  String
+  sectionId                         String?
+  itemId                            String?
+  itemDescription                   String?
+  requestDate                       DateTime?
+  expenseClass                      String?
+  originator                        String?
+  woType                            String?
+  priority                          Int?
+  description                       String?
+  equipmentNo                       String?
+  equipmentDescription              String?
+  fullDescriptionOfIssue            String?
+  department                        String?
+  fileName                          String?
+  fileUrl                           String?
+  fileSize                          Int?
+  uploadedAt                        DateTime?
+  assignedTo                        String?
+  assignedById                      String?
+  status                            WorkOrderStatus           @default(PENDING)
+  completionDate                    DateTime?
+  createdById                       String
+  organizationId                    String
+  createdAt                         DateTime                  @default(now())
+  updatedAt                         DateTime
+  WorkplaceSafetyAssessment         WorkplaceSafetyAssessment @relation(fields: [assessmentId], references: [id], onDelete: Cascade)
+  User_WorkOrder_assignedByIdToUser User?                     @relation("WorkOrder_assignedByIdToUser", fields: [assignedById], references: [id])
+  User_WorkOrder_createdByIdToUser  User                      @relation("WorkOrder_createdByIdToUser", fields: [createdById], references: [id])
+  Organization                      Organization              @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  WorkOrderStatusHistory            WorkOrderStatusHistory[]
+
+  @@index([assessmentId])
+  @@index([assessmentNumber])
+  @@index([createdById])
+  @@index([organizationId])
+  @@index([status])
+  @@index([type])
+  @@index([woNumber])
+}
+
+model WorkOrderSettings {
+  id                     String       @id
+  organizationId         String       @unique
+  enableInAppForm        Boolean      @default(true)
+  enableTemplateDownload Boolean      @default(false)
+  preferredOption        String       @default("form")
+  formTitle              String       @default("Maintenance Work Order Request")
+  createdAt              DateTime     @default(now())
+  updatedAt              DateTime
+  Organization           Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+
+  @@index([organizationId])
+}
+
+model WorkOrderStatusHistory {
+  id          String           @id
+  workOrderId String
+  fromStatus  WorkOrderStatus?
+  toStatus    WorkOrderStatus
+  changedById String
+  changedAt   DateTime         @default(now())
+  notes       String?
+  User        User             @relation(fields: [changedById], references: [id])
+  WorkOrder   WorkOrder        @relation(fields: [workOrderId], references: [id], onDelete: Cascade)
+
+  @@index([changedAt])
+  @@index([changedById])
+  @@index([workOrderId])
+}
+
+model WorkOrderTemplate {
+  id             String       @id
+  organizationId String
+  name           String
+  fileName       String
+  fileUrl        String
+  fileSize       Int?
+  mimeType       String?
+  description    String?
+  version        Int          @default(1)
+  isActive       Boolean      @default(true)
+  uploadedById   String
+  uploadedAt     DateTime     @default(now())
+  updatedAt      DateTime
+  Organization   Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  User           User         @relation(fields: [uploadedById], references: [id])
+
+  @@unique([organizationId, isActive])
+  @@index([isActive])
+  @@index([organizationId])
+}
+
+model WorkplaceSafetyAssessment {
+  id                        String       @id
+  assessmentNumber          String       @unique
+  version                   String       @default("3/19/25")
+  date                      DateTime
+  department                String?
+  departmentId              String?
+  teamLeaderName            String
+  teamLeaderSignature       String?
+  employeeName              String?
+  employeeSignature         String?
+  operationManagerName      String?
+  operationManagerSignature String?
+  plantManagerName          String?
+  plantManagerSignature     String?
+  safetyManagerName         String?
+  safetyManagerSignature    String?
+  status                    WSAStatus    @default(DRAFT)
+  organizationId            String
+  facilityId                String?
+  createdById               String
+  createdAt                 DateTime     @default(now())
+  updatedAt                 DateTime
+  submittedAt               DateTime?
+  completedAt               DateTime?
+  WSAPhoto                  WSAPhoto[]
+  WSASection                WSASection[]
+  WorkOrder                 WorkOrder[]
+  User                      User         @relation(fields: [createdById], references: [id])
+  Department                Department?  @relation(fields: [departmentId], references: [id])
+  Facility                  Facility?    @relation(fields: [facilityId], references: [id])
+  Organization              Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+
+  @@index([assessmentNumber])
+  @@index([createdById])
+  @@index([departmentId])
+  @@index([facilityId])
+  @@index([organizationId])
+  @@index([status])
 }
 
 enum ActionPriority {
@@ -1758,9 +1921,24 @@ enum UserRole {
   QUALITY_CONTROL_MANAGER
 }
 
-// =============================================================================
-// MEETING INTELLIGENCE - Task Enums
-// =============================================================================
+enum WSAStatus {
+  DRAFT
+  SUBMITTED
+  COMPLETED
+}
+
+enum WorkOrderStatus {
+  PENDING
+  IN_PROGRESS
+  COMPLETED
+  CANCELLED
+}
+
+enum WorkOrderType {
+  IN_APP
+  UPLOADED
+}
+
 enum TaskStatus {
   PENDING
   IN_PROGRESS
@@ -1773,4 +1951,36 @@ enum TaskPriority {
   MEDIUM
   HIGH
   URGENT
+}
+
+model Task {
+  id             String       @id @default(uuid())
+  title          String
+  description    String?
+  status         TaskStatus   @default(PENDING)
+  priority       TaskPriority @default(MEDIUM)
+  dueDate        DateTime?
+  completedAt    DateTime?
+  
+  ownerId        String
+  owner          User         @relation("TaskOwner", fields: [ownerId], references: [id])
+  
+  assigneeId     String?
+  assignee       User?        @relation("TaskAssignee", fields: [assigneeId], references: [id])
+  
+  organizationId String
+  organization   Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  
+  facilityId     String?
+  facility       Facility?    @relation(fields: [facilityId], references: [id])
+  
+  meetingId      String?
+  
+  createdAt      DateTime     @default(now())
+  updatedAt      DateTime     @updatedAt
+
+  @@index([ownerId])
+  @@index([assigneeId])
+  @@index([organizationId])
+  @@index([status])
 }
