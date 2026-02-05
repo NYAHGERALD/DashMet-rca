@@ -36,6 +36,7 @@ import transcriptRoutes from './transcriptRoutes';
 import spotlightRoutes from './spotlight';
 import recordingsRoutes from './recordings';
 import mobileAuthRoutes from './mobileAuthRoutes';
+import taskRoutes from './taskRoutes';
 import { authenticate } from '../middleware/auth';
 import { getIncidentTranscripts } from '../controllers/transcriptController';
 
@@ -68,6 +69,10 @@ router.use('/firebase-auth', firebaseAuthRoutes);
 // Mobile App Authentication routes - PUBLIC, no auth required
 // Used by iOS Meeting Intelligence app for registration
 router.use('/mobile', mobileAuthRoutes);
+
+// Mobile App Task routes - PUBLIC for now (will add auth later)
+// Used by iOS Meeting Intelligence app for task management
+router.use('/mobile/tasks', taskRoutes);
 
 // Phase 1: Legacy JWT Authentication routes (will be deprecated)
 router.use('/auth', authRoutes);

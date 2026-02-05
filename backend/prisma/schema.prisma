@@ -1241,6 +1241,44 @@ model SupportStatusNotificationDismissal {
   @@index([userId])
 }
 
+// =============================================================================
+// MEETING INTELLIGENCE - Task Model for AI Meeting App
+// =============================================================================
+model Task {
+  id              String       @id @default(uuid())
+  title           String
+  description     String?
+  status          TaskStatus   @default(PENDING)
+  priority        TaskPriority @default(MEDIUM)
+  dueDate         DateTime?
+  completedAt     DateTime?
+  
+  // Ownership
+  ownerId         String
+  owner           User         @relation("TaskOwner", fields: [ownerId], references: [id], onDelete: Cascade)
+  
+  // Assignment
+  assigneeId      String?
+  assignee        User?        @relation("TaskAssignee", fields: [assigneeId], references: [id])
+  
+  // Organization context
+  organizationId  String
+  facilityId      String?
+  
+  // Meeting reference (for tasks created from meetings)
+  meetingId       String?
+  
+  // Metadata
+  createdAt       DateTime     @default(now())
+  updatedAt       DateTime     @updatedAt
+
+  @@index([ownerId])
+  @@index([assigneeId])
+  @@index([organizationId])
+  @@index([status])
+  @@index([dueDate])
+}
+
 model User {
   id                                                                  String                               @id @default(uuid())
   email                                                               String                               @unique
@@ -1306,6 +1344,10 @@ model User {
   SupportRequestAlertDismissal                                        SupportRequestAlertDismissal[]
   SupportStatusNotificationDismissal                                  SupportStatusNotificationDismissal[]
   Organization                                                        Organization?                        @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  
+  // Meeting Intelligence - Tasks
+  TasksOwned                                                          Task[]                               @relation("TaskOwner")
+  TasksAssigned                                                       Task[]                               @relation("TaskAssignee")
 
   @@index([email])
   @@index([isOnline])
@@ -1714,4 +1756,21 @@ enum UserRole {
   SYSTEM_ADMIN
   SAFETY_SECURITY_MANAGER
   QUALITY_CONTROL_MANAGER
+}
+
+// =============================================================================
+// MEETING INTELLIGENCE - Task Enums
+// =============================================================================
+enum TaskStatus {
+  PENDING
+  IN_PROGRESS
+  COMPLETED
+  CANCELLED
+}
+
+enum TaskPriority {
+  LOW
+  MEDIUM
+  HIGH
+  URGENT
 }
