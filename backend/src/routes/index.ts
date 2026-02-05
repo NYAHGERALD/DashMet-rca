@@ -37,6 +37,7 @@ import spotlightRoutes from './spotlight';
 import recordingsRoutes from './recordings';
 import mobileAuthRoutes from './mobileAuthRoutes';
 import taskRoutes from './taskRoutes';
+import meetingRoutes from './meetingRoutes';
 import { authenticate } from '../middleware/auth';
 import { getIncidentTranscripts } from '../controllers/transcriptController';
 
@@ -73,6 +74,10 @@ router.use('/mobile', mobileAuthRoutes);
 // Mobile App Task routes - PUBLIC for now (will add auth later)
 // Used by iOS Meeting Intelligence app for task management
 router.use('/mobile/tasks', taskRoutes);
+
+// Mobile App Meeting routes - PUBLIC for now (will add auth later)
+// Used by iOS Meeting Intelligence app for meeting management
+router.use('/mobile/meetings', meetingRoutes);
 
 // Phase 1: Legacy JWT Authentication routes (will be deprecated)
 router.use('/auth', authRoutes);

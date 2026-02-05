@@ -482,8 +482,9 @@ model Facility {
   Incident                  Incident[]
   RegulatoryTracking        RegulatoryTracking[]
   Shift                     Shift[]
-  WorkplaceSafetyAssessment WorkplaceSafetyAssessment[]
   Task                      Task[]
+  Meeting                   Meeting[]                   @relation("MeetingFacility")
+  WorkplaceSafetyAssessment WorkplaceSafetyAssessment[]
 
   @@index([organizationId])
 }
@@ -897,12 +898,13 @@ model Organization {
   RegulatoryTracking        RegulatoryTracking[]
   RolePrivilege             RolePrivilege[]
   SupportRequest            SupportRequest[]
+  Task                      Task[]
+  Meeting                   Meeting[]
   User                      User[]
   WorkOrder                 WorkOrder[]
   WorkOrderSettings         WorkOrderSettings?
   WorkOrderTemplate         WorkOrderTemplate[]
   WorkplaceSafetyAssessment WorkplaceSafetyAssessment[]
-  Task                      Task[]
 
   @@index([name])
   @@index([signupCode])
@@ -1313,14 +1315,16 @@ model User {
   SupportRequest_SupportRequest_submittedByUserIdToUser               SupportRequest[]                     @relation("SupportRequest_submittedByUserIdToUser")
   SupportRequestAlertDismissal                                        SupportRequestAlertDismissal[]
   SupportStatusNotificationDismissal                                  SupportStatusNotificationDismissal[]
+  TasksAssigned                                                       Task[]                               @relation("TaskAssignee")
+  TasksOwned                                                          Task[]                               @relation("TaskOwner")
+  MeetingsCreated                                                     Meeting[]                            @relation("MeetingCreator")
+  MeetingParticipations                                               MeetingParticipant[]                 @relation("MeetingParticipantUser")
   Organization                                                        Organization?                        @relation(fields: [organizationId], references: [id], onDelete: Cascade)
   WorkOrder_WorkOrder_assignedByIdToUser                              WorkOrder[]                          @relation("WorkOrder_assignedByIdToUser")
   WorkOrder_WorkOrder_createdByIdToUser                               WorkOrder[]                          @relation("WorkOrder_createdByIdToUser")
   WorkOrderStatusHistory                                              WorkOrderStatusHistory[]
   WorkOrderTemplate                                                   WorkOrderTemplate[]
   WorkplaceSafetyAssessment                                           WorkplaceSafetyAssessment[]
-  TasksOwned                                                          Task[]                               @relation("TaskOwner")
-  TasksAssigned                                                       Task[]                               @relation("TaskAssignee")
 
   @@index([email])
   @@index([isOnline])
@@ -1645,6 +1649,34 @@ model WorkplaceSafetyAssessment {
   @@index([status])
 }
 
+model Task {
+  id             String       @id @default(uuid())
+  title          String
+  description    String?
+  status         TaskStatus   @default(PENDING)
+  priority       TaskPriority @default(MEDIUM)
+  dueDate        DateTime?
+  completedAt    DateTime?
+  ownerId        String
+  assigneeId     String?
+  organizationId String
+  facilityId     String?
+  meetingId      String?
+  createdAt      DateTime     @default(now())
+  updatedAt      DateTime     @updatedAt
+  assignee       User?        @relation("TaskAssignee", fields: [assigneeId], references: [id])
+  facility       Facility?    @relation(fields: [facilityId], references: [id])
+  organization   Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  owner          User         @relation("TaskOwner", fields: [ownerId], references: [id])
+  meeting        Meeting?     @relation(fields: [meetingId], references: [id])
+
+  @@index([ownerId])
+  @@index([assigneeId])
+  @@index([organizationId])
+  @@index([status])
+  @@index([meetingId])
+}
+
 enum ActionPriority {
   LOW
   MEDIUM
@@ -1953,34 +1985,174 @@ enum TaskPriority {
   URGENT
 }
 
-model Task {
-  id             String       @id @default(uuid())
-  title          String
-  description    String?
-  status         TaskStatus   @default(PENDING)
-  priority       TaskPriority @default(MEDIUM)
-  dueDate        DateTime?
-  completedAt    DateTime?
-  
-  ownerId        String
-  owner          User         @relation("TaskOwner", fields: [ownerId], references: [id])
-  
-  assigneeId     String?
-  assignee       User?        @relation("TaskAssignee", fields: [assigneeId], references: [id])
-  
-  organizationId String
-  organization   Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
-  
-  facilityId     String?
-  facility       Facility?    @relation(fields: [facilityId], references: [id])
-  
-  meetingId      String?
-  
-  createdAt      DateTime     @default(now())
-  updatedAt      DateTime     @updatedAt
+// ============================================================================
+// MEETING INTELLIGENCE MODELS
+// ============================================================================
 
-  @@index([ownerId])
-  @@index([assigneeId])
+enum MeetingStatus {
+  DRAFT
+  RECORDING
+  UPLOADING
+  UPLOADED
+  PROCESSING
+  READY
+  NEEDS_REVIEW
+  PUBLISHED
+  FAILED
+}
+
+enum MeetingType {
+  GENERAL
+  STANDUP
+  ONE_ON_ONE
+  TEAM_SYNC
+  CLIENT_CALL
+  INTERVIEW
+  BRAINSTORM
+  REVIEW
+  OTHER
+}
+
+model Meeting {
+  id               String        @id @default(uuid())
+  title            String?
+  meetingType      MeetingType   @default(GENERAL)
+  status           MeetingStatus @default(DRAFT)
+  
+  // Location & Context
+  location         String?
+  tags             String[]      @default([])
+  language         String        @default("en")
+  
+  // Recording info
+  recordingUrl     String?       // Firebase Storage URL
+  duration         Int?          // Duration in seconds
+  recordedAt       DateTime?     // When recording started
+  
+  // AI Processing
+  processingStartedAt DateTime?
+  processingCompletedAt DateTime?
+  processingError  String?
+  
+  // Ownership
+  creatorId        String
+  creator          User          @relation("MeetingCreator", fields: [creatorId], references: [id])
+  
+  organizationId   String
+  organization     Organization  @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  
+  facilityId       String?
+  facility         Facility?     @relation("MeetingFacility", fields: [facilityId], references: [id])
+  
+  // Timestamps
+  createdAt        DateTime      @default(now())
+  updatedAt        DateTime      @updatedAt
+  publishedAt      DateTime?
+  
+  // Relations
+  participants     MeetingParticipant[]
+  bookmarks        MeetingBookmark[]
+  transcript       TranscriptBlock[]
+  summary          MeetingSummary?
+  actionItems      Task[]
+  attachments      MeetingAttachment[]
+
+  @@index([creatorId])
   @@index([organizationId])
   @@index([status])
+  @@index([createdAt])
+}
+
+model MeetingParticipant {
+  id          String   @id @default(uuid())
+  meetingId   String
+  meeting     Meeting  @relation(fields: [meetingId], references: [id], onDelete: Cascade)
+  
+  userId      String?
+  user        User?    @relation("MeetingParticipantUser", fields: [userId], references: [id])
+  
+  // For external participants without user account
+  name        String?
+  email       String?
+  phone       String?
+  
+  // Speaker mapping from AI
+  speakerLabel String?  // "Speaker 1", "Speaker 2", etc.
+  
+  createdAt   DateTime @default(now())
+
+  @@index([meetingId])
+  @@index([userId])
+}
+
+model MeetingBookmark {
+  id          String   @id @default(uuid())
+  meetingId   String
+  meeting     Meeting  @relation(fields: [meetingId], references: [id], onDelete: Cascade)
+  
+  timestamp   Int      // Seconds from start
+  label       String?
+  note        String?
+  
+  createdAt   DateTime @default(now())
+
+  @@index([meetingId])
+}
+
+model TranscriptBlock {
+  id           String   @id @default(uuid())
+  meetingId    String
+  meeting      Meeting  @relation(fields: [meetingId], references: [id], onDelete: Cascade)
+  
+  speakerLabel String   // "Speaker 1", "Speaker 2", etc.
+  speakerId    String?  // Linked to MeetingParticipant if resolved
+  
+  content      String
+  startTime    Int      // Seconds from start
+  endTime      Int      // Seconds from start
+  confidence   Float?   // AI confidence score
+  
+  createdAt    DateTime @default(now())
+
+  @@index([meetingId])
+  @@index([startTime])
+}
+
+model MeetingSummary {
+  id          String   @id @default(uuid())
+  meetingId   String   @unique
+  meeting     Meeting  @relation(fields: [meetingId], references: [id], onDelete: Cascade)
+  
+  keyPoints   Json?    // Array of key points
+  decisions   Json?    // Array of decisions
+  risks       Json?    // Array of risks/concerns
+  questions   Json?    // Array of open questions
+  nextSteps   Json?    // Array of next steps
+  
+  // Full summary text
+  executiveSummary String?
+  
+  // Versioning
+  version     Int      @default(1)
+  generatedAt DateTime @default(now())
+  editedAt    DateTime?
+  editedById  String?
+
+  @@index([meetingId])
+}
+
+model MeetingAttachment {
+  id          String   @id @default(uuid())
+  meetingId   String
+  meeting     Meeting  @relation(fields: [meetingId], references: [id], onDelete: Cascade)
+  
+  fileName    String
+  fileUrl     String
+  fileSize    Int?
+  mimeType    String?
+  
+  uploadedById String
+  uploadedAt  DateTime @default(now())
+
+  @@index([meetingId])
 }
