@@ -509,6 +509,10 @@ router.post('/link-firebase', async (req: Request, res: Response) => {
         id: true,
         firstName: true,
         lastName: true,
+        email: true,
+        role: true,
+        organizationId: true,
+        defaultSiteId: true,
       },
     });
 
@@ -518,6 +522,10 @@ router.post('/link-firebase', async (req: Request, res: Response) => {
         id: updatedUser.id,
         firstName: updatedUser.firstName,
         lastName: updatedUser.lastName,
+        email: updatedUser.email,
+        role: updatedUser.role,
+        organizationId: updatedUser.organizationId,
+        facilityId: updatedUser.defaultSiteId,
       },
     });
   } catch (error: any) {
