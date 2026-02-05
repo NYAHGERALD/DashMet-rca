@@ -35,6 +35,7 @@ import videoCallRoutes from './videoCallRoutes';
 import transcriptRoutes from './transcriptRoutes';
 import spotlightRoutes from './spotlight';
 import recordingsRoutes from './recordings';
+import mobileAuthRoutes from './mobileAuthRoutes';
 import { authenticate } from '../middleware/auth';
 import { getIncidentTranscripts } from '../controllers/transcriptController';
 
@@ -63,6 +64,10 @@ router.get('/version', (req, res) => {
 // Phase 1: Authentication routes
 // Phase 1.1: Firebase Authentication routes
 router.use('/firebase-auth', firebaseAuthRoutes);
+
+// Mobile App Authentication routes - PUBLIC, no auth required
+// Used by iOS Meeting Intelligence app for registration
+router.use('/mobile', mobileAuthRoutes);
 
 // Phase 1: Legacy JWT Authentication routes (will be deprecated)
 router.use('/auth', authRoutes);

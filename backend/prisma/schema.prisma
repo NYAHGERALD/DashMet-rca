@@ -1245,6 +1245,7 @@ model User {
   id                                                                  String                               @id @default(uuid())
   email                                                               String                               @unique
   password                                                            String?
+  phone                                                               String?                              @db.VarChar(20)
   workEmail                                                           String?
   firstName                                                           String
   lastName                                                            String
