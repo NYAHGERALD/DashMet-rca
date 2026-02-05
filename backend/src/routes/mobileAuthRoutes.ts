@@ -252,7 +252,10 @@ router.post('/validate-access-code', async (req: Request, res: Response) => {
 
 // ============================================================================
 // POST /api/mobile/register
-// Register a new user from mobile app
+// Register a new user OR update existing user's phone from mobile app
+// Cases:
+//   1. Email exists in DB → Just add/update phone number for existing user
+//   2. Email doesn't exist → Create new user with all provided info
 // Expects: { firstName, lastName, email, phone, accessCodeId, facilityId?, firebaseUid? }
 // ============================================================================
 router.post('/register', async (req: Request, res: Response) => {
@@ -260,39 +263,15 @@ router.post('/register', async (req: Request, res: Response) => {
     const { firstName, lastName, email, phone, accessCodeId, facilityId, firebaseUid } = req.body;
 
     // Validate required fields
-    if (!firstName || !lastName || !email || !phone || !accessCodeId) {
+    if (!email || !phone || !accessCodeId) {
       return res.status(400).json({
         success: false,
-        error: 'Missing required fields: firstName, lastName, email, phone, accessCodeId',
+        error: 'Missing required fields: email, phone, accessCodeId',
       });
     }
 
     const normalizedEmail = email.toLowerCase().trim();
     const normalizedPhone = phone.replace(/\s+/g, '').trim();
-
-    // Check if email already exists
-    const existingEmailUser = await prisma.user.findFirst({
-      where: { email: normalizedEmail },
-    });
-
-    if (existingEmailUser) {
-      return res.status(400).json({
-        success: false,
-        error: 'Email already registered',
-      });
-    }
-
-    // Check if phone already exists
-    const existingPhoneUser = await prisma.user.findFirst({
-      where: { phone: normalizedPhone },
-    });
-
-    if (existingPhoneUser) {
-      return res.status(400).json({
-        success: false,
-        error: 'Phone number already registered',
-      });
-    }
 
     // Validate access code and get role/organization
     const accessCode = await prisma.organizationAccessCode.findFirst({
@@ -337,50 +316,134 @@ router.post('/register', async (req: Request, res: Response) => {
       }
     }
 
-    // Create user (facilityId is not stored on User model, organization assigns facilities differently)
-    const user = await prisma.user.create({
-      data: {
-        id: uuidv4(),
-        updatedAt: new Date(),
-        email: normalizedEmail,
-        phone: normalizedPhone,
-        firstName: firstName.trim(),
-        lastName: lastName.trim(),
-        role: accessCode.role,
-        organizationId: accessCode.organizationId,
-        firebaseUid: firebaseUid || null,
-        isActive: true,
-      },
-      select: {
-        id: true,
-        email: true,
-        phone: true,
-        firstName: true,
-        lastName: true,
-        role: true,
-        organizationId: true,
-      },
+    // Check if email already exists in database
+    const existingUser = await prisma.user.findFirst({
+      where: { email: normalizedEmail },
     });
 
-    // Increment access code usage count
-    await prisma.organizationAccessCode.update({
-      where: { id: accessCode.id },
-      data: { usedCount: { increment: 1 } },
-    });
+    let user;
 
-    return res.status(201).json({
-      success: true,
-      user: {
-        id: user.id,
-        firstName: user.firstName,
-        lastName: user.lastName,
-        email: user.email,
-        phone: user.phone,
-        role: user.role,
-        organizationId: user.organizationId,
-        facilityId: facilityId || null,
-      },
-    });
+    if (existingUser) {
+      // CASE 1: Email exists - Update existing user's phone number
+      // Check if phone is already used by a DIFFERENT user
+      const phoneInUse = await prisma.user.findFirst({
+        where: { 
+          phone: normalizedPhone,
+          id: { not: existingUser.id }
+        },
+      });
+
+      if (phoneInUse) {
+        return res.status(400).json({
+          success: false,
+          error: 'Phone number already registered to another user',
+        });
+      }
+
+      // Update existing user with phone number (and firebaseUid if provided)
+      user = await prisma.user.update({
+        where: { id: existingUser.id },
+        data: {
+          phone: normalizedPhone,
+          firebaseUid: firebaseUid || existingUser.firebaseUid,
+          updatedAt: new Date(),
+        },
+        select: {
+          id: true,
+          email: true,
+          phone: true,
+          firstName: true,
+          lastName: true,
+          role: true,
+          organizationId: true,
+        },
+      });
+
+      return res.status(200).json({
+        success: true,
+        isExistingUser: true,
+        message: 'Phone number linked to existing account',
+        user: {
+          id: user.id,
+          firstName: user.firstName,
+          lastName: user.lastName,
+          email: user.email,
+          phone: user.phone,
+          role: user.role,
+          organizationId: user.organizationId,
+          facilityId: facilityId || null,
+        },
+      });
+
+    } else {
+      // CASE 2: Email doesn't exist - Create new user
+      // Validate that first and last name are provided for new users
+      if (!firstName || !lastName) {
+        return res.status(400).json({
+          success: false,
+          error: 'First name and last name are required for new users',
+        });
+      }
+
+      // Check if phone already exists
+      const existingPhoneUser = await prisma.user.findFirst({
+        where: { phone: normalizedPhone },
+      });
+
+      if (existingPhoneUser) {
+        return res.status(400).json({
+          success: false,
+          error: 'Phone number already registered',
+        });
+      }
+
+      // Create new user
+      user = await prisma.user.create({
+        data: {
+          id: uuidv4(),
+          updatedAt: new Date(),
+          email: normalizedEmail,
+          phone: normalizedPhone,
+          firstName: firstName.trim(),
+          lastName: lastName.trim(),
+          role: accessCode.role,
+          organizationId: accessCode.organizationId,
+          firebaseUid: firebaseUid || null,
+          isActive: true,
+        },
+        select: {
+          id: true,
+          email: true,
+          phone: true,
+          firstName: true,
+          lastName: true,
+          role: true,
+          organizationId: true,
+        },
+      });
+
+      // Increment access code usage count (only for new users)
+      await prisma.organizationAccessCode.update({
+        where: { id: accessCode.id },
+        data: { usedCount: { increment: 1 } },
+      });
+
+      return res.status(201).json({
+        success: true,
+        isExistingUser: false,
+        message: 'New account created successfully',
+        user: {
+          id: user.id,
+          firstName: user.firstName,
+          lastName: user.lastName,
+          email: user.email,
+          phone: user.phone,
+          role: user.role,
+          organizationId: user.organizationId,
+          facilityId: facilityId || null,
+        },
+      });
+    }
   } catch (error: any) {
     console.error('Register user error:', error);
     return res.status(500).json({
