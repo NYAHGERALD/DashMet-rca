@@ -75,7 +75,7 @@ router.post('/check-phone', async (req: Request, res: Response) => {
 // ============================================================================
 // POST /api/mobile/check-email
 // Check if email exists in database
-// Returns: { exists: boolean, email?: string }
+// Returns: { exists: boolean, email?: string, firstName?: string, lastName?: string }
 // ============================================================================
 router.post('/check-email', async (req: Request, res: Response) => {
   try {
@@ -95,7 +95,10 @@ router.post('/check-email', async (req: Request, res: Response) => {
         email: normalizedEmail,
       },
       select: {
+        id: true,
         email: true,
+        firstName: true,
+        lastName: true,
       },
     });
 
@@ -103,6 +106,9 @@ router.post('/check-email', async (req: Request, res: Response) => {
       success: true,
       exists: !!user,
       email: user?.email || null,
+      firstName: user?.firstName || null,
+      lastName: user?.lastName || null,
+      userId: user?.id || null,
     });
   } catch (error: any) {
     console.error('Check email error:', error);
