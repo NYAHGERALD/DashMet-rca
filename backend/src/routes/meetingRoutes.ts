@@ -426,6 +426,144 @@ router.post('/:id/participants', async (req: Request, res: Response) => {
 });
 
 // ============================================================================
+// POST /api/mobile/meetings/:id/transcript
+// Save transcript blocks for a meeting (raw, processed, or AI-generated)
+// ============================================================================
+router.post('/:id/transcript', async (req: Request, res: Response) => {
+  try {
+    const { id } = req.params;
+    const { blocks, rawText, processedText, type = 'raw' } = req.body;
+
+    const existingMeeting = await prisma.meeting.findUnique({
+      where: { id },
+    });
+
+    if (!existingMeeting) {
+      return res.status(404).json({
+        success: false,
+        error: 'Meeting not found',
+      });
+    }
+
+    // If blocks array provided, create TranscriptBlocks
+    if (blocks && Array.isArray(blocks) && blocks.length > 0) {
+      // Delete existing transcript blocks first
+      await prisma.transcriptBlock.deleteMany({
+        where: { meetingId: id },
+      });
+
+      // Create new blocks
+      const createdBlocks = await prisma.transcriptBlock.createMany({
+        data: blocks.map((block: any) => ({
+          meetingId: id,
+          speakerLabel: block.speakerLabel || 'Speaker 1',
+          speakerId: block.speakerId || null,
+          content: block.content || block.text,
+          startTime: block.startTime || 0,
+          endTime: block.endTime || 0,
+          confidence: block.confidence || null,
+        })),
+      });
+
+      return res.status(201).json({
+        success: true,
+        message: `Created ${createdBlocks.count} transcript blocks`,
+        count: createdBlocks.count,
+      });
+    }
+
+    // If rawText/processedText provided, create a single block
+    if (rawText || processedText) {
+      // Delete existing transcript blocks first
+      await prisma.transcriptBlock.deleteMany({
+        where: { meetingId: id },
+      });
+
+      const content = processedText || rawText;
+      const block = await prisma.transcriptBlock.create({
+        data: {
+          meetingId: id,
+          speakerLabel: 'Full Transcript',
+          content: content,
+          startTime: 0,
+          endTime: existingMeeting.duration || 0,
+          confidence: type === 'processed' ? 0.95 : 0.8,
+        },
+      });
+
+      return res.status(201).json({
+        success: true,
+        message: 'Transcript saved successfully',
+        transcriptBlock: block,
+      });
+    }
+
+    return res.status(400).json({
+      success: false,
+      error: 'Either blocks array or rawText/processedText is required',
+    });
+  } catch (error: any) {
+    console.error('Save transcript error:', error);
+    return res.status(500).json({
+      success: false,
+      error: 'Failed to save transcript',
+    });
+  }
+});
+
+// ============================================================================
+// POST /api/mobile/meetings/:id/summary
+// Save AI-generated summary for a meeting
+// ============================================================================
+router.post('/:id/summary', async (req: Request, res: Response) => {
+  try {
+    const { id } = req.params;
+    const { executiveSummary, keyPoints, decisions, nextSteps } = req.body;
+
+    const existingMeeting = await prisma.meeting.findUnique({
+      where: { id },
+    });
+
+    if (!existingMeeting) {
+      return res.status(404).json({
+        success: false,
+        error: 'Meeting not found',
+      });
+    }
+
+    // Upsert summary (create or update)
+    const summary = await prisma.meetingSummary.upsert({
+      where: { meetingId: id },
+      update: {
+        executiveSummary: executiveSummary || null,
+        keyPoints: keyPoints || null,
+        decisions: decisions || null,
+        nextSteps: nextSteps || null,
+      },
+      create: {
+        meetingId: id,
+        executiveSummary: executiveSummary || null,
+        keyPoints: keyPoints || null,
+        decisions: decisions || null,
+        nextSteps: nextSteps || null,
+      },
+    });
+
+    return res.status(201).json({
+      success: true,
+      message: 'Summary saved successfully',
+      summary,
+    });
+  } catch (error: any) {
+    console.error('Save summary error:', error);
+    return res.status(500).json({
+      success: false,
+      error: 'Failed to save summary',
+    });
+  }
+});
+
+// ============================================================================
 // PATCH /api/mobile/meetings/:id/upload
 // Convenience endpoint to mark a meeting as uploaded with recording info
 // ============================================================================
