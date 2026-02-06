@@ -13,7 +13,7 @@
  */
 
 import { Router, Request, Response } from 'express';
-import { PrismaClient, MeetingStatus, MeetingType } from '@prisma/client';
+import { PrismaClient } from '@prisma/client';
 
 const router = Router();
 const prisma = new PrismaClient();
@@ -28,8 +28,17 @@ router.post('/', async (req: Request, res: Response) => {
       title, 
       meetingType,
       location,
+      locationType,
       tags,
       language,
+      scheduledAt,
+      departmentId,
+      objective,
+      agendaItems,
+      liveTranscriptionEnabled,
+      aiProcessingMode,
+      confidentialityLevel,
+      participants,
       creatorId, 
       organizationId, 
       facilityId 
@@ -56,11 +65,19 @@ router.post('/', async (req: Request, res: Response) => {
     const meeting = await prisma.meeting.create({
       data: {
         title: title?.trim() || null,
-        meetingType: meetingType || MeetingType.GENERAL,
-        status: MeetingStatus.DRAFT,
+        meetingType: meetingType || 'GENERAL',
+        status: 'DRAFT',
         location: location?.trim() || null,
+        locationType: locationType || null,
         tags: tags || [],
         language: language || 'en',
+        scheduledAt: scheduledAt ? new Date(scheduledAt) : null,
+        departmentId: departmentId || null,
+        objective: objective?.trim() || null,
+        agendaItems: agendaItems || [],
+        liveTranscriptionEnabled: liveTranscriptionEnabled !== false,
+        aiProcessingMode: aiProcessingMode || null,
+        confidentialityLevel: confidentialityLevel || null,
         creatorId,
         organizationId,
         facilityId: facilityId || null,
@@ -69,11 +86,45 @@ router.post('/', async (req: Request, res: Response) => {
         creator: {
           select: { id: true, firstName: true, lastName: true, email: true },
         },
+        department: {
+          select: { id: true, name: true },
+        },
         participants: true,
         bookmarks: true,
         _count: { select: { actionItems: true } },
       },
     });
+
+    // If participants were provided, add them
+    if (participants && Array.isArray(participants) && participants.length > 0) {
+      await prisma.meetingParticipant.createMany({
+        data: participants.map((p: any) => ({
+          meetingId: meeting.id,
+          userId: p.userId || null,
+          name: p.name || null,
+          email: p.email || null,
+          phone: p.phone || null,
+        })),
+      });
+      
+      // Re-fetch meeting with participants
+      const updatedMeeting = await prisma.meeting.findUnique({
+        where: { id: meeting.id },
+        include: {
+          creator: {
+            select: { id: true, firstName: true, lastName: true, email: true },
+          },
+          department: {
+            select: { id: true, name: true },
+          },
+          participants: true,
+          bookmarks: true,
+          _count: { select: { actionItems: true } },
+        },
+      });
+      
+      return res.status(201).json({ success: true, meeting: updatedMeeting });
+    }
 
     return res.status(201).json({ success: true, meeting });
   } catch (error: any) {

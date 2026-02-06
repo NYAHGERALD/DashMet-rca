@@ -330,6 +330,7 @@ model Department {
   Facility                  Facility                    @relation(fields: [facilityId], references: [id], onDelete: Cascade)
   Incident                  Incident[]
   WorkplaceSafetyAssessment WorkplaceSafetyAssessment[]
+  Meeting                   Meeting[]
 
   @@index([facilityId])
 }
@@ -2021,8 +2022,25 @@ model Meeting {
   
   // Location & Context
   location         String?
+  locationType     String?       // On-site, Remote, Hybrid, Custom
   tags             String[]      @default([])
   language         String        @default("en")
+  
+  // Scheduling
+  scheduledAt      DateTime?     // Scheduled date/time for the meeting
+  
+  // Department
+  departmentId     String?
+  department       Department?   @relation(fields: [departmentId], references: [id])
+  
+  // Meeting Purpose
+  objective        String?       // Meeting objective/goal
+  agendaItems      String[]      @default([])  // List of agenda items
+  
+  // AI Settings
+  liveTranscriptionEnabled Boolean @default(true)
+  aiProcessingMode String?       // ExecutiveSummary, DetailedMinutes, ActionFocused, Compliance
+  confidentialityLevel String?   // Private, TeamVisible, Restricted
   
   // Recording info
   recordingUrl     String?       // Firebase Storage URL
@@ -2058,6 +2076,7 @@ model Meeting {
   attachments      MeetingAttachment[]
 
   @@index([creatorId])
+  @@index([departmentId])
   @@index([organizationId])
   @@index([status])
   @@index([createdAt])
