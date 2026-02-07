@@ -758,3 +758,57 @@ export const transcribeAudio = async (req: AuthRequest, res: Response) => {
     });
   }
 };
+
+/**
+ * Process transcript to detect speakers and format with paragraph breaks
+ * Uses GPT to intelligently identify speaker changes based on context
+ * POST /transcripts/process-speakers
+ * Body: { transcript: string, isChunk?: boolean, chunkIndex?: number, totalChunks?: number }
+ */
+export const processSpeakers = async (req: AuthRequest, res: Response) => {
+  try {
+    const userId = req.user?.id;
+    
+    if (!userId) {
+      return res.status(401).json({ success: false, error: 'Unauthorized' });
+    }
+
+    const { transcript, isChunk, chunkIndex, totalChunks } = req.body;
+
+    if (!transcript || typeof transcript !== 'string') {
+      return res.status(400).json({
+        success: false,
+        error: 'Transcript text is required',
+      });
+    }
+
+    console.log(`[SpeakerDetection] ====== PROCESSING REQUEST ======`);
+    console.log(`[SpeakerDetection] User: ${userId}`);
+    console.log(`[SpeakerDetection] Input length: ${transcript.length} characters`);
+    console.log(`[SpeakerDetection] Is chunk: ${isChunk}, Index: ${chunkIndex}/${totalChunks}`);
+
+    // Import and use the speaker detection service
+    const speakerService = await import('../services/speakerDetectionService');
+    
+    const processedTranscript = await speakerService.detectAndFormatSpeakers(
+      transcript,
+      isChunk || false,
+      chunkIndex || 0,
+      totalChunks || 1
+    );
+
+    console.log(`[SpeakerDetection] ====== PROCESSING COMPLETE ======`);
+    console.log(`[SpeakerDetection] Output length: ${processedTranscript.length} characters`);
+
+    return res.json({
+      success: true,
+      processedTranscript,
+    });
+  } catch (error: any) {
+    console.error('[SpeakerDetection] Error processing transcript:', error);
+    return res.status(500).json({
+      success: false,
+      error: error.message || 'Failed to process transcript',
+    });
+  }
+};

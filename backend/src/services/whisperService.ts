@@ -184,18 +184,52 @@ async function transcribeChunk(
 ): Promise<TranscriptionResult> {
   try {
     const prompt = getMeetingPrompt(config.meetingType, previousText);
-    const fileStream = fs.createReadStream(filePath);
     
-    console.log(`[Whisper] Transcribing chunk: ${path.basename(filePath)}`);
+    // Verify file exists and get its size
+    if (!fs.existsSync(filePath)) {
+      console.error(`[Whisper] File not found: ${filePath}`);
+      return { success: false, error: 'Audio file not found' };
+    }
+    
+    const stats = fs.statSync(filePath);
+    console.log(`[Whisper] ====== Transcribing Chunk ======`);
+    console.log(`[Whisper] File: ${path.basename(filePath)}`);
+    console.log(`[Whisper] File size: ${stats.size} bytes (${(stats.size / 1024 / 1024).toFixed(2)}MB)`);
+    console.log(`[Whisper] Language: ${config.language || 'en'}`);
+    
+    // Read file as buffer and create a File object for OpenAI
+    const fileBuffer = fs.readFileSync(filePath);
+    console.log(`[Whisper] Buffer read: ${fileBuffer.length} bytes`);
+    
+    // Create a File object from the buffer
+    const file = new File([fileBuffer], path.basename(filePath), {
+      type: 'audio/m4a',
+    });
+    
+    console.log(`[Whisper] Sending to OpenAI Whisper API...`);
     
     const response = await openai.audio.transcriptions.create({
-      file: fileStream,
+      file: file,
       model: 'whisper-1',
       language: config.language || 'en',
       prompt: prompt,
       temperature: config.temperature || 0,
       response_format: 'verbose_json',
     });
+    
+    console.log(`[Whisper] ====== Whisper API Response ======`);
+    console.log(`[Whisper] Duration from API: ${response.duration}s`);
+    console.log(`[Whisper] Text length: ${response.text?.length || 0} characters`);
+    console.log(`[Whisper] Word count: ${response.text?.split(/\s+/).length || 0} words`);
+    console.log(`[Whisper] Segments: ${response.segments?.length || 0}`);
+    
+    // Log first and last segment timestamps if available
+    if (response.segments && response.segments.length > 0) {
+      const firstSeg = response.segments[0];
+      const lastSeg = response.segments[response.segments.length - 1];
+      console.log(`[Whisper] First segment: ${firstSeg.start}s - ${firstSeg.end}s`);
+      console.log(`[Whisper] Last segment: ${lastSeg.start}s - ${lastSeg.end}s`);
+    }
     
     return {
       success: true,
@@ -210,6 +244,7 @@ async function transcribeChunk(
     };
   } catch (error: any) {
     console.error(`[Whisper] Chunk transcription error:`, error.message);
+    console.error(`[Whisper] Error details:`, error);
     return {
       success: false,
       error: error.message,
