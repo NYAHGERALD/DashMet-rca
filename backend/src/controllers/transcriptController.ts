@@ -1151,3 +1151,162 @@ export const getAISummary = async (req: AuthRequest, res: Response) => {
     });
   }
 };
+
+/**
+ * Save processed transcript to database
+ * Stores both raw and AI-processed transcript
+ * POST /transcripts/save-processed
+ * Body: {
+ *   meetingId: string,
+ *   rawTranscript: string,
+ *   processedTranscript: string,
+ *   wordCount?: number,
+ *   duration?: number
+ * }
+ */
+export const saveProcessedTranscript = async (req: AuthRequest, res: Response) => {
+  try {
+    const userId = req.user?.id;
+    
+    if (!userId) {
+      return res.status(401).json({ success: false, error: 'Unauthorized' });
+    }
+
+    const { 
+      meetingId,
+      rawTranscript,
+      processedTranscript,
+      wordCount,
+      duration
+    } = req.body;
+
+    if (!meetingId) {
+      return res.status(400).json({
+        success: false,
+        error: 'Meeting ID is required',
+      });
+    }
+
+    if (!rawTranscript && !processedTranscript) {
+      return res.status(400).json({
+        success: false,
+        error: 'At least one transcript (raw or processed) is required',
+      });
+    }
+
+    console.log(`[SaveProcessedTranscript] ====== SAVING TRANSCRIPT ======`);
+    console.log(`[SaveProcessedTranscript] User: ${userId}`);
+    console.log(`[SaveProcessedTranscript] Meeting: ${meetingId}`);
+    console.log(`[SaveProcessedTranscript] Raw length: ${rawTranscript?.length || 0} characters`);
+    console.log(`[SaveProcessedTranscript] Processed length: ${processedTranscript?.length || 0} characters`);
+
+    // Upsert - update if exists, create if not
+    const summary = await prisma.meetingSummary.upsert({
+      where: { meetingId },
+      update: {
+        rawTranscript,
+        processedTranscript,
+        transcriptWordCount: wordCount,
+        transcriptDuration: duration,
+        transcriptSavedAt: new Date(),
+        editedAt: new Date(),
+        editedById: userId,
+      },
+      create: {
+        meetingId,
+        rawTranscript,
+        processedTranscript,
+        transcriptWordCount: wordCount,
+        transcriptDuration: duration,
+        transcriptSavedAt: new Date(),
+        generatedAt: new Date(),
+      },
+    });
+
+    console.log(`[SaveProcessedTranscript] ====== TRANSCRIPT SAVED ======`);
+    console.log(`[SaveProcessedTranscript] Summary ID: ${summary.id}`);
+
+    return res.json({
+      success: true,
+      transcript: {
+        id: summary.id,
+        meetingId: summary.meetingId,
+        rawTranscript: summary.rawTranscript,
+        processedTranscript: summary.processedTranscript,
+        wordCount: summary.transcriptWordCount,
+        duration: summary.transcriptDuration,
+        savedAt: summary.transcriptSavedAt,
+      },
+    });
+  } catch (error: any) {
+    console.error('[SaveProcessedTranscript] Error saving transcript:', error);
+    return res.status(500).json({
+      success: false,
+      error: error.message || 'Failed to save transcript',
+    });
+  }
+};
+
+/**
+ * Get processed transcript for a meeting
+ * GET /transcripts/processed/:meetingId
+ */
+export const getProcessedTranscript = async (req: AuthRequest, res: Response) => {
+  try {
+    const userId = req.user?.id;
+    
+    if (!userId) {
+      return res.status(401).json({ success: false, error: 'Unauthorized' });
+    }
+
+    const { meetingId } = req.params;
+
+    if (!meetingId) {
+      return res.status(400).json({
+        success: false,
+        error: 'Meeting ID is required',
+      });
+    }
+
+    console.log(`[GetProcessedTranscript] Fetching transcript for meeting: ${meetingId}`);
+
+    const summary = await prisma.meetingSummary.findUnique({
+      where: { meetingId },
+      select: {
+        id: true,
+        meetingId: true,
+        rawTranscript: true,
+        processedTranscript: true,
+        transcriptWordCount: true,
+        transcriptDuration: true,
+        transcriptSavedAt: true,
+      },
+    });
+
+    if (!summary || (!summary.rawTranscript && !summary.processedTranscript)) {
+      return res.status(404).json({
+        success: false,
+        error: 'No transcript found for this meeting',
+      });
+    }
+
+    return res.json({
+      success: true,
+      transcript: {
+        id: summary.id,
+        meetingId: summary.meetingId,
+        rawTranscript: summary.rawTranscript,
+        processedTranscript: summary.processedTranscript,
+        wordCount: summary.transcriptWordCount,
+        duration: summary.transcriptDuration,
+        savedAt: summary.transcriptSavedAt,
+      },
+    });
+  } catch (error: any) {
+    console.error('[GetProcessedTranscript] Error fetching transcript:', error);
+    return res.status(500).json({
+      success: false,
+      error: error.message || 'Failed to fetch transcript',
+    });
+  }
+};

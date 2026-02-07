@@ -2151,6 +2151,13 @@ model MeetingSummary {
   // Full summary text
   executiveSummary String?
   
+  // Processed Transcript (AI speaker-detected)
+  rawTranscript       String?   @db.Text    // Original Whisper transcription
+  processedTranscript String?   @db.Text    // AI-processed with speaker labels
+  transcriptWordCount Int?                  // Word count
+  transcriptDuration  Int?                  // Duration in seconds
+  transcriptSavedAt   DateTime?             // When transcript was saved
+  
   // AI Narrative Summary (GPT-4o generated)
   narrative       String?   @db.Text    // Full narrative summary text
   briefSummary    String?   @db.Text    // Brief one-paragraph summary

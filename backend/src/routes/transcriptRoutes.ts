@@ -20,6 +20,8 @@ import {
   generateSummaryAudio,
   saveAISummary,
   getAISummary,
+  saveProcessedTranscript,
+  getProcessedTranscript,
 } from '../controllers/transcriptController';
 import multer from 'multer';
 
@@ -74,5 +76,9 @@ router.post('/summary-audio', generateSummaryAudio);         // Generate TTS aud
 // AI Summary persistence
 router.post('/save-ai-summary', saveAISummary);              // Save AI summary to database
 router.get('/ai-summary/:meetingId', getAISummary);          // Get AI summary by meeting ID
+
+// Processed Transcript persistence
+router.post('/save-processed', saveProcessedTranscript);     // Save processed transcript to database
+router.get('/processed/:meetingId', getProcessedTranscript); // Get processed transcript by meeting ID
 
 export default router;
