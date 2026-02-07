@@ -372,14 +372,26 @@ export async function transcribeFromFile(
     const fileSize = getFileSize(filePath);
     const duration = await getAudioDuration(filePath);
     
-    console.log(`[Whisper] Processing audio: ${(fileSize / 1024 / 1024).toFixed(2)}MB, ~${duration.toFixed(0)}s`);
+    console.log(`[Whisper] ====== transcribeFromFile ======`);
+    console.log(`[Whisper] File path: ${filePath}`);
+    console.log(`[Whisper] File size: ${(fileSize / 1024 / 1024).toFixed(2)}MB (${fileSize} bytes)`);
+    console.log(`[Whisper] Estimated duration: ${duration.toFixed(1)}s`);
+    console.log(`[Whisper] Max file size limit: ${(MAX_FILE_SIZE / 1024 / 1024).toFixed(0)}MB`);
     
     // If file is small enough, transcribe directly
     if (fileSize <= MAX_FILE_SIZE) {
-      console.log(`[Whisper] File within size limit, transcribing directly`);
+      console.log(`[Whisper] File within size limit, transcribing directly (no chunking)`);
       const result = await transcribeChunk(filePath, config);
+      
+      console.log(`[Whisper] Direct transcription result:`);
+      console.log(`[Whisper]   Success: ${result.success}`);
+      console.log(`[Whisper]   Duration from API: ${result.duration?.toFixed(1)}s`);
+      console.log(`[Whisper]   Text length: ${result.text?.length || 0} characters`);
+      console.log(`[Whisper]   Segments: ${result.segments?.length || 0}`);
+      
       if (result.success && result.text) {
         result.text = formatIntoParagraphs(enhanceTranscription(result.text));
+        console.log(`[Whisper]   Enhanced text length: ${result.text.length} characters`);
       }
       return result;
     }
@@ -470,12 +482,26 @@ export async function transcribeFromBuffer(
   const tempDir = os.tmpdir();
   const tempFilePath = path.join(tempDir, `whisper_${Date.now()}_${fileName}`);
   
+  console.log(`[Whisper] transcribeFromBuffer called`);
+  console.log(`[Whisper] Buffer size: ${buffer.length} bytes (${(buffer.length / 1024 / 1024).toFixed(2)}MB)`);
+  console.log(`[Whisper] Temp file: ${tempFilePath}`);
+  
   try {
     fs.writeFileSync(tempFilePath, buffer);
+    
+    // Verify file was written correctly
+    const writtenStats = fs.statSync(tempFilePath);
+    console.log(`[Whisper] Temp file written: ${writtenStats.size} bytes`);
+    
+    if (writtenStats.size !== buffer.length) {
+      console.error(`[Whisper] ⚠️ File write mismatch! Buffer: ${buffer.length}, Written: ${writtenStats.size}`);
+    }
+    
     return await transcribeFromFile(tempFilePath, config);
   } finally {
     if (fs.existsSync(tempFilePath)) {
       fs.unlinkSync(tempFilePath);
+      console.log(`[Whisper] Temp file cleaned up`);
     }
   }
 }

@@ -703,9 +703,21 @@ export const transcribeAudio = async (req: AuthRequest, res: Response) => {
     const { language, meetingType } = req.query;
 
     const fileSizeMB = (file.size / 1024 / 1024).toFixed(2);
-    console.log(`[Whisper] Enterprise transcription started for user ${userId}`);
-    console.log(`[Whisper] File: ${file.originalname}, Size: ${fileSizeMB}MB`);
+    const fileSizeBytes = file.size;
+    const bufferLength = file.buffer?.length || 0;
+    
+    console.log(`[Whisper] ====== TRANSCRIPTION REQUEST ======`);
+    console.log(`[Whisper] User: ${userId}`);
+    console.log(`[Whisper] File: ${file.originalname}`);
+    console.log(`[Whisper] File size: ${fileSizeMB}MB (${fileSizeBytes} bytes)`);
+    console.log(`[Whisper] Buffer length: ${bufferLength} bytes`);
+    console.log(`[Whisper] MIME type: ${file.mimetype}`);
     console.log(`[Whisper] Language: ${language || 'en'}, Meeting type: ${meetingType || 'general'}`);
+    
+    // Verify buffer integrity
+    if (bufferLength !== fileSizeBytes) {
+      console.error(`[Whisper] ⚠️ Buffer size mismatch! File size: ${fileSizeBytes}, Buffer: ${bufferLength}`);
+    }
 
     // Transcribe from buffer - handles chunking automatically for large files
     const result = await whisperService.transcribeFromBuffer(
@@ -725,8 +737,11 @@ export const transcribeAudio = async (req: AuthRequest, res: Response) => {
       });
     }
 
-    console.log(`[Whisper] Transcription complete!`);
-    console.log(`[Whisper] Duration: ${result.duration?.toFixed(0)}s, Characters: ${result.text?.length || 0}`);
+    console.log(`[Whisper] ====== TRANSCRIPTION COMPLETE ======`);
+    console.log(`[Whisper] Duration: ${result.duration?.toFixed(0)}s`);
+    console.log(`[Whisper] Text length: ${result.text?.length || 0} characters`);
+    console.log(`[Whisper] Word count: ${result.text?.split(/\s+/).length || 0} words`);
+    console.log(`[Whisper] Segments: ${result.segments?.length || 0}`);
 
     return res.json({
       success: true,
@@ -736,7 +751,7 @@ export const transcribeAudio = async (req: AuthRequest, res: Response) => {
       segments: result.segments,
     });
   } catch (error: any) {
-    console.error('Error transcribing audio:', error);
+    console.error('[Whisper] Error transcribing audio:', error);
     return res.status(500).json({
       success: false,
       error: error.message || 'Failed to transcribe audio',
