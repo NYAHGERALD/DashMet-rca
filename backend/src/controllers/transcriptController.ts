@@ -702,9 +702,12 @@ export const transcribeAudio = async (req: AuthRequest, res: Response) => {
     // Get config from query params
     const { language, meetingType } = req.query;
 
-    console.log(`[Whisper] Transcribing audio for user ${userId}, file: ${file.originalname}, size: ${file.size}`);
+    const fileSizeMB = (file.size / 1024 / 1024).toFixed(2);
+    console.log(`[Whisper] Enterprise transcription started for user ${userId}`);
+    console.log(`[Whisper] File: ${file.originalname}, Size: ${fileSizeMB}MB`);
+    console.log(`[Whisper] Language: ${language || 'en'}, Meeting type: ${meetingType || 'general'}`);
 
-    // Transcribe from buffer
+    // Transcribe from buffer - handles chunking automatically for large files
     const result = await whisperService.transcribeFromBuffer(
       file.buffer,
       file.originalname,
@@ -722,13 +725,15 @@ export const transcribeAudio = async (req: AuthRequest, res: Response) => {
       });
     }
 
-    console.log(`[Whisper] Transcription successful, duration: ${result.duration}s`);
+    console.log(`[Whisper] Transcription complete!`);
+    console.log(`[Whisper] Duration: ${result.duration?.toFixed(0)}s, Characters: ${result.text?.length || 0}`);
 
     return res.json({
       success: true,
       transcript: result.text,
       language: result.language,
       duration: result.duration,
+      segments: result.segments,
     });
   } catch (error: any) {
     console.error('Error transcribing audio:', error);

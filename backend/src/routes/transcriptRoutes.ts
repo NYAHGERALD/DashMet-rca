@@ -1,6 +1,7 @@
 /**
  * Meeting Transcript Routes
  * API endpoints for AI meeting transcription and smart summaries
+ * Enterprise-grade transcription supporting up to 60+ minute recordings
  */
 import { Router } from 'express';
 import { authenticate } from '../middleware/auth';
@@ -19,23 +20,24 @@ import multer from 'multer';
 
 const router = Router();
 
-// Configure multer for audio file uploads (max 25MB for Whisper)
+// Configure multer for audio file uploads
+// Support large files for enterprise (up to 500MB for 60+ minute recordings)
 const upload = multer({
   storage: multer.memoryStorage(),
   limits: {
-    fileSize: 25 * 1024 * 1024, // 25MB limit
+    fileSize: 500 * 1024 * 1024, // 500MB limit for long recordings
   },
   fileFilter: (req, file, cb) => {
     // Accept common audio formats
     const allowedMimes = [
       'audio/mpeg', 'audio/mp3', 'audio/mp4', 'audio/m4a',
       'audio/wav', 'audio/webm', 'audio/ogg', 'audio/flac',
-      'video/mp4', 'video/webm'
+      'audio/x-m4a', 'audio/aac', 'video/mp4', 'video/webm'
     ];
-    if (allowedMimes.includes(file.mimetype) || file.originalname.match(/\.(mp3|mp4|m4a|wav|webm|ogg|flac|mpeg|mpga)$/i)) {
+    if (allowedMimes.includes(file.mimetype) || file.originalname.match(/\.(mp3|mp4|m4a|wav|webm|ogg|flac|mpeg|mpga|aac)$/i)) {
       cb(null, true);
     } else {
-      cb(new Error('Invalid file type. Supported: mp3, mp4, m4a, wav, webm, ogg, flac'));
+      cb(new Error('Invalid file type. Supported: mp3, mp4, m4a, wav, webm, ogg, flac, aac'));
     }
   },
 });
