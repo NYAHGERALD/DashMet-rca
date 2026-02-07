@@ -664,3 +664,77 @@ export const searchTranscripts = async (req: AuthRequest, res: Response) => {
     });
   }
 };
+
+/**
+ * Transcribe audio using OpenAI Whisper API (server-side)
+ * POST /transcripts/transcribe
+ * Body: multipart/form-data with 'audio' file
+ * Query params: language, meetingType
+ */
+export const transcribeAudio = async (req: AuthRequest, res: Response) => {
+  try {
+    const userId = req.user?.id;
+    
+    if (!userId) {
+      return res.status(401).json({ success: false, error: 'Unauthorized' });
+    }
+
+    // Check if file was uploaded
+    const file = req.file;
+    if (!file) {
+      return res.status(400).json({
+        success: false,
+        error: 'No audio file provided. Please upload an audio file.',
+      });
+    }
+
+    // Import whisper service
+    const whisperService = await import('../services/whisperService');
+
+    // Check if Whisper is configured
+    if (!whisperService.isConfigured()) {
+      return res.status(503).json({
+        success: false,
+        error: 'Transcription service is not configured. Please contact administrator.',
+      });
+    }
+
+    // Get config from query params
+    const { language, meetingType } = req.query;
+
+    console.log(`[Whisper] Transcribing audio for user ${userId}, file: ${file.originalname}, size: ${file.size}`);
+
+    // Transcribe from buffer
+    const result = await whisperService.transcribeFromBuffer(
+      file.buffer,
+      file.originalname,
+      {
+        language: language as string || 'en',
+        meetingType: meetingType as string || 'general',
+      }
+    );
+
+    if (!result.success) {
+      console.error('[Whisper] Transcription failed:', result.error);
+      return res.status(500).json({
+        success: false,
+        error: result.error || 'Transcription failed',
+      });
+    }
+
+    console.log(`[Whisper] Transcription successful, duration: ${result.duration}s`);
+
+    return res.json({
+      success: true,
+      transcript: result.text,
+      language: result.language,
+      duration: result.duration,
+    });
+  } catch (error: any) {
+    console.error('Error transcribing audio:', error);
+    return res.status(500).json({
+      success: false,
+      error: error.message || 'Failed to transcribe audio',
+    });
+  }
+};
