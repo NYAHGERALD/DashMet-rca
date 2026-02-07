@@ -38,6 +38,7 @@ import recordingsRoutes from './recordings';
 import mobileAuthRoutes from './mobileAuthRoutes';
 import taskRoutes from './taskRoutes';
 import meetingRoutes from './meetingRoutes';
+import consentRoutes from './consentRoutes';
 import { authenticate } from '../middleware/auth';
 import { getIncidentTranscripts } from '../controllers/transcriptController';
 
@@ -78,6 +79,10 @@ router.use('/mobile/tasks', taskRoutes);
 // Mobile App Meeting routes - PUBLIC for now (will add auth later)
 // Used by iOS Meeting Intelligence app for meeting management
 router.use('/mobile/meetings', meetingRoutes);
+
+// Consent & Compliance routes - PUBLIC for iOS app
+// Recording consent, policy management, audit logs
+router.use('/consent', consentRoutes);
 
 // Phase 1: Legacy JWT Authentication routes (will be deprecated)
 router.use('/auth', authRoutes);

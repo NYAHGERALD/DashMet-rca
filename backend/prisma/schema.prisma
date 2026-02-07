@@ -2074,6 +2074,7 @@ model Meeting {
   summary          MeetingSummary?
   actionItems      Task[]
   attachments      MeetingAttachment[]
+  consentRecords   RecordingConsentAudit[]
 
   @@index([creatorId])
   @@index([departmentId])
@@ -2194,4 +2195,116 @@ model MeetingAttachment {
   uploadedAt  DateTime @default(now())
 
   @@index([meetingId])
+}
+
+// ===========================================
+// CONSENT & COMPLIANCE MODELS
+// For GDPR/Legal compliance on meeting recordings
+// ===========================================
+
+// Consent Policy Version - Tracks policy changes over time
+model ConsentPolicy {
+  id          String   @id @default(uuid())
+  version     String   @unique  // e.g., "1.0.0", "1.1.0"
+  title       String   @default("Meeting Recording Consent Policy")
+  
+  // Policy content sections
+  purposeOfRecording    String   @db.Text  // Why we record
+  dataRetentionPolicy   String   @db.Text  // How long data is kept
+  dataSecurityPolicy    String   @db.Text  // How data is secured
+  dataSharingPolicy     String   @db.Text  // Who can access data
+  userRights            String   @db.Text  // User rights (deletion, access, etc.)
+  
+  // Full policy text (for legal reference)
+  fullPolicyText        String   @db.Text
+  
+  // Metadata
+  isActive              Boolean  @default(true)
+  effectiveDate         DateTime @default(now())
+  expirationDate        DateTime?
+  createdAt             DateTime @default(now())
+  updatedAt             DateTime @updatedAt
+  createdById           String?
+  
+  // Audit trail
+  consentRecords        RecordingConsentAudit[]
+
+  @@index([isActive])
+  @@index([version])
+}
+
+// Recording Consent Audit Log - IMMUTABLE record of consent
+// This table should NEVER be updated or deleted (legal requirement)
+model RecordingConsentAudit {
+  id                    String   @id @default(uuid())
+  
+  // Meeting Reference
+  meetingId             String
+  meeting               Meeting  @relation(fields: [meetingId], references: [id])
+  
+  // User who gave consent
+  userId                String
+  userEmail             String
+  userFirstName         String
+  userLastName          String
+  userPhoneNumber       String?
+  
+  // Policy accepted
+  policyId              String
+  policy                ConsentPolicy @relation(fields: [policyId], references: [id])
+  policyVersion         String        // Snapshot of version at time of consent
+  
+  // Consent details
+  consentType           ConsentType   @default(RECORDING_START)
+  consentGiven          Boolean       @default(true)
+  consentMethod         ConsentMethod @default(IN_APP_MODAL)
+  
+  // Legal verification data
+  ipAddress             String?
+  userAgent             String?       // Device/browser info
+  deviceId              String?       // Device identifier
+  deviceModel           String?       // e.g., "iPhone 15 Pro"
+  osVersion             String?       // e.g., "iOS 17.2"
+  appVersion            String?       // App version at time of consent
+  geoLocation           String?       // Optional: City/Country for legal purposes
+  
+  // Confirmation that all participants were notified
+  allParticipantsNotified Boolean @default(false)
+  audioAnnouncementPlayed Boolean @default(false)
+  
+  // Cryptographic hash for tamper-proofing
+  // Hash of: meetingId + userId + timestamp + policyVersion
+  consentHash           String   @unique
+  
+  // Timestamps (immutable)
+  consentTimestamp      DateTime @default(now())
+  
+  // For soft-delete tracking (we never actually delete)
+  isRevoked             Boolean  @default(false)
+  revokedAt             DateTime?
+  revocationReason      String?
+
+  @@index([meetingId])
+  @@index([userId])
+  @@index([consentTimestamp])
+  @@index([policyVersion])
+  @@index([consentHash])
+}
+
+// Consent Type Enum
+enum ConsentType {
+  RECORDING_START       // Consent to start recording
+  RECORDING_RESUME      // Consent to resume after pause
+  DATA_PROCESSING       // Consent for AI processing
+  DATA_RETENTION        // Consent for data storage
+  PARTICIPANT_ADDITION  // Consent when new participant joins
+}
+
+// Consent Method Enum
+enum ConsentMethod {
+  IN_APP_MODAL          // User clicked agree in app modal
+  VERBAL                // Verbal consent (recorded)
+  EMAIL                 // Email consent
+  WRITTEN               // Written/signed consent
+  IMPLICIT              // Implicit (stayed in meeting after announcement)
 }
