@@ -1318,6 +1318,8 @@ model User {
   SupportStatusNotificationDismissal                                  SupportStatusNotificationDismissal[]
   TasksAssigned                                                       Task[]                               @relation("TaskAssignee")
   TasksOwned                                                          Task[]                               @relation("TaskOwner")
+  TaskComments                                                        TaskComment[]
+  TaskEvidence                                                        TaskEvidence[]
   MeetingsCreated                                                     Meeting[]                            @relation("MeetingCreator")
   MeetingParticipations                                               MeetingParticipant[]                 @relation("MeetingParticipantUser")
   Organization                                                        Organization?                        @relation(fields: [organizationId], references: [id], onDelete: Cascade)
@@ -1651,31 +1653,72 @@ model WorkplaceSafetyAssessment {
 }
 
 model Task {
-  id             String       @id @default(uuid())
+  id             String         @id @default(uuid())
   title          String
   description    String?
-  status         TaskStatus   @default(PENDING)
-  priority       TaskPriority @default(MEDIUM)
+  status         TaskStatus     @default(PENDING)
+  priority       TaskPriority   @default(MEDIUM)
   dueDate        DateTime?
   completedAt    DateTime?
+  progress       Int            @default(0) // 0-100 percentage
   ownerId        String
   assigneeId     String?
   organizationId String
   facilityId     String?
   meetingId      String?
-  createdAt      DateTime     @default(now())
-  updatedAt      DateTime     @updatedAt
-  assignee       User?        @relation("TaskAssignee", fields: [assigneeId], references: [id])
-  facility       Facility?    @relation(fields: [facilityId], references: [id])
-  organization   Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
-  owner          User         @relation("TaskOwner", fields: [ownerId], references: [id])
-  meeting        Meeting?     @relation(fields: [meetingId], references: [id])
+  sourceText     String?        // Original text from transcript (if AI extracted)
+  isAiExtracted  Boolean        @default(false) // Whether this was AI extracted
+  createdAt      DateTime       @default(now())
+  updatedAt      DateTime       @updatedAt
+  assignee       User?          @relation("TaskAssignee", fields: [assigneeId], references: [id])
+  facility       Facility?      @relation(fields: [facilityId], references: [id])
+  organization   Organization   @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  owner          User           @relation("TaskOwner", fields: [ownerId], references: [id])
+  meeting        Meeting?       @relation(fields: [meetingId], references: [id])
+  comments       TaskComment[]
+  evidence       TaskEvidence[]
 
   @@index([ownerId])
   @@index([assigneeId])
   @@index([organizationId])
   @@index([status])
   @@index([meetingId])
+}
+
+// Task Comments - for discussions and notes
+model TaskComment {
+  id        String   @id @default(uuid())
+  content   String
+  taskId    String
+  authorId  String
+  parentId  String?  // For threaded replies
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+  task      Task     @relation(fields: [taskId], references: [id], onDelete: Cascade)
+  author    User     @relation(fields: [authorId], references: [id])
+  parent    TaskComment?  @relation("CommentReplies", fields: [parentId], references: [id])
+  replies   TaskComment[] @relation("CommentReplies")
+
+  @@index([taskId])
+  @@index([authorId])
+}
+
+// Task Evidence - for work done evidence/attachments
+model TaskEvidence {
+  id          String   @id @default(uuid())
+  title       String
+  description String?
+  fileUrl     String?
+  fileType    String?  // image, pdf, link, etc.
+  fileName    String?
+  taskId      String
+  uploaderId  String
+  createdAt   DateTime @default(now())
+  task        Task     @relation(fields: [taskId], references: [id], onDelete: Cascade)
+  uploader    User     @relation(fields: [uploaderId], references: [id])
+
+  @@index([taskId])
+  @@index([uploaderId])
 }
 
 enum ActionPriority {
