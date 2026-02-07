@@ -615,6 +615,156 @@ router.post('/:id/summary', async (req: Request, res: Response) => {
 });
 
 // ============================================================================
+// POST /api/mobile/meetings/:id/ai-summary
+// Save AI Narrative Summary with all GPT-4o generated fields + TTS audio URL
+// ============================================================================
+router.post('/:id/ai-summary', async (req: Request, res: Response) => {
+  try {
+    const { id } = req.params;
+    const { 
+      narrative,
+      briefSummary,
+      tone,
+      objectives,
+      keyDiscussions,
+      takeaways,
+      audioUrl,
+      audioVoice,
+      audioDuration,
+      generatedAt
+    } = req.body;
+
+    // Validate required fields
+    if (!narrative || !briefSummary) {
+      return res.status(400).json({
+        success: false,
+        error: 'narrative and briefSummary are required',
+      });
+    }
+
+    const existingMeeting = await prisma.meeting.findUnique({
+      where: { id },
+    });
+
+    if (!existingMeeting) {
+      return res.status(404).json({
+        success: false,
+        error: 'Meeting not found',
+      });
+    }
+
+    // Upsert AI summary (create or update)
+    const summary = await prisma.meetingSummary.upsert({
+      where: { meetingId: id },
+      update: {
+        // AI Narrative fields
+        narrative: narrative,
+        briefSummary: briefSummary,
+        tone: tone || null,
+        objectives: objectives || null,
+        keyDiscussions: keyDiscussions || null,
+        takeaways: takeaways || null,
+        // AI Audio fields
+        audioUrl: audioUrl || null,
+        audioVoice: audioVoice || null,
+        audioDuration: audioDuration || null,
+        // Also set executiveSummary for backward compatibility
+        executiveSummary: briefSummary,
+        // Update timestamp
+        generatedAt: generatedAt ? new Date(generatedAt) : new Date(),
+        editedAt: new Date(),
+      },
+      create: {
+        meetingId: id,
+        narrative: narrative,
+        briefSummary: briefSummary,
+        tone: tone || null,
+        objectives: objectives || null,
+        keyDiscussions: keyDiscussions || null,
+        takeaways: takeaways || null,
+        audioUrl: audioUrl || null,
+        audioVoice: audioVoice || null,
+        audioDuration: audioDuration || null,
+        executiveSummary: briefSummary,
+        generatedAt: generatedAt ? new Date(generatedAt) : new Date(),
+      },
+    });
+
+    console.log(`✅ AI Summary saved for meeting: ${id}`);
+    if (audioUrl) {
+      console.log(`   🔊 Audio URL: ${audioUrl}`);
+    }
+
+    return res.status(201).json({
+      success: true,
+      message: 'AI Summary saved successfully',
+      summary,
+    });
+  } catch (error: any) {
+    console.error('Save AI summary error:', error);
+    return res.status(500).json({
+      success: false,
+      error: 'Failed to save AI summary',
+    });
+  }
+});
+
+// ============================================================================
+// GET /api/mobile/meetings/:id/ai-summary
+// Get AI Summary for a meeting
+// ============================================================================
+router.get('/:id/ai-summary', async (req: Request, res: Response) => {
+  try {
+    const { id } = req.params;
+
+    const summary = await prisma.meetingSummary.findUnique({
+      where: { meetingId: id },
+      select: {
+        id: true,
+        meetingId: true,
+        narrative: true,
+        briefSummary: true,
+        tone: true,
+        objectives: true,
+        keyDiscussions: true,
+        takeaways: true,
+        audioUrl: true,
+        audioVoice: true,
+        audioDuration: true,
+        generatedAt: true,
+        // Also include legacy fields
+        executiveSummary: true,
+        keyPoints: true,
+        decisions: true,
+        nextSteps: true,
+      },
+    });
+
+    if (!summary) {
+      return res.status(404).json({
+        success: false,
+        error: 'AI Summary not found',
+      });
+    }
+
+    // Check if this is an AI narrative summary (has narrative field)
+    const isAISummary = summary.narrative !== null;
+
+    return res.status(200).json({
+      success: true,
+      summary,
+      isAISummary,
+    });
+  } catch (error: any) {
+    console.error('Get AI summary error:', error);
+    return res.status(500).json({
+      success: false,
+      error: 'Failed to get AI summary',
+    });
+  }
+});
+
+// ============================================================================
 // PATCH /api/mobile/meetings/:id/upload
 // Convenience endpoint to mark a meeting as uploaded with recording info
 // ============================================================================

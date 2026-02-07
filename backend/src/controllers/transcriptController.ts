@@ -969,3 +969,185 @@ export const generateSummaryAudio = async (req: AuthRequest, res: Response) => {
     });
   }
 };
+
+/**
+ * Save AI narrative summary to database
+ * Stores the generated summary in the MeetingSummary table
+ * POST /transcripts/save-ai-summary
+ * Body: {
+ *   meetingId: string,
+ *   narrative: string,
+ *   briefSummary: string,
+ *   tone: string,
+ *   objectives: string[],
+ *   keyDiscussions: string[],
+ *   takeaways: string[],
+ *   audioUrl?: string,
+ *   audioVoice?: string,
+ *   audioDuration?: number
+ * }
+ */
+export const saveAISummary = async (req: AuthRequest, res: Response) => {
+  try {
+    const userId = req.user?.id;
+    
+    if (!userId) {
+      return res.status(401).json({ success: false, error: 'Unauthorized' });
+    }
+
+    const { 
+      meetingId,
+      narrative,
+      briefSummary,
+      tone,
+      objectives,
+      keyDiscussions,
+      takeaways,
+      audioUrl,
+      audioVoice,
+      audioDuration
+    } = req.body;
+
+    if (!meetingId) {
+      return res.status(400).json({
+        success: false,
+        error: 'Meeting ID is required',
+      });
+    }
+
+    if (!narrative || !briefSummary) {
+      return res.status(400).json({
+        success: false,
+        error: 'Narrative and brief summary are required',
+      });
+    }
+
+    console.log(`[SaveAISummary] ====== SAVING AI SUMMARY ======`);
+    console.log(`[SaveAISummary] User: ${userId}`);
+    console.log(`[SaveAISummary] Meeting: ${meetingId}`);
+    console.log(`[SaveAISummary] Narrative length: ${narrative.length} characters`);
+    console.log(`[SaveAISummary] Has audio: ${!!audioUrl}`);
+
+    // Check if meeting exists (using the mobile meeting system)
+    // Since we're using Firebase for meetings, we'll just save to the summary table
+    // with meetingId as the key (meeting ID from iOS app)
+    
+    // Upsert - update if exists, create if not
+    const summary = await prisma.meetingSummary.upsert({
+      where: { meetingId },
+      update: {
+        narrative,
+        briefSummary,
+        tone,
+        objectives: objectives || [],
+        keyDiscussions: keyDiscussions || [],
+        takeaways: takeaways || [],
+        audioUrl,
+        audioVoice,
+        audioDuration,
+        editedAt: new Date(),
+        editedById: userId,
+      },
+      create: {
+        meetingId,
+        narrative,
+        briefSummary,
+        tone,
+        objectives: objectives || [],
+        keyDiscussions: keyDiscussions || [],
+        takeaways: takeaways || [],
+        audioUrl,
+        audioVoice,
+        audioDuration,
+        generatedAt: new Date(),
+      },
+    });
+
+    console.log(`[SaveAISummary] ====== AI SUMMARY SAVED ======`);
+    console.log(`[SaveAISummary] Summary ID: ${summary.id}`);
+
+    return res.json({
+      success: true,
+      summary: {
+        id: summary.id,
+        meetingId: summary.meetingId,
+        narrative: summary.narrative,
+        briefSummary: summary.briefSummary,
+        tone: summary.tone,
+        objectives: summary.objectives,
+        keyDiscussions: summary.keyDiscussions,
+        takeaways: summary.takeaways,
+        audioUrl: summary.audioUrl,
+        audioVoice: summary.audioVoice,
+        audioDuration: summary.audioDuration,
+        generatedAt: summary.generatedAt,
+      },
+    });
+  } catch (error: any) {
+    console.error('[SaveAISummary] Error saving AI summary:', error);
+    return res.status(500).json({
+      success: false,
+      error: error.message || 'Failed to save AI summary',
+    });
+  }
+};
+
+/**
+ * Get AI summary for a meeting
+ * GET /transcripts/ai-summary/:meetingId
+ */
+export const getAISummary = async (req: AuthRequest, res: Response) => {
+  try {
+    const userId = req.user?.id;
+    
+    if (!userId) {
+      return res.status(401).json({ success: false, error: 'Unauthorized' });
+    }
+
+    const { meetingId } = req.params;
+
+    if (!meetingId) {
+      return res.status(400).json({
+        success: false,
+        error: 'Meeting ID is required',
+      });
+    }
+
+    console.log(`[GetAISummary] Fetching summary for meeting: ${meetingId}`);
+
+    const summary = await prisma.meetingSummary.findUnique({
+      where: { meetingId },
+    });
+
+    if (!summary) {
+      return res.status(404).json({
+        success: false,
+        error: 'No AI summary found for this meeting',
+      });
+    }
+
+    return res.json({
+      success: true,
+      summary: {
+        id: summary.id,
+        meetingId: summary.meetingId,
+        narrative: summary.narrative,
+        briefSummary: summary.briefSummary,
+        tone: summary.tone,
+        objectives: summary.objectives,
+        keyDiscussions: summary.keyDiscussions,
+        takeaways: summary.takeaways,
+        audioUrl: summary.audioUrl,
+        audioVoice: summary.audioVoice,
+        audioDuration: summary.audioDuration,
+        generatedAt: summary.generatedAt,
+      },
+    });
+  } catch (error: any) {
+    console.error('[GetAISummary] Error fetching AI summary:', error);
+    return res.status(500).json({
+      success: false,
+      error: error.message || 'Failed to fetch AI summary',
+    });
+  }
+};

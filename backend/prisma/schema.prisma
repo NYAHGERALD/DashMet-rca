@@ -2151,6 +2151,19 @@ model MeetingSummary {
   // Full summary text
   executiveSummary String?
   
+  // AI Narrative Summary (GPT-4o generated)
+  narrative       String?   @db.Text    // Full narrative summary text
+  briefSummary    String?   @db.Text    // Brief one-paragraph summary
+  tone            String?               // Meeting tone (e.g., "productive", "collaborative")
+  objectives      Json?                 // Array of meeting objectives
+  keyDiscussions  Json?                 // Array of key discussion points
+  takeaways       Json?                 // Array of key takeaways
+  
+  // AI Audio Summary (TTS generated)
+  audioUrl        String?               // Firebase Storage URL for TTS audio
+  audioVoice      String?               // Voice used (onyx, echo, etc.)
+  audioDuration   Int?                  // Duration in seconds
+  
   // Versioning
   version     Int      @default(1)
   generatedAt DateTime @default(now())
