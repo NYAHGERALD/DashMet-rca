@@ -16,6 +16,8 @@ import {
   searchTranscripts,
   transcribeAudio,
   processSpeakers,
+  generateNarrativeSummary,
+  generateSummaryAudio,
 } from '../controllers/transcriptController';
 import multer from 'multer';
 
@@ -62,5 +64,9 @@ router.post('/transcribe', upload.single('audio'), transcribeAudio);  // Transcr
 
 // AI Speaker detection and formatting
 router.post('/process-speakers', processSpeakers);           // Process transcript to detect speakers
+
+// AI Narrative Summary with TTS
+router.post('/narrative-summary', generateNarrativeSummary); // Generate narrative summary
+router.post('/summary-audio', generateSummaryAudio);         // Generate TTS audio from summary
 
 export default router;
