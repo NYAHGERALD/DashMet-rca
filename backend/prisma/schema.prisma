@@ -2240,7 +2240,7 @@ model RecordingConsentAudit {
   
   // Meeting Reference
   meetingId             String
-  meeting               Meeting  @relation(fields: [meetingId], references: [id])
+  meeting               Meeting  @relation(fields: [meetingId], references: [id], onDelete: Cascade)
   
   // User who gave consent
   userId                String
