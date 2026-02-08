@@ -39,6 +39,7 @@ import mobileAuthRoutes from './mobileAuthRoutes';
 import taskRoutes from './taskRoutes';
 import meetingRoutes from './meetingRoutes';
 import consentRoutes from './consentRoutes';
+import aiVisionRoutes from './aiVisionRoutes';
 import { authenticate } from '../middleware/auth';
 import { getIncidentTranscripts } from '../controllers/transcriptController';
 
@@ -83,6 +84,10 @@ router.use('/mobile/meetings', meetingRoutes);
 // Consent & Compliance routes - PUBLIC for iOS app
 // Recording consent, policy management, audit logs
 router.use('/consent', consentRoutes);
+
+// AI Vision Assistant routes - PUBLIC for iOS app
+// Industrial equipment analysis with GPT-4 Vision and TTS
+router.use('/ai-vision', aiVisionRoutes);
 
 // Phase 1: Legacy JWT Authentication routes (will be deprecated)
 router.use('/auth', authRoutes);
