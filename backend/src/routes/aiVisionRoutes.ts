@@ -239,4 +239,61 @@ router.post('/tts', async (req: Request, res: Response) => {
   }
 });
 
+/**
+ * POST /api/ai-vision/transcribe
+ * Transcribe audio using OpenAI Whisper API
+ */
+router.post('/transcribe', async (req: Request, res: Response) => {
+  try {
+    const { audio } = req.body as { audio: string }; // base64 encoded audio
+    const apiKey = process.env.OPENAI_API_KEY;
+
+    if (!apiKey) {
+      return res.status(500).json({ error: 'OpenAI API key not configured' });
+    }
+
+    if (!audio) {
+      return res.status(400).json({ error: 'No audio provided' });
+    }
+
+    // Decode base64 audio to buffer
+    const audioBuffer = Buffer.from(audio, 'base64');
+
+    // Create form data for Whisper API
+    const formData = new FormData();
+    const audioBlob = new Blob([audioBuffer], { type: 'audio/m4a' });
+    formData.append('file', audioBlob, 'audio.m4a');
+    formData.append('model', 'whisper-1');
+    formData.append('language', 'en');
+    formData.append('response_format', 'json');
+
+    // Call OpenAI Whisper API
+    const openaiResponse = await fetch('https://api.openai.com/v1/audio/transcriptions', {
+      method: 'POST',
+      headers: {
+        'Authorization': `Bearer ${apiKey}`,
+      },
+      body: formData,
+    });
+
+    if (!openaiResponse.ok) {
+      const errorData = await openaiResponse.json();
+      console.error('Whisper API error:', errorData);
+      return res.status(openaiResponse.status).json({
+        error: errorData.error?.message || 'Failed to transcribe audio',
+      });
+    }
+
+    const data = await openaiResponse.json();
+    const transcription = data.text?.trim() || '';
+
+    return res.json({ transcription });
+  } catch (error: any) {
+    console.error('Transcription error:', error);
+    return res.status(500).json({
+      error: error.message || 'Failed to transcribe audio',
+    });
+  }
+});
+
 export default router;
