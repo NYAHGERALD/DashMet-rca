@@ -15,6 +15,11 @@
  * - GET    /api/mobile/tasks/:id/evidence       - Get evidence for task
  * - DELETE /api/mobile/tasks/evidence/:evidenceId - Delete evidence
  * - POST   /api/mobile/tasks/extract-from-transcript - AI extract action items from transcript
+ * - GET    /api/mobile/tasks/users/organization/:organizationId - Get users in an organization
+ * - POST   /api/mobile/tasks/:taskId/assignees  - Add assignees to a task
+ * - DELETE /api/mobile/tasks/:taskId/assignees/:userId - Remove an assignee
+ * - PUT    /api/mobile/tasks/:taskId/assignees  - Replace all assignees
+ * - GET    /api/mobile/tasks/:taskId/assignees  - Get all assignees for a task
  */
 
 import { Router, Request, Response } from 'express';
@@ -46,6 +51,26 @@ const taskInclude = {
       lastName: true,
       email: true,
     },
+  },
+  assignees: {
+    include: {
+      user: {
+        select: {
+          id: true,
+          firstName: true,
+          lastName: true,
+          email: true,
+        },
+      },
+      assigner: {
+        select: {
+          id: true,
+          firstName: true,
+          lastName: true,
+        },
+      },
+    },
+    orderBy: { assignedAt: 'desc' as const },
   },
   comments: {
     include: {
@@ -81,6 +106,47 @@ const taskInclude = {
     },
   },
 };
+
+// ============================================================================
+// GET /api/mobile/tasks/users/organization/:organizationId
+// Get all users in an organization (for assigning tasks)
+// ============================================================================
+router.get('/users/organization/:organizationId', async (req: Request, res: Response) => {
+  try {
+    const { organizationId } = req.params;
+
+    const users = await prisma.user.findMany({
+      where: {
+        organizationId,
+        isActive: true,
+      },
+      select: {
+        id: true,
+        email: true,
+        firstName: true,
+        lastName: true,
+        role: true,
+        profilePicture: true,
+      },
+      orderBy: [
+        { firstName: 'asc' },
+        { lastName: 'asc' },
+      ],
+    });
+
+    return res.json({
+      success: true,
+      users,
+      count: users.length,
+    });
+  } catch (error: any) {
+    console.error('Get organization users error:', error);
+    return res.status(500).json({
+      success: false,
+      error: 'Failed to fetch users',
+    });
+  }
+});
 
 // ============================================================================
 // POST /api/mobile/tasks
@@ -1121,6 +1187,237 @@ router.patch('/bulk-update-status', async (req: Request, res: Response) => {
     return res.status(500).json({
       success: false,
       error: 'Failed to update tasks',
+    });
+  }
+});
+
+// ============================================================================
+// ASSIGNEE ENDPOINTS - Multiple assignees per task
+// ============================================================================
+
+// POST /api/mobile/tasks/:taskId/assignees - Add assignees to a task
+router.post('/:taskId/assignees', async (req: Request, res: Response) => {
+  try {
+    const { taskId } = req.params;
+    const { userIds, assignedBy } = req.body;
+
+    if (!userIds || !Array.isArray(userIds) || userIds.length === 0) {
+      return res.status(400).json({
+        success: false,
+        error: 'userIds array is required',
+      });
+    }
+
+    // Verify task exists
+    const task = await prisma.task.findUnique({ where: { id: taskId } });
+    if (!task) {
+      return res.status(404).json({
+        success: false,
+        error: 'Task not found',
+      });
+    }
+
+    // Verify all users exist
+    const users = await prisma.user.findMany({
+      where: { id: { in: userIds } },
+    });
+
+    if (users.length !== userIds.length) {
+      return res.status(404).json({
+        success: false,
+        error: 'One or more users not found',
+      });
+    }
+
+    // Create assignee records (upsert to avoid duplicates)
+    const assignees = await Promise.all(
+      userIds.map(async (userId: string) => {
+        return prisma.taskAssignee.upsert({
+          where: {
+            taskId_userId: { taskId, userId },
+          },
+          update: {
+            assignedAt: new Date(),
+            assignedBy: assignedBy || null,
+          },
+          create: {
+            taskId,
+            userId,
+            assignedBy: assignedBy || null,
+          },
+          include: {
+            user: {
+              select: {
+                id: true,
+                firstName: true,
+                lastName: true,
+                email: true,
+              },
+            },
+          },
+        });
+      })
+    );
+
+    // Get updated task with all assignees
+    const updatedTask = await prisma.task.findUnique({
+      where: { id: taskId },
+      include: taskInclude,
+    });
+
+    return res.status(201).json({
+      success: true,
+      assignees,
+      task: updatedTask,
+    });
+  } catch (error: any) {
+    console.error('Add assignees error:', error);
+    return res.status(500).json({
+      success: false,
+      error: 'Failed to add assignees',
+    });
+  }
+});
+
+// DELETE /api/mobile/tasks/:taskId/assignees/:userId - Remove an assignee from a task
+router.delete('/:taskId/assignees/:userId', async (req: Request, res: Response) => {
+  try {
+    const { taskId, userId } = req.params;
+
+    // Verify the assignee exists
+    const assignee = await prisma.taskAssignee.findUnique({
+      where: {
+        taskId_userId: { taskId, userId },
+      },
+    });
+
+    if (!assignee) {
+      return res.status(404).json({
+        success: false,
+        error: 'Assignee not found',
+      });
+    }
+
+    await prisma.taskAssignee.delete({
+      where: {
+        taskId_userId: { taskId, userId },
+      },
+    });
+
+    // Get updated task
+    const updatedTask = await prisma.task.findUnique({
+      where: { id: taskId },
+      include: taskInclude,
+    });
+
+    return res.json({
+      success: true,
+      message: 'Assignee removed',
+      task: updatedTask,
+    });
+  } catch (error: any) {
+    console.error('Remove assignee error:', error);
+    return res.status(500).json({
+      success: false,
+      error: 'Failed to remove assignee',
+    });
+  }
+});
+
+// PUT /api/mobile/tasks/:taskId/assignees - Replace all assignees for a task
+router.put('/:taskId/assignees', async (req: Request, res: Response) => {
+  try {
+    const { taskId } = req.params;
+    const { userIds, assignedBy } = req.body;
+
+    if (!userIds || !Array.isArray(userIds)) {
+      return res.status(400).json({
+        success: false,
+        error: 'userIds array is required',
+      });
+    }
+
+    // Verify task exists
+    const task = await prisma.task.findUnique({ where: { id: taskId } });
+    if (!task) {
+      return res.status(404).json({
+        success: false,
+        error: 'Task not found',
+      });
+    }
+
+    // Delete all existing assignees
+    await prisma.taskAssignee.deleteMany({
+      where: { taskId },
+    });
+
+    // Create new assignees (if any)
+    if (userIds.length > 0) {
+      await prisma.taskAssignee.createMany({
+        data: userIds.map((userId: string) => ({
+          taskId,
+          userId,
+          assignedBy: assignedBy || null,
+        })),
+      });
+    }
+
+    // Get updated task with all assignees
+    const updatedTask = await prisma.task.findUnique({
+      where: { id: taskId },
+      include: taskInclude,
+    });
+
+    return res.json({
+      success: true,
+      task: updatedTask,
+    });
+  } catch (error: any) {
+    console.error('Replace assignees error:', error);
+    return res.status(500).json({
+      success: false,
+      error: 'Failed to replace assignees',
+    });
+  }
+});
+
+// GET /api/mobile/tasks/:taskId/assignees - Get all assignees for a task
+router.get('/:taskId/assignees', async (req: Request, res: Response) => {
+  try {
+    const { taskId } = req.params;
+
+    const assignees = await prisma.taskAssignee.findMany({
+      where: { taskId },
+      include: {
+        user: {
+          select: {
+            id: true,
+            firstName: true,
+            lastName: true,
+            email: true,
+          },
+        },
+        assigner: {
+          select: {
+            id: true,
+            firstName: true,
+            lastName: true,
+          },
+        },
+      },
+      orderBy: { assignedAt: 'desc' },
+    });
+
+    return res.json({
+      success: true,
+      assignees,
+      count: assignees.length,
+    });
+  } catch (error: any) {
+    console.error('Get assignees error:', error);
+    return res.status(500).json({
+      success: false,
+      error: 'Failed to get assignees',
     });
   }
 });

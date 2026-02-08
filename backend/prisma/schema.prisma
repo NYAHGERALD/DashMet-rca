@@ -1318,6 +1318,8 @@ model User {
   SupportStatusNotificationDismissal                                  SupportStatusNotificationDismissal[]
   TasksAssigned                                                       Task[]                               @relation("TaskAssignee")
   TasksOwned                                                          Task[]                               @relation("TaskOwner")
+  TaskAssignments                                                     TaskAssignee[]                       @relation("TaskAssignees")
+  TaskAssignmentsAssigned                                             TaskAssignee[]                       @relation("TaskAssigner")
   TaskComments                                                        TaskComment[]
   TaskEvidence                                                        TaskEvidence[]
   MeetingsCreated                                                     Meeting[]                            @relation("MeetingCreator")
@@ -1653,28 +1655,29 @@ model WorkplaceSafetyAssessment {
 }
 
 model Task {
-  id             String         @id @default(uuid())
+  id             String           @id @default(uuid())
   title          String
   description    String?
-  status         TaskStatus     @default(PENDING)
-  priority       TaskPriority   @default(MEDIUM)
+  status         TaskStatus       @default(PENDING)
+  priority       TaskPriority     @default(MEDIUM)
   dueDate        DateTime?
   completedAt    DateTime?
-  progress       Int            @default(0) // 0-100 percentage
+  progress       Int              @default(0) // 0-100 percentage
   ownerId        String
-  assigneeId     String?
+  assigneeId     String?          // Legacy single assignee (kept for backwards compatibility)
   organizationId String
   facilityId     String?
   meetingId      String?
-  sourceText     String?        // Original text from transcript (if AI extracted)
-  isAiExtracted  Boolean        @default(false) // Whether this was AI extracted
-  createdAt      DateTime       @default(now())
-  updatedAt      DateTime       @updatedAt
-  assignee       User?          @relation("TaskAssignee", fields: [assigneeId], references: [id])
-  facility       Facility?      @relation(fields: [facilityId], references: [id])
-  organization   Organization   @relation(fields: [organizationId], references: [id], onDelete: Cascade)
-  owner          User           @relation("TaskOwner", fields: [ownerId], references: [id])
-  meeting        Meeting?       @relation(fields: [meetingId], references: [id])
+  sourceText     String?          // Original text from transcript (if AI extracted)
+  isAiExtracted  Boolean          @default(false) // Whether this was AI extracted
+  createdAt      DateTime         @default(now())
+  updatedAt      DateTime         @updatedAt
+  assignee       User?            @relation("TaskAssignee", fields: [assigneeId], references: [id])
+  assignees      TaskAssignee[]   // Multiple assignees
+  facility       Facility?        @relation(fields: [facilityId], references: [id])
+  organization   Organization     @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  owner          User             @relation("TaskOwner", fields: [ownerId], references: [id])
+  meeting        Meeting?         @relation(fields: [meetingId], references: [id])
   comments       TaskComment[]
   evidence       TaskEvidence[]
 
@@ -1683,6 +1686,22 @@ model Task {
   @@index([organizationId])
   @@index([status])
   @@index([meetingId])
+}
+
+// Task Assignees - junction table for multiple assignees
+model TaskAssignee {
+  id         String   @id @default(uuid())
+  taskId     String
+  userId     String
+  assignedAt DateTime @default(now())
+  assignedBy String?  // Who assigned this user
+  task       Task     @relation(fields: [taskId], references: [id], onDelete: Cascade)
+  user       User     @relation("TaskAssignees", fields: [userId], references: [id])
+  assigner   User?    @relation("TaskAssigner", fields: [assignedBy], references: [id])
+
+  @@unique([taskId, userId])
+  @@index([taskId])
+  @@index([userId])
 }
 
 // Task Comments - for discussions and notes
