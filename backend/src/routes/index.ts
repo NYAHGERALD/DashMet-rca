@@ -40,6 +40,7 @@ import taskRoutes from './taskRoutes';
 import meetingRoutes from './meetingRoutes';
 import consentRoutes from './consentRoutes';
 import aiVisionRoutes from './aiVisionRoutes';
+import documentOcrRoutes from './documentOcrRoutes';
 import { authenticate } from '../middleware/auth';
 import { getIncidentTranscripts } from '../controllers/transcriptController';
 
@@ -88,6 +89,10 @@ router.use('/consent', consentRoutes);
 // AI Vision Assistant routes - PUBLIC for iOS app
 // Industrial equipment analysis with GPT-4 Vision and TTS
 router.use('/ai-vision', aiVisionRoutes);
+
+// Document OCR routes - PUBLIC for iOS app
+// Handwritten document scanning with GPT-4 Vision
+router.use('/document-ocr', documentOcrRoutes);
 
 // Phase 1: Legacy JWT Authentication routes (will be deprecated)
 router.use('/auth', authRoutes);
