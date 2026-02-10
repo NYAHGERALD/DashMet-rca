@@ -1,6 +1,10 @@
 import { Router, Request, Response } from 'express';
+import { adminFirestore } from '../config/firebase-admin';
 
 const router = Router();
+
+// Firestore collections
+const SESSIONS_COLLECTION = 'vision_sessions';
 
 interface FrameData {
   base64: string;
@@ -160,14 +164,14 @@ router.post('/analyze', async (req: Request, res: Response) => {
     });
 
     if (!openaiResponse.ok) {
-      const errorData = await openaiResponse.json();
+      const errorData = await openaiResponse.json() as { error?: { message?: string } };
       console.error('OpenAI API error:', errorData);
       return res.status(openaiResponse.status).json({
         error: errorData.error?.message || 'Failed to analyze frames',
       });
     }
 
-    const data = await openaiResponse.json();
+    const data = await openaiResponse.json() as { choices?: { message?: { content?: string } }[] };
     const content = data.choices?.[0]?.message?.content;
 
     if (!content) {
@@ -219,7 +223,7 @@ router.post('/tts', async (req: Request, res: Response) => {
     });
 
     if (!openaiResponse.ok) {
-      const errorData = await openaiResponse.json();
+      const errorData = await openaiResponse.json() as { error?: { message?: string } };
       console.error('TTS API error:', errorData);
       return res.status(openaiResponse.status).json({
         error: errorData.error?.message || 'Failed to generate speech',
@@ -279,14 +283,14 @@ router.post('/transcribe', async (req: Request, res: Response) => {
     });
 
     if (!openaiResponse.ok) {
-      const errorData = await openaiResponse.json();
+      const errorData = await openaiResponse.json() as { error?: { message?: string } };
       console.error('Whisper API error:', errorData);
       return res.status(openaiResponse.status).json({
         error: errorData.error?.message || 'Failed to transcribe audio',
       });
     }
 
-    const data = await openaiResponse.json();
+    const data = await openaiResponse.json() as { text?: string };
     const transcription = data.text?.trim() || '';
 
     return res.json({ transcription });
@@ -294,6 +298,336 @@ router.post('/transcribe', async (req: Request, res: Response) => {
     console.error('Transcription error:', error);
     return res.status(500).json({
       error: error.message || 'Failed to transcribe audio',
+    });
+  }
+});
+
+// ============================================
+// VISION SESSION ENDPOINTS (Database Storage)
+// ============================================
+
+interface VisionMessage {
+  id: string;
+  role: 'user' | 'assistant';
+  content: string;
+  timestamp: string;
+}
+
+interface VisionSession {
+  id: string;
+  userId: string;
+  topic: string;
+  topicIcon: string;
+  messages: VisionMessage[];
+  createdAt: string;
+  updatedAt: string;
+  summary?: string;
+}
+
+/**
+ * POST /api/ai-vision/sessions
+ * Save a new vision session to the database
+ */
+router.post('/sessions', async (req: Request, res: Response) => {
+  try {
+    const { userId, session } = req.body as { userId: string; session: VisionSession };
+
+    if (!userId || !session) {
+      return res.status(400).json({ error: 'userId and session are required' });
+    }
+
+    // Create session document
+    const sessionDoc = {
+      ...session,
+      userId,
+      savedAt: new Date().toISOString(),
+    };
+
+    // Save to Firestore
+    await adminFirestore
+      .collection(SESSIONS_COLLECTION)
+      .doc(session.id)
+      .set(sessionDoc);
+
+    console.log(`✅ Vision session saved: ${session.id} for user ${userId}`);
+
+    return res.status(201).json({
+      success: true,
+      message: 'Session saved successfully',
+      sessionId: session.id,
+    });
+  } catch (error: any) {
+    console.error('Error saving vision session:', error);
+    return res.status(500).json({
+      error: error.message || 'Failed to save session',
+    });
+  }
+});
+
+/**
+ * GET /api/ai-vision/sessions/:userId
+ * Get all vision sessions for a user
+ */
+router.get('/sessions/:userId', async (req: Request, res: Response) => {
+  try {
+    const { userId } = req.params;
+
+    if (!userId) {
+      return res.status(400).json({ error: 'userId is required' });
+    }
+
+    // Query sessions for this user, ordered by creation date
+    const snapshot = await adminFirestore
+      .collection(SESSIONS_COLLECTION)
+      .where('userId', '==', userId)
+      .orderBy('createdAt', 'desc')
+      .get();
+
+    const sessions: VisionSession[] = [];
+    snapshot.forEach((doc) => {
+      sessions.push(doc.data() as VisionSession);
+    });
+
+    return res.json({ sessions });
+  } catch (error: any) {
+    console.error('Error fetching vision sessions:', error);
+    return res.status(500).json({
+      error: error.message || 'Failed to fetch sessions',
+    });
+  }
+});
+
+/**
+ * GET /api/ai-vision/sessions/:userId/:sessionId
+ * Get a specific vision session
+ */
+router.get('/sessions/:userId/:sessionId', async (req: Request, res: Response) => {
+  try {
+    const { userId, sessionId } = req.params;
+
+    if (!userId || !sessionId) {
+      return res.status(400).json({ error: 'userId and sessionId are required' });
+    }
+
+    const doc = await adminFirestore
+      .collection(SESSIONS_COLLECTION)
+      .doc(sessionId)
+      .get();
+
+    if (!doc.exists) {
+      return res.status(404).json({ error: 'Session not found' });
+    }
+
+    const session = doc.data() as VisionSession;
+
+    // Verify ownership
+    if (session.userId !== userId) {
+      return res.status(403).json({ error: 'Not authorized to access this session' });
+    }
+
+    return res.json({ session });
+  } catch (error: any) {
+    console.error('Error fetching vision session:', error);
+    return res.status(500).json({
+      error: error.message || 'Failed to fetch session',
+    });
+  }
+});
+
+/**
+ * PUT /api/ai-vision/sessions/:sessionId
+ * Update a vision session (e.g., add summary)
+ */
+router.put('/sessions/:sessionId', async (req: Request, res: Response) => {
+  try {
+    const { sessionId } = req.params;
+    const { userId, summary } = req.body as { userId: string; summary?: string };
+
+    if (!sessionId || !userId) {
+      return res.status(400).json({ error: 'sessionId and userId are required' });
+    }
+
+    // Get existing session
+    const doc = await adminFirestore
+      .collection(SESSIONS_COLLECTION)
+      .doc(sessionId)
+      .get();
+
+    if (!doc.exists) {
+      return res.status(404).json({ error: 'Session not found' });
+    }
+
+    const session = doc.data() as VisionSession;
+
+    // Verify ownership
+    if (session.userId !== userId) {
+      return res.status(403).json({ error: 'Not authorized to update this session' });
+    }
+
+    // Update session
+    const updates: Partial<VisionSession> = {
+      updatedAt: new Date().toISOString(),
+    };
+
+    if (summary !== undefined) {
+      updates.summary = summary;
+    }
+
+    await adminFirestore
+      .collection(SESSIONS_COLLECTION)
+      .doc(sessionId)
+      .update(updates);
+
+    return res.json({
+      success: true,
+      message: 'Session updated successfully',
+    });
+  } catch (error: any) {
+    console.error('Error updating vision session:', error);
+    return res.status(500).json({
+      error: error.message || 'Failed to update session',
+    });
+  }
+});
+
+/**
+ * DELETE /api/ai-vision/sessions/:sessionId
+ * Delete a vision session
+ */
+router.delete('/sessions/:sessionId', async (req: Request, res: Response) => {
+  try {
+    const { sessionId } = req.params;
+    const { userId } = req.body as { userId: string };
+
+    if (!sessionId || !userId) {
+      return res.status(400).json({ error: 'sessionId and userId are required' });
+    }
+
+    // Get existing session
+    const doc = await adminFirestore
+      .collection(SESSIONS_COLLECTION)
+      .doc(sessionId)
+      .get();
+
+    if (!doc.exists) {
+      return res.status(404).json({ error: 'Session not found' });
+    }
+
+    const session = doc.data() as VisionSession;
+
+    // Verify ownership
+    if (session.userId !== userId) {
+      return res.status(403).json({ error: 'Not authorized to delete this session' });
+    }
+
+    // Delete session
+    await adminFirestore
+      .collection(SESSIONS_COLLECTION)
+      .doc(sessionId)
+      .delete();
+
+    console.log(`✅ Vision session deleted: ${sessionId}`);
+
+    return res.json({
+      success: true,
+      message: 'Session deleted successfully',
+    });
+  } catch (error: any) {
+    console.error('Error deleting vision session:', error);
+    return res.status(500).json({
+      error: error.message || 'Failed to delete session',
+    });
+  }
+});
+
+/**
+ * POST /api/ai-vision/sessions/:sessionId/summarize
+ * Generate AI summary for a session
+ */
+router.post('/sessions/:sessionId/summarize', async (req: Request, res: Response) => {
+  try {
+    const { sessionId } = req.params;
+    const { userId } = req.body as { userId: string };
+    const apiKey = process.env.OPENAI_API_KEY;
+
+    if (!apiKey) {
+      return res.status(500).json({ error: 'OpenAI API key not configured' });
+    }
+
+    if (!sessionId || !userId) {
+      return res.status(400).json({ error: 'sessionId and userId are required' });
+    }
+
+    // Get session
+    const doc = await adminFirestore
+      .collection(SESSIONS_COLLECTION)
+      .doc(sessionId)
+      .get();
+
+    if (!doc.exists) {
+      return res.status(404).json({ error: 'Session not found' });
+    }
+
+    const session = doc.data() as VisionSession;
+
+    if (session.userId !== userId) {
+      return res.status(403).json({ error: 'Not authorized' });
+    }
+
+    // Build conversation text
+    const conversationText = session.messages
+      .map((m) => `${m.role === 'user' ? 'User' : 'AI'}: ${m.content}`)
+      .join('\n');
+
+    // Generate summary with GPT
+    const openaiResponse = await fetch('https://api.openai.com/v1/chat/completions', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'Authorization': `Bearer ${apiKey}`,
+      },
+      body: JSON.stringify({
+        model: 'gpt-4o-mini',
+        messages: [
+          {
+            role: 'system',
+            content: `You are a helpful assistant that summarizes ${session.topic} analysis sessions. Create a brief, professional summary highlighting key observations, issues identified, and recommendations made. Keep it under 200 words.`,
+          },
+          {
+            role: 'user',
+            content: `Summarize this ${session.topic} analysis session:\n\n${conversationText}`,
+          },
+        ],
+        max_tokens: 500,
+        temperature: 0.7,
+      }),
+    });
+
+    if (!openaiResponse.ok) {
+      const errorData = await openaiResponse.json() as { error?: { message?: string } };
+      console.error('OpenAI summary error:', errorData);
+      return res.status(openaiResponse.status).json({
+        error: errorData.error?.message || 'Failed to generate summary',
+      });
+    }
+
+    const data = await openaiResponse.json() as { choices?: { message?: { content?: string } }[] };
+    const summary = data.choices?.[0]?.message?.content?.trim() || 'Summary generation failed.';
+
+    // Save summary to session
+    await adminFirestore
+      .collection(SESSIONS_COLLECTION)
+      .doc(sessionId)
+      .update({
+        summary,
+        updatedAt: new Date().toISOString(),
+      });
+
+    return res.json({ summary });
+  } catch (error: any) {
+    console.error('Error generating summary:', error);
+    return res.status(500).json({
+      error: error.message || 'Failed to generate summary',
     });
   }
 });
