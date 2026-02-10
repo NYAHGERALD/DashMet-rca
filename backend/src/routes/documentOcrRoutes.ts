@@ -742,6 +742,73 @@ function getBaseLanguageCode(languageCode: string): string {
   return languageCode.split('-')[0].toLowerCase();
 }
 
+// Helper to preprocess text for natural speech synthesis
+function preprocessTextForSpeech(text: string): string {
+  let processed = text;
+  
+  // Format addresses - add pauses between components
+  // Pattern: number + street name + apt/unit + city + state + zip
+  processed = processed.replace(/(\d+)\s+([A-Za-z\s]+(?:Street|St|Avenue|Ave|Road|Rd|Drive|Dr|Lane|Ln|Boulevard|Blvd|Way|Court|Ct|Place|Pl|Circle|Cir))/gi, 
+    '$1, $2');
+  
+  // Add pause after apartment/unit numbers
+  processed = processed.replace(/(Apt\.?|Unit|Suite|Ste\.?|#)\s*(\d+)/gi, '$1 $2,');
+  
+  // Format city, state zip - add pauses
+  processed = processed.replace(/([A-Za-z\s]+),?\s*([A-Z]{2})\s*(\d{5}(?:-\d{4})?)/g, 
+    '$1, $2, $3');
+  
+  // Format phone numbers for natural reading
+  // (xxx) xxx-xxxx or xxx-xxx-xxxx
+  processed = processed.replace(/\((\d{3})\)\s*(\d{3})-(\d{4})/g, '$1, $2, $3');
+  processed = processed.replace(/(\d{3})-(\d{3})-(\d{4})/g, '$1, $2, $3');
+  
+  // Format dates for natural reading
+  // MM/DD/YYYY or MM-DD-YYYY
+  processed = processed.replace(/(\d{1,2})[\/\-](\d{1,2})[\/\-](\d{4})/g, (match, month, day, year) => {
+    const months = ['January', 'February', 'March', 'April', 'May', 'June', 
+                    'July', 'August', 'September', 'October', 'November', 'December'];
+    const monthNum = parseInt(month);
+    const monthName = monthNum >= 1 && monthNum <= 12 ? months[monthNum - 1] : month;
+    return `${monthName} ${parseInt(day)}, ${year}`;
+  });
+  
+  // Format times for natural reading
+  // HH:MM AM/PM
+  processed = processed.replace(/(\d{1,2}):(\d{2})\s*(AM|PM|am|pm)/gi, (match, hour, min, period) => {
+    const hourNum = parseInt(hour);
+    const minNum = parseInt(min);
+    let timeStr = hourNum.toString();
+    if (minNum === 0) {
+      timeStr += ` ${period.toUpperCase()}`;
+    } else if (minNum === 30) {
+      timeStr += ` thirty ${period.toUpperCase()}`;
+    } else if (minNum === 15) {
+      timeStr += ` fifteen ${period.toUpperCase()}`;
+    } else if (minNum === 45) {
+      timeStr += ` forty-five ${period.toUpperCase()}`;
+    } else {
+      timeStr += `:${min} ${period.toUpperCase()}`;
+    }
+    return timeStr;
+  });
+  
+  // Format currency
+  processed = processed.replace(/\$(\d+)\.(\d{2})/g, '$1 dollars and $2 cents');
+  processed = processed.replace(/\$(\d+)/g, '$1 dollars');
+  
+  // Format percentages
+  processed = processed.replace(/(\d+)%/g, '$1 percent');
+  
+  // Add slight pause after periods that aren't abbreviations
+  processed = processed.replace(/\.(?=[A-Z])/g, '. ');
+  
+  // Clean up multiple spaces
+  processed = processed.replace(/\s+/g, ' ').trim();
+  
+  return processed;
+}
+
 /**
  * Convert text to speech using OpenAI TTS API with female voice
  * Supports multiple languages with localized greetings
@@ -777,18 +844,21 @@ router.post('/text-to-speech', async (req: Request, res: Response) => {
     const transition = scripts.transition;
     const closing = scripts.closing(firstName);
 
-    const fullScript = `${greeting} ${purpose} ${transition} ... ${text} ... ${closing}`;
+    // Preprocess text for natural speech (addresses, dates, numbers, etc.)
+    const processedText = preprocessTextForSpeech(text);
+
+    const fullScript = `${greeting} ${purpose} ${transition} ... ${processedText} ... ${closing}`;
 
     console.log(`TTS request for ${employeeName}, language: ${languageCode}, text length: ${text.length}`);
 
     // Call OpenAI TTS API with "nova" voice (confident female)
-    // OpenAI TTS automatically handles multiple languages
+    // Using tts-1 for faster generation (tts-1-hd is slower but higher quality)
     const mp3Response = await openai.audio.speech.create({
-      model: 'tts-1-hd', // High definition for better quality
+      model: 'tts-1',    // Standard model for faster response
       voice: 'nova',     // Confident, friendly female voice
       input: fullScript,
       response_format: 'mp3',
-      speed: 0.95        // Slightly slower for clarity
+      speed: 1.0         // Normal speed
     });
 
     // Get raw audio buffer and send directly (like ai-vision/tts)
