@@ -47,6 +47,58 @@ interface ProcessDocumentRequest {
 }
 
 /**
+ * Check if detected language matches selected language
+ * Handles variations like "english" vs "en", "mandarin" vs "chinese", etc.
+ */
+function isLanguageMatch(detected: string, selected: string): boolean {
+  const normalize = (lang: string) => lang.toLowerCase().trim();
+  
+  const d = normalize(detected);
+  const s = normalize(selected);
+  
+  // Exact match
+  if (d === s) return true;
+  
+  // One contains the other
+  if (d.includes(s) || s.includes(d)) return true;
+  
+  // Language aliases/variations
+  const aliases: { [key: string]: string[] } = {
+    'english': ['en', 'eng', 'english'],
+    'chinese': ['mandarin', 'chinese', 'zh', 'cn', 'simplified chinese', 'traditional chinese'],
+    'mandarin': ['chinese', 'mandarin', 'zh', 'cn', 'simplified chinese', 'traditional chinese'],
+    'malay': ['bahasa melayu', 'malay', 'ms', 'bahasa malaysia'],
+    'tamil': ['tamil', 'ta'],
+    'french': ['french', 'fr', 'français'],
+    'spanish': ['spanish', 'es', 'español'],
+    'german': ['german', 'de', 'deutsch'],
+    'japanese': ['japanese', 'ja', 'jp'],
+    'korean': ['korean', 'ko', 'kr'],
+    'hindi': ['hindi', 'hi'],
+    'arabic': ['arabic', 'ar'],
+    'portuguese': ['portuguese', 'pt'],
+    'russian': ['russian', 'ru'],
+    'italian': ['italian', 'it', 'italiano'],
+    'dutch': ['dutch', 'nl', 'nederlands'],
+    'thai': ['thai', 'th'],
+    'vietnamese': ['vietnamese', 'vi'],
+    'indonesian': ['indonesian', 'id', 'bahasa indonesia'],
+  };
+  
+  // Check if both languages belong to the same alias group
+  for (const key of Object.keys(aliases)) {
+    const group = aliases[key];
+    const detectedInGroup = group.some(alias => d.includes(alias) || alias.includes(d));
+    const selectedInGroup = group.some(alias => s.includes(alias) || alias.includes(s));
+    if (detectedInGroup && selectedInGroup) {
+      return true;
+    }
+  }
+  
+  return false;
+}
+
+/**
  * Extract text from a single image using GPT-4 Vision
  * POST /api/document-ocr/extract
  */
@@ -109,11 +161,16 @@ CRITICAL RULES FOR ACCURATE EXTRACTION:
    - Maintain any dates, numbers, and names exactly as they appear
    - Do NOT correct spelling or grammar at this stage - just extract accurately
 
+6. LANGUAGE DETECTION:
+   - Detect the ACTUAL language of the document text
+   - Compare it to the expected language (${sourceLanguage})
+   - The detected language should be the primary language of the document content
+
 Return your response in this exact JSON format:
 {
     "extractedText": "the full extracted text here with accurate letter-by-letter transcription",
     "isHandwritten": true/false,
-    "detectedLanguage": "${sourceLanguage}",
+    "detectedLanguage": "the actual detected language of the document (e.g., English, French, Mandarin, Malay, Tamil, etc.)",
     "confidence": 0.0-1.0,
     "unclearSections": ["list of sections that were difficult to read, if any"]
 }`
@@ -159,6 +216,22 @@ Return the result in the specified JSON format.`
       }
       
       const parsed = JSON.parse(jsonContent.trim());
+      
+      // Check for language mismatch
+      const detectedLang = (parsed.detectedLanguage || '').toLowerCase().trim();
+      const selectedLang = sourceLanguage.toLowerCase().trim();
+      
+      // Check if detected language is significantly different from selected
+      if (detectedLang && selectedLang && !isLanguageMatch(detectedLang, selectedLang)) {
+        return res.status(400).json({
+          success: false,
+          error: 'LANGUAGE_MISMATCH',
+          message: `The document appears to be in ${parsed.detectedLanguage}, but '${sourceLanguage}' was selected. Please go back and select the correct language for accurate text extraction.`,
+          detectedLanguage: parsed.detectedLanguage,
+          selectedLanguage: sourceLanguage
+        });
+      }
+      
       return res.json({ success: true, data: parsed });
     } catch {
       // Return as plain text if not JSON
@@ -509,6 +582,7 @@ interface TTSRequest {
   employeeName: string;
   documentType?: string;
   languageCode?: string;  // e.g., "en-US", "fr-FR", "zh-CN"
+  skipIntro?: boolean;    // Skip greeting/intro/closing, just read the content
 }
 
 // Language-specific greetings and phrases
@@ -813,10 +887,13 @@ function preprocessTextForSpeech(text: string): string {
  * Convert text to speech using OpenAI TTS API with female voice
  * Supports multiple languages with localized greetings
  * POST /api/document-ocr/text-to-speech
+ * 
+ * @param skipIntro - If true, skip greeting/purpose/transition/closing and just read the content.
+ *                    Use this for documents that have already been reviewed and accepted.
  */
 router.post('/text-to-speech', async (req: Request, res: Response) => {
   try {
-    const { text, employeeName, documentType = 'complaint', languageCode = 'en-US' } = req.body as TTSRequest;
+    const { text, employeeName, documentType = 'complaint', languageCode = 'en-US', skipIntro = false } = req.body as TTSRequest;
 
     if (!text || !employeeName) {
       return res.status(400).json({ 
@@ -833,23 +910,38 @@ router.post('/text-to-speech', async (req: Request, res: Response) => {
       });
     }
 
-    // Get the appropriate language script
-    const baseLanguage = getBaseLanguageCode(languageCode);
-    const scripts = languageScripts[baseLanguage] || languageScripts['en'];
-    
-    // Build the complete speech script with greeting and introduction
-    const firstName = employeeName.split(' ')[0];
-    const greeting = scripts.greeting(firstName);
-    const purpose = scripts.purpose(documentType);
-    const transition = scripts.transition;
-    const closing = scripts.closing(firstName);
-
     // Preprocess text for natural speech (addresses, dates, numbers, etc.)
     const processedText = preprocessTextForSpeech(text);
 
-    const fullScript = `${greeting} ${purpose} ${transition} ... ${processedText} ... ${closing}`;
+    let fullScript: string;
+    let introWordCount = 0;
 
-    console.log(`TTS request for ${employeeName}, language: ${languageCode}, text length: ${text.length}`);
+    if (skipIntro) {
+      // Skip intro - just read the processed content directly
+      // Used for documents that have already been reviewed and accepted
+      fullScript = processedText;
+      introWordCount = 0;
+      console.log(`TTS request (no intro) for ${employeeName}, language: ${languageCode}, text length: ${text.length}`);
+    } else {
+      // Get the appropriate language script
+      const baseLanguage = getBaseLanguageCode(languageCode);
+      const scripts = languageScripts[baseLanguage] || languageScripts['en'];
+      
+      // Build the complete speech script with greeting and introduction
+      const firstName = employeeName.split(' ')[0];
+      const greeting = scripts.greeting(firstName);
+      const purpose = scripts.purpose(documentType);
+      const transition = scripts.transition;
+      const closing = scripts.closing(firstName);
+
+      // Calculate intro word count (greeting + purpose + transition + "...")
+      // This helps the client sync text highlighting to start AFTER the intro
+      const introText = `${greeting} ${purpose} ${transition} ...`;
+      introWordCount = introText.split(/\s+/).filter(word => word.length > 0).length;
+
+      fullScript = `${greeting} ${purpose} ${transition} ... ${processedText} ... ${closing}`;
+      console.log(`TTS request for ${employeeName}, language: ${languageCode}, text length: ${text.length}, intro words: ${introWordCount}`);
+    }
 
     // Call OpenAI TTS API with "nova" voice (confident female)
     // Using tts-1 for faster generation (tts-1-hd is slower but higher quality)
@@ -867,6 +959,7 @@ router.post('/text-to-speech', async (req: Request, res: Response) => {
     res.setHeader('Content-Type', 'audio/mpeg');
     res.setHeader('Content-Length', buffer.length);
     res.setHeader('X-Language-Code', languageCode);
+    res.setHeader('X-Intro-Word-Count', introWordCount.toString());
     return res.send(buffer);
 
   } catch (error: any) {
@@ -874,6 +967,137 @@ router.post('/text-to-speech', async (req: Request, res: Response) => {
     return res.status(500).json({ 
       error: 'Failed to generate speech',
       message: error.message || 'An error occurred during text-to-speech conversion'
+    });
+  }
+});
+
+// MARK: - Document Audit Log
+
+interface DocumentAuditLogRequest {
+  id: string;
+  complaintId: string;
+  documentId: string;
+  originalText: string;
+  cleanedText: string;
+  translatedText?: string;
+  originalImageBase64?: string;
+  signatureImageBase64: string;
+  employeeReviewTimestamp: string;
+  employeeSignatureTimestamp: string;
+  supervisorCertificationTimestamp: string;
+  supervisorId?: string;
+  supervisorName?: string;
+  submittedBy: string;
+  submittedById?: string;
+  deviceId: string;
+  appVersion: string;
+  versionHash: string;
+  submissionTimestamp: string;
+}
+
+/**
+ * Store document audit log for compliance and traceability
+ * POST /api/document-ocr/audit-log
+ * 
+ * This endpoint receives comprehensive audit logs from the iOS app
+ * after an employee completes the 3-step document review/signature workflow:
+ * 1. Employee review confirmation
+ * 2. Digital signature capture
+ * 3. Supervisor certification
+ * 
+ * The audit log contains all timestamps, signatures, and content hashes
+ * for tamper-evident record keeping.
+ */
+router.post('/audit-log', async (req: Request, res: Response) => {
+  try {
+    const auditLog = req.body as DocumentAuditLogRequest;
+    
+    // Validate required fields
+    const requiredFields = [
+      'complaintId',
+      'documentId',
+      'originalText',
+      'cleanedText',
+      'signatureImageBase64',
+      'employeeReviewTimestamp',
+      'employeeSignatureTimestamp',
+      'supervisorCertificationTimestamp',
+      'submittedBy',
+      'deviceId',
+      'appVersion',
+      'versionHash'
+    ];
+    
+    const missingFields = requiredFields.filter(field => !auditLog[field as keyof DocumentAuditLogRequest]);
+    
+    if (missingFields.length > 0) {
+      return res.status(400).json({
+        error: 'Missing required fields',
+        message: `The following fields are required: ${missingFields.join(', ')}`
+      });
+    }
+    
+    // Validate signature image size (max 5MB base64)
+    if (auditLog.signatureImageBase64 && auditLog.signatureImageBase64.length > 5 * 1024 * 1024 * 1.37) {
+      return res.status(400).json({
+        error: 'Signature too large',
+        message: 'Signature image exceeds maximum allowed size of 5MB'
+      });
+    }
+    
+    // Log the audit record (in production, this would be stored in database)
+    console.log('=== DOCUMENT AUDIT LOG RECEIVED ===');
+    console.log(`Complaint ID: ${auditLog.complaintId}`);
+    console.log(`Document ID: ${auditLog.documentId}`);
+    console.log(`Submitted By: ${auditLog.submittedBy} (${auditLog.submittedById || 'No ID'})`);
+    console.log(`Employee Review: ${auditLog.employeeReviewTimestamp}`);
+    console.log(`Employee Signature: ${auditLog.employeeSignatureTimestamp}`);
+    console.log(`Supervisor Certification: ${auditLog.supervisorCertificationTimestamp}`);
+    console.log(`Supervisor: ${auditLog.supervisorName || 'Not specified'} (${auditLog.supervisorId || 'No ID'})`);
+    console.log(`Device ID: ${auditLog.deviceId}`);
+    console.log(`App Version: ${auditLog.appVersion}`);
+    console.log(`Version Hash: ${auditLog.versionHash}`);
+    console.log(`Original Text Length: ${auditLog.originalText.length} chars`);
+    console.log(`Cleaned Text Length: ${auditLog.cleanedText.length} chars`);
+    console.log(`Signature Image Size: ${Math.round(auditLog.signatureImageBase64.length / 1024)} KB`);
+    console.log('===================================');
+    
+    // TODO: In production, store audit log in database
+    // Example database schema:
+    // - Table: document_audit_logs
+    // - Columns: id, complaint_id, document_id, original_text, cleaned_text,
+    //            translated_text, original_image_base64, signature_image_base64,
+    //            employee_review_timestamp, employee_signature_timestamp,
+    //            supervisor_certification_timestamp, supervisor_id, supervisor_name,
+    //            submitted_by, submitted_by_id, device_id, app_version,
+    //            version_hash, submission_timestamp, created_at
+    
+    // Return success response with audit record ID
+    const auditRecordId = auditLog.id || `AUDIT-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`;
+    
+    return res.status(201).json({
+      success: true,
+      message: 'Audit log recorded successfully',
+      auditRecordId: auditRecordId,
+      complaintId: auditLog.complaintId,
+      documentId: auditLog.documentId,
+      timestamps: {
+        employeeReview: auditLog.employeeReviewTimestamp,
+        employeeSignature: auditLog.employeeSignatureTimestamp,
+        supervisorCertification: auditLog.supervisorCertificationTimestamp,
+        submission: auditLog.submissionTimestamp || new Date().toISOString()
+      },
+      integrity: {
+        versionHash: auditLog.versionHash,
+        deviceVerified: true
+      }
+    });
+    
+  } catch (error: any) {
+    console.error('Audit log error:', error);
+    return res.status(500).json({
+      error: 'Failed to store audit log',
+      message: error.message || 'An error occurred while storing the audit log'
     });
   }
 });

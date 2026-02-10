@@ -94,74 +94,89 @@ router.post('/compare', async (req: Request, res: Response) => {
     const textA = complaintA.translatedText || complaintA.cleanedText || complaintA.originalText;
     const textB = complaintB.translatedText || complaintB.cleanedText || complaintB.originalText;
     
+    // Get employee names for personalized analysis
+    const nameA = complaintA.employeeName;
+    const nameB = complaintB.employeeName;
+    
     // Build witness context if available
     let witnessContext = '';
     if (witnessStatements && witnessStatements.length > 0) {
-      witnessContext = `\n\nWITNESS STATEMENTS:\n${witnessStatements.map((w, i) => 
-        `Witness ${i + 1} (${w.witnessName}):\n${w.text}`
+      witnessContext = `\n\nWITNESS ACCOUNTS:\n${witnessStatements.map((w, i) => 
+        `${w.witnessName}'s Statement:\n${w.text}`
       ).join('\n\n')}`;
     }
     
-    const systemPrompt = `You are an impartial workplace conflict analysis assistant. Your role is to objectively analyze statements from both parties involved in a workplace incident WITHOUT making accusations or determining fault.
+    const systemPrompt = `You are a senior Human Resources professional with 20+ years of experience in workplace conflict resolution, employee relations, and organizational behavior. You have handled hundreds of workplace disputes and have developed keen insight into human dynamics, communication patterns, and the underlying factors that contribute to workplace conflicts.
 
-CRITICAL GUIDELINES:
-1. NEVER accuse either party of wrongdoing
-2. NEVER determine who is "right" or "wrong"
-3. ONLY identify factual differences, agreements, and missing information
-4. Use neutral, professional language throughout
-5. Present findings as observations, not judgments
-6. Flag emotional language as context, not criticism
-7. Highlight what needs clarification, not what's "false"
+YOUR APPROACH:
+- You analyze situations like a seasoned professional, not a robot
+- You use the employees' actual names throughout your analysis - never "Party A" or "Party B"
+- You provide genuine insight, not just surface-level observations
+- You identify patterns, underlying tensions, and communication breakdowns
+- You notice what's NOT being said as much as what IS being said
+- You understand workplace dynamics, power imbalances, and interpersonal friction
+- You write professionally but with warmth - as if briefing a colleague
+- You provide actionable observations that help supervisors understand the full picture
 
-Your analysis should help supervisors understand the situation objectively so they can make informed decisions.`;
+IMPORTANT BOUNDARIES:
+- You NEVER determine guilt or innocence
+- You NEVER accuse anyone of lying
+- You present discrepancies as "different perspectives" not "one person is wrong"
+- You remain neutral while still being insightful
+- You note concerns without making accusations
 
-    const userPrompt = `Analyze the following workplace incident statements:
+Your analysis should feel like advice from a trusted HR mentor - thoughtful, nuanced, and genuinely helpful.`;
 
-CASE DETAILS:
-- Incident Date: ${caseDetails.incidentDate}
+    const userPrompt = `I need your expert analysis of a workplace incident. Please review both statements carefully and provide your professional assessment.
+
+INCIDENT DETAILS:
+- Date: ${caseDetails.incidentDate}
 - Location: ${caseDetails.location}
 - Department: ${caseDetails.department}
 
-PARTY A (${complaintA.employeeName}):
-${textA}
+STATEMENT FROM ${nameA.toUpperCase()}:
+"${textA}"
 
-PARTY B (${complaintB.employeeName}):
-${textB}${witnessContext}
+STATEMENT FROM ${nameB.toUpperCase()}:
+"${textB}"${witnessContext}
 
-Please provide a comprehensive, NEUTRAL analysis in the following JSON format:
+Please provide your analysis in JSON format. Remember to use "${nameA}" and "${nameB}" by name throughout - never use generic terms like "Party A" or "Party B".
 
 {
   "timelineDifferences": [
-    "List specific timeline discrepancies between the two accounts, stating what each party claims without judgment"
+    "Describe specific timing discrepancies you've identified. Use their names. Example: '${nameA} places the conversation at around 10:30 AM, while ${nameB} recalls it happening closer to lunch, around 11:45 AM. This 75-minute gap is significant and worth clarifying.'"
   ],
   "agreementPoints": [
-    "List facts that both parties agree on or describe consistently"
+    "Identify what both employees agree on - these are your foundation facts. Use their names. Example: 'Both ${nameA} and ${nameB} confirm that the interaction took place near the loading dock, and both acknowledge that voices were raised at some point.'"
   ],
   "contradictions": [
-    "List direct contradictions where Party A says X but Party B says Y - present both versions neutrally"
+    "Describe key points where their accounts directly conflict. Present both versions WITH CONTEXT about why this matters. Use their names. Example: '${nameA} states that ${nameB} approached them first, while ${nameB} describes being called over by ${nameA}. Who initiated the interaction often sets the tone for what follows, making this an important point to clarify.'"
   ],
   "emotionalLanguage": [
-    "Note instances of emotional, escalated, or strong language from either party (for context, not criticism)"
+    "Note emotional indicators in their language that reveal how they're feeling about this situation. Provide professional insight. Example: '${nameA} uses phrases like \"always does this\" and \"never listens\" - this pattern of absolute language suggests this may not be an isolated incident from their perspective, and there could be underlying frustration building over time.'"
   ],
   "missingDetails": [
-    "List important details that are unclear or not addressed by either party (e.g., specific times, witnesses mentioned but not interviewed)"
+    "Identify gaps in the narrative that a thorough investigation should address. Be specific about WHY these details matter. Example: 'Neither statement mentions whether other team members witnessed the exchange. Given that this occurred during shift change, it's likely others were present - their perspectives could provide valuable context.'"
   ],
-  "neutralSummary": "A 2-3 paragraph summary of the incident based on both accounts. Present what happened according to each party without determining truth. End with what aspects need further clarification.",
+  "neutralSummary": "Write a 3-4 paragraph executive summary as if you're briefing a senior manager. Start with what we know happened (the common ground). Then describe where the accounts diverge and what that might indicate about the situation. Discuss any patterns or underlying dynamics you've observed. End with specific recommendations for what the supervisor should explore further. Use ${nameA} and ${nameB}'s names throughout. Write naturally, as a professional would speak.",
   "sideBySideComparison": [
     {
-      "topic": "The main point being compared (e.g., 'Time of incident', 'Who initiated contact')",
-      "partyAVersion": "What Party A claims about this topic",
-      "partyBVersion": "What Party B claims about this topic", 
+      "topic": "A clear, specific aspect of the incident (e.g., 'Who initiated the conversation', 'Tone of the exchange', 'What was said about the deadline')",
+      "partyAVersion": "${nameA}'s perspective on this specific point, in your professional summary (not a direct quote)",
+      "partyBVersion": "${nameB}'s perspective on this specific point, in your professional summary (not a direct quote)", 
       "status": "agreement|contradiction|partial|unclear"
     }
   ]
 }
 
-Ensure:
-- Each array has at least 1 item, up to 5-8 items for thorough analysis
-- Side-by-side comparison covers all major disputed points
-- Language remains completely neutral and professional
-- No conclusions about who is telling the truth`;
+QUALITY STANDARDS:
+- Write as a human professional, not a template-filling machine
+- Each bullet point should contain genuine insight, not just restated facts
+- Use ${nameA} and ${nameB}'s names - NEVER say "Party A" or "Party B"
+- The summary should read like a professional briefing, not a form response
+- Identify 4-6 comparison points that matter most for understanding this situation
+- If something seems significant, explain WHY it matters
+- Consider workplace dynamics, communication patterns, and what's left unsaid`;
 
     console.log('Conflict Analysis: Starting comparison...');
     
@@ -171,8 +186,8 @@ Ensure:
         { role: 'system', content: systemPrompt },
         { role: 'user', content: userPrompt }
       ],
-      max_tokens: 4096,
-      temperature: 0.3, // Lower temperature for more consistent analysis
+      max_tokens: 6000,
+      temperature: 0.5, // Balanced for natural, professional responses
       response_format: { type: 'json_object' }
     });
     
