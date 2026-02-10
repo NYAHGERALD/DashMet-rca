@@ -791,23 +791,13 @@ router.post('/text-to-speech', async (req: Request, res: Response) => {
       speed: 0.95        // Slightly slower for clarity
     });
 
-    // Convert to base64
+    // Get raw audio buffer and send directly (like ai-vision/tts)
     const buffer = Buffer.from(await mp3Response.arrayBuffer());
-    const audioBase64 = buffer.toString('base64');
-
-    return res.json({
-      success: true,
-      data: {
-        audioBase64,
-        format: 'mp3',
-        languageCode,
-        greeting,
-        purpose,
-        transition,
-        closing,
-        documentText: text
-      }
-    });
+    
+    res.setHeader('Content-Type', 'audio/mpeg');
+    res.setHeader('Content-Length', buffer.length);
+    res.setHeader('X-Language-Code', languageCode);
+    return res.send(buffer);
 
   } catch (error: any) {
     console.error('TTS error:', error);
