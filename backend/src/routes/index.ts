@@ -42,6 +42,7 @@ import consentRoutes from './consentRoutes';
 import aiVisionRoutes from './aiVisionRoutes';
 import documentOcrRoutes from './documentOcrRoutes';
 import conflictAnalysisRoutes from './conflictAnalysisRoutes';
+import policyMatchingRoutes from './policyMatchingRoutes';
 import { authenticate } from '../middleware/auth';
 import { getIncidentTranscripts } from '../controllers/transcriptController';
 
@@ -98,6 +99,10 @@ router.use('/document-ocr', documentOcrRoutes);
 // Conflict Analysis routes - PUBLIC for iOS app
 // AI-powered comparison of workplace conflict statements
 router.use('/conflict-analysis', conflictAnalysisRoutes);
+
+// Policy Matching routes - PUBLIC for iOS app
+// AI-powered matching of case details against policy sections
+router.use('/policy-matching', policyMatchingRoutes);
 
 // Phase 1: Legacy JWT Authentication routes (will be deprecated)
 router.use('/auth', authRoutes);

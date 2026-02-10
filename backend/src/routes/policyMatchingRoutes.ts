@@ -1,0 +1,263 @@
+import { Router, Request, Response } from 'express';
+import OpenAI from 'openai';
+
+const router = Router();
+
+// Lazy initialization of OpenAI client
+let openaiClient: OpenAI | null = null;
+
+function getOpenAIClient(): OpenAI | null {
+  if (!process.env.OPENAI_API_KEY) {
+    return null;
+  }
+  
+  if (openaiClient) {
+    return openaiClient;
+  }
+  
+  openaiClient = new OpenAI({
+    apiKey: process.env.OPENAI_API_KEY,
+    timeout: 120000,
+    maxRetries: 2,
+  });
+  
+  return openaiClient;
+}
+
+interface PolicySection {
+  id: string;
+  sectionNumber: string;
+  title: string;
+  content: string;
+  type: string;
+  keywords: string[];
+}
+
+interface PolicyMatchRequest {
+  caseDetails: {
+    caseType: string;
+    incidentDate: string;
+    location: string;
+    department: string;
+  };
+  complaintA: {
+    employeeName: string;
+    text: string;
+  };
+  complaintB: {
+    employeeName: string;
+    text: string;
+  };
+  analysisResult?: {
+    contradictions: string[];
+    agreementPoints: string[];
+    neutralSummary: string;
+  };
+  witnessStatements?: Array<{
+    witnessName: string;
+    text: string;
+  }>;
+  policySections: PolicySection[];
+}
+
+interface PolicyMatchResult {
+  sectionId: string;
+  sectionNumber: string;
+  sectionTitle: string;
+  relevanceExplanation: string;
+  matchConfidence: number;
+  keyPhrases: string[];
+}
+
+/**
+ * Match case details against policy sections
+ * POST /api/policy-matching/match
+ */
+router.post('/match', async (req: Request, res: Response) => {
+  try {
+    const {
+      caseDetails,
+      complaintA,
+      complaintB,
+      analysisResult,
+      witnessStatements,
+      policySections
+    } = req.body as PolicyMatchRequest;
+
+    if (!caseDetails || !complaintA || !complaintB) {
+      return res.status(400).json({
+        error: 'Case details and both complaints are required'
+      });
+    }
+
+    if (!policySections || policySections.length === 0) {
+      return res.status(400).json({
+        error: 'No policy sections provided for matching'
+      });
+    }
+
+    const openai = getOpenAIClient();
+    if (!openai) {
+      return res.status(503).json({
+        error: 'AI service unavailable',
+        message: 'OpenAI API key not configured. Please contact your administrator.'
+      });
+    }
+
+    // Build witness context if available
+    let witnessContext = '';
+    if (witnessStatements && witnessStatements.length > 0) {
+      witnessContext = `\n\nWITNESS ACCOUNTS:\n${witnessStatements.map(w =>
+        `${w.witnessName}: "${w.text}"`
+      ).join('\n')}`;
+    }
+
+    // Build analysis context if available
+    let analysisContext = '';
+    if (analysisResult) {
+      analysisContext = `\n\nPREVIOUS ANALYSIS FINDINGS:
+Key Contradictions: ${analysisResult.contradictions.slice(0, 3).join('; ')}
+Agreement Points: ${analysisResult.agreementPoints.slice(0, 3).join('; ')}
+Summary: ${analysisResult.neutralSummary.substring(0, 500)}`;
+    }
+
+    // Format policy sections for the prompt
+    const policySectionsText = policySections.map(section =>
+      `[Section ${section.sectionNumber}: ${section.title}]
+Type: ${section.type}
+Content: ${section.content.substring(0, 800)}${section.content.length > 800 ? '...' : ''}
+Keywords: ${section.keywords.join(', ')}`
+    ).join('\n\n---\n\n');
+
+    const systemPrompt = `You are a senior HR Policy Specialist with 20+ years of experience in workplace policy interpretation and compliance. Your role is to analyze workplace incidents and identify which company policy sections MAY be relevant.
+
+YOUR APPROACH:
+- You identify policy sections that POTENTIALLY relate to the situation
+- You explain in plain, professional language WHY each section might apply
+- You use employee names when referring to specific behaviors
+- You NEVER accuse anyone or determine guilt
+- You present policy relevance as "This section may be relevant because..." NOT "This person violated..."
+- You focus on the BEHAVIORS described, not the people
+- You prioritize sections that address the core issues raised in both statements
+
+IMPORTANT BOUNDARIES:
+- You are NOT determining if a policy was violated
+- You are SUGGESTING which policies a supervisor should review
+- You present findings as guidance, not conclusions
+- You remain completely neutral and objective`;
+
+    const userPrompt = `Please analyze this workplace incident and identify which policy sections may be relevant.
+
+INCIDENT DETAILS:
+- Type: ${caseDetails.caseType}
+- Date: ${caseDetails.incidentDate}
+- Location: ${caseDetails.location}
+- Department: ${caseDetails.department}
+
+${complaintA.employeeName.toUpperCase()}'S STATEMENT:
+"${complaintA.text}"
+
+${complaintB.employeeName.toUpperCase()}'S STATEMENT:
+"${complaintB.text}"${witnessContext}${analysisContext}
+
+COMPANY POLICY SECTIONS TO CONSIDER:
+${policySectionsText}
+
+Please identify which policy sections may be relevant to this situation. For each relevant section, provide:
+1. Why it might apply (in professional, neutral language)
+2. A confidence score (0.0-1.0) based on how clearly the section relates
+3. Key phrases from the statements that triggered this match
+
+Respond in JSON format:
+{
+  "matches": [
+    {
+      "sectionId": "the section's ID",
+      "sectionNumber": "the section number (e.g., '3.2')",
+      "sectionTitle": "the section title",
+      "relevanceExplanation": "A 2-3 sentence professional explanation of why this section may be relevant. Use ${complaintA.employeeName} and ${complaintB.employeeName}'s names. Focus on behaviors described, not accusations. Start with 'This section may be relevant because...'",
+      "matchConfidence": 0.85,
+      "keyPhrases": ["specific phrases from statements that relate to this policy"]
+    }
+  ],
+  "overallGuidance": "A brief paragraph of professional guidance for the supervisor about how to use these policy references in their review. Emphasize that these are suggestions for consideration, not determinations of violation."
+}
+
+QUALITY STANDARDS:
+- Only include sections with genuine relevance (confidence > 0.5)
+- Maximum 5 most relevant sections
+- Use employee names in explanations, never "Party A" or "Party B"
+- Explanations should be helpful and actionable
+- Maintain completely neutral, professional tone`;
+
+    console.log('Policy Matching: Starting analysis...');
+
+    const completion = await openai.chat.completions.create({
+      model: 'gpt-4o',
+      messages: [
+        { role: 'system', content: systemPrompt },
+        { role: 'user', content: userPrompt }
+      ],
+      max_tokens: 4000,
+      temperature: 0.4,
+      response_format: { type: 'json_object' }
+    });
+
+    const content = completion.choices[0]?.message?.content || '';
+    console.log('Policy Matching: Received response, parsing...');
+
+    try {
+      const result = JSON.parse(content);
+
+      // Validate and clean up matches
+      const matches: PolicyMatchResult[] = (result.matches || [])
+        .filter((m: any) => m.matchConfidence >= 0.5)
+        .slice(0, 5)
+        .map((m: any) => ({
+          sectionId: m.sectionId || '',
+          sectionNumber: m.sectionNumber || '',
+          sectionTitle: m.sectionTitle || '',
+          relevanceExplanation: m.relevanceExplanation || '',
+          matchConfidence: Math.min(1, Math.max(0, m.matchConfidence || 0)),
+          keyPhrases: m.keyPhrases || []
+        }));
+
+      return res.json({
+        success: true,
+        data: {
+          matches,
+          overallGuidance: result.overallGuidance || '',
+          generatedAt: new Date().toISOString()
+        }
+      });
+
+    } catch (parseError) {
+      console.error('Policy Matching: Failed to parse JSON response', parseError);
+      return res.status(500).json({
+        error: 'Failed to parse policy matching results',
+        message: 'The AI returned an invalid response format'
+      });
+    }
+
+  } catch (error: any) {
+    console.error('Policy Matching error:', error);
+    return res.status(500).json({
+      error: 'Policy matching failed',
+      message: error.message || 'An error occurred during policy analysis'
+    });
+  }
+});
+
+/**
+ * Health check endpoint
+ * GET /api/policy-matching/health
+ */
+router.get('/health', (req: Request, res: Response) => {
+  const openai = getOpenAIClient();
+  res.json({
+    status: 'ok',
+    aiAvailable: openai !== null
+  });
+});
+
+export default router;
