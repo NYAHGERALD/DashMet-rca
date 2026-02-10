@@ -41,6 +41,7 @@ import meetingRoutes from './meetingRoutes';
 import consentRoutes from './consentRoutes';
 import aiVisionRoutes from './aiVisionRoutes';
 import documentOcrRoutes from './documentOcrRoutes';
+import conflictAnalysisRoutes from './conflictAnalysisRoutes';
 import { authenticate } from '../middleware/auth';
 import { getIncidentTranscripts } from '../controllers/transcriptController';
 
@@ -93,6 +94,10 @@ router.use('/ai-vision', aiVisionRoutes);
 // Document OCR routes - PUBLIC for iOS app
 // Handwritten document scanning with GPT-4 Vision
 router.use('/document-ocr', documentOcrRoutes);
+
+// Conflict Analysis routes - PUBLIC for iOS app
+// AI-powered comparison of workplace conflict statements
+router.use('/conflict-analysis', conflictAnalysisRoutes);
 
 // Phase 1: Legacy JWT Authentication routes (will be deprecated)
 router.use('/auth', authRoutes);
