@@ -664,3 +664,649 @@ export const searchTranscripts = async (req: AuthRequest, res: Response) => {
     });
   }
 };
+
+/**
+ * Transcribe audio using OpenAI Whisper API (server-side)
+ * POST /transcripts/transcribe
+ * Body: multipart/form-data with 'audio' file
+ * Query params: language, meetingType
+ */
+export const transcribeAudio = async (req: AuthRequest, res: Response) => {
+  try {
+    const userId = req.user?.id;
+    
+    if (!userId) {
+      return res.status(401).json({ success: false, error: 'Unauthorized' });
+    }
+
+    // Check if file was uploaded
+    const file = req.file;
+    if (!file) {
+      return res.status(400).json({
+        success: false,
+        error: 'No audio file provided. Please upload an audio file.',
+      });
+    }
+
+    // Import whisper service
+    const whisperService = await import('../services/whisperService');
+
+    // Check if Whisper is configured
+    if (!whisperService.isConfigured()) {
+      return res.status(503).json({
+        success: false,
+        error: 'Transcription service is not configured. Please contact administrator.',
+      });
+    }
+
+    // Get config from query params
+    const { language, meetingType } = req.query;
+
+    const fileSizeMB = (file.size / 1024 / 1024).toFixed(2);
+    const fileSizeBytes = file.size;
+    const bufferLength = file.buffer?.length || 0;
+    
+    console.log(`[Whisper] ====== TRANSCRIPTION REQUEST ======`);
+    console.log(`[Whisper] User: ${userId}`);
+    console.log(`[Whisper] File: ${file.originalname}`);
+    console.log(`[Whisper] File size: ${fileSizeMB}MB (${fileSizeBytes} bytes)`);
+    console.log(`[Whisper] Buffer length: ${bufferLength} bytes`);
+    console.log(`[Whisper] MIME type: ${file.mimetype}`);
+    console.log(`[Whisper] Language: ${language || 'en'}, Meeting type: ${meetingType || 'general'}`);
+    
+    // Verify buffer integrity
+    if (bufferLength !== fileSizeBytes) {
+      console.error(`[Whisper] ⚠️ Buffer size mismatch! File size: ${fileSizeBytes}, Buffer: ${bufferLength}`);
+    }
+
+    // Transcribe from buffer - handles chunking automatically for large files
+    const result = await whisperService.transcribeFromBuffer(
+      file.buffer,
+      file.originalname,
+      {
+        language: language as string || 'en',
+        meetingType: meetingType as string || 'general',
+      }
+    );
+
+    if (!result.success) {
+      console.error('[Whisper] Transcription failed:', result.error);
+      return res.status(500).json({
+        success: false,
+        error: result.error || 'Transcription failed',
+      });
+    }
+
+    console.log(`[Whisper] ====== TRANSCRIPTION COMPLETE ======`);
+    console.log(`[Whisper] Duration: ${result.duration?.toFixed(0)}s`);
+    console.log(`[Whisper] Text length: ${result.text?.length || 0} characters`);
+    console.log(`[Whisper] Word count: ${result.text?.split(/\s+/).length || 0} words`);
+    console.log(`[Whisper] Segments: ${result.segments?.length || 0}`);
+
+    return res.json({
+      success: true,
+      transcript: result.text,
+      language: result.language,
+      duration: result.duration,
+      segments: result.segments,
+    });
+  } catch (error: any) {
+    console.error('[Whisper] Error transcribing audio:', error);
+    return res.status(500).json({
+      success: false,
+      error: error.message || 'Failed to transcribe audio',
+    });
+  }
+};
+
+/**
+ * Process transcript to detect speakers and format with paragraph breaks
+ * Uses GPT to intelligently identify speaker changes based on context
+ * POST /transcripts/process-speakers
+ * Body: { transcript: string, isChunk?: boolean, chunkIndex?: number, totalChunks?: number }
+ */
+export const processSpeakers = async (req: AuthRequest, res: Response) => {
+  try {
+    const userId = req.user?.id;
+    
+    if (!userId) {
+      return res.status(401).json({ success: false, error: 'Unauthorized' });
+    }
+
+    const { transcript, isChunk, chunkIndex, totalChunks } = req.body;
+
+    if (!transcript || typeof transcript !== 'string') {
+      return res.status(400).json({
+        success: false,
+        error: 'Transcript text is required',
+      });
+    }
+
+    console.log(`[SpeakerDetection] ====== PROCESSING REQUEST ======`);
+    console.log(`[SpeakerDetection] User: ${userId}`);
+    console.log(`[SpeakerDetection] Input length: ${transcript.length} characters`);
+    console.log(`[SpeakerDetection] Is chunk: ${isChunk}, Index: ${chunkIndex}/${totalChunks}`);
+
+    // Import and use the speaker detection service
+    const speakerService = await import('../services/speakerDetectionService');
+    
+    const processedTranscript = await speakerService.detectAndFormatSpeakers(
+      transcript,
+      isChunk || false,
+      chunkIndex || 0,
+      totalChunks || 1
+    );
+
+    console.log(`[SpeakerDetection] ====== PROCESSING COMPLETE ======`);
+    console.log(`[SpeakerDetection] Output length: ${processedTranscript.length} characters`);
+
+    return res.json({
+      success: true,
+      processedTranscript,
+    });
+  } catch (error: any) {
+    console.error('[SpeakerDetection] Error processing transcript:', error);
+    return res.status(500).json({
+      success: false,
+      error: error.message || 'Failed to process transcript',
+    });
+  }
+};
+
+/**
+ * Generate an intelligent narrative summary of a meeting
+ * Uses GPT-4o to create a professional, natural-sounding summary
+ * POST /transcripts/narrative-summary
+ * Body: { 
+ *   meetingTitle: string, 
+ *   meetingType: string,
+ *   meetingDate: string (ISO),
+ *   meetingTime: string,
+ *   duration?: number (seconds),
+ *   transcript: string,
+ *   language?: string,
+ *   participantCount?: number
+ * }
+ */
+export const generateNarrativeSummary = async (req: AuthRequest, res: Response) => {
+  try {
+    const userId = req.user?.id;
+    
+    if (!userId) {
+      return res.status(401).json({ success: false, error: 'Unauthorized' });
+    }
+
+    const { 
+      meetingTitle, 
+      meetingType, 
+      meetingDate, 
+      meetingTime,
+      duration,
+      transcript,
+      language,
+      participantCount
+    } = req.body;
+
+    if (!transcript || typeof transcript !== 'string') {
+      return res.status(400).json({
+        success: false,
+        error: 'Transcript text is required',
+      });
+    }
+
+    if (!meetingTitle || !meetingDate) {
+      return res.status(400).json({
+        success: false,
+        error: 'Meeting title and date are required',
+      });
+    }
+
+    console.log(`[NarrativeSummary] ====== GENERATING SUMMARY ======`);
+    console.log(`[NarrativeSummary] User: ${userId}`);
+    console.log(`[NarrativeSummary] Meeting: ${meetingTitle}`);
+    console.log(`[NarrativeSummary] Transcript length: ${transcript.length} characters`);
+
+    // Import and use the summary service
+    const summaryService = await import('../services/meetingSummaryService');
+    
+    const summary = await summaryService.generateNarrativeSummary({
+      meetingTitle,
+      meetingType: meetingType || 'General',
+      meetingDate,
+      meetingTime: meetingTime || 'Unknown',
+      duration,
+      transcript,
+      language,
+      participantCount
+    });
+
+    console.log(`[NarrativeSummary] ====== SUMMARY GENERATED ======`);
+    console.log(`[NarrativeSummary] Narrative length: ${summary.narrative.length} characters`);
+
+    return res.json({
+      success: true,
+      summary,
+    });
+  } catch (error: any) {
+    console.error('[NarrativeSummary] Error generating summary:', error);
+    return res.status(500).json({
+      success: false,
+      error: error.message || 'Failed to generate narrative summary',
+    });
+  }
+};
+
+/**
+ * Generate TTS audio from a narrative summary
+ * Uses OpenAI TTS with realistic voice (onyx - professional male voice)
+ * POST /transcripts/summary-audio
+ * Body: { 
+ *   text: string,
+ *   voice?: 'alloy' | 'echo' | 'fable' | 'onyx' | 'nova' | 'shimmer',
+ *   speed?: number (0.25 - 4.0)
+ * }
+ */
+export const generateSummaryAudio = async (req: AuthRequest, res: Response) => {
+  try {
+    const userId = req.user?.id;
+    
+    if (!userId) {
+      return res.status(401).json({ success: false, error: 'Unauthorized' });
+    }
+
+    const { text, voice = 'onyx', speed = 1.0 } = req.body;
+
+    if (!text || typeof text !== 'string') {
+      return res.status(400).json({
+        success: false,
+        error: 'Text is required for TTS',
+      });
+    }
+
+    // Validate voice option
+    const validVoices = ['alloy', 'echo', 'fable', 'onyx', 'nova', 'shimmer'];
+    if (!validVoices.includes(voice)) {
+      return res.status(400).json({
+        success: false,
+        error: `Invalid voice. Valid options: ${validVoices.join(', ')}`,
+      });
+    }
+
+    // Validate speed
+    if (speed < 0.25 || speed > 4.0) {
+      return res.status(400).json({
+        success: false,
+        error: 'Speed must be between 0.25 and 4.0',
+      });
+    }
+
+    console.log(`[SummaryAudio] ====== GENERATING TTS ======`);
+    console.log(`[SummaryAudio] User: ${userId}`);
+    console.log(`[SummaryAudio] Voice: ${voice}, Speed: ${speed}x`);
+    console.log(`[SummaryAudio] Text length: ${text.length} characters`);
+
+    // Import and use the summary service
+    const summaryService = await import('../services/meetingSummaryService');
+    
+    const audioBuffer = await summaryService.textToSpeech(text, voice as any, speed);
+
+    console.log(`[SummaryAudio] ====== TTS GENERATED ======`);
+    console.log(`[SummaryAudio] Audio size: ${audioBuffer.length} bytes`);
+
+    // Set response headers for audio
+    res.set({
+      'Content-Type': 'audio/mpeg',
+      'Content-Length': audioBuffer.length,
+      'Content-Disposition': 'attachment; filename="summary.mp3"'
+    });
+
+    return res.send(audioBuffer);
+  } catch (error: any) {
+    console.error('[SummaryAudio] Error generating TTS:', error);
+    return res.status(500).json({
+      success: false,
+      error: error.message || 'Failed to generate audio',
+    });
+  }
+};
+
+/**
+ * Save AI narrative summary to database
+ * Stores the generated summary in the MeetingSummary table
+ * POST /transcripts/save-ai-summary
+ * Body: {
+ *   meetingId: string,
+ *   narrative: string,
+ *   briefSummary: string,
+ *   tone: string,
+ *   objectives: string[],
+ *   keyDiscussions: string[],
+ *   takeaways: string[],
+ *   audioUrl?: string,
+ *   audioVoice?: string,
+ *   audioDuration?: number
+ * }
+ */
+export const saveAISummary = async (req: AuthRequest, res: Response) => {
+  try {
+    const userId = req.user?.id;
+    
+    if (!userId) {
+      return res.status(401).json({ success: false, error: 'Unauthorized' });
+    }
+
+    const { 
+      meetingId,
+      narrative,
+      briefSummary,
+      tone,
+      objectives,
+      keyDiscussions,
+      takeaways,
+      audioUrl,
+      audioVoice,
+      audioDuration
+    } = req.body;
+
+    if (!meetingId) {
+      return res.status(400).json({
+        success: false,
+        error: 'Meeting ID is required',
+      });
+    }
+
+    if (!narrative || !briefSummary) {
+      return res.status(400).json({
+        success: false,
+        error: 'Narrative and brief summary are required',
+      });
+    }
+
+    console.log(`[SaveAISummary] ====== SAVING AI SUMMARY ======`);
+    console.log(`[SaveAISummary] User: ${userId}`);
+    console.log(`[SaveAISummary] Meeting: ${meetingId}`);
+    console.log(`[SaveAISummary] Narrative length: ${narrative.length} characters`);
+    console.log(`[SaveAISummary] Has audio: ${!!audioUrl}`);
+
+    // Check if meeting exists (using the mobile meeting system)
+    // Since we're using Firebase for meetings, we'll just save to the summary table
+    // with meetingId as the key (meeting ID from iOS app)
+    
+    // Upsert - update if exists, create if not
+    const summary = await prisma.meetingSummary.upsert({
+      where: { meetingId },
+      update: {
+        narrative,
+        briefSummary,
+        tone,
+        objectives: objectives || [],
+        keyDiscussions: keyDiscussions || [],
+        takeaways: takeaways || [],
+        audioUrl,
+        audioVoice,
+        audioDuration,
+        editedAt: new Date(),
+        editedById: userId,
+      },
+      create: {
+        meetingId,
+        narrative,
+        briefSummary,
+        tone,
+        objectives: objectives || [],
+        keyDiscussions: keyDiscussions || [],
+        takeaways: takeaways || [],
+        audioUrl,
+        audioVoice,
+        audioDuration,
+        generatedAt: new Date(),
+      },
+    });
+
+    console.log(`[SaveAISummary] ====== AI SUMMARY SAVED ======`);
+    console.log(`[SaveAISummary] Summary ID: ${summary.id}`);
+
+    return res.json({
+      success: true,
+      summary: {
+        id: summary.id,
+        meetingId: summary.meetingId,
+        narrative: summary.narrative,
+        briefSummary: summary.briefSummary,
+        tone: summary.tone,
+        objectives: summary.objectives,
+        keyDiscussions: summary.keyDiscussions,
+        takeaways: summary.takeaways,
+        audioUrl: summary.audioUrl,
+        audioVoice: summary.audioVoice,
+        audioDuration: summary.audioDuration,
+        generatedAt: summary.generatedAt,
+      },
+    });
+  } catch (error: any) {
+    console.error('[SaveAISummary] Error saving AI summary:', error);
+    return res.status(500).json({
+      success: false,
+      error: error.message || 'Failed to save AI summary',
+    });
+  }
+};
+
+/**
+ * Get AI summary for a meeting
+ * GET /transcripts/ai-summary/:meetingId
+ */
+export const getAISummary = async (req: AuthRequest, res: Response) => {
+  try {
+    const userId = req.user?.id;
+    
+    if (!userId) {
+      return res.status(401).json({ success: false, error: 'Unauthorized' });
+    }
+
+    const { meetingId } = req.params;
+
+    if (!meetingId) {
+      return res.status(400).json({
+        success: false,
+        error: 'Meeting ID is required',
+      });
+    }
+
+    console.log(`[GetAISummary] Fetching summary for meeting: ${meetingId}`);
+
+    const summary = await prisma.meetingSummary.findUnique({
+      where: { meetingId },
+    });
+
+    if (!summary) {
+      return res.status(404).json({
+        success: false,
+        error: 'No AI summary found for this meeting',
+      });
+    }
+
+    return res.json({
+      success: true,
+      summary: {
+        id: summary.id,
+        meetingId: summary.meetingId,
+        narrative: summary.narrative,
+        briefSummary: summary.briefSummary,
+        tone: summary.tone,
+        objectives: summary.objectives,
+        keyDiscussions: summary.keyDiscussions,
+        takeaways: summary.takeaways,
+        audioUrl: summary.audioUrl,
+        audioVoice: summary.audioVoice,
+        audioDuration: summary.audioDuration,
+        generatedAt: summary.generatedAt,
+      },
+    });
+  } catch (error: any) {
+    console.error('[GetAISummary] Error fetching AI summary:', error);
+    return res.status(500).json({
+      success: false,
+      error: error.message || 'Failed to fetch AI summary',
+    });
+  }
+};
+
+/**
+ * Save processed transcript to database
+ * Stores both raw and AI-processed transcript
+ * POST /transcripts/save-processed
+ * Body: {
+ *   meetingId: string,
+ *   rawTranscript: string,
+ *   processedTranscript: string,
+ *   wordCount?: number,
+ *   duration?: number
+ * }
+ */
+export const saveProcessedTranscript = async (req: AuthRequest, res: Response) => {
+  try {
+    const userId = req.user?.id;
+    
+    if (!userId) {
+      return res.status(401).json({ success: false, error: 'Unauthorized' });
+    }
+
+    const { 
+      meetingId,
+      rawTranscript,
+      processedTranscript,
+      wordCount,
+      duration
+    } = req.body;
+
+    if (!meetingId) {
+      return res.status(400).json({
+        success: false,
+        error: 'Meeting ID is required',
+      });
+    }
+
+    if (!rawTranscript && !processedTranscript) {
+      return res.status(400).json({
+        success: false,
+        error: 'At least one transcript (raw or processed) is required',
+      });
+    }
+
+    console.log(`[SaveProcessedTranscript] ====== SAVING TRANSCRIPT ======`);
+    console.log(`[SaveProcessedTranscript] User: ${userId}`);
+    console.log(`[SaveProcessedTranscript] Meeting: ${meetingId}`);
+    console.log(`[SaveProcessedTranscript] Raw length: ${rawTranscript?.length || 0} characters`);
+    console.log(`[SaveProcessedTranscript] Processed length: ${processedTranscript?.length || 0} characters`);
+
+    // Upsert - update if exists, create if not
+    const summary = await prisma.meetingSummary.upsert({
+      where: { meetingId },
+      update: {
+        rawTranscript,
+        processedTranscript,
+        transcriptWordCount: wordCount,
+        transcriptDuration: duration,
+        transcriptSavedAt: new Date(),
+        editedAt: new Date(),
+        editedById: userId,
+      },
+      create: {
+        meetingId,
+        rawTranscript,
+        processedTranscript,
+        transcriptWordCount: wordCount,
+        transcriptDuration: duration,
+        transcriptSavedAt: new Date(),
+        generatedAt: new Date(),
+      },
+    });
+
+    console.log(`[SaveProcessedTranscript] ====== TRANSCRIPT SAVED ======`);
+    console.log(`[SaveProcessedTranscript] Summary ID: ${summary.id}`);
+
+    return res.json({
+      success: true,
+      transcript: {
+        id: summary.id,
+        meetingId: summary.meetingId,
+        rawTranscript: summary.rawTranscript,
+        processedTranscript: summary.processedTranscript,
+        wordCount: summary.transcriptWordCount,
+        duration: summary.transcriptDuration,
+        savedAt: summary.transcriptSavedAt,
+      },
+    });
+  } catch (error: any) {
+    console.error('[SaveProcessedTranscript] Error saving transcript:', error);
+    return res.status(500).json({
+      success: false,
+      error: error.message || 'Failed to save transcript',
+    });
+  }
+};
+
+/**
+ * Get processed transcript for a meeting
+ * GET /transcripts/processed/:meetingId
+ */
+export const getProcessedTranscript = async (req: AuthRequest, res: Response) => {
+  try {
+    const userId = req.user?.id;
+    
+    if (!userId) {
+      return res.status(401).json({ success: false, error: 'Unauthorized' });
+    }
+
+    const { meetingId } = req.params;
+
+    if (!meetingId) {
+      return res.status(400).json({
+        success: false,
+        error: 'Meeting ID is required',
+      });
+    }
+
+    console.log(`[GetProcessedTranscript] Fetching transcript for meeting: ${meetingId}`);
+
+    const summary = await prisma.meetingSummary.findUnique({
+      where: { meetingId },
+      select: {
+        id: true,
+        meetingId: true,
+        rawTranscript: true,
+        processedTranscript: true,
+        transcriptWordCount: true,
+        transcriptDuration: true,
+        transcriptSavedAt: true,
+      },
+    });
+
+    if (!summary || (!summary.rawTranscript && !summary.processedTranscript)) {
+      return res.status(404).json({
+        success: false,
+        error: 'No transcript found for this meeting',
+      });
+    }
+
+    return res.json({
+      success: true,
+      transcript: {
+        id: summary.id,
+        meetingId: summary.meetingId,
+        rawTranscript: summary.rawTranscript,
+        processedTranscript: summary.processedTranscript,
+        wordCount: summary.transcriptWordCount,
+        duration: summary.transcriptDuration,
+        savedAt: summary.transcriptSavedAt,
+      },
+    });
+  } catch (error: any) {
+    console.error('[GetProcessedTranscript] Error fetching transcript:', error);
+    return res.status(500).json({
+      success: false,
+      error: error.message || 'Failed to fetch transcript',
+    });
+  }
+};

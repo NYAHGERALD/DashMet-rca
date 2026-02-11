@@ -330,6 +330,7 @@ model Department {
   Facility                  Facility                    @relation(fields: [facilityId], references: [id], onDelete: Cascade)
   Incident                  Incident[]
   WorkplaceSafetyAssessment WorkplaceSafetyAssessment[]
+  Meeting                   Meeting[]
 
   @@index([facilityId])
 }
@@ -482,6 +483,8 @@ model Facility {
   Incident                  Incident[]
   RegulatoryTracking        RegulatoryTracking[]
   Shift                     Shift[]
+  Task                      Task[]
+  Meeting                   Meeting[]                   @relation("MeetingFacility")
   WorkplaceSafetyAssessment WorkplaceSafetyAssessment[]
 
   @@index([organizationId])
@@ -767,7 +770,6 @@ model Incident {
   DiscussionMarker                               DiscussionMarker[]
   Evidence                                       Evidence[]
   EvidenceSpotlight                              EvidenceSpotlight[]
-  MeetingRecording                               MeetingRecording[]
   Area                                           Area?                    @relation(fields: [areaId], references: [id])
   User_Incident_assignedToIdToUser               User?                    @relation("Incident_assignedToIdToUser", fields: [assignedToId], references: [id])
   Category                                       Category                 @relation(fields: [categoryId], references: [id])
@@ -780,6 +782,7 @@ model Incident {
   Organization                                   Organization             @relation(fields: [organizationId], references: [id], onDelete: Cascade)
   Shift                                          Shift?                   @relation(fields: [shiftId], references: [id])
   IncidentParticipant                            IncidentParticipant[]
+  MeetingRecording                               MeetingRecording[]
   Notification                                   Notification[]
   RCAAnalysis                                    RCAAnalysis[]
 
@@ -896,11 +899,13 @@ model Organization {
   RegulatoryTracking        RegulatoryTracking[]
   RolePrivilege             RolePrivilege[]
   SupportRequest            SupportRequest[]
+  Task                      Task[]
+  Meeting                   Meeting[]
   User                      User[]
-  WorkplaceSafetyAssessment WorkplaceSafetyAssessment[]
-  WorkOrderTemplate         WorkOrderTemplate[]
-  WorkOrderSettings         WorkOrderSettings?
   WorkOrder                 WorkOrder[]
+  WorkOrderSettings         WorkOrderSettings?
+  WorkOrderTemplate         WorkOrderTemplate[]
+  WorkplaceSafetyAssessment WorkplaceSafetyAssessment[]
 
   @@index([name])
   @@index([signupCode])
@@ -1278,6 +1283,7 @@ model User {
   socketId                                                            String?
   profilePicture                                                      String?
   autoSaveEnabled                                                     Boolean                              @default(false)
+  phone                                                               String?                              @unique
   AIFishboneSessionsUpdated                                           AIFishboneSession[]                  @relation("AIFishboneSessionUpdatedBy")
   AIFishboneSessionsStarted                                           AIFishboneSession[]                  @relation("AIFishboneSessionStartedBy")
   AuditLog                                                            AuditLog[]
@@ -1289,7 +1295,6 @@ model User {
   MarkersCreated                                                      DiscussionMarker[]                   @relation("MarkerCreatedBy")
   AnnotationsCreated                                                  EvidenceAnnotation[]                 @relation("AnnotationCreatedBy")
   SpotlightsPresented                                                 EvidenceSpotlight[]                  @relation("SpotlightPresentedBy")
-  RecordingsCreated                                                   MeetingRecording[]                   @relation("RecordingRecordedBy")
   FMIRAuditReport                                                     FMIRAuditReport[]
   FMIRComment                                                         FMIRComment[]
   FiveWhysAnalysisCreated                                             FiveWhysAnalysis[]                   @relation("FiveWhysAnalysisCreatedBy")
@@ -1301,6 +1306,7 @@ model User {
   Incident_Incident_investigationSubmittedByIdToUser                  Incident[]                           @relation("Incident_investigationSubmittedByIdToUser")
   IncidentParticipant_IncidentParticipant_addedByIdToUser             IncidentParticipant[]                @relation("IncidentParticipant_addedByIdToUser")
   IncidentParticipant_IncidentParticipant_userIdToUser                IncidentParticipant[]                @relation("IncidentParticipant_userIdToUser")
+  RecordingsCreated                                                   MeetingRecording[]                   @relation("RecordingRecordedBy")
   OrganizationAccessCode                                              OrganizationAccessCode[]
   PolicyDocument                                                      PolicyDocument[]
   PolicyRevision                                                      PolicyRevision[]
@@ -1310,235 +1316,25 @@ model User {
   SupportRequest_SupportRequest_submittedByUserIdToUser               SupportRequest[]                     @relation("SupportRequest_submittedByUserIdToUser")
   SupportRequestAlertDismissal                                        SupportRequestAlertDismissal[]
   SupportStatusNotificationDismissal                                  SupportStatusNotificationDismissal[]
+  TasksAssigned                                                       Task[]                               @relation("TaskAssignee")
+  TasksOwned                                                          Task[]                               @relation("TaskOwner")
+  TaskAssignments                                                     TaskAssignee[]                       @relation("TaskAssignees")
+  TaskAssignmentsAssigned                                             TaskAssignee[]                       @relation("TaskAssigner")
+  TaskComments                                                        TaskComment[]
+  TaskEvidence                                                        TaskEvidence[]
+  MeetingsCreated                                                     Meeting[]                            @relation("MeetingCreator")
+  MeetingParticipations                                               MeetingParticipant[]                 @relation("MeetingParticipantUser")
   Organization                                                        Organization?                        @relation(fields: [organizationId], references: [id], onDelete: Cascade)
-  WorkplaceSafetyAssessment                                           WorkplaceSafetyAssessment[]
+  WorkOrder_WorkOrder_assignedByIdToUser                              WorkOrder[]                          @relation("WorkOrder_assignedByIdToUser")
+  WorkOrder_WorkOrder_createdByIdToUser                               WorkOrder[]                          @relation("WorkOrder_createdByIdToUser")
+  WorkOrderStatusHistory                                              WorkOrderStatusHistory[]
   WorkOrderTemplate                                                   WorkOrderTemplate[]
-  WorkOrdersCreated                                                   WorkOrder[]                          @relation("WorkOrderCreatedBy")
-  WorkOrdersAssigned                                                  WorkOrder[]                          @relation("WorkOrderAssignedBy")
-  WorkOrderStatusChanges                                              WorkOrderStatusHistory[]             @relation("WorkOrderStatusChangedBy")
+  WorkplaceSafetyAssessment                                           WorkplaceSafetyAssessment[]
 
   @@index([email])
   @@index([isOnline])
   @@index([organizationId])
   @@index([role])
-}
-
-// Workplace Safety Assessment Models
-model WorkplaceSafetyAssessment {
-  id                         String                         @id @default(uuid())
-  assessmentNumber           String                         @unique
-  version                    String                         @default("3/19/25")
-  date                       DateTime
-  department                 String?
-  departmentId               String?
-  teamLeaderName             String
-  teamLeaderSignature        String?                        // Firebase URL for signature image
-  employeeName               String?
-  employeeSignature          String?                        // Firebase URL for signature image
-  operationManagerName       String?
-  operationManagerSignature  String?                        // Firebase URL for signature image
-  plantManagerName           String?
-  plantManagerSignature      String?                        // Firebase URL for signature image
-  safetyManagerName          String?
-  safetyManagerSignature     String?                        // Firebase URL for signature image
-  status                     WSAStatus                      @default(DRAFT)
-  organizationId             String
-  facilityId                 String?
-  createdById                String
-  createdAt                  DateTime                       @default(now())
-  updatedAt                  DateTime                       @updatedAt
-  submittedAt                DateTime?
-  completedAt                DateTime?
-  
-  // Relations
-  Department                 Department?                    @relation(fields: [departmentId], references: [id])
-  Facility                   Facility?                      @relation(fields: [facilityId], references: [id])
-  Organization               Organization                   @relation(fields: [organizationId], references: [id], onDelete: Cascade)
-  CreatedBy                  User                           @relation(fields: [createdById], references: [id])
-  Sections                   WSASection[]
-  Photos                     WSAPhoto[]
-  WorkOrders                 WorkOrder[]
-
-  @@index([assessmentNumber])
-  @@index([createdById])
-  @@index([departmentId])
-  @@index([facilityId])
-  @@index([organizationId])
-  @@index([status])
-}
-
-model WSASection {
-  id           String                    @id @default(uuid())
-  assessmentId String
-  sectionId    String                    // e.g., 'ppe', 'lockout', 'machine-guarding'
-  title        String
-  sortOrder    Int                       @default(0)
-  
-  Assessment   WorkplaceSafetyAssessment @relation(fields: [assessmentId], references: [id], onDelete: Cascade)
-  Items        WSAItem[]
-
-  @@index([assessmentId])
-  @@unique([assessmentId, sectionId])
-}
-
-model WSAItem {
-  id                     String      @id @default(uuid())
-  sectionId              String
-  itemId                 String      // e.g., 'ppe-1', 'lockout-2'
-  description            String
-  status                 String?     // 'A' (Acceptable), 'U' (Unacceptable), 'NA' (Not Applicable)
-  deficiency             String?
-  correctiveAction       String?
-  dynamicEntries         Json?       // For items with dynamic entries (employee/equipment lists)
-  workOrderPlaced        Boolean?    @default(false)
-  reportedViaSafetyApp   Boolean?    @default(false)
-  safetyAppReportDate    DateTime?
-  workOrderDateCreated   DateTime?
-  workOrderAssignedTo    String?
-  workOrderAttachment    Json?       // { id, name, fileUrl }
-  sortOrder              Int         @default(0)
-  
-  Section                WSASection  @relation(fields: [sectionId], references: [id], onDelete: Cascade)
-
-  @@index([sectionId])
-  @@unique([sectionId, itemId])
-}
-
-model WSAPhoto {
-  id           String                    @id @default(uuid())
-  assessmentId String
-  itemId       String?                   // Optional: link to specific item
-  sectionId    String?                   // Optional: link to specific section
-  fileName     String
-  fileUrl      String                    // Firebase Storage URL
-  fileSize     Int?
-  mimeType     String?
-  caption      String?
-  uploadedAt   DateTime                  @default(now())
-  
-  Assessment   WorkplaceSafetyAssessment @relation(fields: [assessmentId], references: [id], onDelete: Cascade)
-
-  @@index([assessmentId])
-  @@index([itemId])
-}
-
-// Work Order Settings - Admin controls for work order behavior
-model WorkOrderSettings {
-  id                    String   @id @default(uuid())
-  organizationId        String   @unique
-  enableInAppForm       Boolean  @default(true)   // Show in-app work order creation form
-  enableTemplateDownload Boolean @default(false)  // Show template download option
-  preferredOption       String   @default("form") // "form", "template", or "both"
-  formTitle             String   @default("Maintenance Work Order Request")
-  createdAt             DateTime @default(now())
-  updatedAt             DateTime @updatedAt
-  
-  Organization          Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
-
-  @@index([organizationId])
-}
-
-// Work Order - Tracks all work orders (in-app and uploaded)
-model WorkOrder {
-  id                     String                     @id @default(uuid())
-  woNumber               String                     @unique  // Auto-generated: WO-2026-0001
-  type                   WorkOrderType              // IN_APP or UPLOADED
-  
-  // Link to Safety Assessment
-  assessmentId           String
-  assessmentNumber       String                     // Denormalized for display
-  sectionId              String?
-  itemId                 String?
-  itemDescription        String?
-  
-  // Form fields (for in-app work orders)
-  requestDate            DateTime?
-  expenseClass           String?                    // Fabrication, Safety, Ergonomics, Equipment, USDA, QA, Other
-  originator             String?                    // Requestor name
-  woType                 String?                    // Repair, Modify, PMD
-  priority               Int?                       // 1=Emergency, 2=Rush, 3=Plan & Schedule
-  description            String?                    // Nature of problem
-  equipmentNo            String?                    // Equipment number (DM#)
-  equipmentDescription   String?                    // Equipment name or area
-  fullDescriptionOfIssue String?                    @db.Text
-  department             String?
-  
-  // For uploaded files
-  fileName               String?
-  fileUrl                String?                    // Firebase Storage URL
-  fileSize               Int?
-  uploadedAt             DateTime?
-  
-  // Assignment
-  assignedTo             String?                    // Free text or user name
-  assignedById           String?
-  
-  // Status
-  status                 WorkOrderStatus            @default(PENDING)
-  completionDate         DateTime?
-  
-  // Audit
-  createdById            String
-  organizationId         String
-  createdAt              DateTime                   @default(now())
-  updatedAt              DateTime                   @updatedAt
-  
-  // Relations
-  Assessment             WorkplaceSafetyAssessment  @relation(fields: [assessmentId], references: [id], onDelete: Cascade)
-  AssignedBy             User?                      @relation("WorkOrderAssignedBy", fields: [assignedById], references: [id])
-  CreatedBy              User                       @relation("WorkOrderCreatedBy", fields: [createdById], references: [id])
-  Organization           Organization               @relation(fields: [organizationId], references: [id], onDelete: Cascade)
-  StatusHistory          WorkOrderStatusHistory[]
-
-  @@index([assessmentId])
-  @@index([assessmentNumber])
-  @@index([createdById])
-  @@index([organizationId])
-  @@index([status])
-  @@index([type])
-  @@index([woNumber])
-}
-
-// Work Order Status History - Audit trail for status changes
-model WorkOrderStatusHistory {
-  id            String          @id @default(uuid())
-  workOrderId   String
-  fromStatus    WorkOrderStatus?
-  toStatus      WorkOrderStatus
-  changedById   String
-  changedAt     DateTime        @default(now())
-  notes         String?
-  
-  WorkOrder     WorkOrder       @relation(fields: [workOrderId], references: [id], onDelete: Cascade)
-  ChangedBy     User            @relation("WorkOrderStatusChangedBy", fields: [changedById], references: [id])
-
-  @@index([workOrderId])
-  @@index([changedById])
-  @@index([changedAt])
-}
-
-// Work Order Template - Admin uploaded templates for users to download
-model WorkOrderTemplate {
-  id             String   @id @default(uuid())
-  organizationId String
-  name           String                    // Display name for the template
-  fileName       String                    // Original file name
-  fileUrl        String                    // Firebase Storage URL
-  fileSize       Int?
-  mimeType       String?                   // application/vnd.openxmlformats-officedocument.wordprocessingml.document, etc.
-  description    String?                   // Instructions or description
-  version        Int      @default(1)
-  isActive       Boolean  @default(true)
-  uploadedById   String
-  uploadedAt     DateTime @default(now())
-  updatedAt      DateTime @updatedAt
-  
-  Organization   Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
-  UploadedBy     User         @relation(fields: [uploadedById], references: [id])
-
-  @@unique([organizationId, isActive])     // Only one active template per org
-  @@index([organizationId])
-  @@index([isActive])
 }
 
 model FiveWhysAnalysis {
@@ -1641,37 +1437,307 @@ model DiscussionMarker {
 }
 
 model MeetingRecording {
-  id              String    @id @default(cuid())
-  incidentId      String
-  roomName        String
-  title           String?
-  description     String?
-  fileName        String
-  fileUrl         String
-  firebasePath    String
-  fileSize        Int
-  duration        Int?      // Duration in seconds
-  mimeType        String    @default("video/webm")
-  recordingType   String    @default("screen") // screen, camera, mixed
-  thumbnailUrl    String?
-  status          String    @default("ready") // uploading, processing, ready, failed
-  recordedById    String
-  startedAt       DateTime
-  endedAt         DateTime?
-  createdAt       DateTime  @default(now())
-  
-  recordedBy      User      @relation("RecordingRecordedBy", fields: [recordedById], references: [id])
-  incident        Incident  @relation(fields: [incidentId], references: [id], onDelete: Cascade)
+  id            String    @id @default(cuid())
+  incidentId    String
+  roomName      String
+  title         String?
+  description   String?
+  fileName      String
+  fileUrl       String
+  firebasePath  String
+  fileSize      Int
+  duration      Int?
+  mimeType      String    @default("video/webm")
+  recordingType String    @default("screen")
+  thumbnailUrl  String?
+  status        String    @default("ready")
+  recordedById  String
+  startedAt     DateTime
+  endedAt       DateTime?
+  createdAt     DateTime  @default(now())
+  incident      Incident  @relation(fields: [incidentId], references: [id], onDelete: Cascade)
+  recordedBy    User      @relation("RecordingRecordedBy", fields: [recordedById], references: [id])
 
   @@index([incidentId])
   @@index([roomName])
   @@index([recordedById])
 }
 
-enum WSAStatus {
-  DRAFT
-  SUBMITTED
-  COMPLETED
+model WSAItem {
+  id                   String     @id
+  sectionId            String
+  itemId               String
+  description          String
+  status               String?
+  deficiency           String?
+  correctiveAction     String?
+  dynamicEntries       Json?
+  workOrderPlaced      Boolean?   @default(false)
+  reportedViaSafetyApp Boolean?   @default(false)
+  safetyAppReportDate  DateTime?
+  workOrderDateCreated DateTime?
+  workOrderAssignedTo  String?
+  workOrderAttachment  Json?
+  sortOrder            Int        @default(0)
+  WSASection           WSASection @relation(fields: [sectionId], references: [id], onDelete: Cascade)
+
+  @@unique([sectionId, itemId])
+  @@index([sectionId])
+}
+
+model WSAPhoto {
+  id                        String                    @id
+  assessmentId              String
+  itemId                    String?
+  sectionId                 String?
+  fileName                  String
+  fileUrl                   String
+  fileSize                  Int?
+  mimeType                  String?
+  caption                   String?
+  uploadedAt                DateTime                  @default(now())
+  WorkplaceSafetyAssessment WorkplaceSafetyAssessment @relation(fields: [assessmentId], references: [id], onDelete: Cascade)
+
+  @@index([assessmentId])
+  @@index([itemId])
+}
+
+model WSASection {
+  id                        String                    @id
+  assessmentId              String
+  sectionId                 String
+  title                     String
+  sortOrder                 Int                       @default(0)
+  WSAItem                   WSAItem[]
+  WorkplaceSafetyAssessment WorkplaceSafetyAssessment @relation(fields: [assessmentId], references: [id], onDelete: Cascade)
+
+  @@unique([assessmentId, sectionId])
+  @@index([assessmentId])
+}
+
+model WorkOrder {
+  id                                String                    @id
+  woNumber                          String                    @unique
+  type                              WorkOrderType
+  assessmentId                      String
+  assessmentNumber                  String
+  sectionId                         String?
+  itemId                            String?
+  itemDescription                   String?
+  requestDate                       DateTime?
+  expenseClass                      String?
+  originator                        String?
+  woType                            String?
+  priority                          Int?
+  description                       String?
+  equipmentNo                       String?
+  equipmentDescription              String?
+  fullDescriptionOfIssue            String?
+  department                        String?
+  fileName                          String?
+  fileUrl                           String?
+  fileSize                          Int?
+  uploadedAt                        DateTime?
+  assignedTo                        String?
+  assignedById                      String?
+  status                            WorkOrderStatus           @default(PENDING)
+  completionDate                    DateTime?
+  createdById                       String
+  organizationId                    String
+  createdAt                         DateTime                  @default(now())
+  updatedAt                         DateTime
+  WorkplaceSafetyAssessment         WorkplaceSafetyAssessment @relation(fields: [assessmentId], references: [id], onDelete: Cascade)
+  User_WorkOrder_assignedByIdToUser User?                     @relation("WorkOrder_assignedByIdToUser", fields: [assignedById], references: [id])
+  User_WorkOrder_createdByIdToUser  User                      @relation("WorkOrder_createdByIdToUser", fields: [createdById], references: [id])
+  Organization                      Organization              @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  WorkOrderStatusHistory            WorkOrderStatusHistory[]
+
+  @@index([assessmentId])
+  @@index([assessmentNumber])
+  @@index([createdById])
+  @@index([organizationId])
+  @@index([status])
+  @@index([type])
+  @@index([woNumber])
+}
+
+model WorkOrderSettings {
+  id                     String       @id
+  organizationId         String       @unique
+  enableInAppForm        Boolean      @default(true)
+  enableTemplateDownload Boolean      @default(false)
+  preferredOption        String       @default("form")
+  formTitle              String       @default("Maintenance Work Order Request")
+  createdAt              DateTime     @default(now())
+  updatedAt              DateTime
+  Organization           Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+
+  @@index([organizationId])
+}
+
+model WorkOrderStatusHistory {
+  id          String           @id
+  workOrderId String
+  fromStatus  WorkOrderStatus?
+  toStatus    WorkOrderStatus
+  changedById String
+  changedAt   DateTime         @default(now())
+  notes       String?
+  User        User             @relation(fields: [changedById], references: [id])
+  WorkOrder   WorkOrder        @relation(fields: [workOrderId], references: [id], onDelete: Cascade)
+
+  @@index([changedAt])
+  @@index([changedById])
+  @@index([workOrderId])
+}
+
+model WorkOrderTemplate {
+  id             String       @id
+  organizationId String
+  name           String
+  fileName       String
+  fileUrl        String
+  fileSize       Int?
+  mimeType       String?
+  description    String?
+  version        Int          @default(1)
+  isActive       Boolean      @default(true)
+  uploadedById   String
+  uploadedAt     DateTime     @default(now())
+  updatedAt      DateTime
+  Organization   Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  User           User         @relation(fields: [uploadedById], references: [id])
+
+  @@unique([organizationId, isActive])
+  @@index([isActive])
+  @@index([organizationId])
+}
+
+model WorkplaceSafetyAssessment {
+  id                        String       @id
+  assessmentNumber          String       @unique
+  version                   String       @default("3/19/25")
+  date                      DateTime
+  department                String?
+  departmentId              String?
+  teamLeaderName            String
+  teamLeaderSignature       String?
+  employeeName              String?
+  employeeSignature         String?
+  operationManagerName      String?
+  operationManagerSignature String?
+  plantManagerName          String?
+  plantManagerSignature     String?
+  safetyManagerName         String?
+  safetyManagerSignature    String?
+  status                    WSAStatus    @default(DRAFT)
+  organizationId            String
+  facilityId                String?
+  createdById               String
+  createdAt                 DateTime     @default(now())
+  updatedAt                 DateTime
+  submittedAt               DateTime?
+  completedAt               DateTime?
+  WSAPhoto                  WSAPhoto[]
+  WSASection                WSASection[]
+  WorkOrder                 WorkOrder[]
+  User                      User         @relation(fields: [createdById], references: [id])
+  Department                Department?  @relation(fields: [departmentId], references: [id])
+  Facility                  Facility?    @relation(fields: [facilityId], references: [id])
+  Organization              Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+
+  @@index([assessmentNumber])
+  @@index([createdById])
+  @@index([departmentId])
+  @@index([facilityId])
+  @@index([organizationId])
+  @@index([status])
+}
+
+model Task {
+  id             String           @id @default(uuid())
+  title          String
+  description    String?
+  status         TaskStatus       @default(PENDING)
+  priority       TaskPriority     @default(MEDIUM)
+  dueDate        DateTime?
+  completedAt    DateTime?
+  progress       Int              @default(0) // 0-100 percentage
+  ownerId        String
+  assigneeId     String?          // Legacy single assignee (kept for backwards compatibility)
+  organizationId String
+  facilityId     String?
+  meetingId      String?
+  sourceText     String?          // Original text from transcript (if AI extracted)
+  isAiExtracted  Boolean          @default(false) // Whether this was AI extracted
+  createdAt      DateTime         @default(now())
+  updatedAt      DateTime         @updatedAt
+  assignee       User?            @relation("TaskAssignee", fields: [assigneeId], references: [id])
+  assignees      TaskAssignee[]   // Multiple assignees
+  facility       Facility?        @relation(fields: [facilityId], references: [id])
+  organization   Organization     @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  owner          User             @relation("TaskOwner", fields: [ownerId], references: [id])
+  meeting        Meeting?         @relation(fields: [meetingId], references: [id])
+  comments       TaskComment[]
+  evidence       TaskEvidence[]
+
+  @@index([ownerId])
+  @@index([assigneeId])
+  @@index([organizationId])
+  @@index([status])
+  @@index([meetingId])
+}
+
+// Task Assignees - junction table for multiple assignees
+model TaskAssignee {
+  id         String   @id @default(uuid())
+  taskId     String
+  userId     String
+  assignedAt DateTime @default(now())
+  assignedBy String?  // Who assigned this user
+  task       Task     @relation(fields: [taskId], references: [id], onDelete: Cascade)
+  user       User     @relation("TaskAssignees", fields: [userId], references: [id])
+  assigner   User?    @relation("TaskAssigner", fields: [assignedBy], references: [id])
+
+  @@unique([taskId, userId])
+  @@index([taskId])
+  @@index([userId])
+}
+
+// Task Comments - for discussions and notes
+model TaskComment {
+  id        String   @id @default(uuid())
+  content   String
+  taskId    String
+  authorId  String
+  parentId  String?  // For threaded replies
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+  task      Task     @relation(fields: [taskId], references: [id], onDelete: Cascade)
+  author    User     @relation(fields: [authorId], references: [id])
+  parent    TaskComment?  @relation("CommentReplies", fields: [parentId], references: [id])
+  replies   TaskComment[] @relation("CommentReplies")
+
+  @@index([taskId])
+  @@index([authorId])
+}
+
+// Task Evidence - for work done evidence/attachments
+model TaskEvidence {
+  id          String   @id @default(uuid())
+  title       String
+  description String?
+  fileUrl     String?
+  fileType    String?  // image, pdf, link, etc.
+  fileName    String?
+  taskId      String
+  uploaderId  String
+  createdAt   DateTime @default(now())
+  task        Task     @relation(fields: [taskId], references: [id], onDelete: Cascade)
+  uploader    User     @relation(fields: [uploaderId], references: [id])
+
+  @@index([taskId])
+  @@index([uploaderId])
 }
 
 enum ActionPriority {
@@ -1950,9 +2016,10 @@ enum UserRole {
   QUALITY_CONTROL_MANAGER
 }
 
-enum WorkOrderType {
-  IN_APP
-  UPLOADED
+enum WSAStatus {
+  DRAFT
+  SUBMITTED
+  COMPLETED
 }
 
 enum WorkOrderStatus {
@@ -1960,4 +2027,346 @@ enum WorkOrderStatus {
   IN_PROGRESS
   COMPLETED
   CANCELLED
+}
+
+enum WorkOrderType {
+  IN_APP
+  UPLOADED
+}
+
+enum TaskStatus {
+  PENDING
+  IN_PROGRESS
+  COMPLETED
+  CANCELLED
+}
+
+enum TaskPriority {
+  LOW
+  MEDIUM
+  HIGH
+  URGENT
+}
+
+// ============================================================================
+// MEETING INTELLIGENCE MODELS
+// ============================================================================
+
+enum MeetingStatus {
+  DRAFT
+  RECORDING
+  UPLOADING
+  UPLOADED
+  PROCESSING
+  READY
+  NEEDS_REVIEW
+  PUBLISHED
+  FAILED
+}
+
+enum MeetingType {
+  GENERAL
+  STANDUP
+  ONE_ON_ONE
+  TEAM_SYNC
+  CLIENT_CALL
+  INTERVIEW
+  BRAINSTORM
+  REVIEW
+  OTHER
+}
+
+model Meeting {
+  id               String        @id @default(uuid())
+  title            String?
+  meetingType      MeetingType   @default(GENERAL)
+  status           MeetingStatus @default(DRAFT)
+  
+  // Location & Context
+  location         String?
+  locationType     String?       // On-site, Remote, Hybrid, Custom
+  tags             String[]      @default([])
+  language         String        @default("en")
+  
+  // Scheduling
+  scheduledAt      DateTime?     // Scheduled date/time for the meeting
+  
+  // Department
+  departmentId     String?
+  department       Department?   @relation(fields: [departmentId], references: [id])
+  
+  // Meeting Purpose
+  objective        String?       // Meeting objective/goal
+  agendaItems      String[]      @default([])  // List of agenda items
+  
+  // AI Settings
+  liveTranscriptionEnabled Boolean @default(true)
+  aiProcessingMode String?       // ExecutiveSummary, DetailedMinutes, ActionFocused, Compliance
+  confidentialityLevel String?   // Private, TeamVisible, Restricted
+  
+  // Recording info
+  recordingUrl     String?       // Firebase Storage URL
+  duration         Int?          // Duration in seconds
+  recordedAt       DateTime?     // When recording started
+  
+  // AI Processing
+  processingStartedAt DateTime?
+  processingCompletedAt DateTime?
+  processingError  String?
+  
+  // Ownership
+  creatorId        String
+  creator          User          @relation("MeetingCreator", fields: [creatorId], references: [id])
+  
+  organizationId   String
+  organization     Organization  @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  
+  facilityId       String?
+  facility         Facility?     @relation("MeetingFacility", fields: [facilityId], references: [id])
+  
+  // Timestamps
+  createdAt        DateTime      @default(now())
+  updatedAt        DateTime      @updatedAt
+  publishedAt      DateTime?
+  
+  // Relations
+  participants     MeetingParticipant[]
+  bookmarks        MeetingBookmark[]
+  transcript       TranscriptBlock[]
+  summary          MeetingSummary?
+  actionItems      Task[]
+  attachments      MeetingAttachment[]
+  consentRecords   RecordingConsentAudit[]
+
+  @@index([creatorId])
+  @@index([departmentId])
+  @@index([organizationId])
+  @@index([status])
+  @@index([createdAt])
+}
+
+model MeetingParticipant {
+  id          String   @id @default(uuid())
+  meetingId   String
+  meeting     Meeting  @relation(fields: [meetingId], references: [id], onDelete: Cascade)
+  
+  userId      String?
+  user        User?    @relation("MeetingParticipantUser", fields: [userId], references: [id])
+  
+  // For external participants without user account
+  name        String?
+  email       String?
+  phone       String?
+  
+  // Speaker mapping from AI
+  speakerLabel String?  // "Speaker 1", "Speaker 2", etc.
+  
+  createdAt   DateTime @default(now())
+
+  @@index([meetingId])
+  @@index([userId])
+}
+
+model MeetingBookmark {
+  id          String   @id @default(uuid())
+  meetingId   String
+  meeting     Meeting  @relation(fields: [meetingId], references: [id], onDelete: Cascade)
+  
+  timestamp   Int      // Seconds from start
+  label       String?
+  note        String?
+  
+  createdAt   DateTime @default(now())
+
+  @@index([meetingId])
+}
+
+model TranscriptBlock {
+  id           String   @id @default(uuid())
+  meetingId    String
+  meeting      Meeting  @relation(fields: [meetingId], references: [id], onDelete: Cascade)
+  
+  speakerLabel String   // "Speaker 1", "Speaker 2", etc.
+  speakerId    String?  // Linked to MeetingParticipant if resolved
+  
+  content      String
+  startTime    Int      // Seconds from start
+  endTime      Int      // Seconds from start
+  confidence   Float?   // AI confidence score
+  
+  createdAt    DateTime @default(now())
+
+  @@index([meetingId])
+  @@index([startTime])
+}
+
+model MeetingSummary {
+  id          String   @id @default(uuid())
+  meetingId   String   @unique
+  meeting     Meeting  @relation(fields: [meetingId], references: [id], onDelete: Cascade)
+  
+  keyPoints   Json?    // Array of key points
+  decisions   Json?    // Array of decisions
+  risks       Json?    // Array of risks/concerns
+  questions   Json?    // Array of open questions
+  nextSteps   Json?    // Array of next steps
+  
+  // Full summary text
+  executiveSummary String?
+  
+  // Processed Transcript (AI speaker-detected)
+  rawTranscript       String?   @db.Text    // Original Whisper transcription
+  processedTranscript String?   @db.Text    // AI-processed with speaker labels
+  transcriptWordCount Int?                  // Word count
+  transcriptDuration  Int?                  // Duration in seconds
+  transcriptSavedAt   DateTime?             // When transcript was saved
+  
+  // AI Narrative Summary (GPT-4o generated)
+  narrative       String?   @db.Text    // Full narrative summary text
+  briefSummary    String?   @db.Text    // Brief one-paragraph summary
+  tone            String?               // Meeting tone (e.g., "productive", "collaborative")
+  objectives      Json?                 // Array of meeting objectives
+  keyDiscussions  Json?                 // Array of key discussion points
+  takeaways       Json?                 // Array of key takeaways
+  
+  // AI Audio Summary (TTS generated)
+  audioUrl        String?               // Firebase Storage URL for TTS audio
+  audioVoice      String?               // Voice used (onyx, echo, etc.)
+  audioDuration   Int?                  // Duration in seconds
+  
+  // Versioning
+  version     Int      @default(1)
+  generatedAt DateTime @default(now())
+  editedAt    DateTime?
+  editedById  String?
+
+  @@index([meetingId])
+}
+
+model MeetingAttachment {
+  id          String   @id @default(uuid())
+  meetingId   String
+  meeting     Meeting  @relation(fields: [meetingId], references: [id], onDelete: Cascade)
+  
+  fileName    String
+  fileUrl     String
+  fileSize    Int?
+  mimeType    String?
+  
+  uploadedById String
+  uploadedAt  DateTime @default(now())
+
+  @@index([meetingId])
+}
+
+// ===========================================
+// CONSENT & COMPLIANCE MODELS
+// For GDPR/Legal compliance on meeting recordings
+// ===========================================
+
+// Consent Policy Version - Tracks policy changes over time
+model ConsentPolicy {
+  id          String   @id @default(uuid())
+  version     String   @unique  // e.g., "1.0.0", "1.1.0"
+  title       String   @default("Meeting Recording Consent Policy")
+  
+  // Policy content sections
+  purposeOfRecording    String   @db.Text  // Why we record
+  dataRetentionPolicy   String   @db.Text  // How long data is kept
+  dataSecurityPolicy    String   @db.Text  // How data is secured
+  dataSharingPolicy     String   @db.Text  // Who can access data
+  userRights            String   @db.Text  // User rights (deletion, access, etc.)
+  
+  // Full policy text (for legal reference)
+  fullPolicyText        String   @db.Text
+  
+  // Metadata
+  isActive              Boolean  @default(true)
+  effectiveDate         DateTime @default(now())
+  expirationDate        DateTime?
+  createdAt             DateTime @default(now())
+  updatedAt             DateTime @updatedAt
+  createdById           String?
+  
+  // Audit trail
+  consentRecords        RecordingConsentAudit[]
+
+  @@index([isActive])
+  @@index([version])
+}
+
+// Recording Consent Audit Log - IMMUTABLE record of consent
+// This table should NEVER be updated or deleted (legal requirement)
+model RecordingConsentAudit {
+  id                    String   @id @default(uuid())
+  
+  // Meeting Reference
+  meetingId             String
+  meeting               Meeting  @relation(fields: [meetingId], references: [id], onDelete: Cascade)
+  
+  // User who gave consent
+  userId                String
+  userEmail             String
+  userFirstName         String
+  userLastName          String
+  userPhoneNumber       String?
+  
+  // Policy accepted
+  policyId              String
+  policy                ConsentPolicy @relation(fields: [policyId], references: [id])
+  policyVersion         String        // Snapshot of version at time of consent
+  
+  // Consent details
+  consentType           ConsentType   @default(RECORDING_START)
+  consentGiven          Boolean       @default(true)
+  consentMethod         ConsentMethod @default(IN_APP_MODAL)
+  
+  // Legal verification data
+  ipAddress             String?
+  userAgent             String?       // Device/browser info
+  deviceId              String?       // Device identifier
+  deviceModel           String?       // e.g., "iPhone 15 Pro"
+  osVersion             String?       // e.g., "iOS 17.2"
+  appVersion            String?       // App version at time of consent
+  geoLocation           String?       // Optional: City/Country for legal purposes
+  
+  // Confirmation that all participants were notified
+  allParticipantsNotified Boolean @default(false)
+  audioAnnouncementPlayed Boolean @default(false)
+  
+  // Cryptographic hash for tamper-proofing
+  // Hash of: meetingId + userId + timestamp + policyVersion
+  consentHash           String   @unique
+  
+  // Timestamps (immutable)
+  consentTimestamp      DateTime @default(now())
+  
+  // For soft-delete tracking (we never actually delete)
+  isRevoked             Boolean  @default(false)
+  revokedAt             DateTime?
+  revocationReason      String?
+
+  @@index([meetingId])
+  @@index([userId])
+  @@index([consentTimestamp])
+  @@index([policyVersion])
+  @@index([consentHash])
+}
+
+// Consent Type Enum
+enum ConsentType {
+  RECORDING_START       // Consent to start recording
+  RECORDING_RESUME      // Consent to resume after pause
+  DATA_PROCESSING       // Consent for AI processing
+  DATA_RETENTION        // Consent for data storage
+  PARTICIPANT_ADDITION  // Consent when new participant joins
+}
+
+// Consent Method Enum
+enum ConsentMethod {
+  IN_APP_MODAL          // User clicked agree in app modal
+  VERBAL                // Verbal consent (recorded)
+  EMAIL                 // Email consent
+  WRITTEN               // Written/signed consent
+  IMPLICIT              // Implicit (stayed in meeting after announcement)
 }

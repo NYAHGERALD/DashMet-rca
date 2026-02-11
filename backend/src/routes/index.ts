@@ -38,6 +38,16 @@ import videoCallRoutes from './videoCallRoutes';
 import transcriptRoutes from './transcriptRoutes';
 import spotlightRoutes from './spotlight';
 import recordingsRoutes from './recordings';
+import mobileAuthRoutes from './mobileAuthRoutes';
+import taskRoutes from './taskRoutes';
+import meetingRoutes from './meetingRoutes';
+import consentRoutes from './consentRoutes';
+import aiVisionRoutes from './aiVisionRoutes';
+import documentOcrRoutes from './documentOcrRoutes';
+import conflictAnalysisRoutes from './conflictAnalysisRoutes';
+import policyMatchingRoutes from './policyMatchingRoutes';
+import decisionSupportRoutes from './decisionSupportRoutes';
+import actionGenerationRoutes from './actionGenerationRoutes';
 import { authenticate } from '../middleware/auth';
 import { getIncidentTranscripts } from '../controllers/transcriptController';
 
@@ -66,6 +76,46 @@ router.get('/version', (req, res) => {
 // Phase 1: Authentication routes
 // Phase 1.1: Firebase Authentication routes
 router.use('/firebase-auth', firebaseAuthRoutes);
+
+// Mobile App Authentication routes - PUBLIC, no auth required
+// Used by iOS Meeting Intelligence app for registration
+router.use('/mobile', mobileAuthRoutes);
+
+// Mobile App Task routes - PUBLIC for now (will add auth later)
+// Used by iOS Meeting Intelligence app for task management
+router.use('/mobile/tasks', taskRoutes);
+
+// Mobile App Meeting routes - PUBLIC for now (will add auth later)
+// Used by iOS Meeting Intelligence app for meeting management
+router.use('/mobile/meetings', meetingRoutes);
+
+// Consent & Compliance routes - PUBLIC for iOS app
+// Recording consent, policy management, audit logs
+router.use('/consent', consentRoutes);
+
+// AI Vision Assistant routes - PUBLIC for iOS app
+// Industrial equipment analysis with GPT-4 Vision and TTS
+router.use('/ai-vision', aiVisionRoutes);
+
+// Document OCR routes - PUBLIC for iOS app
+// Handwritten document scanning with GPT-4 Vision
+router.use('/document-ocr', documentOcrRoutes);
+
+// Conflict Analysis routes - PUBLIC for iOS app
+// AI-powered comparison of workplace conflict statements
+router.use('/conflict-analysis', conflictAnalysisRoutes);
+
+// Policy Matching routes - PUBLIC for iOS app
+// AI-powered matching of case details against policy sections
+router.use('/policy-matching', policyMatchingRoutes);
+
+// Decision Support routes - PUBLIC for iOS app
+// AI-powered recommendations for case resolution
+router.use('/decision-support', decisionSupportRoutes);
+
+// Action Generation routes - PUBLIC for iOS app
+// Generate documents based on selected action (coaching, counseling, warning, escalate)
+router.use('/action-generation', actionGenerationRoutes);
 
 // Phase 1: Legacy JWT Authentication routes (will be deprecated)
 router.use('/auth', authRoutes);
