@@ -2203,7 +2203,11 @@ router.post('/:id/ai-summary', requirePrivilege('incidents.ai_analysis'), async 
           },
         },
         Facility: true,
-        Area: true,
+        Area: {
+          include: {
+            Department: true,
+          },
+        },
         Line: true,
       },
     });
@@ -2224,12 +2228,13 @@ router.post('/:id/ai-summary', requirePrivilege('incidents.ai_analysis'), async 
 
     // Build data for AI service
     const aiData = {
-      type: incident.type as 'FOOD_SAFETY' | 'MACHINE_EQUIPMENT',
+      type: incident.type as 'FOOD_SAFETY' | 'MACHINE_EQUIPMENT' | 'WORKPLACE_SAFETY' | 'OPERATIONS',
       categoryName: incident.Category?.Category?.name || incident.Category?.name,
       subcategoryName: incident.Category?.Category ? incident.Category.name : undefined,
       customTitle: incident.customTitle || undefined,
       description: incident.description,
       facilityName: incident.Facility?.name,
+      departmentName: incident.Area?.Department?.name,
       areaName: incident.Area?.name,
       lineName: incident.Line?.name,
       productName: incident.productName || undefined,
@@ -2275,6 +2280,7 @@ router.post('/generate-summary', async (req: Request, res: Response, next: NextF
       customTitle,
       description,
       facilityId,
+      departmentId,
       areaId,
       lineId,
       shiftId,
@@ -2315,12 +2321,13 @@ router.post('/generate-summary', async (req: Request, res: Response, next: NextF
     }
 
     // Fetch related data for context
-    const [category, facility, area, line, shift] = await Promise.all([
+    const [category, facility, department, area, line, shift] = await Promise.all([
       categoryId ? prisma.category.findUnique({
         where: { id: categoryId },
         include: { Category: true },
       }) : null,
       facilityId ? prisma.facility.findUnique({ where: { id: facilityId } }) : null,
+      departmentId ? prisma.department.findUnique({ where: { id: departmentId } }) : null,
       areaId ? prisma.area.findUnique({ where: { id: areaId } }) : null,
       lineId ? prisma.line.findUnique({ where: { id: lineId } }) : null,
       shiftId ? prisma.shift.findUnique({ where: { id: shiftId } }) : null,
@@ -2328,12 +2335,13 @@ router.post('/generate-summary', async (req: Request, res: Response, next: NextF
 
     // Build data for AI service
     const aiData: any = {
-      type: type as 'FOOD_SAFETY' | 'MACHINE_EQUIPMENT' | 'WORKPLACE_SAFETY',
+      type: type as 'FOOD_SAFETY' | 'MACHINE_EQUIPMENT' | 'WORKPLACE_SAFETY' | 'OPERATIONS',
       categoryName: category?.Category?.name || category?.name || 'Unknown',
       subcategoryName: category?.Category ? category.name : undefined,
       customTitle: customTitle || undefined,
       description,
       facilityName: facility?.name,
+      departmentName: department?.name,
       areaName: area?.name,
       lineName: line?.name,
       shiftName: shift?.name,
@@ -2641,10 +2649,10 @@ router.post('/enhance-text', async (req: Request, res: Response, next: NextFunct
       });
     }
 
-    if (!incidentType || !['FOOD_SAFETY', 'MACHINE_EQUIPMENT', 'WORKPLACE_SAFETY'].includes(incidentType)) {
+    if (!incidentType || !['FOOD_SAFETY', 'MACHINE_EQUIPMENT', 'WORKPLACE_SAFETY', 'OPERATIONS'].includes(incidentType)) {
       return res.status(400).json({
         success: false,
-        error: 'Valid incident type is required (FOOD_SAFETY, MACHINE_EQUIPMENT, WORKPLACE_SAFETY)',
+        error: 'Valid incident type is required (FOOD_SAFETY, MACHINE_EQUIPMENT, WORKPLACE_SAFETY, OPERATIONS)',
       });
     }
 

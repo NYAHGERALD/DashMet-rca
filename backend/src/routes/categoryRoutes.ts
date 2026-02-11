@@ -79,9 +79,9 @@ router.post('/', requireMinimumRole(UserRole.ADMIN), async (req, res) => {
   }
 
   // Validate type
-  const validTypes = ['FOOD_SAFETY', 'MACHINE_EQUIPMENT', 'WORKPLACE_SAFETY'];
+  const validTypes = ['FOOD_SAFETY', 'MACHINE_EQUIPMENT', 'WORKPLACE_SAFETY', 'OPERATIONS'];
   if (!validTypes.includes(type)) {
-    throw new ValidationError('Invalid type. Must be FOOD_SAFETY, MACHINE_EQUIPMENT, or WORKPLACE_SAFETY');
+    throw new ValidationError('Invalid type. Must be FOOD_SAFETY, MACHINE_EQUIPMENT, WORKPLACE_SAFETY, or OPERATIONS');
   }
 
   const category = await prisma.category.create({

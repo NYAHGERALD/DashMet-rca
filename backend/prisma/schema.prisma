@@ -1861,6 +1861,7 @@ enum IncidentType {
   FOOD_SAFETY
   MACHINE_EQUIPMENT
   WORKPLACE_SAFETY
+  OPERATIONS
 }
 
 enum IncidentVisibility {

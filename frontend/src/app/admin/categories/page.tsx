@@ -10,7 +10,7 @@ import DropdownOptionsManager from './DropdownOptionsManager';
 
 interface Category {
   id: string;
-  type: 'FOOD_SAFETY' | 'MACHINE_EQUIPMENT' | 'WORKPLACE_SAFETY';
+  type: 'FOOD_SAFETY' | 'MACHINE_EQUIPMENT' | 'WORKPLACE_SAFETY' | 'OPERATIONS';
   name: string;
   parentId: string | null;
   allowCustomTitle: boolean;
@@ -38,7 +38,7 @@ export default function CategoriesPage() {
   const [showForm, setShowForm] = useState(false);
   const [editingCategory, setEditingCategory] = useState<Category | null>(null);
   const [error, setError] = useState('');
-  const [activeTab, setActiveTab] = useState<'FOOD_SAFETY' | 'MACHINE_EQUIPMENT' | 'WORKPLACE_SAFETY'>('FOOD_SAFETY');
+  const [activeTab, setActiveTab] = useState<'FOOD_SAFETY' | 'MACHINE_EQUIPMENT' | 'WORKPLACE_SAFETY' | 'OPERATIONS'>('FOOD_SAFETY');
   const [expandedCategories, setExpandedCategories] = useState<Set<string>>(new Set());
   const [creatingMainCategory, setCreatingMainCategory] = useState(false);
   
@@ -48,7 +48,7 @@ export default function CategoriesPage() {
   // Form state for single category/subcategory
   const [formData, setFormData] = useState({
     name: '',
-    type: 'FOOD_SAFETY' as 'FOOD_SAFETY' | 'MACHINE_EQUIPMENT' | 'WORKPLACE_SAFETY',
+    type: 'FOOD_SAFETY' as 'FOOD_SAFETY' | 'MACHINE_EQUIPMENT' | 'WORKPLACE_SAFETY' | 'OPERATIONS',
     parentId: '',
     allowCustomTitle: false,
     sortOrder: 0,
@@ -531,6 +531,16 @@ export default function CategoriesPage() {
             >
               🦺 <span className="hidden sm:inline">Workplace Safety</span><span className="sm:hidden">Workplace</span>
             </button>
+            <button
+              onClick={() => setActiveTab('OPERATIONS')}
+              className={`${
+                activeTab === 'OPERATIONS'
+                  ? 'border-primary-500 text-primary-600 dark:text-primary-400'
+                  : 'border-transparent text-gray-500 dark:text-gray-400 hover:text-gray-700 dark:hover:text-gray-300 hover:border-gray-300'
+              } whitespace-nowrap py-3 sm:py-4 px-1 border-b-2 font-medium text-xs sm:text-sm touch-manipulation`}
+            >
+              📊 <span className="hidden sm:inline">Operations</span><span className="sm:hidden">Ops</span>
+            </button>
           </nav>
         </div>
 
@@ -799,7 +809,7 @@ export default function CategoriesPage() {
           {parentCategories.length === 0 ? (
             <div className="bg-white dark:bg-slate-800 rounded-xl shadow-lg p-8 text-center border border-gray-200 dark:border-slate-700">
               <p className="text-gray-500 dark:text-gray-400">
-                No categories found for {activeTab === 'FOOD_SAFETY' ? 'Food Safety' : activeTab === 'MACHINE_EQUIPMENT' ? 'Machine & Equipment' : 'Workplace Safety'}. Create your first category to get started.
+                No categories found for {activeTab === 'FOOD_SAFETY' ? 'Food Safety' : activeTab === 'MACHINE_EQUIPMENT' ? 'Machine & Equipment' : activeTab === 'WORKPLACE_SAFETY' ? 'Workplace Safety' : 'Operations'}. Create your first category to get started.
               </p>
             </div>
           ) : (

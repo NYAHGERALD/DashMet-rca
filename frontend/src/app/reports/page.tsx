@@ -899,6 +899,7 @@ export default function ReportsPage() {
                     <option value="FOOD_SAFETY">Food Safety</option>
                     <option value="MACHINE_EQUIPMENT">Machine/Equipment</option>
                     <option value="WORKPLACE_SAFETY">Workplace Safety</option>
+                    <option value="OPERATIONS">Operations</option>
                   </select>
                 </div>
                 <button

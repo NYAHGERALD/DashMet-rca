@@ -91,12 +91,13 @@ async function withRetry<T>(
 }
 
 interface IncidentData {
-  type: 'FOOD_SAFETY' | 'MACHINE_EQUIPMENT' | 'WORKPLACE_SAFETY';
+  type: 'FOOD_SAFETY' | 'MACHINE_EQUIPMENT' | 'WORKPLACE_SAFETY' | 'OPERATIONS';
   categoryName: string;
   subcategoryName?: string;
   customTitle?: string;
   description: string;
   facilityName?: string;
+  departmentName?: string;
   areaName?: string;
   lineName?: string;
   productName?: string;
@@ -160,7 +161,7 @@ interface EnhanceTextResult {
  */
 export async function enhanceIncidentText(
   text: string, 
-  incidentType: 'FOOD_SAFETY' | 'MACHINE_EQUIPMENT' | 'WORKPLACE_SAFETY',
+  incidentType: 'FOOD_SAFETY' | 'MACHINE_EQUIPMENT' | 'WORKPLACE_SAFETY' | 'OPERATIONS',
   fieldContext?: string
 ): Promise<EnhanceTextResult> {
   const openai = getOpenAIClient();
@@ -396,41 +397,60 @@ export async function generateIncidentSummary(data: IncidentData): Promise<Summa
       messages: [
         {
           role: 'system',
-          content: `You are a senior Quality Assurance, Environmental Health & Safety (EHS), and Compliance specialist with extensive experience in manufacturing, food processing, and industrial operations. Your role is to transform raw incident reports into professional, comprehensive, and actionable summaries suitable for official documentation, OSHA compliance, workers' compensation records, and management review.
+          content: `You are writing incident summaries for a manufacturing plant. Write like a normal person - clear, simple, and realistic. Don't sound like a robot.
 
-WRITING GUIDELINES:
-1. Write in professional third-person narrative style that sounds natural and human - avoid robotic or formulaic language
-2. Use precise, industry-standard terminology appropriate to the incident type
-3. Structure the summary as a cohesive paragraph (3-5 sentences) that tells the complete story naturally
-4. Include all relevant contextual details: what happened, where, when, who was affected, and potential impact
-5. Maintain objectivity - report facts without speculation or blame assignment
-6. For food safety incidents: emphasize contamination pathways, affected products, consumer risk, and containment status
-7. For machine/equipment incidents: emphasize operational impact, safety implications, affected production capacity, and equipment status
-8. For workplace safety incidents: emphasize the nature of the injury or near-miss, body parts affected, task context, whether PPE and safety protocols were followed, immediate response actions taken, and OSHA recordability considerations
-9. Never fabricate or assume information not explicitly provided
-10. Use active voice and vary sentence structure to sound professional yet approachable
-11. Conclude with the current status, immediate actions taken, or next steps if known
+CRITICAL - LOCATION LABELS:
+The data has a hierarchy. USE THE EXACT LABELS PROVIDED - don't rename or reinterpret them:
+- "Facility/Plant" = the company/building name (like "Don Miguel Foods")
+- "Department" = a major section (like "Bakery", "Packaging")  
+- "Area/Section" = a specific zone WITHIN a department (like "RTE", "Mixing Room")
+- "Production Line" = the actual machine/line (like "Die Cut Line 2")
 
-WORKPLACE SAFETY SPECIFIC GUIDANCE:
-- Clearly state the injury classification (First Aid, Recordable, Near Miss, Lost Time)
-- Mention body parts affected using proper anatomical terms
-- Note whether the task was routine or non-routine
-- Highlight any PPE compliance gaps or successes
-- Reference LOTO, SOP, and machine guarding status when applicable
-- Include environmental factors that may have contributed
-- Mention if this type of incident has occurred before (pattern recognition)
+IMPORTANT: If a field says "Area/Section: RTE (Ready To Eat)" - that is an AREA, not a department. 
+If there's no Department in the data, don't invent one or call the Area a department.
 
-SEVERITY ASSESSMENT CRITERIA:
-- CRITICAL: Lost time injury, multiple body parts affected, OSHA recordable with days away, regulatory violation, potential permanent disability
-- HIGH: OSHA recordable, medical treatment beyond first aid required, significant safety protocol failures, restricted duty likely
-- MEDIUM: First aid injury, minor PPE non-compliance, near-miss with moderate potential, corrective action needed
-- LOW: Minor near-miss, no injury, routine observation, documentation-only incident
+HOW TO WRITE THE LOCATION:
+Good: "on Die Cut Line 2 in the RTE area"
+Good: "in the Bakery department on Line 3"
+Bad: "in their Ready To Eat department" (wrong - RTE is an area, not a department)
+Bad: "Don Miguel Foods has been experiencing..." (weird phrasing - just say where in the plant)
+
+WRITING STYLE:
+- Use simple English that anyone can understand
+- Write 2-4 sentences that tell what happened
+- Just state the facts from the data - don't make things up
+- Don't use fancy words when simple ones work
+- Sound like a real person wrote this, not ChatGPT
+
+WHAT TO INCLUDE:
+- What happened (the actual incident/problem)
+- Where it happened (area, line - use the correct terms from data)
+- When (if date/time given)
+- The impact or concern (why it matters)
+- What was found in any photos/evidence
+
+WHAT NOT TO DO:
+- Don't start with the company name like "Don Miguel Foods has been..."
+- Don't call an Area a Department
+- Don't assume things not in the data
+- Don't use words like "subsequently", "aforementioned", "pertaining to"
+- Don't repeat information unnecessarily
+
+FOR OPERATIONS INCIDENTS (waste, OEE, efficiency):
+- State the problem clearly: what metric is off and by how much
+- Mention what the photo shows if there is one
+- Keep it factual - if waste is 4.2% and target is 3%, just say that
 
 OUTPUT FORMAT:
-Provide your response in exactly this format:
-SUMMARY: [Your professional summary paragraph here]
+SUMMARY: [Your 2-4 sentence summary]
 SEVERITY: [LOW/MEDIUM/HIGH/CRITICAL]
-RATIONALE: [Brief one-sentence justification for severity level]`,
+RATIONALE: [One sentence why]
+
+SEVERITY GUIDE:
+- CRITICAL: Major injury, big production stop, way over target (>5%), regulation issues
+- HIGH: Serious but not critical, medical treatment needed, notable waste/efficiency problems
+- MEDIUM: First aid level, minor issues that need fixing, moderate deviation from targets
+- LOW: Near-miss, minor observation, within acceptable range`,
         },
         {
           role: 'user',
@@ -494,7 +514,8 @@ function buildSummaryPrompt(data: IncidentData): string {
   const typeLabels: Record<string, string> = {
     'FOOD_SAFETY': 'Food Safety / Quality',
     'MACHINE_EQUIPMENT': 'Machine & Equipment',
-    'WORKPLACE_SAFETY': 'Workplace Safety / Employee Injury'
+    'WORKPLACE_SAFETY': 'Workplace Safety / Employee Injury',
+    'OPERATIONS': 'Operations / Production Efficiency'
   };
   parts.push(`INCIDENT TYPE: ${typeLabels[data.type] || data.type}`);
   parts.push(`CATEGORY: ${data.categoryName}`);
@@ -505,11 +526,12 @@ function buildSummaryPrompt(data: IncidentData): string {
     parts.push(`SPECIFIC ISSUE: ${data.customTitle}`);
   }
   
-  // Location Information
-  parts.push('\n--- LOCATION ---');
-  if (data.facilityName) parts.push(`Facility/Plant: ${data.facilityName}`);
-  if (data.areaName) parts.push(`Area/Department: ${data.areaName}`);
-  if (data.lineName) parts.push(`Production Line: ${data.lineName}`);
+  // Location Information (Hierarchical: Facility > Department > Area > Line)
+  parts.push('\n--- WHERE IT HAPPENED ---');
+  if (data.facilityName) parts.push(`FACILITY (company/plant): ${data.facilityName}`);
+  if (data.departmentName) parts.push(`DEPARTMENT (section of facility): ${data.departmentName}`);
+  if (data.areaName) parts.push(`AREA (zone within department): ${data.areaName}`);
+  if (data.lineName) parts.push(`PRODUCTION LINE (machine/line): ${data.lineName}`);
   
   // Product/Equipment Information (for non-safety incidents)
   if (data.productName || data.lotNumber || data.machineId) {
@@ -654,7 +676,7 @@ function buildSummaryPrompt(data: IncidentData): string {
   }
   
   parts.push('\n=== END OF REPORT DATA ===');
-  parts.push('\nPlease generate a professional incident summary based on all the information provided above. Write naturally and avoid sounding formulaic or robotic.');
+  parts.push('\nWrite a clear, simple summary of what happened. Use the EXACT location labels from the data (don\'t call an Area a Department). Keep it natural and easy to read.');
   
   return parts.join('\n');
 }

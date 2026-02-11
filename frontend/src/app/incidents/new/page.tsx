@@ -37,6 +37,7 @@ interface Facility {
 interface Area {
   id: string;
   name: string;
+  departmentId?: string;
   department?: {
     id: string;
     name: string;
@@ -44,6 +45,17 @@ interface Area {
       id: string;
       name: string;
     };
+  };
+}
+
+interface Department {
+  id: string;
+  name: string;
+  description?: string;
+  facilityId: string;
+  Facility?: {
+    id: string;
+    name: string;
   };
 }
 
@@ -141,22 +153,34 @@ function NewIncidentPageContent() {
   const [isEditMode, setIsEditMode] = useState(false);
   const [editingIncidentNumber, setEditingIncidentNumber] = useState<string | null>(null);
   
+  // Helper to get current datetime in local timezone for datetime-local input
+  const getLocalDateTimeString = () => {
+    const now = new Date();
+    const year = now.getFullYear();
+    const month = String(now.getMonth() + 1).padStart(2, '0');
+    const day = String(now.getDate()).padStart(2, '0');
+    const hours = String(now.getHours()).padStart(2, '0');
+    const minutes = String(now.getMinutes()).padStart(2, '0');
+    return `${year}-${month}-${day}T${hours}:${minutes}`;
+  };
+  
   // Form state
   const [formData, setFormData] = useState({
-    type: '' as 'FOOD_SAFETY' | 'MACHINE_EQUIPMENT' | 'WORKPLACE_SAFETY' | '',
+    type: '' as 'FOOD_SAFETY' | 'MACHINE_EQUIPMENT' | 'WORKPLACE_SAFETY' | 'OPERATIONS' | '',
     mainCategoryId: '', // Parent category
     categoryId: '', // Subcategory (what gets saved to incident)
     customTitle: '',
     description: '',
     aiSummary: '',
     facilityId: '',
+    departmentId: '',
     areaId: '',
     lineId: '',
     shiftId: '',
     productName: '',
     lotNumber: '',
     machineId: '',
-    occurredAt: new Date().toISOString().slice(0, 16),
+    occurredAt: getLocalDateTimeString(),
     severity: '' as '' | 'LOW' | 'MEDIUM' | 'HIGH' | 'CRITICAL',
     visibility: 'PRIVATE' as 'PRIVATE' | 'TEAM' | 'PUBLIC',
     // Workplace Safety specific fields
@@ -284,6 +308,7 @@ function NewIncidentPageContent() {
   // Data state
   const [categories, setCategories] = useState<Category[]>([]);
   const [facilities, setFacilities] = useState<Facility[]>([]);
+  const [departments, setDepartments] = useState<Department[]>([]);
   const [areas, setAreas] = useState<Area[]>([]);
   const [lines, setLines] = useState<Line[]>([]);
   const [shifts, setShifts] = useState<Shift[]>([]);
@@ -525,12 +550,35 @@ function NewIncidentPageContent() {
     }
   }, [formData.type, user?.organizationId]);
 
-  // Load areas when facility changes
+  // Load departments when facility changes
   useEffect(() => {
     if (formData.facilityId) {
-      loadAreas(formData.facilityId);
+      // Reset downstream selections and data
+      setAreas([]);
+      setLines([]);
+      setShifts([]);
+      loadDepartments(formData.facilityId);
+    } else {
+      setDepartments([]);
+      setAreas([]);
+      setLines([]);
+      setShifts([]);
     }
   }, [formData.facilityId]);
+
+  // Load areas when department changes
+  useEffect(() => {
+    if (formData.departmentId) {
+      // Reset downstream selections and data
+      setLines([]);
+      setShifts([]);
+      loadAreas(formData.departmentId);
+    } else {
+      setAreas([]);
+      setLines([]);
+      setShifts([]);
+    }
+  }, [formData.departmentId]);
 
   // Load lines when area changes
   useEffect(() => {
@@ -686,9 +734,20 @@ function NewIncidentPageContent() {
     }
   };
 
-  const loadAreas = async (facilityId: string) => {
+  const loadDepartments = async (facilityId: string) => {
     try {
-      const response = await api.get(`/facilities/areas?facilityId=${facilityId}`);
+      const response = await api.get(`/facilities/departments?facilityId=${facilityId}`);
+      const departmentsData = response.data.data?.departments || [];
+      setDepartments(Array.isArray(departmentsData) ? departmentsData : []);
+    } catch (err) {
+      console.error('Failed to load departments:', err);
+      setDepartments([]);
+    }
+  };
+
+  const loadAreas = async (departmentId: string) => {
+    try {
+      const response = await api.get(`/facilities/areas?departmentId=${departmentId}`);
       const areasData = response.data.data?.areas || [];
       setAreas(Array.isArray(areasData) ? areasData : []);
     } catch (err) {
@@ -758,21 +817,32 @@ function NewIncidentPageContent() {
       // Find parent category
       const parentCategoryId = incident.category?.parentId || '';
       
-      // Helper to parse date for datetime-local input
+      // Helper to parse date for datetime-local input (uses local timezone)
       const formatDateTimeLocal = (dateStr: string | null | undefined): string => {
         if (!dateStr) return '';
         try {
-          return new Date(dateStr).toISOString().slice(0, 16);
+          const date = new Date(dateStr);
+          // Use local time components instead of UTC
+          const year = date.getFullYear();
+          const month = String(date.getMonth() + 1).padStart(2, '0');
+          const day = String(date.getDate()).padStart(2, '0');
+          const hours = String(date.getHours()).padStart(2, '0');
+          const minutes = String(date.getMinutes()).padStart(2, '0');
+          return `${year}-${month}-${day}T${hours}:${minutes}`;
         } catch {
           return '';
         }
       };
       
-      // Helper to parse date for date input
+      // Helper to parse date for date input (uses local timezone)
       const formatDateLocal = (dateStr: string | null | undefined): string => {
         if (!dateStr) return '';
         try {
-          return new Date(dateStr).toISOString().slice(0, 10);
+          const date = new Date(dateStr);
+          const year = date.getFullYear();
+          const month = String(date.getMonth() + 1).padStart(2, '0');
+          const day = String(date.getDate()).padStart(2, '0');
+          return `${year}-${month}-${day}`;
         } catch {
           return '';
         }
@@ -1044,6 +1114,7 @@ function NewIncidentPageContent() {
         customTitle: formData.customTitle,
         description: formData.description,
         facilityId: formData.facilityId,
+        departmentId: formData.departmentId,
         areaId: formData.areaId,
         lineId: formData.lineId,
         shiftId: formData.shiftId,
@@ -2077,7 +2148,7 @@ function NewIncidentPageContent() {
               )}
             </div>
             <p className="text-gray-600 dark:text-gray-400 mb-6 sm:mb-8 text-xs sm:text-sm lg:text-base">
-              {isEditMode ? 'Continue editing your draft incident report' : 'Report a food safety, machine equipment, or workplace safety incident'}
+              {isEditMode ? 'Continue editing your draft incident report' : 'Report a food safety, machine equipment, workplace safety, or operations incident'}
             </p>
 
             {error && (
@@ -2091,7 +2162,7 @@ function NewIncidentPageContent() {
               <h2 className="text-base sm:text-lg lg:text-xl font-semibold text-gray-900 dark:text-white mb-3 sm:mb-4">
                 1. Incident Type *
               </h2>
-              <div className="grid grid-cols-1 sm:grid-cols-3 gap-3 sm:gap-4">
+              <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3 sm:gap-4">
                 <button
                   type="button"
                   onClick={() => setFormData({ ...formData, type: 'FOOD_SAFETY', categoryId: '', mainCategoryId: '' })}
@@ -2137,6 +2208,22 @@ function NewIncidentPageContent() {
                   <h3 className="font-semibold text-gray-900 dark:text-white mb-0.5 sm:mb-1 text-sm sm:text-base">Workplace Safety</h3>
                   <p className="text-xs sm:text-sm text-gray-600 dark:text-gray-400">
                     Injuries, hazards, PPE, compliance
+                  </p>
+                </button>
+
+                <button
+                  type="button"
+                  onClick={() => setFormData({ ...formData, type: 'OPERATIONS', categoryId: '', mainCategoryId: '' })}
+                  className={`p-4 sm:p-6 rounded-lg border-2 transition-all touch-manipulation ${
+                    formData.type === 'OPERATIONS'
+                      ? 'border-primary-500 bg-primary-50 dark:bg-primary-900/20'
+                      : 'border-gray-300 dark:border-gray-600 hover:border-gray-400'
+                  }`}
+                >
+                  <div className="text-2xl sm:text-4xl mb-1.5 sm:mb-2">📊</div>
+                  <h3 className="font-semibold text-gray-900 dark:text-white mb-0.5 sm:mb-1 text-sm sm:text-base">Operations</h3>
+                  <p className="text-xs sm:text-sm text-gray-600 dark:text-gray-400">
+                    OEE, Waste, efficiency issues
                   </p>
                 </button>
               </div>
@@ -2283,7 +2370,7 @@ function NewIncidentPageContent() {
                         </label>
                         <select
                           value={formData.facilityId}
-                          onChange={(e) => setFormData({ ...formData, facilityId: e.target.value, areaId: '', lineId: '' })}
+                          onChange={(e) => setFormData({ ...formData, facilityId: e.target.value, departmentId: '', areaId: '', lineId: '', shiftId: '' })}
                           required
                           className="w-full px-3 sm:px-4 py-2 rounded-lg border border-gray-300 dark:border-slate-600 bg-white dark:bg-slate-700 text-gray-900 dark:text-white focus:ring-2 focus:ring-primary-500 text-sm sm:text-base"
                         >
@@ -2296,12 +2383,31 @@ function NewIncidentPageContent() {
 
                       <div>
                         <label className="block text-xs sm:text-sm font-medium text-gray-700 dark:text-gray-300 mb-1.5 sm:mb-2">
+                          Department
+                        </label>
+                        <select
+                          value={formData.departmentId}
+                          onChange={(e) => setFormData({ ...formData, departmentId: e.target.value, areaId: '', lineId: '', shiftId: '' })}
+                          disabled={!formData.facilityId}
+                          className="w-full px-3 sm:px-4 py-2 rounded-lg border border-gray-300 dark:border-slate-600 bg-white dark:bg-slate-700 text-gray-900 dark:text-white focus:ring-2 focus:ring-primary-500 disabled:opacity-50 text-sm sm:text-base"
+                        >
+                          <option value="">Select department</option>
+                          {departments.map((d) => (
+                            <option key={d.id} value={d.id}>{d.name}</option>
+                          ))}
+                        </select>
+                      </div>
+                    </div>
+
+                    <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 sm:gap-4">
+                      <div>
+                        <label className="block text-xs sm:text-sm font-medium text-gray-700 dark:text-gray-300 mb-1.5 sm:mb-2">
                           Area
                         </label>
                         <select
                           value={formData.areaId}
-                          onChange={(e) => setFormData({ ...formData, areaId: e.target.value, lineId: '' })}
-                          disabled={!formData.facilityId}
+                          onChange={(e) => setFormData({ ...formData, areaId: e.target.value, lineId: '', shiftId: '' })}
+                          disabled={!formData.departmentId}
                           className="w-full px-3 sm:px-4 py-2 rounded-lg border border-gray-300 dark:border-slate-600 bg-white dark:bg-slate-700 text-gray-900 dark:text-white focus:ring-2 focus:ring-primary-500 disabled:opacity-50 text-sm sm:text-base"
                         >
                           <option value="">Select area</option>
@@ -2310,9 +2416,7 @@ function NewIncidentPageContent() {
                           ))}
                         </select>
                       </div>
-                    </div>
 
-                    <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 sm:gap-4">
                       <div>
                         <label className="block text-xs sm:text-sm font-medium text-gray-700 dark:text-gray-300 mb-1.5 sm:mb-2">
                           Production Line
