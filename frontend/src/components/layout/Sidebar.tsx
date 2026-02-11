@@ -20,6 +20,7 @@ import {
   ClipboardList,
   AlertTriangle,
   Inbox,
+  Shield,
 } from 'lucide-react';
 
 export default function Sidebar() {
@@ -84,6 +85,12 @@ export default function Sidebar() {
       href: '/fmir',
       icon: AlertTriangle,
       roles: ['*'], // Available to all users
+    },
+    {
+      name: 'Safety Assessment',
+      href: '/workplace-safety',
+      icon: Shield,
+      roles: ['SUPERVISOR', 'QA_FOOD_SAFETY', 'MAINTENANCE_ENGINEERING', 'SAFETY_SECURITY_MANAGER', 'CI_MANAGER', 'ADMIN', 'SYSTEM_ADMIN'],
     },
   ];
 

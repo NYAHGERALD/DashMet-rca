@@ -275,3 +275,6 @@ then
 . add
 comit
 push.
+
+All sections in this report is should be marked as required and be validated before making the Submition button Active. in each section, validate wheather "A", "U", or "N/A" was selected, If "U" was selected, validate weather these Text areas where filled "Deficiency Found", "Corrective Action", that means it have Data in them, and at least a word. 
+All Fields in the "Assessment Information" section mut be filled and mark as required as well

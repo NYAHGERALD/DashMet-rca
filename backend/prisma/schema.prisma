@@ -320,15 +320,16 @@ model DefaultPrivilege {
 }
 
 model Department {
-  id          String     @id @default(uuid())
-  name        String
-  description String?
-  facilityId  String
-  createdAt   DateTime   @default(now())
-  updatedAt   DateTime   @updatedAt
-  Area        Area[]
-  Facility    Facility   @relation(fields: [facilityId], references: [id], onDelete: Cascade)
-  Incident    Incident[]
+  id                        String                      @id @default(uuid())
+  name                      String
+  description               String?
+  facilityId                String
+  createdAt                 DateTime                    @default(now())
+  updatedAt                 DateTime                    @updatedAt
+  Area                      Area[]
+  Facility                  Facility                    @relation(fields: [facilityId], references: [id], onDelete: Cascade)
+  Incident                  Incident[]
+  WorkplaceSafetyAssessment WorkplaceSafetyAssessment[]
 
   @@index([facilityId])
 }
@@ -467,20 +468,21 @@ model FMIRAIValidation {
 }
 
 model Facility {
-  id                      String                    @id @default(uuid())
-  name                    String
-  timezone                String                    @default("America/New_York")
-  address                 String?
-  organizationId          String
-  createdAt               DateTime                  @default(now())
-  updatedAt               DateTime                  @updatedAt
-  Area                    Area[]
-  Department              Department[]
-  Organization            Organization              @relation(fields: [organizationId], references: [id], onDelete: Cascade)
-  ForeignMaterialIncident ForeignMaterialIncident[]
-  Incident                Incident[]
-  RegulatoryTracking      RegulatoryTracking[]
-  Shift                   Shift[]
+  id                        String                      @id @default(uuid())
+  name                      String
+  timezone                  String                      @default("America/New_York")
+  address                   String?
+  organizationId            String
+  createdAt                 DateTime                    @default(now())
+  updatedAt                 DateTime                    @updatedAt
+  Area                      Area[]
+  Department                Department[]
+  Organization              Organization                @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  ForeignMaterialIncident   ForeignMaterialIncident[]
+  Incident                  Incident[]
+  RegulatoryTracking        RegulatoryTracking[]
+  Shift                     Shift[]
+  WorkplaceSafetyAssessment WorkplaceSafetyAssessment[]
 
   @@index([organizationId])
 }
@@ -871,30 +873,34 @@ model Notification {
 }
 
 model Organization {
-  id                      String                    @id @default(uuid())
-  name                    String
-  region                  Region
-  defaultLanguage         Language                  @default(ENGLISH)
-  isActive                Boolean                   @default(true)
-  regulatoryRuleset       String?
-  createdAt               DateTime                  @default(now())
-  updatedAt               DateTime                  @updatedAt
-  isPublic                Boolean                   @default(false)
-  signupCode              String?                   @unique
-  AuditLog                AuditLog[]
-  Category                Category[]
-  DropdownOption          DropdownOption[]
-  FMIRAuditReport         FMIRAuditReport[]
-  Facility                Facility[]
-  FieldConfiguration      FieldConfiguration[]
-  ForeignMaterialIncident ForeignMaterialIncident[]
-  Incident                Incident[]
-  OrganizationAccessCode  OrganizationAccessCode[]
-  PrivilegeAuditLog       PrivilegeAuditLog[]
-  RegulatoryTracking      RegulatoryTracking[]
-  RolePrivilege           RolePrivilege[]
-  SupportRequest          SupportRequest[]
-  User                    User[]
+  id                        String                      @id @default(uuid())
+  name                      String
+  region                    Region
+  defaultLanguage           Language                    @default(ENGLISH)
+  isActive                  Boolean                     @default(true)
+  regulatoryRuleset         String?
+  createdAt                 DateTime                    @default(now())
+  updatedAt                 DateTime                    @updatedAt
+  isPublic                  Boolean                     @default(false)
+  signupCode                String?                     @unique
+  AuditLog                  AuditLog[]
+  Category                  Category[]
+  DropdownOption            DropdownOption[]
+  FMIRAuditReport           FMIRAuditReport[]
+  Facility                  Facility[]
+  FieldConfiguration        FieldConfiguration[]
+  ForeignMaterialIncident   ForeignMaterialIncident[]
+  Incident                  Incident[]
+  OrganizationAccessCode    OrganizationAccessCode[]
+  PrivilegeAuditLog         PrivilegeAuditLog[]
+  RegulatoryTracking        RegulatoryTracking[]
+  RolePrivilege             RolePrivilege[]
+  SupportRequest            SupportRequest[]
+  User                      User[]
+  WorkplaceSafetyAssessment WorkplaceSafetyAssessment[]
+  WorkOrderTemplate         WorkOrderTemplate[]
+  WorkOrderSettings         WorkOrderSettings?
+  WorkOrder                 WorkOrder[]
 
   @@index([name])
   @@index([signupCode])
@@ -1305,11 +1311,234 @@ model User {
   SupportRequestAlertDismissal                                        SupportRequestAlertDismissal[]
   SupportStatusNotificationDismissal                                  SupportStatusNotificationDismissal[]
   Organization                                                        Organization?                        @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  WorkplaceSafetyAssessment                                           WorkplaceSafetyAssessment[]
+  WorkOrderTemplate                                                   WorkOrderTemplate[]
+  WorkOrdersCreated                                                   WorkOrder[]                          @relation("WorkOrderCreatedBy")
+  WorkOrdersAssigned                                                  WorkOrder[]                          @relation("WorkOrderAssignedBy")
+  WorkOrderStatusChanges                                              WorkOrderStatusHistory[]             @relation("WorkOrderStatusChangedBy")
 
   @@index([email])
   @@index([isOnline])
   @@index([organizationId])
   @@index([role])
+}
+
+// Workplace Safety Assessment Models
+model WorkplaceSafetyAssessment {
+  id                         String                         @id @default(uuid())
+  assessmentNumber           String                         @unique
+  version                    String                         @default("3/19/25")
+  date                       DateTime
+  department                 String?
+  departmentId               String?
+  teamLeaderName             String
+  teamLeaderSignature        String?                        // Firebase URL for signature image
+  employeeName               String?
+  employeeSignature          String?                        // Firebase URL for signature image
+  operationManagerName       String?
+  operationManagerSignature  String?                        // Firebase URL for signature image
+  plantManagerName           String?
+  plantManagerSignature      String?                        // Firebase URL for signature image
+  safetyManagerName          String?
+  safetyManagerSignature     String?                        // Firebase URL for signature image
+  status                     WSAStatus                      @default(DRAFT)
+  organizationId             String
+  facilityId                 String?
+  createdById                String
+  createdAt                  DateTime                       @default(now())
+  updatedAt                  DateTime                       @updatedAt
+  submittedAt                DateTime?
+  completedAt                DateTime?
+  
+  // Relations
+  Department                 Department?                    @relation(fields: [departmentId], references: [id])
+  Facility                   Facility?                      @relation(fields: [facilityId], references: [id])
+  Organization               Organization                   @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  CreatedBy                  User                           @relation(fields: [createdById], references: [id])
+  Sections                   WSASection[]
+  Photos                     WSAPhoto[]
+  WorkOrders                 WorkOrder[]
+
+  @@index([assessmentNumber])
+  @@index([createdById])
+  @@index([departmentId])
+  @@index([facilityId])
+  @@index([organizationId])
+  @@index([status])
+}
+
+model WSASection {
+  id           String                    @id @default(uuid())
+  assessmentId String
+  sectionId    String                    // e.g., 'ppe', 'lockout', 'machine-guarding'
+  title        String
+  sortOrder    Int                       @default(0)
+  
+  Assessment   WorkplaceSafetyAssessment @relation(fields: [assessmentId], references: [id], onDelete: Cascade)
+  Items        WSAItem[]
+
+  @@index([assessmentId])
+  @@unique([assessmentId, sectionId])
+}
+
+model WSAItem {
+  id                     String      @id @default(uuid())
+  sectionId              String
+  itemId                 String      // e.g., 'ppe-1', 'lockout-2'
+  description            String
+  status                 String?     // 'A' (Acceptable), 'U' (Unacceptable), 'NA' (Not Applicable)
+  deficiency             String?
+  correctiveAction       String?
+  dynamicEntries         Json?       // For items with dynamic entries (employee/equipment lists)
+  workOrderPlaced        Boolean?    @default(false)
+  reportedViaSafetyApp   Boolean?    @default(false)
+  safetyAppReportDate    DateTime?
+  workOrderDateCreated   DateTime?
+  workOrderAssignedTo    String?
+  workOrderAttachment    Json?       // { id, name, fileUrl }
+  sortOrder              Int         @default(0)
+  
+  Section                WSASection  @relation(fields: [sectionId], references: [id], onDelete: Cascade)
+
+  @@index([sectionId])
+  @@unique([sectionId, itemId])
+}
+
+model WSAPhoto {
+  id           String                    @id @default(uuid())
+  assessmentId String
+  itemId       String?                   // Optional: link to specific item
+  sectionId    String?                   // Optional: link to specific section
+  fileName     String
+  fileUrl      String                    // Firebase Storage URL
+  fileSize     Int?
+  mimeType     String?
+  caption      String?
+  uploadedAt   DateTime                  @default(now())
+  
+  Assessment   WorkplaceSafetyAssessment @relation(fields: [assessmentId], references: [id], onDelete: Cascade)
+
+  @@index([assessmentId])
+  @@index([itemId])
+}
+
+// Work Order Settings - Admin controls for work order behavior
+model WorkOrderSettings {
+  id                    String   @id @default(uuid())
+  organizationId        String   @unique
+  enableInAppForm       Boolean  @default(true)   // Show in-app work order creation form
+  enableTemplateDownload Boolean @default(false)  // Show template download option
+  preferredOption       String   @default("form") // "form", "template", or "both"
+  formTitle             String   @default("Maintenance Work Order Request")
+  createdAt             DateTime @default(now())
+  updatedAt             DateTime @updatedAt
+  
+  Organization          Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+
+  @@index([organizationId])
+}
+
+// Work Order - Tracks all work orders (in-app and uploaded)
+model WorkOrder {
+  id                     String                     @id @default(uuid())
+  woNumber               String                     @unique  // Auto-generated: WO-2026-0001
+  type                   WorkOrderType              // IN_APP or UPLOADED
+  
+  // Link to Safety Assessment
+  assessmentId           String
+  assessmentNumber       String                     // Denormalized for display
+  sectionId              String?
+  itemId                 String?
+  itemDescription        String?
+  
+  // Form fields (for in-app work orders)
+  requestDate            DateTime?
+  expenseClass           String?                    // Fabrication, Safety, Ergonomics, Equipment, USDA, QA, Other
+  originator             String?                    // Requestor name
+  woType                 String?                    // Repair, Modify, PMD
+  priority               Int?                       // 1=Emergency, 2=Rush, 3=Plan & Schedule
+  description            String?                    // Nature of problem
+  equipmentNo            String?                    // Equipment number (DM#)
+  equipmentDescription   String?                    // Equipment name or area
+  fullDescriptionOfIssue String?                    @db.Text
+  department             String?
+  
+  // For uploaded files
+  fileName               String?
+  fileUrl                String?                    // Firebase Storage URL
+  fileSize               Int?
+  uploadedAt             DateTime?
+  
+  // Assignment
+  assignedTo             String?                    // Free text or user name
+  assignedById           String?
+  
+  // Status
+  status                 WorkOrderStatus            @default(PENDING)
+  completionDate         DateTime?
+  
+  // Audit
+  createdById            String
+  organizationId         String
+  createdAt              DateTime                   @default(now())
+  updatedAt              DateTime                   @updatedAt
+  
+  // Relations
+  Assessment             WorkplaceSafetyAssessment  @relation(fields: [assessmentId], references: [id], onDelete: Cascade)
+  AssignedBy             User?                      @relation("WorkOrderAssignedBy", fields: [assignedById], references: [id])
+  CreatedBy              User                       @relation("WorkOrderCreatedBy", fields: [createdById], references: [id])
+  Organization           Organization               @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  StatusHistory          WorkOrderStatusHistory[]
+
+  @@index([assessmentId])
+  @@index([assessmentNumber])
+  @@index([createdById])
+  @@index([organizationId])
+  @@index([status])
+  @@index([type])
+  @@index([woNumber])
+}
+
+// Work Order Status History - Audit trail for status changes
+model WorkOrderStatusHistory {
+  id            String          @id @default(uuid())
+  workOrderId   String
+  fromStatus    WorkOrderStatus?
+  toStatus      WorkOrderStatus
+  changedById   String
+  changedAt     DateTime        @default(now())
+  notes         String?
+  
+  WorkOrder     WorkOrder       @relation(fields: [workOrderId], references: [id], onDelete: Cascade)
+  ChangedBy     User            @relation("WorkOrderStatusChangedBy", fields: [changedById], references: [id])
+
+  @@index([workOrderId])
+  @@index([changedById])
+  @@index([changedAt])
+}
+
+// Work Order Template - Admin uploaded templates for users to download
+model WorkOrderTemplate {
+  id             String   @id @default(uuid())
+  organizationId String
+  name           String                    // Display name for the template
+  fileName       String                    // Original file name
+  fileUrl        String                    // Firebase Storage URL
+  fileSize       Int?
+  mimeType       String?                   // application/vnd.openxmlformats-officedocument.wordprocessingml.document, etc.
+  description    String?                   // Instructions or description
+  version        Int      @default(1)
+  isActive       Boolean  @default(true)
+  uploadedById   String
+  uploadedAt     DateTime @default(now())
+  updatedAt      DateTime @updatedAt
+  
+  Organization   Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  UploadedBy     User         @relation(fields: [uploadedById], references: [id])
+
+  @@unique([organizationId, isActive])     // Only one active template per org
+  @@index([organizationId])
+  @@index([isActive])
 }
 
 model FiveWhysAnalysis {
@@ -1437,6 +1666,12 @@ model MeetingRecording {
   @@index([incidentId])
   @@index([roomName])
   @@index([recordedById])
+}
+
+enum WSAStatus {
+  DRAFT
+  SUBMITTED
+  COMPLETED
 }
 
 enum ActionPriority {
@@ -1713,4 +1948,16 @@ enum UserRole {
   SYSTEM_ADMIN
   SAFETY_SECURITY_MANAGER
   QUALITY_CONTROL_MANAGER
+}
+
+enum WorkOrderType {
+  IN_APP
+  UPLOADED
+}
+
+enum WorkOrderStatus {
+  PENDING
+  IN_PROGRESS
+  COMPLETED
+  CANCELLED
 }

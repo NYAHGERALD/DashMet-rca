@@ -220,6 +220,7 @@ function DashboardContent() {
                 { href: '/workplace-report', icon: '📝', label: t('nav.workplaceReport') },
                 { href: '/investigation-report', icon: '🔎', label: t('nav.investigationReport') },
                 { href: '/fmir', icon: '⚠️', label: t('nav.fmir') || 'Foreign Material' },
+                { href: '/workplace-safety', icon: '🛡️', label: 'Safety Assessment', show: isSupervisorPlus },
                 { href: '/settings', icon: '⚙️', label: t('nav.settings') },
               ]}
             />
@@ -246,6 +247,7 @@ function DashboardContent() {
                   { href: '/admin/categories', icon: '🏷️', label: t('nav.categories') },
                   { href: '/admin', icon: '👥', label: t('nav.userManagement') },
                   { href: '/admin/privileges', icon: '🔐', label: t('nav.privileges') || 'Role Privileges' },
+                  { href: '/admin/work-order-templates', icon: '📋', label: 'Work Order Templates' },
                   { href: '/admin/enterprise', icon: '🛡️', label: t('nav.enterprise') },
                   { href: '/support-inbox', icon: '📬', label: 'Support Inbox' },
                 ]}

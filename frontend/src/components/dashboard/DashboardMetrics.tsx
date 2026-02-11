@@ -1,6 +1,6 @@
 'use client';
 
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useMemo } from 'react';
 import {
   AreaChart,
   Area,
@@ -20,6 +20,19 @@ import {
 } from 'recharts';
 import { useAuth } from '@/components/providers/AuthProvider';
 import { formatDate } from '@/lib/dateUtils';
+import { 
+  TrendingUp, 
+  AlertCircle, 
+  Clock, 
+  CheckCircle2, 
+  Activity,
+  FileWarning,
+  ShieldCheck,
+  Timer,
+  BarChart3,
+  PieChartIcon,
+  Calendar
+} from 'lucide-react';
 
 interface DashboardStats {
   totalIncidents: number;
@@ -40,7 +53,7 @@ interface DashboardStats {
   dataScope?: 'organization' | 'user';
 }
 
-const COLORS = ['#0088FE', '#00C49F', '#FFBB28', '#FF8042', '#8884d8', '#82ca9d'];
+const CATEGORY_COLORS = ['#3b82f6', '#22c55e', '#f59e0b', '#ef4444', '#8b5cf6', '#06b6d4', '#f97316', '#14b8a6'];
 
 const SEVERITY_COLORS = {
   CRITICAL: '#ef4444',
@@ -59,12 +72,44 @@ const formatDateLocal = (isoDate: string | undefined, fallbackName: string): str
   }
 };
 
+// Animated counter hook
+function useAnimatedCounter(end: number, duration: number = 1000, start: boolean = true) {
+  const [count, setCount] = useState(0);
+  
+  useEffect(() => {
+    if (!start) return;
+    let startTime: number | null = null;
+    let animationFrame: number;
+    
+    const animate = (timestamp: number) => {
+      if (!startTime) startTime = timestamp;
+      const progress = Math.min((timestamp - startTime) / duration, 1);
+      const easeOutQuart = 1 - Math.pow(1 - progress, 4);
+      setCount(Math.floor(easeOutQuart * end));
+      
+      if (progress < 1) {
+        animationFrame = requestAnimationFrame(animate);
+      }
+    };
+    
+    animationFrame = requestAnimationFrame(animate);
+    return () => cancelAnimationFrame(animationFrame);
+  }, [end, duration, start]);
+  
+  return count;
+}
+
 export default function DashboardMetrics() {
   const { user, getIdToken } = useAuth();
   const [stats, setStats] = useState<DashboardStats | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [timeRange, setTimeRange] = useState<'7d' | '30d' | '90d'>('30d');
+  const [mounted, setMounted] = useState(false);
+
+  useEffect(() => {
+    setMounted(true);
+  }, []);
 
   useEffect(() => {
     fetchDashboardStats();
@@ -110,17 +155,40 @@ export default function DashboardMetrics() {
     }
   };
 
+  // Transform trend data to use browser timezone for date display
+  const trendDataWithLocalDates = useMemo(() => {
+    if (!stats) return [];
+    return stats.incidentsTrend.map(item => ({
+      ...item,
+      name: formatDateLocal(item.date, item.name),
+    }));
+  }, [stats]);
+
   if (loading) {
     return (
-      <div className="animate-pulse space-y-6">
-        <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
-          {[...Array(4)].map((_, i) => (
-            <div key={i} className="h-32 bg-gray-200 dark:bg-gray-700 rounded-xl"></div>
+      <div className="space-y-6">
+        {/* Loading Header */}
+        <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4">
+          <div className="h-8 w-48 bg-gray-200 dark:bg-gray-700 rounded-lg animate-pulse" />
+          <div className="flex gap-2">
+            {[1, 2, 3].map(i => (
+              <div key={i} className="h-9 w-20 bg-gray-200 dark:bg-gray-700 rounded-lg animate-pulse" />
+            ))}
+          </div>
+        </div>
+        
+        {/* Loading Metric Cards */}
+        <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
+          {[...Array(8)].map((_, i) => (
+            <div key={i} className="h-32 bg-gradient-to-br from-gray-100 to-gray-200 dark:from-gray-800 dark:to-gray-700 rounded-2xl animate-pulse" />
           ))}
         </div>
-        <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
-          <div className="h-80 bg-gray-200 dark:bg-gray-700 rounded-xl"></div>
-          <div className="h-80 bg-gray-200 dark:bg-gray-700 rounded-xl"></div>
+        
+        {/* Loading Charts */}
+        <div className="grid grid-cols-1 xl:grid-cols-2 gap-6">
+          {[1, 2].map(i => (
+            <div key={i} className="h-80 bg-gray-100 dark:bg-gray-800 rounded-2xl animate-pulse" />
+          ))}
         </div>
       </div>
     );
@@ -128,11 +196,14 @@ export default function DashboardMetrics() {
 
   if (error) {
     return (
-      <div className="bg-red-50 dark:bg-red-900/20 border border-red-200 dark:border-red-800 rounded-xl p-6 text-center">
-        <p className="text-red-600 dark:text-red-400">{error}</p>
+      <div className="backdrop-blur-xl bg-red-50/80 dark:bg-red-900/20 border border-red-200 dark:border-red-800 rounded-2xl p-8 text-center">
+        <div className="w-16 h-16 mx-auto mb-4 rounded-full bg-red-100 dark:bg-red-900/40 flex items-center justify-center">
+          <AlertCircle className="w-8 h-8 text-red-600 dark:text-red-400" />
+        </div>
+        <p className="text-red-600 dark:text-red-400 font-medium">{error}</p>
         <button
           onClick={fetchDashboardStats}
-          className="mt-4 px-4 py-2 bg-red-600 text-white rounded-lg hover:bg-red-700"
+          className="mt-4 px-6 py-2.5 bg-gradient-to-r from-red-600 to-red-700 text-white rounded-xl hover:from-red-700 hover:to-red-800 transition-all duration-200 shadow-lg shadow-red-500/25"
         >
           Retry
         </button>
@@ -142,307 +213,382 @@ export default function DashboardMetrics() {
 
   if (!stats) return null;
 
-  // Transform trend data to use browser timezone for date display
-  const trendDataWithLocalDates = stats.incidentsTrend.map(item => ({
-    ...item,
-    name: formatDateLocal(item.date, item.name),
-  }));
-
   return (
-    <div className="space-y-4 sm:space-y-6">
-      {/* Time Range Selector */}
-      <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-3">
+    <div className="space-y-6">
+      {/* Enhanced Header Section */}
+      <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4">
         <div className="flex items-center gap-3">
-          <h3 className="text-base sm:text-lg font-semibold text-gray-900 dark:text-white">
-            Dashboard Overview
-          </h3>
+          <div className="relative">
+            <div className="absolute inset-0 bg-gradient-to-r from-blue-500 to-indigo-500 rounded-xl blur-lg opacity-50 animate-pulse" />
+            <div className="relative p-2.5 bg-gradient-to-br from-blue-500 to-indigo-600 rounded-xl shadow-lg">
+              <BarChart3 className="w-5 h-5 text-white" />
+            </div>
+          </div>
+          <div>
+            <h3 className="text-lg sm:text-xl font-bold bg-gradient-to-r from-gray-900 via-blue-800 to-indigo-900 dark:from-white dark:via-blue-200 dark:to-indigo-200 bg-clip-text text-transparent">
+              Dashboard Overview
+            </h3>
+            <p className="text-xs text-gray-500 dark:text-gray-400">Real-time quality metrics & insights</p>
+          </div>
           {stats.dataScope && (
-            <span className={`px-2 py-0.5 text-xs font-medium rounded-full ${
+            <span className={`px-3 py-1 text-xs font-semibold rounded-full backdrop-blur-md ${
               stats.dataScope === 'organization' 
-                ? 'bg-blue-100 text-blue-700 dark:bg-blue-900/30 dark:text-blue-300' 
-                : 'bg-purple-100 text-purple-700 dark:bg-purple-900/30 dark:text-purple-300'
+                ? 'bg-blue-500/10 text-blue-700 dark:text-blue-300 border border-blue-500/20' 
+                : 'bg-purple-500/10 text-purple-700 dark:text-purple-300 border border-purple-500/20'
             }`}>
               {stats.dataScope === 'organization' ? '🏢 Organization' : '👤 My Incidents'}
             </span>
           )}
         </div>
-        <div className="flex gap-1.5 sm:gap-2">
+        
+        {/* Time Range Selector - Pill Style */}
+        <div className="flex p-1 bg-gray-100/80 dark:bg-gray-800/80 backdrop-blur-md rounded-xl border border-gray-200/50 dark:border-gray-700/50">
           {(['7d', '30d', '90d'] as const).map((range) => (
             <button
               key={range}
               onClick={() => setTimeRange(range)}
-              className={`px-2 sm:px-3 py-1 sm:py-1.5 text-xs font-medium rounded-lg transition-colors ${
+              className={`relative px-4 py-2 text-xs font-semibold rounded-lg transition-all duration-300 ${
                 timeRange === range
-                  ? 'bg-primary-600 text-white'
-                  : 'bg-gray-100 dark:bg-gray-700 text-gray-600 dark:text-gray-300 hover:bg-gray-200 dark:hover:bg-gray-600'
+                  ? 'text-white shadow-lg'
+                  : 'text-gray-600 dark:text-gray-300 hover:text-gray-900 dark:hover:text-white'
               }`}
             >
-              {range === '7d' ? '7 Days' : range === '30d' ? '30 Days' : '90 Days'}
+              {timeRange === range && (
+                <span className="absolute inset-0 bg-gradient-to-r from-blue-500 to-indigo-600 rounded-lg animate-scale-in" />
+              )}
+              <span className="relative z-10">
+                {range === '7d' ? '7 Days' : range === '30d' ? '30 Days' : '90 Days'}
+              </span>
             </button>
           ))}
         </div>
       </div>
 
-      {/* KPI Cards - Row 1 */}
-      <div className="grid grid-cols-2 lg:grid-cols-4 gap-3 sm:gap-4">
+      {/* KPI Cards Grid - Enhanced with Glassmorphism */}
+      <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
         <MetricCard
           title="Total Incidents"
           value={stats.totalIncidents}
-          icon="📊"
+          icon={FileWarning}
           trend={stats.trendPercentage}
           color="blue"
+          delay={0}
+          mounted={mounted}
+          subtitle="All time"
         />
         <MetricCard
           title="Open Incidents"
           value={stats.openIncidents}
-          icon="🔓"
-          color="yellow"
+          icon={AlertCircle}
+          color="amber"
+          delay={1}
+          mounted={mounted}
+          subtitle="Require attention"
         />
         <MetricCard
           title="In Progress"
           value={stats.inProgressIncidents}
-          icon="⏳"
-          color="purple"
+          icon={Clock}
+          color="violet"
+          delay={2}
+          mounted={mounted}
+          subtitle="Being worked on"
         />
         <MetricCard
           title="Critical"
           value={stats.criticalIncidents}
-          icon="🚨"
-          color="red"
+          icon={Activity}
+          color="rose"
+          delay={3}
+          mounted={mounted}
           highlight
+          subtitle="High priority"
         />
-      </div>
-
-      {/* KPI Cards - Row 2 */}
-      <div className="grid grid-cols-2 lg:grid-cols-4 gap-3 sm:gap-4">
         <MetricCard
           title="RCA In Progress"
           value={stats.rcaInProgress}
-          icon="🔍"
+          icon={SearchIcon}
           color="indigo"
+          delay={4}
+          mounted={mounted}
+          subtitle="Under analysis"
         />
         <MetricCard
           title="RCA Completed"
           value={stats.rcaCompleted}
-          icon="✅"
-          color="green"
+          icon={CheckCircle2}
+          color="emerald"
+          delay={5}
+          mounted={mounted}
+          subtitle="Root cause found"
         />
         <MetricCard
           title="CAPA Open"
           value={stats.capaOpen}
-          icon="📋"
+          icon={ShieldCheck}
           color="orange"
+          delay={6}
+          mounted={mounted}
+          subtitle="Pending actions"
         />
         <MetricCard
           title="Avg Resolution"
           value={`${stats.avgResolutionTime}d`}
-          icon="⏱️"
-          color="teal"
-          subtitle="days"
+          icon={Timer}
+          color="cyan"
+          delay={7}
+          mounted={mounted}
+          subtitle="Days average"
         />
       </div>
 
-      {/* Charts Row 1 */}
-      <div className="grid grid-cols-1 xl:grid-cols-2 gap-4 sm:gap-6">
-        {/* Incidents Trend Chart */}
-        <div className="bg-white dark:bg-gray-800 rounded-xl shadow-sm border border-gray-200 dark:border-gray-700 p-4 sm:p-6">
-          <h4 className="text-xs sm:text-sm font-semibold text-gray-900 dark:text-white mb-3 sm:mb-4">
-            Incident Trend
-          </h4>
-          <div className="h-48 sm:h-64">
+      {/* Charts Row 1 - Enhanced */}
+      <div className="grid grid-cols-1 xl:grid-cols-2 gap-6">
+        {/* Incident Trend Chart */}
+        <ChartCard 
+          title="Incident Trend" 
+          icon={TrendingUp}
+          subtitle="Created vs Resolved over time"
+          delay={0}
+          mounted={mounted}
+        >
+          <div className="h-64">
             <ResponsiveContainer width="100%" height="100%">
-              <AreaChart data={trendDataWithLocalDates}>
+              <AreaChart data={trendDataWithLocalDates} margin={{ top: 10, right: 10, left: 0, bottom: 0 }}>
                 <defs>
                   <linearGradient id="colorIncidents" x1="0" y1="0" x2="0" y2="1">
-                    <stop offset="5%" stopColor="#3b82f6" stopOpacity={0.3} />
-                    <stop offset="95%" stopColor="#3b82f6" stopOpacity={0} />
+                    <stop offset="5%" stopColor="#3b82f6" stopOpacity={0.4} />
+                    <stop offset="95%" stopColor="#3b82f6" stopOpacity={0.05} />
                   </linearGradient>
                   <linearGradient id="colorResolved" x1="0" y1="0" x2="0" y2="1">
-                    <stop offset="5%" stopColor="#22c55e" stopOpacity={0.3} />
-                    <stop offset="95%" stopColor="#22c55e" stopOpacity={0} />
+                    <stop offset="5%" stopColor="#22c55e" stopOpacity={0.4} />
+                    <stop offset="95%" stopColor="#22c55e" stopOpacity={0.05} />
                   </linearGradient>
                 </defs>
-                <CartesianGrid strokeDasharray="3 3" className="stroke-gray-200 dark:stroke-gray-700" />
-                <XAxis dataKey="name" className="text-xs" tick={{ fill: '#9ca3af' }} />
-                <YAxis className="text-xs" tick={{ fill: '#9ca3af' }} />
+                <CartesianGrid strokeDasharray="3 3" stroke="currentColor" className="text-gray-200 dark:text-gray-700" opacity={0.5} />
+                <XAxis 
+                  dataKey="name" 
+                  tick={{ fill: 'currentColor', fontSize: 11 }} 
+                  className="text-gray-400 dark:text-gray-500"
+                  axisLine={false}
+                  tickLine={false}
+                />
+                <YAxis 
+                  tick={{ fill: 'currentColor', fontSize: 11 }} 
+                  className="text-gray-400 dark:text-gray-500"
+                  axisLine={false}
+                  tickLine={false}
+                />
                 <Tooltip
-                  contentStyle={{
-                    backgroundColor: 'rgba(31, 41, 55, 0.95)',
-                    border: 'none',
-                    borderRadius: '8px',
-                    color: '#fff',
-                  }}
+                  content={<CustomTooltip />}
                 />
                 <Area
                   type="monotone"
                   dataKey="incidents"
                   stroke="#3b82f6"
-                  strokeWidth={2}
+                  strokeWidth={3}
                   fillOpacity={1}
                   fill="url(#colorIncidents)"
                   name="Created"
+                  animationDuration={1500}
                 />
                 <Area
                   type="monotone"
                   dataKey="resolved"
                   stroke="#22c55e"
-                  strokeWidth={2}
+                  strokeWidth={3}
                   fillOpacity={1}
                   fill="url(#colorResolved)"
                   name="Resolved"
+                  animationDuration={1500}
+                  animationDelay={300}
                 />
-                <Legend />
+                <Legend 
+                  wrapperStyle={{ paddingTop: '20px' }}
+                  iconType="circle"
+                />
               </AreaChart>
             </ResponsiveContainer>
           </div>
-        </div>
+        </ChartCard>
 
         {/* Severity Distribution */}
-        <div className="bg-white dark:bg-gray-800 rounded-xl shadow-sm border border-gray-200 dark:border-gray-700 p-4 sm:p-6">
-          <h4 className="text-xs sm:text-sm font-semibold text-gray-900 dark:text-white mb-3 sm:mb-4">
-            Severity Distribution
-          </h4>
-          <div className="h-48 sm:h-64 flex flex-col sm:flex-row items-center">
-            <div className="w-full sm:w-1/2 h-40 sm:h-full">
+        <ChartCard 
+          title="Severity Distribution" 
+          icon={PieChartIcon}
+          subtitle="Breakdown by incident severity"
+          delay={1}
+          mounted={mounted}
+        >
+          <div className="h-64 flex flex-col sm:flex-row items-center">
+            <div className="w-full sm:w-1/2 h-full">
               <ResponsiveContainer width="100%" height="100%">
                 <PieChart>
                   <Pie
                     data={stats.incidentsBySeverity.filter(s => s.value > 0)}
                     cx="50%"
                     cy="50%"
-                    innerRadius={50}
-                    outerRadius={80}
-                    paddingAngle={2}
+                    innerRadius={55}
+                    outerRadius={85}
+                    paddingAngle={3}
                     dataKey="value"
+                    animationBegin={0}
+                    animationDuration={1200}
                   >
                     {stats.incidentsBySeverity.filter(s => s.value > 0).map((entry, index) => (
-                      <Cell key={`cell-${index}`} fill={entry.color} />
+                      <Cell key={`cell-${index}`} fill={entry.color} strokeWidth={0} />
                     ))}
                   </Pie>
-                  <Tooltip
-                    contentStyle={{
-                      backgroundColor: 'rgba(31, 41, 55, 0.95)',
-                      border: 'none',
-                      borderRadius: '8px',
-                      color: '#fff',
-                    }}
-                    formatter={(value: number, name: string) => [`${value} incidents`, name]}
-                  />
+                  <Tooltip content={<PieTooltip />} />
                 </PieChart>
               </ResponsiveContainer>
             </div>
-            <div className="w-full sm:w-1/2 flex flex-row sm:flex-col flex-wrap justify-center gap-2 sm:gap-3 pl-0 sm:pl-4 mt-3 sm:mt-0">
+            <div className="w-full sm:w-1/2 flex flex-row sm:flex-col flex-wrap justify-center gap-3 pl-0 sm:pl-4 mt-4 sm:mt-0">
               {stats.incidentsBySeverity.map((entry, index) => (
-                <div key={index} className="flex items-center justify-between gap-2">
-                  <div className="flex items-center gap-1.5 sm:gap-2">
+                <div 
+                  key={index} 
+                  className="flex items-center justify-between gap-3 p-2 rounded-lg bg-gray-50/50 dark:bg-gray-800/50 hover:bg-gray-100 dark:hover:bg-gray-700/50 transition-colors duration-200"
+                  style={{ animationDelay: `${index * 100}ms` }}
+                >
+                  <div className="flex items-center gap-2">
                     <div 
-                      className="w-2.5 h-2.5 sm:w-3 sm:h-3 rounded-full" 
-                      style={{ backgroundColor: entry.color }}
+                      className="w-3 h-3 rounded-full shadow-lg" 
+                      style={{ backgroundColor: entry.color, boxShadow: `0 0 10px ${entry.color}40` }}
                     />
-                    <span className="text-xs sm:text-sm text-gray-600 dark:text-gray-300">{entry.name}</span>
+                    <span className="text-sm font-medium text-gray-600 dark:text-gray-300">{entry.name}</span>
                   </div>
-                  <div className="flex items-center gap-1">
-                    <span className="text-xs sm:text-sm font-semibold text-gray-900 dark:text-white">{entry.value}</span>
-                    <span className="text-xs text-gray-500 dark:text-gray-400">({entry.percentage}%)</span>
+                  <div className="flex items-center gap-2">
+                    <span className="text-sm font-bold text-gray-900 dark:text-white">{entry.value}</span>
+                    <span className="text-xs text-gray-400 dark:text-gray-500">({entry.percentage}%)</span>
                   </div>
                 </div>
               ))}
             </div>
           </div>
-        </div>
+        </ChartCard>
       </div>
 
       {/* Charts Row 2 */}
-      <div className="grid grid-cols-1 xl:grid-cols-2 gap-4 sm:gap-6">
+      <div className="grid grid-cols-1 xl:grid-cols-2 gap-6">
         {/* Category Distribution */}
-        <div className="bg-white dark:bg-gray-800 rounded-xl shadow-sm border border-gray-200 dark:border-gray-700 p-4 sm:p-6">
-          <h4 className="text-xs sm:text-sm font-semibold text-gray-900 dark:text-white mb-3 sm:mb-4">
-            Incidents by Category
-          </h4>
-          <div className="h-48 sm:h-64">
+        <ChartCard 
+          title="Incidents by Category" 
+          icon={BarChart3}
+          subtitle="Distribution across categories"
+          delay={2}
+          mounted={mounted}
+        >
+          <div className="h-64">
             <ResponsiveContainer width="100%" height="100%">
-              <BarChart data={stats.incidentsByCategory} layout="vertical">
-                <CartesianGrid strokeDasharray="3 3" className="stroke-gray-200 dark:stroke-gray-700" />
-                <XAxis type="number" tick={{ fill: '#9ca3af' }} />
-                <YAxis dataKey="name" type="category" width={80} tick={{ fill: '#9ca3af', fontSize: 12 }} />
-                <Tooltip
-                  contentStyle={{
-                    backgroundColor: 'rgba(31, 41, 55, 0.95)',
-                    border: 'none',
-                    borderRadius: '8px',
-                    color: '#fff',
-                  }}
+              <BarChart data={stats.incidentsByCategory} layout="vertical" margin={{ top: 5, right: 30, left: 20, bottom: 5 }}>
+                <CartesianGrid strokeDasharray="3 3" stroke="currentColor" className="text-gray-200 dark:text-gray-700" opacity={0.3} horizontal={false} />
+                <XAxis type="number" tick={{ fill: 'currentColor', fontSize: 11 }} className="text-gray-400 dark:text-gray-500" axisLine={false} tickLine={false} />
+                <YAxis 
+                  dataKey="name" 
+                  type="category" 
+                  width={100} 
+                  tick={{ fill: 'currentColor', fontSize: 11 }} 
+                  className="text-gray-500 dark:text-gray-400"
+                  axisLine={false}
+                  tickLine={false}
                 />
-                <Bar dataKey="value" radius={[0, 4, 4, 0]}>
+                <Tooltip content={<BarTooltip />} />
+                <Bar dataKey="value" radius={[0, 8, 8, 0]} animationDuration={1500}>
                   {stats.incidentsByCategory.map((entry, index) => (
-                    <Cell key={`cell-${index}`} fill={COLORS[index % COLORS.length]} />
+                    <Cell key={`cell-${index}`} fill={CATEGORY_COLORS[index % CATEGORY_COLORS.length]} />
                   ))}
                 </Bar>
               </BarChart>
             </ResponsiveContainer>
           </div>
-        </div>
+        </ChartCard>
 
         {/* Weekly Performance */}
-        <div className="bg-white dark:bg-gray-800 rounded-xl shadow-sm border border-gray-200 dark:border-gray-700 p-4 sm:p-6">
-          <h4 className="text-xs sm:text-sm font-semibold text-gray-900 dark:text-white mb-3 sm:mb-4">
-            Weekly Performance
-          </h4>
-          <div className="h-48 sm:h-64">
+        <ChartCard 
+          title="Weekly Performance" 
+          icon={Calendar}
+          subtitle="Created vs Resolved this week"
+          delay={3}
+          mounted={mounted}
+        >
+          <div className="h-64">
             <ResponsiveContainer width="100%" height="100%">
-              <LineChart data={stats.weeklyPerformance}>
-                <CartesianGrid strokeDasharray="3 3" className="stroke-gray-200 dark:stroke-gray-700" />
-                <XAxis dataKey="day" tick={{ fill: '#9ca3af' }} />
-                <YAxis tick={{ fill: '#9ca3af' }} />
-                <Tooltip
-                  contentStyle={{
-                    backgroundColor: 'rgba(31, 41, 55, 0.95)',
-                    border: 'none',
-                    borderRadius: '8px',
-                    color: '#fff',
-                  }}
-                />
+              <LineChart data={stats.weeklyPerformance} margin={{ top: 10, right: 10, left: 0, bottom: 0 }}>
+                <CartesianGrid strokeDasharray="3 3" stroke="currentColor" className="text-gray-200 dark:text-gray-700" opacity={0.3} />
+                <XAxis dataKey="day" tick={{ fill: 'currentColor', fontSize: 11 }} className="text-gray-400 dark:text-gray-500" axisLine={false} tickLine={false} />
+                <YAxis tick={{ fill: 'currentColor', fontSize: 11 }} className="text-gray-400 dark:text-gray-500" axisLine={false} tickLine={false} />
+                <Tooltip content={<CustomTooltip />} />
                 <Line
                   type="monotone"
                   dataKey="created"
                   stroke="#f97316"
-                  strokeWidth={2}
-                  dot={{ fill: '#f97316', strokeWidth: 2 }}
+                  strokeWidth={3}
+                  dot={{ fill: '#f97316', strokeWidth: 2, r: 4, stroke: '#fff' }}
+                  activeDot={{ r: 6, strokeWidth: 0 }}
                   name="Created"
+                  animationDuration={1500}
                 />
                 <Line
                   type="monotone"
                   dataKey="resolved"
                   stroke="#22c55e"
-                  strokeWidth={2}
-                  dot={{ fill: '#22c55e', strokeWidth: 2 }}
+                  strokeWidth={3}
+                  dot={{ fill: '#22c55e', strokeWidth: 2, r: 4, stroke: '#fff' }}
+                  activeDot={{ r: 6, strokeWidth: 0 }}
                   name="Resolved"
+                  animationDuration={1500}
+                  animationDelay={300}
                 />
-                <Legend />
+                <Legend wrapperStyle={{ paddingTop: '20px' }} iconType="circle" />
               </LineChart>
             </ResponsiveContainer>
           </div>
-        </div>
+        </ChartCard>
       </div>
 
-      {/* Quick Stats Footer */}
-      <div className="bg-gradient-to-r from-primary-600 to-primary-700 rounded-xl p-4 sm:p-6 text-white">
-        <div className="grid grid-cols-2 lg:grid-cols-4 gap-4 sm:gap-6 text-center">
-          <div>
-            <p className="text-xl sm:text-3xl font-bold">{Math.round((stats.closedIncidents / stats.totalIncidents) * 100) || 0}%</p>
-            <p className="text-xs sm:text-sm text-primary-100">Resolution Rate</p>
-          </div>
-          <div>
-            <p className="text-xl sm:text-3xl font-bold">{stats.capaOverdue}</p>
-            <p className="text-xs sm:text-sm text-primary-100">Overdue CAPAs</p>
-          </div>
-          <div>
-            <p className="text-xl sm:text-3xl font-bold">{stats.rcaInProgress + stats.rcaCompleted}</p>
-            <p className="text-xs sm:text-sm text-primary-100">Total RCAs</p>
-          </div>
-          <div>
-            <p className="text-xl sm:text-3xl font-bold">{stats.avgResolutionTime}d</p>
-            <p className="text-xs sm:text-sm text-primary-100">Avg Resolution</p>
+      {/* Enhanced Quick Stats Footer */}
+      <div 
+        className={`relative overflow-hidden rounded-2xl transition-all duration-700 ${mounted ? 'opacity-100 translate-y-0' : 'opacity-0 translate-y-4'}`}
+        style={{ transitionDelay: '500ms' }}
+      >
+        {/* Background gradient with animation */}
+        <div className="absolute inset-0 bg-gradient-to-r from-blue-600 via-indigo-600 to-violet-600" />
+        <div className="absolute inset-0 bg-gradient-to-r from-blue-600/0 via-white/10 to-blue-600/0 animate-shimmer" style={{ backgroundSize: '200% 100%' }} />
+        
+        {/* Floating particles effect */}
+        <div className="absolute inset-0 overflow-hidden">
+          <div className="absolute top-4 left-10 w-2 h-2 bg-white/20 rounded-full animate-float" style={{ animationDelay: '0s' }} />
+          <div className="absolute top-8 right-20 w-3 h-3 bg-white/10 rounded-full animate-float" style={{ animationDelay: '1s' }} />
+          <div className="absolute bottom-6 left-1/4 w-2 h-2 bg-white/15 rounded-full animate-float" style={{ animationDelay: '2s' }} />
+        </div>
+        
+        <div className="relative px-6 py-6 sm:py-8">
+          <div className="grid grid-cols-2 lg:grid-cols-4 gap-6 text-center">
+            <StatFooterItem 
+              value={Math.round((stats.closedIncidents / (stats.totalIncidents || 1)) * 100)}
+              label="Resolution Rate"
+              suffix="%"
+              delay={0}
+            />
+            <StatFooterItem 
+              value={stats.capaOverdue}
+              label="Overdue CAPAs"
+              suffix=""
+              alert={stats.capaOverdue > 0}
+              delay={1}
+            />
+            <StatFooterItem 
+              value={stats.rcaInProgress + stats.rcaCompleted}
+              label="Total RCAs"
+              suffix=""
+              delay={2}
+            />
+            <StatFooterItem 
+              value={stats.avgResolutionTime}
+              label="Avg Resolution"
+              suffix="d"
+              delay={3}
+            />
           </div>
         </div>
       </div>
@@ -450,66 +596,276 @@ export default function DashboardMetrics() {
   );
 }
 
-// Metric Card Component
+// Enhanced Metric Card Component
 interface MetricCardProps {
   title: string;
   value: number | string;
-  icon: string;
+  icon: React.ElementType;
   trend?: number;
-  color: 'blue' | 'green' | 'yellow' | 'red' | 'purple' | 'indigo' | 'orange' | 'teal';
+  color: 'blue' | 'emerald' | 'amber' | 'rose' | 'violet' | 'indigo' | 'orange' | 'cyan';
   highlight?: boolean;
   subtitle?: string;
+  delay: number;
+  mounted: boolean;
 }
 
-function MetricCard({ title, value, icon, trend, color, highlight, subtitle }: MetricCardProps) {
-  const colorClasses = {
-    blue: 'bg-blue-50 dark:bg-blue-900/20 border-blue-200 dark:border-blue-800',
-    green: 'bg-green-50 dark:bg-green-900/20 border-green-200 dark:border-green-800',
-    yellow: 'bg-yellow-50 dark:bg-yellow-900/20 border-yellow-200 dark:border-yellow-800',
-    red: 'bg-red-50 dark:bg-red-900/20 border-red-200 dark:border-red-800',
-    purple: 'bg-purple-50 dark:bg-purple-900/20 border-purple-200 dark:border-purple-800',
-    indigo: 'bg-indigo-50 dark:bg-indigo-900/20 border-indigo-200 dark:border-indigo-800',
-    orange: 'bg-orange-50 dark:bg-orange-900/20 border-orange-200 dark:border-orange-800',
-    teal: 'bg-teal-50 dark:bg-teal-900/20 border-teal-200 dark:border-teal-800',
+function MetricCard({ title, value, icon: Icon, trend, color, highlight, subtitle, delay, mounted }: MetricCardProps) {
+  const numericValue = typeof value === 'string' ? parseFloat(value) : value;
+  const animatedValue = useAnimatedCounter(isNaN(numericValue) ? 0 : numericValue, 1200, mounted);
+  const displayValue = typeof value === 'string' && value.includes('d') 
+    ? `${animatedValue}d` 
+    : animatedValue;
+
+  const colorThemes = {
+    blue: {
+      bg: 'from-blue-500/10 via-blue-500/5 to-transparent',
+      border: 'border-blue-200/50 dark:border-blue-700/30',
+      iconBg: 'bg-blue-500/10 dark:bg-blue-500/20',
+      iconColor: 'text-blue-600 dark:text-blue-400',
+      glow: 'shadow-blue-500/20',
+      gradient: 'from-blue-500 to-cyan-500',
+    },
+    emerald: {
+      bg: 'from-emerald-500/10 via-emerald-500/5 to-transparent',
+      border: 'border-emerald-200/50 dark:border-emerald-700/30',
+      iconBg: 'bg-emerald-500/10 dark:bg-emerald-500/20',
+      iconColor: 'text-emerald-600 dark:text-emerald-400',
+      glow: 'shadow-emerald-500/20',
+      gradient: 'from-emerald-500 to-teal-500',
+    },
+    amber: {
+      bg: 'from-amber-500/10 via-amber-500/5 to-transparent',
+      border: 'border-amber-200/50 dark:border-amber-700/30',
+      iconBg: 'bg-amber-500/10 dark:bg-amber-500/20',
+      iconColor: 'text-amber-600 dark:text-amber-400',
+      glow: 'shadow-amber-500/20',
+      gradient: 'from-amber-500 to-orange-500',
+    },
+    rose: {
+      bg: 'from-rose-500/10 via-rose-500/5 to-transparent',
+      border: 'border-rose-200/50 dark:border-rose-700/30',
+      iconBg: 'bg-rose-500/10 dark:bg-rose-500/20',
+      iconColor: 'text-rose-600 dark:text-rose-400',
+      glow: 'shadow-rose-500/20',
+      gradient: 'from-rose-500 to-pink-500',
+    },
+    violet: {
+      bg: 'from-violet-500/10 via-violet-500/5 to-transparent',
+      border: 'border-violet-200/50 dark:border-violet-700/30',
+      iconBg: 'bg-violet-500/10 dark:bg-violet-500/20',
+      iconColor: 'text-violet-600 dark:text-violet-400',
+      glow: 'shadow-violet-500/20',
+      gradient: 'from-violet-500 to-purple-500',
+    },
+    indigo: {
+      bg: 'from-indigo-500/10 via-indigo-500/5 to-transparent',
+      border: 'border-indigo-200/50 dark:border-indigo-700/30',
+      iconBg: 'bg-indigo-500/10 dark:bg-indigo-500/20',
+      iconColor: 'text-indigo-600 dark:text-indigo-400',
+      glow: 'shadow-indigo-500/20',
+      gradient: 'from-indigo-500 to-blue-500',
+    },
+    orange: {
+      bg: 'from-orange-500/10 via-orange-500/5 to-transparent',
+      border: 'border-orange-200/50 dark:border-orange-700/30',
+      iconBg: 'bg-orange-500/10 dark:bg-orange-500/20',
+      iconColor: 'text-orange-600 dark:text-orange-400',
+      glow: 'shadow-orange-500/20',
+      gradient: 'from-orange-500 to-red-500',
+    },
+    cyan: {
+      bg: 'from-cyan-500/10 via-cyan-500/5 to-transparent',
+      border: 'border-cyan-200/50 dark:border-cyan-700/30',
+      iconBg: 'bg-cyan-500/10 dark:bg-cyan-500/20',
+      iconColor: 'text-cyan-600 dark:text-cyan-400',
+      glow: 'shadow-cyan-500/20',
+      gradient: 'from-cyan-500 to-blue-500',
+    },
   };
 
-  const iconBgClasses = {
-    blue: 'bg-blue-100 dark:bg-blue-900/40',
-    green: 'bg-green-100 dark:bg-green-900/40',
-    yellow: 'bg-yellow-100 dark:bg-yellow-900/40',
-    red: 'bg-red-100 dark:bg-red-900/40',
-    purple: 'bg-purple-100 dark:bg-purple-900/40',
-    indigo: 'bg-indigo-100 dark:bg-indigo-900/40',
-    orange: 'bg-orange-100 dark:bg-orange-900/40',
-    teal: 'bg-teal-100 dark:bg-teal-900/40',
-  };
+  const theme = colorThemes[color];
 
   return (
     <div
-      className={`relative p-3 sm:p-4 rounded-xl border ${colorClasses[color]} ${
-        highlight ? 'ring-2 ring-red-400 dark:ring-red-500' : ''
-      } transition-all hover:shadow-md`}
+      className={`group relative overflow-hidden rounded-2xl backdrop-blur-xl bg-gradient-to-br ${theme.bg} border ${theme.border} 
+        transition-all duration-500 hover:scale-[1.02] hover:shadow-xl ${theme.glow}
+        ${highlight ? 'ring-2 ring-rose-400/50 dark:ring-rose-500/50' : ''}
+        ${mounted ? 'opacity-100 translate-y-0' : 'opacity-0 translate-y-4'}`}
+      style={{ transitionDelay: `${delay * 75}ms` }}
     >
-      <div className="flex items-start justify-between">
-        <div className={`p-1.5 sm:p-2 rounded-lg ${iconBgClasses[color]}`}>
-          <span className="text-lg sm:text-xl">{icon}</span>
-        </div>
-        {trend !== undefined && (
-          <span
-            className={`text-xs font-medium px-1.5 sm:px-2 py-0.5 rounded-full ${
-              trend >= 0
-                ? 'bg-green-100 text-green-700 dark:bg-green-900/40 dark:text-green-400'
-                : 'bg-red-100 text-red-700 dark:bg-red-900/40 dark:text-red-400'
-            }`}
-          >
-            {trend >= 0 ? '↑' : '↓'} {Math.abs(trend)}%
-          </span>
-        )}
+      {/* Animated gradient border on hover */}
+      <div className={`absolute inset-0 rounded-2xl bg-gradient-to-r ${theme.gradient} opacity-0 group-hover:opacity-100 transition-opacity duration-500 blur-sm -z-10`} />
+      
+      {/* Shimmer effect */}
+      <div className="absolute inset-0 opacity-0 group-hover:opacity-100 transition-opacity duration-500">
+        <div className="absolute inset-0 bg-gradient-to-r from-transparent via-white/10 to-transparent -translate-x-full group-hover:translate-x-full transition-transform duration-1000" />
       </div>
-      <div className="mt-2 sm:mt-3">
-        <p className="text-lg sm:text-2xl font-bold text-gray-900 dark:text-white">{value}</p>
-        <p className="text-xs text-gray-500 dark:text-gray-400 mt-0.5 sm:mt-1 line-clamp-1">{title}</p>
+
+      <div className="relative p-4 sm:p-5">
+        <div className="flex items-start justify-between">
+          <div className={`p-2.5 rounded-xl ${theme.iconBg} transition-transform duration-300 group-hover:scale-110 group-hover:rotate-3`}>
+            <Icon className={`w-5 h-5 ${theme.iconColor}`} />
+          </div>
+          
+          {trend !== undefined && (
+            <span
+              className={`flex items-center gap-1 text-xs font-bold px-2 py-1 rounded-full backdrop-blur-sm ${
+                trend >= 0
+                  ? 'bg-emerald-500/10 text-emerald-700 dark:text-emerald-400 border border-emerald-500/20'
+                  : 'bg-rose-500/10 text-rose-700 dark:text-rose-400 border border-rose-500/20'
+              }`}
+            >
+              {trend >= 0 ? (
+                <TrendingUp className="w-3 h-3" />
+              ) : (
+                <TrendingUp className="w-3 h-3 rotate-180" />
+              )}
+              {Math.abs(trend)}%
+            </span>
+          )}
+        </div>
+        
+        <div className="mt-4">
+          <p className="text-2xl sm:text-3xl font-bold bg-gradient-to-br from-gray-900 to-gray-700 dark:from-white dark:to-gray-300 bg-clip-text text-transparent">
+            {displayValue}
+          </p>
+          <p className="text-sm font-semibold text-gray-700 dark:text-gray-300 mt-1">{title}</p>
+          {subtitle && (
+            <p className="text-xs text-gray-400 dark:text-gray-500 mt-0.5">{subtitle}</p>
+          )}
+        </div>
       </div>
     </div>
+  );
+}
+
+// Chart Card Component
+interface ChartCardProps {
+  title: string;
+  icon: React.ElementType;
+  subtitle?: string;
+  children: React.ReactNode;
+  delay: number;
+  mounted: boolean;
+}
+
+function ChartCard({ title, icon: Icon, subtitle, children, delay, mounted }: ChartCardProps) {
+  return (
+    <div 
+      className={`group relative overflow-hidden rounded-2xl backdrop-blur-xl 
+        bg-white/70 dark:bg-gray-800/70 
+        border border-gray-200/50 dark:border-gray-700/50 
+        shadow-sm hover:shadow-xl transition-all duration-500
+        ${mounted ? 'opacity-100 translate-y-0' : 'opacity-0 translate-y-4'}`}
+      style={{ transitionDelay: `${delay * 100 + 300}ms` }}
+    >
+      {/* Subtle gradient overlay */}
+      <div className="absolute inset-0 bg-gradient-to-br from-blue-500/5 via-transparent to-indigo-500/5 opacity-0 group-hover:opacity-100 transition-opacity duration-500 pointer-events-none" />
+      
+      <div className="relative p-5 sm:p-6">
+        <div className="flex items-center gap-3 mb-4">
+          <div className="p-2 rounded-xl bg-gradient-to-br from-blue-500/10 to-indigo-500/10 border border-blue-500/10">
+            <Icon className="w-4 h-4 text-blue-600 dark:text-blue-400" />
+          </div>
+          <div>
+            <h4 className="text-sm font-bold text-gray-900 dark:text-white">{title}</h4>
+            {subtitle && (
+              <p className="text-xs text-gray-500 dark:text-gray-400">{subtitle}</p>
+            )}
+          </div>
+        </div>
+        {children}
+      </div>
+    </div>
+  );
+}
+
+// Footer Stat Item
+function StatFooterItem({ value, label, suffix, alert, delay }: { 
+  value: number; 
+  label: string; 
+  suffix: string;
+  alert?: boolean;
+  delay: number;
+}) {
+  const animatedValue = useAnimatedCounter(value, 1500, true);
+  
+  return (
+    <div 
+      className="relative group"
+      style={{ animationDelay: `${delay * 100}ms` }}
+    >
+      <div className={`text-3xl sm:text-4xl font-bold ${alert ? 'text-rose-200' : 'text-white'}`}>
+        {animatedValue}{suffix}
+      </div>
+      <p className="text-xs sm:text-sm text-blue-100 mt-1 font-medium">{label}</p>
+      
+      {/* Hover glow */}
+      <div className="absolute inset-0 bg-white/10 rounded-xl opacity-0 group-hover:opacity-100 transition-opacity duration-300 -z-10 blur-xl" />
+    </div>
+  );
+}
+
+// Custom Tooltip for Charts
+function CustomTooltip({ active, payload, label }: any) {
+  if (active && payload && payload.length) {
+    return (
+      <div className="backdrop-blur-xl bg-gray-900/95 border border-gray-700/50 rounded-xl p-4 shadow-2xl">
+        <p className="text-gray-300 text-sm mb-2 font-medium">{label}</p>
+        {payload.map((entry: any, index: number) => (
+          <div key={index} className="flex items-center gap-2 mb-1 last:mb-0">
+            <div 
+              className="w-3 h-3 rounded-full" 
+              style={{ backgroundColor: entry.color }}
+            />
+            <span className="text-gray-400 text-sm">{entry.name}:</span>
+            <span className="text-white font-bold">{entry.value}</span>
+          </div>
+        ))}
+      </div>
+    );
+  }
+  return null;
+}
+
+// Pie Chart Tooltip
+function PieTooltip({ active, payload }: any) {
+  if (active && payload && payload.length) {
+    const data = payload[0];
+    return (
+      <div className="backdrop-blur-xl bg-gray-900/95 border border-gray-700/50 rounded-xl p-3 shadow-2xl">
+        <div className="flex items-center gap-2">
+          <div 
+            className="w-3 h-3 rounded-full" 
+            style={{ backgroundColor: data.payload.color }}
+          />
+          <span className="text-gray-300 text-sm">{data.name}:</span>
+          <span className="text-white font-bold">{data.value} incidents</span>
+        </div>
+      </div>
+    );
+  }
+  return null;
+}
+
+// Bar Chart Tooltip
+function BarTooltip({ active, payload, label }: any) {
+  if (active && payload && payload.length) {
+    return (
+      <div className="backdrop-blur-xl bg-gray-900/95 border border-gray-700/50 rounded-xl p-3 shadow-2xl">
+        <p className="text-gray-300 text-sm mb-1">{label}</p>
+        <p className="text-white font-bold">{payload[0].value} incidents</p>
+      </div>
+    );
+  }
+  return null;
+}
+
+// Search Icon Component
+function SearchIcon({ className }: { className?: string }) {
+  return (
+    <svg className={className} fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+      <path strokeLinecap="round" strokeLinejoin="round" d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z" />
+    </svg>
   );
 }

@@ -163,6 +163,7 @@ const CATEGORY_ICONS: Record<string, React.ReactNode> = {
   'Compliance': '📜',
   'System Administration': '⚙️',
   'Collaboration': '💬',
+  'Safety Assessment': '🦺',
 };
 
 function PrivilegesContent() {

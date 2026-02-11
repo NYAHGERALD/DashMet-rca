@@ -24,6 +24,9 @@ import policyRoutes from './policyRoutes';
 import supportRoutes from './supportRoutes';
 import accessCodeRoutes from './accessCodeRoutes';
 import workplaceReportRoutes from './workplaceReportRoutes';
+import workplaceSafetyRoutes from './workplaceSafetyRoutes';
+import workOrderTemplateRoutes from './workOrderTemplateRoutes';
+import workOrderRoutes from './workOrderRoutes';
 import investigationReportRoutes from './investigationReportRoutes';
 import translationRoutes from './translationRoutes';
 import powerpointRoutes from './powerpointRoutes';
@@ -141,6 +144,15 @@ router.use('/chat', chatRoutes);
 
 // Workplace Safety Report routes (PDF generation)
 router.use('/workplace-report', workplaceReportRoutes);
+
+// Workplace Safety Assessment routes (CRUD for assessments)
+router.use('/workplace-safety', workplaceSafetyRoutes);
+
+// Work Order Template routes (Admin uploads for users to download)
+router.use('/work-order-templates', workOrderTemplateRoutes);
+
+// Work Order routes (In-App and Uploaded work orders)
+router.use('/work-orders', workOrderRoutes);
 
 // Team Leader Investigation Report routes (PDF generation)
 router.use('/investigation-report', investigationReportRoutes);

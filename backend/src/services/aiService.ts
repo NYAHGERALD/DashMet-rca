@@ -264,6 +264,115 @@ IMPORTANT: Reply with ONLY the improved text. No explanations or extra words.`,
 }
 
 /**
+ * Enhance workplace safety assessment text using AI
+ * Specifically for deficiency descriptions and corrective actions
+ */
+export async function enhanceWorkplaceSafetyText(
+  text: string,
+  fieldContext?: string,
+  sectionTitle?: string,
+  itemDescription?: string
+): Promise<EnhanceTextResult> {
+  const openai = getOpenAIClient();
+  
+  if (!openai) {
+    console.error('AI Enhancement unavailable: No OpenAI API key configured');
+    return {
+      enhancedText: text,
+      changes: [],
+      error: true,
+    };
+  }
+
+  if (!text || text.trim().length < 5) {
+    return {
+      enhancedText: text,
+      changes: ['Text too short to enhance'],
+      error: true,
+    };
+  }
+
+  const isDeficiency = fieldContext === 'deficiency';
+  const isCorrectiveAction = fieldContext === 'correctiveAction';
+
+  try {
+    const completion = await openai.chat.completions.create({
+      model: process.env.AI_MODEL || 'gpt-4o',
+      messages: [
+        {
+          role: 'system',
+          content: `You are a workplace safety professional helping to write clear, professional safety assessment documentation.
+
+${isDeficiency ? `YOUR TASK: Improve the "Deficiency Found" description.
+- Make it clear exactly what the safety issue or problem is
+- Use specific, measurable language when possible
+- Describe the current unsafe condition objectively
+- Keep it concise but complete` : ''}
+
+${isCorrectiveAction ? `YOUR TASK: Improve the "Corrective Action" description.
+- Describe what was done or will be done to fix the issue
+- Use action-oriented language (fixed, replaced, installed, trained, etc.)
+- Be specific about the solution
+- Include any follow-up actions if mentioned` : ''}
+
+${sectionTitle ? `Section: ${sectionTitle}` : ''}
+${itemDescription ? `Assessment Item: ${itemDescription}` : ''}
+
+WRITING GUIDELINES:
+- Use clear, professional English
+- Fix any spelling and grammar errors
+- Keep the original meaning and facts intact
+- Use active voice when possible
+- Be concise - avoid unnecessary words
+- Sound professional but natural, not robotic
+
+IMPORTANT: Reply with ONLY the improved text. No explanations, quotes, or extra formatting.`,
+        },
+        {
+          role: 'user',
+          content: `Improve this ${isDeficiency ? 'deficiency description' : isCorrectiveAction ? 'corrective action' : 'text'}:\n\n${text}`,
+        },
+      ],
+      temperature: 0.3,
+      max_completion_tokens: 500,
+    });
+
+    const enhancedText = completion.choices[0]?.message?.content?.trim() || text;
+    
+    // Remove any quotes that GPT might add
+    const cleanedText = enhancedText.replace(/^["']|["']$/g, '').trim();
+    
+    // Generate a brief summary of changes
+    const changes: string[] = [];
+    if (cleanedText !== text) {
+      if (cleanedText.length !== text.length) {
+        changes.push('Improved clarity and structure');
+      }
+      const lowerOriginal = text.toLowerCase();
+      const lowerEnhanced = cleanedText.toLowerCase();
+      if (lowerOriginal !== lowerEnhanced) {
+        changes.push('Corrected spelling and grammar');
+      }
+      changes.push('Enhanced professional tone');
+    } else {
+      changes.push('Text was already well-written');
+    }
+
+    return {
+      enhancedText: cleanedText,
+      changes,
+    };
+  } catch (error: any) {
+    console.error('AI Workplace Safety Text Enhancement failed:', error.message);
+    return {
+      enhancedText: text,
+      changes: [],
+      error: true,
+    };
+  }
+}
+
+/**
  * Generate a professional AI summary for an incident
  */
 export async function generateIncidentSummary(data: IncidentData): Promise<SummaryResult> {

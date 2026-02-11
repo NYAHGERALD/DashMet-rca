@@ -404,7 +404,15 @@ function NewIncidentPageContent() {
   const [lastSavedAt, setLastSavedAt] = useState<Date | null>(null);
   const [saveMessage, setSaveMessage] = useState<{ type: 'success' | 'error'; text: string } | null>(null);
   const [hasUnsavedChanges, setHasUnsavedChanges] = useState(false);
-  const [isAutoSaveEnabled, setIsAutoSaveEnabled] = useState(true);
+  const [isAutoSaveEnabled, setIsAutoSaveEnabled] = useState(() => {
+    // Initialize from localStorage, default to true
+    if (typeof window !== 'undefined') {
+      const saved = localStorage.getItem('incidents-autosave-enabled');
+      return saved !== null ? saved === 'true' : true;
+    }
+    return true;
+  });
+  const [isAutoSaving, setIsAutoSaving] = useState(false);
   const autoSaveTimeoutRef = useRef<NodeJS.Timeout | null>(null);
 
   // AI Form Validation state
@@ -502,6 +510,13 @@ function NewIncidentPageContent() {
       loadExistingIncident(editIncidentId);
     }
   }, [editIncidentId]);
+
+  // Persist auto-save preference to localStorage
+  useEffect(() => {
+    if (typeof window !== 'undefined') {
+      localStorage.setItem('incidents-autosave-enabled', String(isAutoSaveEnabled));
+    }
+  }, [isAutoSaveEnabled]);
 
   // Load categories when type changes or user loads
   useEffect(() => {
@@ -1238,7 +1253,12 @@ function NewIncidentPageContent() {
       } else {
         // Create new draft incident
         const response = await api.post('/incidents', payload);
-        setIncidentId(response.data.data.id);
+        const newIncidentId = response.data.data.id;
+        setIncidentId(newIncidentId);
+        setIsEditMode(true);
+        setEditingIncidentNumber(response.data.data.incidentNumber);
+        // Update URL to include edit parameter so refresh loads the draft
+        window.history.replaceState(null, '', `/incidents/new?edit=${newIncidentId}`);
       }
 
       setLastSavedAt(new Date());
@@ -1265,7 +1285,7 @@ function NewIncidentPageContent() {
     }
   }, [formData, incidentId]);
 
-  // Auto-save effect - triggers auto-save 5 seconds after last change
+  // Auto-save effect - triggers auto-save 3 seconds after last change
   useEffect(() => {
     if (!isAutoSaveEnabled || !hasUnsavedChanges) return;
     
@@ -1276,14 +1296,17 @@ function NewIncidentPageContent() {
     
     // Only auto-save if minimum fields are filled
     if (formData.type && formData.categoryId && formData.description && formData.facilityId) {
-      autoSaveTimeoutRef.current = setTimeout(() => {
-        handleSaveProgress(false); // Silent auto-save
-      }, 5000); // 5 seconds debounce
+      setIsAutoSaving(true);
+      autoSaveTimeoutRef.current = setTimeout(async () => {
+        await handleSaveProgress(false); // Silent auto-save
+        setIsAutoSaving(false);
+      }, 3000); // 3 seconds debounce (reduced from 5)
     }
     
     return () => {
       if (autoSaveTimeoutRef.current) {
         clearTimeout(autoSaveTimeoutRef.current);
+        setIsAutoSaving(false);
       }
     };
   }, [hasUnsavedChanges, isAutoSaveEnabled, formData, handleSaveProgress]);
@@ -1371,6 +1394,10 @@ function NewIncidentPageContent() {
         
         if (isDraft) {
           // Stay on page to allow evidence staging
+          setIsEditMode(true);
+          setEditingIncidentNumber(response.data.data.incidentNumber);
+          // Update URL to include edit parameter so refresh loads the draft
+          window.history.replaceState(null, '', `/incidents/new?edit=${finalIncidentId}`);
           setLoading(false);
         } else {
           // Final submission - upload any staged files first
@@ -2408,16 +2435,54 @@ function NewIncidentPageContent() {
                               )}
                             </button>
                             
-                            {/* Auto-save toggle */}
-                            <label className="flex items-center gap-1.5 sm:gap-2 text-xs sm:text-sm text-gray-600 dark:text-gray-400 cursor-pointer">
-                              <input
-                                type="checkbox"
-                                checked={isAutoSaveEnabled}
-                                onChange={(e) => setIsAutoSaveEnabled(e.target.checked)}
-                                className="h-3.5 w-3.5 sm:h-4 sm:w-4 rounded border-gray-300 text-blue-600 focus:ring-blue-500"
-                              />
-                              <span className="hidden sm:inline">Auto-save</span><span className="sm:hidden">Auto</span>
-                            </label>
+                            {/* Auto-save toggle - prominent switch style */}
+                            <div className="flex items-center gap-2">
+                              <button
+                                type="button"
+                                onClick={() => setIsAutoSaveEnabled(!isAutoSaveEnabled)}
+                                className={`relative inline-flex h-6 w-11 flex-shrink-0 cursor-pointer rounded-full border-2 border-transparent transition-colors duration-200 ease-in-out focus:outline-none focus:ring-2 focus:ring-blue-500 focus:ring-offset-2 ${
+                                  isAutoSaveEnabled ? 'bg-green-500' : 'bg-gray-300 dark:bg-gray-600'
+                                }`}
+                                role="switch"
+                                aria-checked={isAutoSaveEnabled}
+                              >
+                                <span
+                                  className={`pointer-events-none inline-block h-5 w-5 transform rounded-full bg-white shadow ring-0 transition duration-200 ease-in-out ${
+                                    isAutoSaveEnabled ? 'translate-x-5' : 'translate-x-0'
+                                  }`}
+                                />
+                              </button>
+                              <span className={`text-xs sm:text-sm font-medium ${
+                                isAutoSaveEnabled 
+                                  ? 'text-green-600 dark:text-green-400' 
+                                  : 'text-gray-500 dark:text-gray-400'
+                              }`}>
+                                {isAutoSaveEnabled ? (
+                                  <span className="flex items-center gap-1">
+                                    {isAutoSaving ? (
+                                      <>
+                                        <svg className="animate-spin h-3 w-3" viewBox="0 0 24 24">
+                                          <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" fill="none" />
+                                          <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z" />
+                                        </svg>
+                                        <span className="hidden sm:inline">Auto-saving...</span>
+                                        <span className="sm:hidden">Saving</span>
+                                      </>
+                                    ) : (
+                                      <>
+                                        <span className="hidden sm:inline">Auto Save ON</span>
+                                        <span className="sm:hidden">Auto ON</span>
+                                      </>
+                                    )}
+                                  </span>
+                                ) : (
+                                  <>
+                                    <span className="hidden sm:inline">Auto Save OFF</span>
+                                    <span className="sm:hidden">Auto OFF</span>
+                                  </>
+                                )}
+                              </span>
+                            </div>
                           </div>
                           
                           <div className="flex items-center gap-3">
