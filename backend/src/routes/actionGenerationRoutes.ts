@@ -316,10 +316,11 @@ Respond in JSON format:
 
 YOUR APPROACH:
 - Use formal, professional language
-- Clearly state the policy violations
-- Document the incident objectively
-- Specify exact expectations and consequences
-- Include appropriate acknowledgment sections
+- Clearly state the company rules violated
+- Document the incident objectively and in detail
+- Specify the conduct deficiency clearly
+- Define required corrective actions
+- State consequences of not performing
 - Ensure document meets HR standards`;
 
         userPrompt = `${baseContext}
@@ -332,23 +333,20 @@ Respond in JSON format:
   "documentDate": "${new Date().toISOString().split('T')[0]}",
   "employeeNames": ["${complaintA.employeeName}", "${complaintB.employeeName}"],
   "warningLevel": "First Written Warning / Final Written Warning",
-  "incidentDescription": "Detailed, objective description of the incident (3-4 paragraphs)",
-  "policyViolations": [
-    "Specific policy that may have been violated",
-    "Another policy reference if applicable"
+  "companyRulesViolated": [
+    "Specific company rule or policy violated",
+    "Another rule/policy if applicable"
   ],
-  "priorActions": "Statement about any prior coaching or counseling (or 'No prior formal actions documented')",
-  "expectations": [
-    "Specific expectation 1",
-    "Specific expectation 2",
-    "3-5 clear expectations"
+  "describeInDetail": "Detailed, objective description of what happened. Include dates, times, locations, and specific behaviors observed or reported. This should be a thorough account of the incident (3-5 paragraphs).",
+  "conductDeficiency": "Clear statement of the specific conduct deficiency. What behavior or action fell below company standards? Be specific about the gap between expected and actual conduct.",
+  "requiredCorrectiveAction": [
+    "Specific corrective action required 1",
+    "Specific corrective action required 2",
+    "Additional actions as needed (3-5 total)"
   ],
-  "consequences": "Clear statement of consequences for future violations",
-  "improvementRequired": [
-    "Specific improvement 1",
-    "Specific improvement 2"
-  ],
+  "consequencesOfNotPerforming": "Clear statement of consequences if corrective action is not taken and improvement is not demonstrated. Include potential progressive discipline steps.",
   "reviewDate": "Date for formal review (typically 30-90 days)",
+  "priorActions": "Statement about any prior coaching or counseling (or 'No prior formal actions documented')",
   "signatureSection": {
     "employeeAcknowledgment": "I acknowledge receipt of this warning. My signature does not necessarily indicate agreement with its contents, but confirms I have received and understand this document.",
     "supervisorStatement": "I have discussed this matter with the employee(s) and provided them with a copy of this warning.",
