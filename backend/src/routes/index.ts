@@ -44,6 +44,7 @@ import documentOcrRoutes from './documentOcrRoutes';
 import conflictAnalysisRoutes from './conflictAnalysisRoutes';
 import policyMatchingRoutes from './policyMatchingRoutes';
 import decisionSupportRoutes from './decisionSupportRoutes';
+import actionGenerationRoutes from './actionGenerationRoutes';
 import { authenticate } from '../middleware/auth';
 import { getIncidentTranscripts } from '../controllers/transcriptController';
 
@@ -108,6 +109,10 @@ router.use('/policy-matching', policyMatchingRoutes);
 // Decision Support routes - PUBLIC for iOS app
 // AI-powered recommendations for case resolution
 router.use('/decision-support', decisionSupportRoutes);
+
+// Action Generation routes - PUBLIC for iOS app
+// Generate documents based on selected action (coaching, counseling, warning, escalate)
+router.use('/action-generation', actionGenerationRoutes);
 
 // Phase 1: Legacy JWT Authentication routes (will be deprecated)
 router.use('/auth', authRoutes);
