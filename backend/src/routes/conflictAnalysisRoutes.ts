@@ -46,6 +46,12 @@ interface CompareComplaintsRequest {
     witnessName: string;
     text: string;
   }>;
+  priorHistory?: Array<{
+    type: string;  // "prior_complaint", "counseling_record", "warning_document"
+    documentDate?: string;
+    summary: string;
+    employeeName?: string;
+  }>;
 }
 
 interface AnalysisResult {
@@ -73,7 +79,8 @@ router.post('/compare', async (req: Request, res: Response) => {
       complaintA, 
       complaintB, 
       caseDetails,
-      witnessStatements 
+      witnessStatements,
+      priorHistory
     } = req.body as CompareComplaintsRequest;
     
     if (!complaintA || !complaintB) {
@@ -104,6 +111,20 @@ router.post('/compare', async (req: Request, res: Response) => {
       witnessContext = `\n\nWITNESS ACCOUNTS:\n${witnessStatements.map((w, i) => 
         `${w.witnessName}'s Statement:\n${w.text}`
       ).join('\n\n')}`;
+    }
+    
+    // Build prior history context if available
+    let priorHistoryContext = '';
+    if (priorHistory && priorHistory.length > 0) {
+      const historyItems = priorHistory.map(h => {
+        const typeLabel = h.type === 'prior_complaint' ? 'Prior Complaint' :
+                          h.type === 'counseling_record' ? 'Counseling Record' :
+                          h.type === 'warning_document' ? 'Written Warning' : 'Prior Record';
+        const dateStr = h.documentDate ? ` (${h.documentDate})` : '';
+        const employeeStr = h.employeeName ? ` - ${h.employeeName}` : '';
+        return `${typeLabel}${dateStr}${employeeStr}:\n${h.summary}`;
+      }).join('\n\n');
+      priorHistoryContext = `\n\nPRIOR HISTORY/RECORDS:\n${historyItems}\n\nNote: This prior history should be considered as context for the current incident. Look for patterns of behavior, escalation, or recurring issues.`;
     }
     
     const systemPrompt = `You are a senior Human Resources professional with 20+ years of experience in workplace conflict resolution, employee relations, and organizational behavior. You have handled hundreds of workplace disputes and have developed keen insight into human dynamics, communication patterns, and the underlying factors that contribute to workplace conflicts.
@@ -138,7 +159,7 @@ STATEMENT FROM ${nameA.toUpperCase()}:
 "${textA}"
 
 STATEMENT FROM ${nameB.toUpperCase()}:
-"${textB}"${witnessContext}
+"${textB}"${witnessContext}${priorHistoryContext}
 
 Please provide your analysis in JSON format. Remember to use "${nameA}" and "${nameB}" by name throughout - never use generic terms like "Party A" or "Party B".
 
