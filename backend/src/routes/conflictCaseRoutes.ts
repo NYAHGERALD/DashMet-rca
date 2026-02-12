@@ -908,55 +908,86 @@ router.get('/:id/audit', async (req: Request, res: Response) => {
 // WORKPLACE POLICY ROUTES
 // ============================================================================
 
-// POST /api/workplace-policies
+// Helper to decrypt policy data
+function decryptPolicyData(policy: any): any {
+  if (!policy) return policy;
+  return {
+    ...policy,
+    originalText: policy.originalText ? decrypt(policy.originalText) : null,
+    sections: policy.sections ? decrypt(policy.sections) : null,
+  };
+}
+
+// POST /api/conflict-cases/workplace-policies
+// Create a new workplace policy
 router.post('/workplace-policies', async (req: Request, res: Response) => {
   try {
     const {
-      title,
-      content,
-      category,
+      name,
       version,
       effectiveDate,
-      isActive,
-      creatorId,
+      status,
+      description,
+      documentFileName,
+      documentFileUrl,
+      documentFileType,
+      documentPageCount,
+      originalText,
+      sections,
+      createdBy,
       organizationId,
       facilityId,
     } = req.body;
 
-    if (!title || !content || !creatorId || !organizationId) {
+    if (!name || !version || !createdBy || !organizationId) {
       return res.status(400).json({
         success: false,
-        error: 'Missing required fields: title, content, creatorId, organizationId',
+        error: 'Missing required fields: name, version, createdBy, organizationId',
+      });
+    }
+
+    // Verify creator exists
+    const creator = await prisma.user.findUnique({
+      where: { id: createdBy },
+    });
+
+    if (!creator) {
+      return res.status(404).json({
+        success: false,
+        error: 'Creator not found',
       });
     }
 
     const policy = await prisma.workplacePolicyDoc.create({
       data: {
-        title,
-        content: encrypt(content),
-        category: category || null,
-        version: version || 1,
+        name,
+        version,
         effectiveDate: effectiveDate ? new Date(effectiveDate) : new Date(),
-        isActive: isActive !== false,
-        creatorId,
+        status: status || 'DRAFT',
+        description: description || null,
+        documentFileName: documentFileName || null,
+        documentFileUrl: documentFileUrl || null,
+        documentFileType: documentFileType || null,
+        documentPageCount: documentPageCount || null,
+        originalText: originalText ? encrypt(originalText) : null,
+        sections: sections ? encrypt(JSON.stringify(sections)) : null,
+        createdBy,
         organizationId,
         facilityId: facilityId || null,
       },
       include: {
-        creator: {
+        createdByUser: {
           select: { id: true, firstName: true, lastName: true },
+        },
+        organization: {
+          select: { id: true, name: true },
         },
       },
     });
 
-    const decryptedPolicy = {
-      ...policy,
-      content: decrypt(policy.content),
-    };
-
     res.status(201).json({
       success: true,
-      data: decryptedPolicy,
+      data: decryptPolicyData(policy),
     });
   } catch (error: any) {
     console.error('Error creating workplace policy:', error);
@@ -968,10 +999,11 @@ router.post('/workplace-policies', async (req: Request, res: Response) => {
   }
 });
 
-// GET /api/workplace-policies
+// GET /api/conflict-cases/workplace-policies
+// Get all policies for organization
 router.get('/workplace-policies', async (req: Request, res: Response) => {
   try {
-    const { organizationId, category, isActive } = req.query;
+    const { organizationId, status } = req.query;
 
     if (!organizationId) {
       return res.status(400).json({
@@ -984,28 +1016,24 @@ router.get('/workplace-policies', async (req: Request, res: Response) => {
       organizationId: organizationId as string,
     };
 
-    if (category) {
-      where.category = category;
-    }
-
-    if (isActive !== undefined) {
-      where.isActive = isActive === 'true';
+    if (status) {
+      where.status = status;
     }
 
     const policies = await prisma.workplacePolicyDoc.findMany({
       where,
       include: {
-        creator: {
+        createdByUser: {
           select: { id: true, firstName: true, lastName: true },
+        },
+        organization: {
+          select: { id: true, name: true },
         },
       },
       orderBy: { createdAt: 'desc' },
     });
 
-    const decryptedPolicies = policies.map(policy => ({
-      ...policy,
-      content: decrypt(policy.content),
-    }));
+    const decryptedPolicies = policies.map(decryptPolicyData);
 
     res.json({
       success: true,
@@ -1021,7 +1049,8 @@ router.get('/workplace-policies', async (req: Request, res: Response) => {
   }
 });
 
-// GET /api/workplace-policies/:id
+// GET /api/conflict-cases/workplace-policies/:id
+// Get single policy by ID
 router.get('/workplace-policies/:id', async (req: Request, res: Response) => {
   try {
     const { id } = req.params;
@@ -1029,8 +1058,11 @@ router.get('/workplace-policies/:id', async (req: Request, res: Response) => {
     const policy = await prisma.workplacePolicyDoc.findUnique({
       where: { id },
       include: {
-        creator: {
+        createdByUser: {
           select: { id: true, firstName: true, lastName: true },
+        },
+        organization: {
+          select: { id: true, name: true },
         },
       },
     });
@@ -1042,14 +1074,9 @@ router.get('/workplace-policies/:id', async (req: Request, res: Response) => {
       });
     }
 
-    const decryptedPolicy = {
-      ...policy,
-      content: decrypt(policy.content),
-    };
-
     res.json({
       success: true,
-      data: decryptedPolicy,
+      data: decryptPolicyData(policy),
     });
   } catch (error: any) {
     console.error('Error fetching workplace policy:', error);
@@ -1061,11 +1088,24 @@ router.get('/workplace-policies/:id', async (req: Request, res: Response) => {
   }
 });
 
-// PATCH /api/workplace-policies/:id
+// PATCH /api/conflict-cases/workplace-policies/:id
+// Update a policy
 router.patch('/workplace-policies/:id', async (req: Request, res: Response) => {
   try {
     const { id } = req.params;
-    const { title, content, category, version, effectiveDate, isActive } = req.body;
+    const {
+      name,
+      version,
+      effectiveDate,
+      status,
+      description,
+      documentFileName,
+      documentFileUrl,
+      documentFileType,
+      documentPageCount,
+      originalText,
+      sections,
+    } = req.body;
 
     const existing = await prisma.workplacePolicyDoc.findUnique({
       where: { id },
@@ -1079,31 +1119,34 @@ router.patch('/workplace-policies/:id', async (req: Request, res: Response) => {
     }
 
     const updateData: any = {};
-    if (title !== undefined) updateData.title = title;
-    if (content !== undefined) updateData.content = encrypt(content);
-    if (category !== undefined) updateData.category = category;
+    if (name !== undefined) updateData.name = name;
     if (version !== undefined) updateData.version = version;
     if (effectiveDate !== undefined) updateData.effectiveDate = new Date(effectiveDate);
-    if (isActive !== undefined) updateData.isActive = isActive;
+    if (status !== undefined) updateData.status = status;
+    if (description !== undefined) updateData.description = description;
+    if (documentFileName !== undefined) updateData.documentFileName = documentFileName;
+    if (documentFileUrl !== undefined) updateData.documentFileUrl = documentFileUrl;
+    if (documentFileType !== undefined) updateData.documentFileType = documentFileType;
+    if (documentPageCount !== undefined) updateData.documentPageCount = documentPageCount;
+    if (originalText !== undefined) updateData.originalText = encrypt(originalText);
+    if (sections !== undefined) updateData.sections = encrypt(JSON.stringify(sections));
 
     const policy = await prisma.workplacePolicyDoc.update({
       where: { id },
       data: updateData,
       include: {
-        creator: {
+        createdByUser: {
           select: { id: true, firstName: true, lastName: true },
+        },
+        organization: {
+          select: { id: true, name: true },
         },
       },
     });
 
-    const decryptedPolicy = {
-      ...policy,
-      content: decrypt(policy.content),
-    };
-
     res.json({
       success: true,
-      data: decryptedPolicy,
+      data: decryptPolicyData(policy),
     });
   } catch (error: any) {
     console.error('Error updating workplace policy:', error);
@@ -1115,7 +1158,8 @@ router.patch('/workplace-policies/:id', async (req: Request, res: Response) => {
   }
 });
 
-// DELETE /api/workplace-policies/:id
+// DELETE /api/conflict-cases/workplace-policies/:id
+// Delete a policy
 router.delete('/workplace-policies/:id', async (req: Request, res: Response) => {
   try {
     const { id } = req.params;
