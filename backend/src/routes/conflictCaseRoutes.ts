@@ -382,11 +382,22 @@ router.get('/', async (req: Request, res: Response) => {
   }
 });
 
+// Helper to check if a string is a valid UUID
+function isValidUUID(str: string): boolean {
+  const uuidRegex = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+  return uuidRegex.test(str);
+}
+
 // ============================================================================
 // GET /api/conflict-cases/:id
 // Get single case by ID
 // ============================================================================
-router.get('/:id', async (req: Request, res: Response) => {
+router.get('/:id', async (req: Request, res: Response, next) => {
+  // Skip to next route if ID is not a valid UUID (allows /workplace-policies to work)
+  if (!isValidUUID(req.params.id)) {
+    return next();
+  }
+  
   try {
     const { id } = req.params;
 
@@ -437,7 +448,12 @@ router.get('/:id', async (req: Request, res: Response) => {
 // PATCH /api/conflict-cases/:id
 // Update case details
 // ============================================================================
-router.patch('/:id', async (req: Request, res: Response) => {
+router.patch('/:id', async (req: Request, res: Response, next) => {
+  // Skip to next route if ID is not a valid UUID
+  if (!isValidUUID(req.params.id)) {
+    return next();
+  }
+  
   try {
     const { id } = req.params;
     const {
@@ -564,7 +580,12 @@ router.patch('/:id', async (req: Request, res: Response) => {
 // DELETE /api/conflict-cases/:id
 // Delete a case
 // ============================================================================
-router.delete('/:id', async (req: Request, res: Response) => {
+router.delete('/:id', async (req: Request, res: Response, next) => {
+  // Skip to next route if ID is not a valid UUID
+  if (!isValidUUID(req.params.id)) {
+    return next();
+  }
+  
   try {
     const { id } = req.params;
 
