@@ -1104,7 +1104,7 @@ router.get('/workplace-policies', async (req: Request, res: Response) => {
           select: { id: true, name: true },
         },
       },
-      orderBy: { timestamp: 'desc' },
+      orderBy: { createdAt: 'desc' },
     });
 
     const decryptedPolicies = policies.map(decryptPolicyData);
