@@ -107,15 +107,25 @@ router.post('/', async (req: Request, res: Response) => {
       status,
       description,
       reportedDate,
+      incidentDate,
+      location,
+      department,
+      shift,
       employeesJson,
       documentsJson,
       aiComparisonResultJson,
+      comparisonResult,
       aiRecommendationsJson,
+      recommendations,
       selectedActionType,
+      selectedAction,
       generatedActionDocJson,
+      generatedDocument,
       policyMatchesJson,
+      policyMatches,
       supervisorNotes,
       finalDecision,
+      activePolicyId,
       creatorId,
       organizationId,
       facilityId,
@@ -140,27 +150,52 @@ router.post('/', async (req: Request, res: Response) => {
       });
     }
 
+    // Map caseType to valid enum values (uppercase)
+    const typeMap: Record<string, string> = {
+      'conflict': 'CONFLICT',
+      'conduct': 'CONDUCT',
+      'safety': 'SAFETY',
+      'other': 'OTHER',
+    };
+    const mappedType = typeMap[caseType?.toLowerCase()] || caseType?.toUpperCase() || 'CONFLICT';
+
+    // Map status to valid enum values (uppercase)
+    const statusMap: Record<string, string> = {
+      'draft': 'DRAFT',
+      'in_progress': 'IN_PROGRESS',
+      'inprogress': 'IN_PROGRESS',
+      'pending_review': 'PENDING_REVIEW',
+      'pendingreview': 'PENDING_REVIEW',
+      'awaiting_action': 'AWAITING_ACTION',
+      'awaitingaction': 'AWAITING_ACTION',
+      'closed': 'CLOSED',
+      'escalated': 'ESCALATED',
+    };
+    const mappedStatus = statusMap[status?.toLowerCase()] || status?.toUpperCase() || 'DRAFT';
+
     // Create case with encrypted sensitive data
     const conflictCase = await prisma.conflictCase.create({
       data: {
         caseNumber,
-        caseType: caseType || 'INTERPERSONAL_CONFLICT',
-        status: status || 'DRAFT',
-        description: description ? encrypt(description) : null,
-        reportedDate: reportedDate ? new Date(reportedDate) : new Date(),
-        aiComparisonResultJson: aiComparisonResultJson ? encrypt(JSON.stringify(aiComparisonResultJson)) : null,
-        aiRecommendationsJson: aiRecommendationsJson ? encrypt(JSON.stringify(aiRecommendationsJson)) : null,
-        selectedActionType: selectedActionType || null,
-        generatedActionDocJson: generatedActionDocJson ? encrypt(JSON.stringify(generatedActionDocJson)) : null,
-        policyMatchesJson: policyMatchesJson ? encrypt(JSON.stringify(policyMatchesJson)) : null,
+        type: mappedType as any,
+        status: mappedStatus as any,
+        incidentDate: incidentDate ? new Date(incidentDate) : (reportedDate ? new Date(reportedDate) : new Date()),
+        location: location ? encrypt(location) : encrypt('Not specified'),
+        department: department ? encrypt(department) : encrypt('Not specified'),
+        shift: shift ? encrypt(shift) : null,
+        comparisonResult: (comparisonResult || aiComparisonResultJson) ? encrypt(JSON.stringify(comparisonResult || aiComparisonResultJson)) : null,
+        recommendations: (recommendations || aiRecommendationsJson) ? encrypt(JSON.stringify(recommendations || aiRecommendationsJson)) : null,
+        selectedAction: (selectedAction || selectedActionType) || null,
+        generatedDocument: (generatedDocument || generatedActionDocJson) ? encrypt(JSON.stringify(generatedDocument || generatedActionDocJson)) : null,
+        policyMatches: (policyMatches || policyMatchesJson) ? encrypt(JSON.stringify(policyMatches || policyMatchesJson)) : null,
         supervisorNotes: supervisorNotes ? encrypt(supervisorNotes) : null,
-        finalDecision: finalDecision ? encrypt(finalDecision) : null,
-        creatorId,
+        activePolicyId: activePolicyId || null,
+        createdBy: creatorId,
         organizationId,
         facilityId: facilityId || null,
       },
       include: {
-        creator: {
+        createdByUser: {
           select: { id: true, firstName: true, lastName: true, email: true },
         },
         organization: {
@@ -169,9 +204,9 @@ router.post('/', async (req: Request, res: Response) => {
         facility: {
           select: { id: true, name: true },
         },
-        employees: true,
+        involvedEmployees: true,
         documents: true,
-        auditTrail: {
+        auditLog: {
           orderBy: { createdAt: 'desc' },
         },
       },
@@ -185,12 +220,11 @@ router.post('/', async (req: Request, res: Response) => {
         await prisma.conflictInvolvedEmployee.create({
           data: {
             caseId: conflictCase.id,
-            name: emp.name,
-            role: emp.role || null,
-            department: emp.department || null,
-            employeeId: emp.employeeId || null,
+            name: encrypt(emp.name || 'Unknown'),
+            role: encrypt(emp.role || 'Not specified'),
+            department: encrypt(emp.department || 'Not specified'),
+            employeeFileNo: emp.employeeId ? encrypt(emp.employeeId) : null,
             isComplainant: emp.isComplainant || false,
-            statement: emp.statement ? encrypt(emp.statement) : null,
           },
         });
       }
@@ -200,16 +234,26 @@ router.post('/', async (req: Request, res: Response) => {
     if (documentsJson) {
       const documents = typeof documentsJson === 'string' ? JSON.parse(documentsJson) : documentsJson;
       
+      // Map document type to valid enum values
+      const docTypeMap: Record<string, string> = {
+        'complaint_a': 'COMPLAINT_A',
+        'complaint_b': 'COMPLAINT_B',
+        'witness_statement': 'WITNESS_STATEMENT',
+        'prior_record': 'PRIOR_RECORD',
+        'counseling_record': 'COUNSELING_RECORD',
+        'warning_document': 'WARNING_DOCUMENT',
+        'evidence': 'EVIDENCE',
+        'other': 'OTHER',
+      };
+      
       for (const doc of documents) {
+        const mappedDocType = docTypeMap[doc.type?.toLowerCase()] || doc.type?.toUpperCase() || 'OTHER';
         await prisma.conflictCaseDocument.create({
           data: {
             caseId: conflictCase.id,
-            name: doc.name,
-            type: doc.type || 'OTHER',
-            url: doc.url || null,
-            uploadedAt: doc.uploadedAt ? new Date(doc.uploadedAt) : new Date(),
-            content: doc.content ? encrypt(doc.content) : null,
-            extractedText: doc.extractedText ? encrypt(doc.extractedText) : null,
+            type: mappedDocType as any,
+            originalText: doc.content ? encrypt(doc.content) : (doc.extractedText ? encrypt(doc.extractedText) : null),
+            originalImageUrls: doc.url ? encrypt(JSON.stringify([doc.url])) : null,
           },
         });
       }
@@ -220,9 +264,9 @@ router.post('/', async (req: Request, res: Response) => {
       data: {
         caseId: conflictCase.id,
         action: 'CREATED',
-        description: 'Case created',
+        details: encrypt('Case created'),
         userId: creatorId,
-        changes: JSON.stringify({ status: 'DRAFT' }),
+        userName: encrypt(creator.firstName + ' ' + creator.lastName),
       },
     });
 
@@ -230,7 +274,7 @@ router.post('/', async (req: Request, res: Response) => {
     const completeCase = await prisma.conflictCase.findUnique({
       where: { id: conflictCase.id },
       include: {
-        creator: {
+        createdByUser: {
           select: { id: true, firstName: true, lastName: true, email: true },
         },
         organization: {
@@ -239,10 +283,10 @@ router.post('/', async (req: Request, res: Response) => {
         facility: {
           select: { id: true, name: true },
         },
-        employees: true,
+        involvedEmployees: true,
         documents: true,
-        auditTrail: {
-          orderBy: { createdAt: 'desc' },
+        auditLog: {
+          orderBy: { timestamp: 'desc' },
         },
       },
     });
