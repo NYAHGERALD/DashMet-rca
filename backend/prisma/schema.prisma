@@ -2519,13 +2519,13 @@ model ConflictCaseDocument {
   // Image Storage (URLs or encrypted base64)
   originalImageUrls               String?                   @db.Text // Encrypted JSON array
   processedImageUrls              String?                   @db.Text // Encrypted JSON array
-  originalImageData               String?                   @db.LongText // Encrypted base64
-  processedImageData              String?                   @db.LongText // Encrypted base64
+  originalImageData               String?                   @db.Text // Encrypted base64
+  processedImageData              String?                   @db.Text // Encrypted base64
   
   // Text Content (All Encrypted)
-  originalText                    String?                   @db.LongText
-  translatedText                  String?                   @db.LongText
-  cleanedText                     String?                   @db.LongText
+  originalText                    String?                   @db.Text
+  translatedText                  String?                   @db.Text
+  cleanedText                     String?                   @db.Text
   
   // Metadata
   detectedLanguage                String?
@@ -2538,7 +2538,7 @@ model ConflictCaseDocument {
   submittedBy                     String?                   // Encrypted - Name of submitter
   
   // Digital Signature & Audit Log Fields (All Encrypted)
-  signatureImageData              String?                   @db.LongText // Encrypted PNG base64
+  signatureImageData              String?                   @db.Text // Encrypted PNG base64
   employeeReviewTimestamp         DateTime?
   employeeSignatureTimestamp      DateTime?
   supervisorCertificationTimestamp DateTime?
@@ -2589,14 +2589,16 @@ model WorkplacePolicyDoc {
   documentFileUrl   String?               @db.Text
   documentFileType  String?
   documentPageCount Int?
-  originalText      String?               @db.LongText // Encrypted
+  originalText      String?               @db.Text // Encrypted
   
   // Parsed Sections (Encrypted JSON)
-  sections          String?               @db.LongText // Encrypted JSON array
+  sections          String?               @db.Text // Encrypted JSON array
   
   // Audit
   organizationId    String
   organization      Organization          @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  facilityId        String?
+  facility          Facility?             @relation(fields: [facilityId], references: [id])
   createdBy         String
   createdByUser     User?                 @relation("PolicyCreator", fields: [createdBy], references: [id])
   
