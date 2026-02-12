@@ -355,7 +355,7 @@ router.get('/', async (req: Request, res: Response) => {
             select: { documents: true, auditLog: true },
           },
         },
-        orderBy: { timestamp: 'desc' },
+        orderBy: { createdAt: 'desc' },
         take: Number(limit),
         skip: Number(offset),
       }),
