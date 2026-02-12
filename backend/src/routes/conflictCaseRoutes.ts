@@ -404,15 +404,10 @@ router.get('/:id', async (req: Request, res: Response) => {
         },
         involvedEmployees: true,
         documents: {
-          orderBy: { uploadedAt: 'desc' },
+          orderBy: { createdAt: 'desc' },
         },
         auditLog: {
           orderBy: { timestamp: 'desc' },
-          include: {
-            user: {
-              select: { id: true, firstName: true, lastName: true },
-            },
-          },
         },
       },
     });
