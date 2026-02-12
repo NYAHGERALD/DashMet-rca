@@ -486,6 +486,10 @@ model Facility {
   Task                      Task[]
   Meeting                   Meeting[]                   @relation("MeetingFacility")
   WorkplaceSafetyAssessment WorkplaceSafetyAssessment[]
+  
+  // Conflict Resolution Relations
+  ConflictCases             ConflictCase[]
+  WorkplacePolicies         WorkplacePolicyDoc[]
 
   @@index([organizationId])
 }
@@ -906,6 +910,10 @@ model Organization {
   WorkOrderSettings         WorkOrderSettings?
   WorkOrderTemplate         WorkOrderTemplate[]
   WorkplaceSafetyAssessment WorkplaceSafetyAssessment[]
+  
+  // Conflict Resolution Relations
+  ConflictCases             ConflictCase[]
+  WorkplacePolicies         WorkplacePolicyDoc[]
 
   @@index([name])
   @@index([signupCode])
@@ -1330,6 +1338,10 @@ model User {
   WorkOrderStatusHistory                                              WorkOrderStatusHistory[]
   WorkOrderTemplate                                                   WorkOrderTemplate[]
   WorkplaceSafetyAssessment                                           WorkplaceSafetyAssessment[]
+  
+  // Conflict Resolution Relations
+  ConflictCasesCreated                                                ConflictCase[]                       @relation("CaseCreator")
+  WorkplacePoliciesCreated                                            WorkplacePolicyDoc[]                 @relation("PolicyCreator")
 
   @@index([email])
   @@index([isOnline])
@@ -2370,4 +2382,231 @@ enum ConsentMethod {
   EMAIL                 // Email consent
   WRITTEN               // Written/signed consent
   IMPLICIT              // Implicit (stayed in meeting after announcement)
+}
+
+// ==========================================
+// CONFLICT RESOLUTION MODELS (ENCRYPTED)
+// ==========================================
+
+// Case Type Enum
+enum ConflictCaseType {
+  CONFLICT
+  CONDUCT
+  SAFETY
+  OTHER
+}
+
+// Case Status Enum
+enum ConflictCaseStatus {
+  DRAFT
+  IN_PROGRESS
+  PENDING_REVIEW
+  AWAITING_ACTION
+  CLOSED
+  ESCALATED
+}
+
+// Document Type Enum
+enum ConflictDocumentType {
+  COMPLAINT_A
+  COMPLAINT_B
+  WITNESS_STATEMENT
+  PRIOR_RECORD
+  COUNSELING_RECORD
+  WARNING_DOCUMENT
+  EVIDENCE
+  OTHER
+}
+
+// Recommended Action Enum
+enum RecommendedActionType {
+  COACHING
+  COUNSELING
+  WRITTEN_WARNING
+  ESCALATE_TO_HR
+}
+
+// Comparison Status Enum
+enum ComparisonStatusType {
+  AGREEMENT
+  CONTRADICTION
+  PARTIAL
+  UNCLEAR
+}
+
+// Conflict Case - Main Model (All sensitive fields encrypted)
+model ConflictCase {
+  id                    String                      @id @default(uuid())
+  caseNumber            String                      @unique
+  type                  ConflictCaseType
+  status                ConflictCaseStatus          @default(DRAFT)
+  incidentDate          DateTime
+  location              String                      // Encrypted
+  department            String                      // Encrypted
+  shift                 String?                     // Encrypted
+  
+  // AI Analysis Results (Encrypted JSON)
+  comparisonResult      String?                     @db.Text // Encrypted JSON
+  policyMatches         String?                     @db.Text // Encrypted JSON  
+  recommendations       String?                     @db.Text // Encrypted JSON
+  
+  // Selected Action
+  selectedAction        RecommendedActionType?
+  generatedDocument     String?                     @db.Text // Encrypted JSON
+  
+  // Supervisor Notes (Encrypted)
+  supervisorNotes       String?                     @db.Text
+  
+  // Workplace Policy Reference
+  activePolicyId        String?
+  workplacePolicy       WorkplacePolicyDoc?         @relation(fields: [activePolicyId], references: [id])
+  
+  // Audit & Metadata
+  createdBy             String
+  createdByUser         User?                       @relation("CaseCreator", fields: [createdBy], references: [id])
+  organizationId        String
+  organization          Organization                @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  facilityId            String?
+  facility              Facility?                   @relation(fields: [facilityId], references: [id])
+  
+  createdAt             DateTime                    @default(now())
+  updatedAt             DateTime                    @updatedAt
+  closedAt              DateTime?
+  
+  // Relations
+  involvedEmployees     ConflictInvolvedEmployee[]
+  documents             ConflictCaseDocument[]
+  auditLog              ConflictCaseAuditEntry[]
+  
+  @@index([organizationId])
+  @@index([facilityId])
+  @@index([createdBy])
+  @@index([status])
+  @@index([type])
+  @@index([caseNumber])
+  @@index([incidentDate])
+}
+
+// Involved Employee (Encrypted)
+model ConflictInvolvedEmployee {
+  id              String          @id @default(uuid())
+  caseId          String
+  case            ConflictCase    @relation(fields: [caseId], references: [id], onDelete: Cascade)
+  
+  name            String          // Encrypted
+  role            String          // Encrypted
+  department      String          // Encrypted
+  employeeFileNo  String?         // Encrypted - Employee ID / File Number
+  isComplainant   Boolean         @default(false)
+  
+  createdAt       DateTime        @default(now())
+  updatedAt       DateTime        @updatedAt
+  
+  // Relation to documents (for witness statements)
+  documents       ConflictCaseDocument[]
+  
+  @@index([caseId])
+}
+
+// Case Document (Encrypted)
+model ConflictCaseDocument {
+  id                              String                    @id @default(uuid())
+  caseId                          String
+  case                            ConflictCase              @relation(fields: [caseId], references: [id], onDelete: Cascade)
+  
+  type                            ConflictDocumentType
+  
+  // Image Storage (URLs or encrypted base64)
+  originalImageUrls               String?                   @db.Text // Encrypted JSON array
+  processedImageUrls              String?                   @db.Text // Encrypted JSON array
+  originalImageData               String?                   @db.LongText // Encrypted base64
+  processedImageData              String?                   @db.LongText // Encrypted base64
+  
+  // Text Content (All Encrypted)
+  originalText                    String?                   @db.LongText
+  translatedText                  String?                   @db.LongText
+  cleanedText                     String?                   @db.LongText
+  
+  // Metadata
+  detectedLanguage                String?
+  isHandwritten                   Boolean?
+  pageCount                       Int                       @default(1)
+  
+  // Associated Employee (for witness statements)
+  employeeId                      String?
+  employee                        ConflictInvolvedEmployee? @relation(fields: [employeeId], references: [id])
+  submittedBy                     String?                   // Encrypted - Name of submitter
+  
+  // Digital Signature & Audit Log Fields (All Encrypted)
+  signatureImageData              String?                   @db.LongText // Encrypted PNG base64
+  employeeReviewTimestamp         DateTime?
+  employeeSignatureTimestamp      DateTime?
+  supervisorCertificationTimestamp DateTime?
+  supervisorId                    String?                   // Encrypted
+  supervisorName                  String?                   // Encrypted
+  submittedById                   String?                   // Encrypted
+  deviceId                        String?
+  appVersion                      String?
+  versionHash                     String?                   // Hash for document integrity
+  
+  createdAt                       DateTime                  @default(now())
+  updatedAt                       DateTime                  @updatedAt
+  
+  @@index([caseId])
+  @@index([type])
+  @@index([employeeId])
+}
+
+// Case Audit Entry
+model ConflictCaseAuditEntry {
+  id          String        @id @default(uuid())
+  caseId      String
+  case        ConflictCase  @relation(fields: [caseId], references: [id], onDelete: Cascade)
+  
+  action      String
+  details     String        @db.Text // Encrypted
+  userId      String
+  userName    String        // Encrypted
+  
+  timestamp   DateTime      @default(now())
+  
+  @@index([caseId])
+  @@index([timestamp])
+  @@index([userId])
+}
+
+// Workplace Policy Document (for conflict resolution reference)
+model WorkplacePolicyDoc {
+  id                String                @id @default(uuid())
+  name              String
+  version           String
+  effectiveDate     DateTime
+  status            String                @default("DRAFT") // DRAFT, ACTIVE, ARCHIVED
+  description       String?               @db.Text
+  
+  // Document Source (Encrypted)
+  documentFileName  String?
+  documentFileUrl   String?               @db.Text
+  documentFileType  String?
+  documentPageCount Int?
+  originalText      String?               @db.LongText // Encrypted
+  
+  // Parsed Sections (Encrypted JSON)
+  sections          String?               @db.LongText // Encrypted JSON array
+  
+  // Audit
+  organizationId    String
+  organization      Organization          @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  createdBy         String
+  createdByUser     User?                 @relation("PolicyCreator", fields: [createdBy], references: [id])
+  
+  createdAt         DateTime              @default(now())
+  updatedAt         DateTime              @updatedAt
+  
+  // Relations
+  cases             ConflictCase[]
+  
+  @@index([organizationId])
+  @@index([status])
+  @@index([createdBy])
 }

@@ -48,6 +48,7 @@ import conflictAnalysisRoutes from './conflictAnalysisRoutes';
 import policyMatchingRoutes from './policyMatchingRoutes';
 import decisionSupportRoutes from './decisionSupportRoutes';
 import actionGenerationRoutes from './actionGenerationRoutes';
+import conflictCaseRoutes from './conflictCaseRoutes';
 import { authenticate } from '../middleware/auth';
 import { getIncidentTranscripts } from '../controllers/transcriptController';
 
@@ -116,6 +117,10 @@ router.use('/decision-support', decisionSupportRoutes);
 // Action Generation routes - PUBLIC for iOS app
 // Generate documents based on selected action (coaching, counseling, warning, escalate)
 router.use('/action-generation', actionGenerationRoutes);
+
+// Conflict Case CRUD routes - PUBLIC for iOS app
+// Full CRUD for conflict cases with encryption
+router.use('/conflict-cases', conflictCaseRoutes);
 
 // Phase 1: Legacy JWT Authentication routes (will be deprecated)
 router.use('/auth', authRoutes);
