@@ -207,7 +207,7 @@ router.post('/', async (req: Request, res: Response) => {
         involvedEmployees: true,
         documents: true,
         auditLog: {
-          orderBy: { createdAt: 'desc' },
+          orderBy: { timestamp: 'desc' },
         },
       },
     });
@@ -344,18 +344,18 @@ router.get('/', async (req: Request, res: Response) => {
       prisma.conflictCase.findMany({
         where,
         include: {
-          creator: {
+          createdByUser: {
             select: { id: true, firstName: true, lastName: true, email: true },
           },
           facility: {
             select: { id: true, name: true },
           },
-          employees: true,
+          involvedEmployees: true,
           _count: {
-            select: { documents: true, auditTrail: true },
+            select: { documents: true, auditLog: true },
           },
         },
-        orderBy: { createdAt: 'desc' },
+        orderBy: { timestamp: 'desc' },
         take: Number(limit),
         skip: Number(offset),
       }),
@@ -393,7 +393,7 @@ router.get('/:id', async (req: Request, res: Response) => {
     const conflictCase = await prisma.conflictCase.findUnique({
       where: { id },
       include: {
-        creator: {
+        createdByUser: {
           select: { id: true, firstName: true, lastName: true, email: true },
         },
         organization: {
@@ -402,12 +402,12 @@ router.get('/:id', async (req: Request, res: Response) => {
         facility: {
           select: { id: true, name: true },
         },
-        employees: true,
+        involvedEmployees: true,
         documents: {
           orderBy: { uploadedAt: 'desc' },
         },
-        auditTrail: {
-          orderBy: { createdAt: 'desc' },
+        auditLog: {
+          orderBy: { timestamp: 'desc' },
           include: {
             user: {
               select: { id: true, firstName: true, lastName: true },
@@ -520,7 +520,7 @@ router.patch('/:id', async (req: Request, res: Response) => {
       where: { id },
       data: updateData,
       include: {
-        creator: {
+        createdByUser: {
           select: { id: true, firstName: true, lastName: true, email: true },
         },
         organization: {
@@ -529,23 +529,24 @@ router.patch('/:id', async (req: Request, res: Response) => {
         facility: {
           select: { id: true, name: true },
         },
-        employees: true,
+        involvedEmployees: true,
         documents: true,
-        auditTrail: {
-          orderBy: { createdAt: 'desc' },
+        auditLog: {
+          orderBy: { timestamp: 'desc' },
         },
       },
     });
 
     // Add audit entry
     if (userId && Object.keys(changes).length > 0) {
+      const user = await prisma.user.findUnique({ where: { id: userId } });
       await prisma.conflictCaseAuditEntry.create({
         data: {
           caseId: id,
           action: 'UPDATED',
-          description: `Case updated: ${Object.keys(changes).join(', ')}`,
+          details: encrypt(`Case updated: ${Object.keys(changes).join(', ')}`),
           userId,
-          changes: JSON.stringify(changes),
+          userName: encrypt(user ? `${user.firstName} ${user.lastName}` : 'Unknown User'),
         },
       });
     }
@@ -636,32 +637,35 @@ router.post('/:id/employees', async (req: Request, res: Response) => {
     const employee = await prisma.conflictInvolvedEmployee.create({
       data: {
         caseId: id,
-        name,
-        role: role || null,
-        department: department || null,
-        employeeId: employeeId || null,
+        name: encrypt(name),
+        role: encrypt(role || 'Not specified'),
+        department: encrypt(department || 'Not specified'),
+        employeeFileNo: employeeId ? encrypt(employeeId) : null,
         isComplainant: isComplainant || false,
-        statement: statement ? encrypt(statement) : null,
       },
     });
 
     // Add audit entry
     if (userId) {
+      const user = await prisma.user.findUnique({ where: { id: userId } });
       await prisma.conflictCaseAuditEntry.create({
         data: {
           caseId: id,
           action: 'EMPLOYEE_ADDED',
-          description: `Employee added: ${name}`,
+          details: encrypt(`Employee added: ${name}`),
           userId,
-          changes: JSON.stringify({ employeeId: employee.id, name }),
+          userName: encrypt(user ? `${user.firstName} ${user.lastName}` : 'Unknown User'),
         },
       });
     }
 
-    // Decrypt statement before returning
+    // Decrypt fields before returning
     const decryptedEmployee = {
       ...employee,
-      statement: employee.statement ? decrypt(employee.statement) : null,
+      name: decrypt(employee.name),
+      role: decrypt(employee.role),
+      department: decrypt(employee.department),
+      employeeFileNo: employee.employeeFileNo ? decrypt(employee.employeeFileNo) : null,
     };
 
     res.status(201).json({
@@ -685,7 +689,7 @@ router.post('/:id/employees', async (req: Request, res: Response) => {
 router.patch('/:id/employees/:employeeId', async (req: Request, res: Response) => {
   try {
     const { id, employeeId } = req.params;
-    const { name, role, department, employeeIdField, isComplainant, statement, userId } = req.body;
+    const { name, role, department, employeeIdField, isComplainant, userId } = req.body;
 
     const employee = await prisma.conflictInvolvedEmployee.findFirst({
       where: { id: employeeId, caseId: id },
@@ -699,12 +703,11 @@ router.patch('/:id/employees/:employeeId', async (req: Request, res: Response) =
     }
 
     const updateData: any = {};
-    if (name !== undefined) updateData.name = name;
-    if (role !== undefined) updateData.role = role;
-    if (department !== undefined) updateData.department = department;
-    if (employeeIdField !== undefined) updateData.employeeId = employeeIdField;
+    if (name !== undefined) updateData.name = encrypt(name);
+    if (role !== undefined) updateData.role = encrypt(role);
+    if (department !== undefined) updateData.department = encrypt(department);
+    if (employeeIdField !== undefined) updateData.employeeFileNo = encrypt(employeeIdField);
     if (isComplainant !== undefined) updateData.isComplainant = isComplainant;
-    if (statement !== undefined) updateData.statement = encrypt(statement);
 
     const updatedEmployee = await prisma.conflictInvolvedEmployee.update({
       where: { id: employeeId },
@@ -713,20 +716,24 @@ router.patch('/:id/employees/:employeeId', async (req: Request, res: Response) =
 
     // Add audit entry
     if (userId) {
+      const user = await prisma.user.findUnique({ where: { id: userId } });
       await prisma.conflictCaseAuditEntry.create({
         data: {
           caseId: id,
           action: 'EMPLOYEE_UPDATED',
-          description: `Employee updated: ${updatedEmployee.name}`,
+          details: encrypt(`Employee updated: ${name || decrypt(employee.name)}`),
           userId,
-          changes: JSON.stringify(updateData),
+          userName: encrypt(user ? `${user.firstName} ${user.lastName}` : 'Unknown User'),
         },
       });
     }
 
     const decryptedEmployee = {
       ...updatedEmployee,
-      statement: updatedEmployee.statement ? decrypt(updatedEmployee.statement) : null,
+      name: decrypt(updatedEmployee.name),
+      role: decrypt(updatedEmployee.role),
+      department: decrypt(updatedEmployee.department),
+      employeeFileNo: updatedEmployee.employeeFileNo ? decrypt(updatedEmployee.employeeFileNo) : null,
     };
 
     res.json({
@@ -769,13 +776,14 @@ router.delete('/:id/employees/:employeeId', async (req: Request, res: Response) 
 
     // Add audit entry
     if (userId) {
+      const user = await prisma.user.findUnique({ where: { id: userId as string } });
       await prisma.conflictCaseAuditEntry.create({
         data: {
           caseId: id,
           action: 'EMPLOYEE_REMOVED',
-          description: `Employee removed: ${employee.name}`,
+          details: encrypt(`Employee removed: ${employee.name}`),
           userId: userId as string,
-          changes: JSON.stringify({ employeeId, name: employee.name }),
+          userName: encrypt(user ? `${user.firstName} ${user.lastName}` : 'Unknown User'),
         },
       });
     }
@@ -801,14 +809,20 @@ router.delete('/:id/employees/:employeeId', async (req: Request, res: Response) 
 router.post('/:id/documents', async (req: Request, res: Response) => {
   try {
     const { id } = req.params;
-    const { name, type, url, content, extractedText, userId } = req.body;
+    const { name, type, url, content, extractedText, originalText, originalImageUrls, userId } = req.body;
 
-    if (!name) {
-      return res.status(400).json({
-        success: false,
-        error: 'Document name is required',
-      });
-    }
+    // Map document type to valid enum values
+    const docTypeMap: Record<string, string> = {
+      'complaint_a': 'COMPLAINT_A',
+      'complaint_b': 'COMPLAINT_B',
+      'witness_statement': 'WITNESS_STATEMENT',
+      'prior_record': 'PRIOR_RECORD',
+      'counseling_record': 'COUNSELING_RECORD',
+      'warning_document': 'WARNING_DOCUMENT',
+      'evidence': 'EVIDENCE',
+      'other': 'OTHER',
+    };
+    const mappedDocType = docTypeMap[type?.toLowerCase()] || type?.toUpperCase() || 'OTHER';
 
     const conflictCase = await prisma.conflictCase.findUnique({
       where: { id },
@@ -824,31 +838,30 @@ router.post('/:id/documents', async (req: Request, res: Response) => {
     const document = await prisma.conflictCaseDocument.create({
       data: {
         caseId: id,
-        name,
-        type: type || 'OTHER',
-        url: url || null,
-        content: content ? encrypt(content) : null,
-        extractedText: extractedText ? encrypt(extractedText) : null,
+        type: mappedDocType as any,
+        originalText: (originalText || content || extractedText) ? encrypt(originalText || content || extractedText) : null,
+        originalImageUrls: (originalImageUrls || url) ? encrypt(JSON.stringify(originalImageUrls || [url])) : null,
       },
     });
 
     // Add audit entry
     if (userId) {
+      const user = await prisma.user.findUnique({ where: { id: userId } });
       await prisma.conflictCaseAuditEntry.create({
         data: {
           caseId: id,
           action: 'DOCUMENT_ADDED',
-          description: `Document added: ${name}`,
+          details: encrypt(`Document added: ${name || type}`),
           userId,
-          changes: JSON.stringify({ documentId: document.id, name, type }),
+          userName: encrypt(user ? `${user.firstName} ${user.lastName}` : 'Unknown User'),
         },
       });
     }
 
     const decryptedDoc = {
       ...document,
-      content: document.content ? decrypt(document.content) : null,
-      extractedText: document.extractedText ? decrypt(document.extractedText) : null,
+      originalText: document.originalText ? decrypt(document.originalText) : null,
+      originalImageUrls: document.originalImageUrls ? JSON.parse(decrypt(document.originalImageUrls)) : null,
     };
 
     res.status(201).json({
@@ -891,13 +904,14 @@ router.delete('/:id/documents/:documentId', async (req: Request, res: Response) 
 
     // Add audit entry
     if (userId) {
+      const user = await prisma.user.findUnique({ where: { id: userId as string } });
       await prisma.conflictCaseAuditEntry.create({
         data: {
           caseId: id,
           action: 'DOCUMENT_REMOVED',
-          description: `Document removed: ${document.name}`,
+          details: encrypt(`Document removed: ${document.type}`),
           userId: userId as string,
-          changes: JSON.stringify({ documentId, name: document.name }),
+          userName: encrypt(user ? `${user.firstName} ${user.lastName}` : 'Unknown User'),
         },
       });
     }
@@ -931,7 +945,7 @@ router.get('/:id/audit', async (req: Request, res: Response) => {
           select: { id: true, firstName: true, lastName: true, email: true },
         },
       },
-      orderBy: { createdAt: 'desc' },
+      orderBy: { timestamp: 'desc' },
     });
 
     res.json({
@@ -1074,7 +1088,7 @@ router.get('/workplace-policies', async (req: Request, res: Response) => {
           select: { id: true, name: true },
         },
       },
-      orderBy: { createdAt: 'desc' },
+      orderBy: { timestamp: 'desc' },
     });
 
     const decryptedPolicies = policies.map(decryptPolicyData);
