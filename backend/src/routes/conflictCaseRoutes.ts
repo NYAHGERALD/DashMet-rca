@@ -66,19 +66,43 @@ function decryptCaseData(caseData: any): any {
   
   const decrypted = { ...caseData };
   
-  // Decrypt sensitive string fields
+  // Decrypt sensitive case string fields
+  if (decrypted.location) decrypted.location = decrypt(decrypted.location);
+  if (decrypted.department) decrypted.department = decrypt(decrypted.department);
+  if (decrypted.shift) decrypted.shift = decrypt(decrypted.shift);
+  if (decrypted.comparisonResult) decrypted.comparisonResult = decrypt(decrypted.comparisonResult);
+  if (decrypted.recommendations) decrypted.recommendations = decrypt(decrypted.recommendations);
+  if (decrypted.generatedDocument) decrypted.generatedDocument = decrypt(decrypted.generatedDocument);
+  if (decrypted.policyMatches) decrypted.policyMatches = decrypt(decrypted.policyMatches);
+  if (decrypted.supervisorNotes) decrypted.supervisorNotes = decrypt(decrypted.supervisorNotes);
+  
+  // Legacy field names (for backwards compatibility)
   if (decrypted.description) decrypted.description = decrypt(decrypted.description);
   if (decrypted.aiComparisonResultJson) decrypted.aiComparisonResultJson = decrypt(decrypted.aiComparisonResultJson);
   if (decrypted.aiRecommendationsJson) decrypted.aiRecommendationsJson = decrypt(decrypted.aiRecommendationsJson);
   if (decrypted.generatedActionDocJson) decrypted.generatedActionDocJson = decrypt(decrypted.generatedActionDocJson);
   if (decrypted.policyMatchesJson) decrypted.policyMatchesJson = decrypt(decrypted.policyMatchesJson);
-  if (decrypted.supervisorNotes) decrypted.supervisorNotes = decrypt(decrypted.supervisorNotes);
   if (decrypted.finalDecision) decrypted.finalDecision = decrypt(decrypted.finalDecision);
   
-  // Decrypt employee statements
+  // Decrypt employee fields (involvedEmployees from database)
+  if (decrypted.involvedEmployees) {
+    decrypted.involvedEmployees = decrypted.involvedEmployees.map((emp: any) => ({
+      ...emp,
+      name: emp.name ? decrypt(emp.name) : emp.name,
+      role: emp.role ? decrypt(emp.role) : emp.role,
+      department: emp.department ? decrypt(emp.department) : emp.department,
+      employeeFileNo: emp.employeeFileNo ? decrypt(emp.employeeFileNo) : emp.employeeFileNo,
+    }));
+  }
+  
+  // Legacy employees field
   if (decrypted.employees) {
     decrypted.employees = decrypted.employees.map((emp: any) => ({
       ...emp,
+      name: emp.name ? decrypt(emp.name) : emp.name,
+      role: emp.role ? decrypt(emp.role) : emp.role,
+      department: emp.department ? decrypt(emp.department) : emp.department,
+      employeeFileNo: emp.employeeFileNo ? decrypt(emp.employeeFileNo) : emp.employeeFileNo,
       statement: emp.statement ? decrypt(emp.statement) : emp.statement,
     }));
   }
@@ -87,8 +111,19 @@ function decryptCaseData(caseData: any): any {
   if (decrypted.documents) {
     decrypted.documents = decrypted.documents.map((doc: any) => ({
       ...doc,
+      originalText: doc.originalText ? decrypt(doc.originalText) : doc.originalText,
+      originalImageUrls: doc.originalImageUrls ? decrypt(doc.originalImageUrls) : doc.originalImageUrls,
       content: doc.content ? decrypt(doc.content) : doc.content,
       extractedText: doc.extractedText ? decrypt(doc.extractedText) : doc.extractedText,
+    }));
+  }
+  
+  // Decrypt audit log entries
+  if (decrypted.auditLog) {
+    decrypted.auditLog = decrypted.auditLog.map((entry: any) => ({
+      ...entry,
+      details: entry.details ? decrypt(entry.details) : entry.details,
+      userName: entry.userName ? decrypt(entry.userName) : entry.userName,
     }));
   }
   
