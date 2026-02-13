@@ -397,8 +397,9 @@ router.get('/', async (req: Request, res: Response) => {
             select: { id: true, name: true },
           },
           involvedEmployees: true,
-          _count: {
-            select: { documents: true, auditLog: true },
+          documents: true,  // Include actual documents, not just count
+          auditLog: {
+            orderBy: { timestamp: 'desc' },
           },
         },
         orderBy: { createdAt: 'desc' },
