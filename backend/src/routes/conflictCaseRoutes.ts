@@ -514,6 +514,7 @@ router.patch('/:id', async (req: Request, res: Response, next) => {
       policyMatchesJson,
       supervisorNotes,
       finalDecision,
+      involvedEmployeesJson, // Array of employees to update
       userId, // For audit trail
     } = req.body;
 
@@ -543,6 +544,33 @@ router.patch('/:id', async (req: Request, res: Response, next) => {
     }
     // Note: 'description' and 'finalDecision' fields don't exist in database schema
     // They are stored locally on iOS only
+    
+    // Handle involved employees update
+    if (involvedEmployeesJson && Array.isArray(involvedEmployeesJson)) {
+      for (const emp of involvedEmployeesJson) {
+        // Try to find existing employee by ID
+        const existingEmployee = await prisma.conflictInvolvedEmployee.findFirst({
+          where: { id: emp.id, caseId: id },
+        });
+        
+        if (existingEmployee) {
+          // Update existing employee
+          const empUpdateData: any = {};
+          if (emp.name !== undefined) empUpdateData.name = encrypt(emp.name);
+          if (emp.role !== undefined) empUpdateData.role = encrypt(emp.role);
+          if (emp.department !== undefined) empUpdateData.department = encrypt(emp.department);
+          if (emp.employeeId !== undefined) empUpdateData.employeeFileNo = emp.employeeId ? encrypt(emp.employeeId) : null;
+          if (emp.isComplainant !== undefined) empUpdateData.isComplainant = emp.isComplainant;
+          
+          await prisma.conflictInvolvedEmployee.update({
+            where: { id: emp.id },
+            data: empUpdateData,
+          });
+        }
+      }
+      changes.involvedEmployees = 'updated';
+    }
+    
     if (aiComparisonResultJson !== undefined) {
       updateData.comparisonResult = encrypt(JSON.stringify(aiComparisonResultJson));
       changes.comparisonResult = 'updated';
