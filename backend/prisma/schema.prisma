@@ -2453,8 +2453,9 @@ model ConflictCase {
   recommendationResult  String?                     @db.Text // Encrypted JSON - Full recommendation result for UI
   
   // Selected Action
-  selectedAction        RecommendedActionType?
-  generatedDocument     String?                     @db.Text // Encrypted JSON
+  selectedAction                  RecommendedActionType?
+  generatedDocument               String?                     @db.Text // Encrypted JSON
+  fullGeneratedDocumentResult     String?                     @db.Text // Encrypted JSON - Full generated document for UI display
   
   // Supervisor Notes (Encrypted)
   supervisorNotes       String?                     @db.Text

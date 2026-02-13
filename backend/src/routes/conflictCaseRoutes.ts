@@ -74,6 +74,7 @@ function decryptCaseData(caseData: any): any {
   if (decrypted.recommendations) decrypted.recommendations = decrypt(decrypted.recommendations);
   if (decrypted.recommendationResult) decrypted.recommendationResult = decrypt(decrypted.recommendationResult);
   if (decrypted.generatedDocument) decrypted.generatedDocument = decrypt(decrypted.generatedDocument);
+  if (decrypted.fullGeneratedDocumentResult) decrypted.fullGeneratedDocumentResult = decrypt(decrypted.fullGeneratedDocumentResult);
   if (decrypted.policyMatches) decrypted.policyMatches = decrypt(decrypted.policyMatches);
   if (decrypted.policyMatchingResult) decrypted.policyMatchingResult = decrypt(decrypted.policyMatchingResult);
   if (decrypted.supervisorNotes) decrypted.supervisorNotes = decrypt(decrypted.supervisorNotes);
@@ -169,6 +170,7 @@ router.post('/', async (req: Request, res: Response) => {
       selectedAction,
       generatedActionDocJson,
       generatedDocument,
+      fullGeneratedDocumentResultJson,
       policyMatchesJson,
       policyMatches,
       supervisorNotes,
@@ -235,6 +237,7 @@ router.post('/', async (req: Request, res: Response) => {
         recommendations: (recommendations || aiRecommendationsJson) ? encrypt(JSON.stringify(recommendations || aiRecommendationsJson)) : null,
         selectedAction: (selectedAction || selectedActionType) || null,
         generatedDocument: (generatedDocument || generatedActionDocJson) ? encrypt(JSON.stringify(generatedDocument || generatedActionDocJson)) : null,
+        fullGeneratedDocumentResult: fullGeneratedDocumentResultJson ? encrypt(JSON.stringify(fullGeneratedDocumentResultJson)) : null,
         policyMatches: (policyMatches || policyMatchesJson) ? encrypt(JSON.stringify(policyMatches || policyMatchesJson)) : null,
         supervisorNotes: supervisorNotes ? encrypt(supervisorNotes) : null,
         activePolicyId: activePolicyId || null,
@@ -514,6 +517,7 @@ router.patch('/:id', async (req: Request, res: Response, next) => {
       recommendationResultJson, // Full recommendation result for UI restoration
       selectedActionType,
       generatedActionDocJson,
+      fullGeneratedDocumentResultJson, // Full generated document result for complete UI display
       policyMatchesJson,
       policyMatchingResultJson, // Full policy matching result for UI restoration
       supervisorNotes,
@@ -594,6 +598,10 @@ router.patch('/:id', async (req: Request, res: Response, next) => {
     if (generatedActionDocJson !== undefined) {
       updateData.generatedDocument = encrypt(JSON.stringify(generatedActionDocJson));
       changes.generatedDocument = 'updated';
+    }
+    if (fullGeneratedDocumentResultJson !== undefined) {
+      updateData.fullGeneratedDocumentResult = encrypt(JSON.stringify(fullGeneratedDocumentResultJson));
+      changes.fullGeneratedDocumentResult = 'updated';
     }
     if (policyMatchesJson !== undefined) {
       updateData.policyMatches = encrypt(JSON.stringify(policyMatchesJson));
