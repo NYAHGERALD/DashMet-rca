@@ -38,6 +38,7 @@ interface RecommendationOption {
   nextSteps: string[];
   timeframe: string;
   confidence: number;
+  targetEmployeeNames: string[];  // Which employees this recommendation applies to
 }
 
 interface RecommendationRequest {
@@ -49,10 +50,12 @@ interface RecommendationRequest {
   };
   complaintA: {
     employeeName: string;
+    employeeId?: string;  // Optional employee ID for tracking
     text: string;
   };
   complaintB: {
     employeeName: string;
+    employeeId?: string;  // Optional employee ID for tracking
     text: string;
   };
   analysisResult?: {
@@ -199,20 +202,23 @@ ${complaintB.employeeName.toUpperCase()}'S STATEMENT:
 
 Please provide 3-4 recommendation options, ordered from least to most severe. The supervisor will make the final decision.
 
+IMPORTANT: For each recommendation, specify EXACTLY which employee(s) the action should be applied to based on your assessment. The employees are: "${complaintA.employeeName}" and "${complaintB.employeeName}". Be specific - if only one employee needs action, list only that one. If both need the same action, list both.
+
 Respond in JSON format:
 {
   "recommendations": [
     {
       "id": "option_a",
       "type": "coaching|counseling|warning|escalate",
-      "title": "Brief action title (e.g., 'Informal Coaching Session')",
+      "title": "Brief action title including employee name(s) (e.g., 'Issue Written Warning to John Smith')",
       "description": "2-3 sentences describing what this action involves",
-      "rationale": "3-4 sentences explaining why this option is appropriate for this situation. Use ${complaintA.employeeName} and ${complaintB.employeeName}'s names. Be specific about what in the case supports this recommendation.",
+      "rationale": "3-4 sentences explaining why this option is appropriate for this situation. Be specific about what in the case supports this recommendation.",
       "riskLevel": "low|moderate|high|critical",
       "riskExplanation": "1-2 sentences explaining the risk level - what could happen if this path is chosen",
       "nextSteps": ["Step 1 for supervisor", "Step 2", "Step 3"],
       "timeframe": "e.g., 'Within 48 hours' or 'Complete within 2 weeks'",
-      "confidence": 0.85
+      "confidence": 0.85,
+      "targetEmployeeNames": ["${complaintA.employeeName}"] or ["${complaintB.employeeName}"] or ["${complaintA.employeeName}", "${complaintB.employeeName}"]
     }
   ],
   "primaryRecommendation": "option_a|option_b|option_c|option_d",
@@ -243,6 +249,9 @@ QUALITY STANDARDS:
 
     try {
       const result = JSON.parse(content);
+      
+      // All employee names for default fallback
+      const allEmployeeNames = [complaintA.employeeName, complaintB.employeeName];
 
       // Validate and clean up recommendations
       const recommendations: RecommendationOption[] = (result.recommendations || [])
@@ -257,7 +266,11 @@ QUALITY STANDARDS:
           riskExplanation: r.riskExplanation || '',
           nextSteps: r.nextSteps || [],
           timeframe: r.timeframe || '',
-          confidence: Math.min(1, Math.max(0, r.confidence || 0.7))
+          confidence: Math.min(1, Math.max(0, r.confidence || 0.7)),
+          // Include target employees - default to all if not specified
+          targetEmployeeNames: Array.isArray(r.targetEmployeeNames) && r.targetEmployeeNames.length > 0 
+            ? r.targetEmployeeNames 
+            : allEmployeeNames
         }));
 
       return res.json({
@@ -266,7 +279,12 @@ QUALITY STANDARDS:
           recommendations,
           primaryRecommendation: result.primaryRecommendation || recommendations[0]?.id || '',
           supervisorGuidance: result.supervisorGuidance || '',
-          generatedAt: new Date().toISOString()
+          generatedAt: new Date().toISOString(),
+          // Include employee info for client-side ID matching
+          employeeNames: {
+            complaintA: complaintA.employeeName,
+            complaintB: complaintB.employeeName
+          }
         }
       });
 
