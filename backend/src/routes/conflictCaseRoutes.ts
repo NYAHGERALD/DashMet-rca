@@ -111,10 +111,21 @@ function decryptCaseData(caseData: any): any {
   if (decrypted.documents) {
     decrypted.documents = decrypted.documents.map((doc: any) => ({
       ...doc,
+      // Text fields
       originalText: doc.originalText ? decrypt(doc.originalText) : doc.originalText,
-      originalImageUrls: doc.originalImageUrls ? decrypt(doc.originalImageUrls) : doc.originalImageUrls,
+      translatedText: doc.translatedText ? decrypt(doc.translatedText) : doc.translatedText,
+      cleanedText: doc.cleanedText ? decrypt(doc.cleanedText) : doc.cleanedText,
       content: doc.content ? decrypt(doc.content) : doc.content,
       extractedText: doc.extractedText ? decrypt(doc.extractedText) : doc.extractedText,
+      // Image URL arrays (stored as encrypted JSON strings)
+      originalImageUrls: doc.originalImageUrls ? decrypt(doc.originalImageUrls) : doc.originalImageUrls,
+      processedImageUrls: doc.processedImageUrls ? decrypt(doc.processedImageUrls) : doc.processedImageUrls,
+      // Signature data
+      signatureImageData: doc.signatureImageData ? decrypt(doc.signatureImageData) : doc.signatureImageData,
+      // Reviewer/supervisor info
+      reviewerName: doc.reviewerName ? decrypt(doc.reviewerName) : doc.reviewerName,
+      reviewerSignature: doc.reviewerSignature ? decrypt(doc.reviewerSignature) : doc.reviewerSignature,
+      supervisorComment: doc.supervisorComment ? decrypt(doc.supervisorComment) : doc.supervisorComment,
     }));
   }
   
@@ -372,7 +383,7 @@ router.get('/', async (req: Request, res: Response) => {
     }
 
     if (caseType) {
-      where.caseType = caseType as any;
+      where.type = caseType as any;  // Database field is 'type' not 'caseType'
     }
 
     const [cases, total] = await Promise.all([
@@ -522,45 +533,40 @@ router.patch('/:id', async (req: Request, res: Response, next) => {
     const changes: any = {};
 
     if (caseType !== undefined) {
-      updateData.caseType = caseType;
-      changes.caseType = { from: existingCase.caseType, to: caseType };
+      updateData.type = caseType;
+      changes.type = { from: existingCase.type, to: caseType };
     }
     if (status !== undefined) {
       updateData.status = status;
       changes.status = { from: existingCase.status, to: status };
     }
-    if (description !== undefined) {
-      updateData.description = encrypt(description);
-      changes.description = 'updated';
-    }
+    // Note: 'description' and 'finalDecision' fields don't exist in database schema
+    // They are stored locally on iOS only
     if (aiComparisonResultJson !== undefined) {
-      updateData.aiComparisonResultJson = encrypt(JSON.stringify(aiComparisonResultJson));
-      changes.aiComparisonResult = 'updated';
+      updateData.comparisonResult = encrypt(JSON.stringify(aiComparisonResultJson));
+      changes.comparisonResult = 'updated';
     }
     if (aiRecommendationsJson !== undefined) {
-      updateData.aiRecommendationsJson = encrypt(JSON.stringify(aiRecommendationsJson));
-      changes.aiRecommendations = 'updated';
+      updateData.recommendations = encrypt(JSON.stringify(aiRecommendationsJson));
+      changes.recommendations = 'updated';
     }
     if (selectedActionType !== undefined) {
-      updateData.selectedActionType = selectedActionType;
-      changes.selectedActionType = { from: existingCase.selectedActionType, to: selectedActionType };
+      updateData.selectedAction = selectedActionType;
+      changes.selectedAction = { from: existingCase.selectedAction, to: selectedActionType };
     }
     if (generatedActionDocJson !== undefined) {
-      updateData.generatedActionDocJson = encrypt(JSON.stringify(generatedActionDocJson));
-      changes.generatedActionDoc = 'updated';
+      updateData.generatedDocument = encrypt(JSON.stringify(generatedActionDocJson));
+      changes.generatedDocument = 'updated';
     }
     if (policyMatchesJson !== undefined) {
-      updateData.policyMatchesJson = encrypt(JSON.stringify(policyMatchesJson));
+      updateData.policyMatches = encrypt(JSON.stringify(policyMatchesJson));
       changes.policyMatches = 'updated';
     }
     if (supervisorNotes !== undefined) {
       updateData.supervisorNotes = encrypt(supervisorNotes);
       changes.supervisorNotes = 'updated';
     }
-    if (finalDecision !== undefined) {
-      updateData.finalDecision = encrypt(finalDecision);
-      changes.finalDecision = 'updated';
-    }
+    // Note: 'finalDecision' doesn't exist in database schema, stored locally only
 
     const updatedCase = await prisma.conflictCase.update({
       where: { id },
@@ -860,7 +866,31 @@ router.delete('/:id/employees/:employeeId', async (req: Request, res: Response) 
 router.post('/:id/documents', async (req: Request, res: Response) => {
   try {
     const { id } = req.params;
-    const { name, type, url, content, extractedText, originalText, originalImageUrls, userId } = req.body;
+    const { 
+      name, 
+      type, 
+      url, 
+      content, 
+      extractedText, 
+      originalText,
+      cleanedText,
+      translatedText,
+      originalImageUrls,
+      processedImageUrls,
+      detectedLanguage,
+      isHandwritten,
+      pageCount,
+      employeeId,
+      submittedBy,
+      // Signature & audit fields
+      signatureImageData,
+      employeeReviewTimestamp,
+      employeeSignatureTimestamp,
+      supervisorCertificationTimestamp,
+      supervisorId,
+      supervisorName,
+      userId 
+    } = req.body;
 
     // Map document type to valid enum values
     const docTypeMap: Record<string, string> = {
@@ -886,13 +916,50 @@ router.post('/:id/documents', async (req: Request, res: Response) => {
       });
     }
 
+    // Build document data with all fields
+    const docData: any = {
+      caseId: id,
+      type: mappedDocType as any,
+      pageCount: pageCount || 1,
+    };
+
+    // Text fields (encrypted)
+    if (originalText || content || extractedText) {
+      docData.originalText = encrypt(originalText || content || extractedText);
+    }
+    if (cleanedText) {
+      docData.cleanedText = encrypt(cleanedText);
+    }
+    if (translatedText) {
+      docData.translatedText = encrypt(translatedText);
+    }
+
+    // Image URLs (encrypted JSON arrays)
+    if (originalImageUrls && originalImageUrls.length > 0) {
+      docData.originalImageUrls = encrypt(JSON.stringify(originalImageUrls));
+    } else if (url) {
+      docData.originalImageUrls = encrypt(JSON.stringify([url]));
+    }
+    if (processedImageUrls && processedImageUrls.length > 0) {
+      docData.processedImageUrls = encrypt(JSON.stringify(processedImageUrls));
+    }
+
+    // Metadata
+    if (detectedLanguage) docData.detectedLanguage = detectedLanguage;
+    if (isHandwritten !== undefined) docData.isHandwritten = isHandwritten;
+    if (employeeId) docData.employeeId = employeeId;
+    if (submittedBy) docData.submittedBy = encrypt(submittedBy);
+
+    // Signature & audit fields (encrypted where sensitive)
+    if (signatureImageData) docData.signatureImageData = encrypt(signatureImageData);
+    if (employeeReviewTimestamp) docData.employeeReviewTimestamp = new Date(employeeReviewTimestamp);
+    if (employeeSignatureTimestamp) docData.employeeSignatureTimestamp = new Date(employeeSignatureTimestamp);
+    if (supervisorCertificationTimestamp) docData.supervisorCertificationTimestamp = new Date(supervisorCertificationTimestamp);
+    if (supervisorId) docData.supervisorId = encrypt(supervisorId);
+    if (supervisorName) docData.supervisorName = encrypt(supervisorName);
+
     const document = await prisma.conflictCaseDocument.create({
-      data: {
-        caseId: id,
-        type: mappedDocType as any,
-        originalText: (originalText || content || extractedText) ? encrypt(originalText || content || extractedText) : null,
-        originalImageUrls: (originalImageUrls || url) ? encrypt(JSON.stringify(originalImageUrls || [url])) : null,
-      },
+      data: docData,
     });
 
     // Add audit entry
@@ -909,10 +976,18 @@ router.post('/:id/documents', async (req: Request, res: Response) => {
       });
     }
 
+    // Decrypt for response
     const decryptedDoc = {
       ...document,
       originalText: document.originalText ? decrypt(document.originalText) : null,
+      cleanedText: document.cleanedText ? decrypt(document.cleanedText) : null,
+      translatedText: document.translatedText ? decrypt(document.translatedText) : null,
       originalImageUrls: document.originalImageUrls ? JSON.parse(decrypt(document.originalImageUrls)) : null,
+      processedImageUrls: document.processedImageUrls ? JSON.parse(decrypt(document.processedImageUrls)) : null,
+      submittedBy: document.submittedBy ? decrypt(document.submittedBy) : null,
+      signatureImageData: document.signatureImageData ? decrypt(document.signatureImageData) : null,
+      supervisorId: document.supervisorId ? decrypt(document.supervisorId) : null,
+      supervisorName: document.supervisorName ? decrypt(document.supervisorName) : null,
     };
 
     res.status(201).json({
