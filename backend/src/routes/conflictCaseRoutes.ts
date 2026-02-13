@@ -948,7 +948,17 @@ router.post('/:id/documents', async (req: Request, res: Response) => {
     // Metadata
     if (detectedLanguage) docData.detectedLanguage = detectedLanguage;
     if (isHandwritten !== undefined) docData.isHandwritten = isHandwritten;
-    if (employeeId) docData.employeeId = employeeId;
+    
+    // Only set employeeId if it references an existing ConflictInvolvedEmployee
+    if (employeeId) {
+      const existingEmployee = await prisma.conflictInvolvedEmployee.findUnique({
+        where: { id: employeeId }
+      });
+      if (existingEmployee) {
+        docData.employeeId = employeeId;
+      }
+      // If employee doesn't exist, skip the foreign key - store submittedBy instead
+    }
     if (submittedBy) docData.submittedBy = encrypt(submittedBy);
 
     // Signature & audit fields (encrypted where sensitive)
