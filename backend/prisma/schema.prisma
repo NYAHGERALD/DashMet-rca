@@ -2449,6 +2449,8 @@ model ConflictCase {
   comparisonResult      String?                     @db.Text // Encrypted JSON
   policyMatches         String?                     @db.Text // Encrypted JSON  
   recommendations       String?                     @db.Text // Encrypted JSON
+  policyMatchingResult  String?                     @db.Text // Encrypted JSON - Full policy matching result for UI
+  recommendationResult  String?                     @db.Text // Encrypted JSON - Full recommendation result for UI
   
   // Selected Action
   selectedAction        RecommendedActionType?

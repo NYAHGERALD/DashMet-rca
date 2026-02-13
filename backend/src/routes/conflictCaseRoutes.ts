@@ -72,8 +72,10 @@ function decryptCaseData(caseData: any): any {
   if (decrypted.shift) decrypted.shift = decrypt(decrypted.shift);
   if (decrypted.comparisonResult) decrypted.comparisonResult = decrypt(decrypted.comparisonResult);
   if (decrypted.recommendations) decrypted.recommendations = decrypt(decrypted.recommendations);
+  if (decrypted.recommendationResult) decrypted.recommendationResult = decrypt(decrypted.recommendationResult);
   if (decrypted.generatedDocument) decrypted.generatedDocument = decrypt(decrypted.generatedDocument);
   if (decrypted.policyMatches) decrypted.policyMatches = decrypt(decrypted.policyMatches);
+  if (decrypted.policyMatchingResult) decrypted.policyMatchingResult = decrypt(decrypted.policyMatchingResult);
   if (decrypted.supervisorNotes) decrypted.supervisorNotes = decrypt(decrypted.supervisorNotes);
   
   // Legacy field names (for backwards compatibility)
@@ -509,9 +511,11 @@ router.patch('/:id', async (req: Request, res: Response, next) => {
       description,
       aiComparisonResultJson,
       aiRecommendationsJson,
+      recommendationResultJson, // Full recommendation result for UI restoration
       selectedActionType,
       generatedActionDocJson,
       policyMatchesJson,
+      policyMatchingResultJson, // Full policy matching result for UI restoration
       supervisorNotes,
       finalDecision,
       involvedEmployeesJson, // Array of employees to update
@@ -579,6 +583,10 @@ router.patch('/:id', async (req: Request, res: Response, next) => {
       updateData.recommendations = encrypt(JSON.stringify(aiRecommendationsJson));
       changes.recommendations = 'updated';
     }
+    if (recommendationResultJson !== undefined) {
+      updateData.recommendationResult = encrypt(JSON.stringify(recommendationResultJson));
+      changes.recommendationResult = 'updated';
+    }
     if (selectedActionType !== undefined) {
       updateData.selectedAction = selectedActionType;
       changes.selectedAction = { from: existingCase.selectedAction, to: selectedActionType };
@@ -590,6 +598,10 @@ router.patch('/:id', async (req: Request, res: Response, next) => {
     if (policyMatchesJson !== undefined) {
       updateData.policyMatches = encrypt(JSON.stringify(policyMatchesJson));
       changes.policyMatches = 'updated';
+    }
+    if (policyMatchingResultJson !== undefined) {
+      updateData.policyMatchingResult = encrypt(JSON.stringify(policyMatchingResultJson));
+      changes.policyMatchingResult = 'updated';
     }
     if (supervisorNotes !== undefined) {
       updateData.supervisorNotes = encrypt(supervisorNotes);
