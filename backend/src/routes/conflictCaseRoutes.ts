@@ -1457,17 +1457,8 @@ router.post('/:id/document-edits', async (req: Request, res: Response) => {
       });
     }
 
-    // Verify case exists
-    const existingCase = await prisma.conflictCase.findUnique({
-      where: { id },
-    });
-
-    if (!existingCase) {
-      return res.status(404).json({
-        success: false,
-        error: 'Case not found',
-      });
-    }
+    // Note: We do NOT check if case exists in DB - cases may only exist locally in the app
+    // Edit history is stored by caseId (UUID) which can reference local-only cases
 
     // Create the document edit with encrypted sensitive fields
     const edit = await prisma.conflictDocumentEdit.create({
@@ -1512,17 +1503,8 @@ router.get('/:id/document-edits', async (req: Request, res: Response) => {
   try {
     const { id } = req.params;
 
-    // Verify case exists
-    const existingCase = await prisma.conflictCase.findUnique({
-      where: { id },
-    });
-
-    if (!existingCase) {
-      return res.status(404).json({
-        success: false,
-        error: 'Case not found',
-      });
-    }
+    // Note: We do NOT check if case exists in DB - cases may only exist locally in the app
+    // Just query edits by caseId
 
     // Get all edits for this case, ordered by creation time
     const edits = await prisma.conflictDocumentEdit.findMany({
@@ -1594,6 +1576,193 @@ router.delete('/:id/document-edits/:editId', async (req: Request, res: Response)
     res.status(500).json({
       success: false,
       error: 'Failed to delete document edit',
+      details: error.message,
+    });
+  }
+});
+
+// ============================================================
+// REVIEW COMMENTS ENDPOINTS
+// ============================================================
+
+/**
+ * POST /api/conflict-cases/:id/review-comments
+ * Save a review comment to the database
+ */
+router.post('/:id/review-comments', async (req: Request, res: Response) => {
+  try {
+    const { id } = req.params;
+    const { section, comment, createdBy } = req.body;
+
+    // Validate required fields
+    if (!section || !comment || !createdBy) {
+      return res.status(400).json({
+        success: false,
+        error: 'Missing required fields: section, comment, createdBy',
+      });
+    }
+
+    // Create the review comment with encrypted sensitive fields
+    const reviewComment = await prisma.conflictReviewComment.create({
+      data: {
+        caseId: id,
+        section,
+        comment: encrypt(comment),
+        createdBy: encrypt(createdBy),
+        isResolved: false,
+      },
+    });
+
+    res.status(201).json({
+      success: true,
+      data: {
+        id: reviewComment.id,
+        caseId: reviewComment.caseId,
+        section: reviewComment.section,
+        comment,
+        createdBy,
+        isResolved: reviewComment.isResolved,
+        createdAt: reviewComment.createdAt,
+      },
+    });
+  } catch (error: any) {
+    console.error('Error saving review comment:', error);
+    res.status(500).json({
+      success: false,
+      error: 'Failed to save review comment',
+      details: error.message,
+    });
+  }
+});
+
+/**
+ * GET /api/conflict-cases/:id/review-comments
+ * Get all review comments for a case (decrypted)
+ */
+router.get('/:id/review-comments', async (req: Request, res: Response) => {
+  try {
+    const { id } = req.params;
+
+    // Get all comments for this case, ordered by creation time
+    const comments = await prisma.conflictReviewComment.findMany({
+      where: { caseId: id },
+      orderBy: { createdAt: 'desc' },
+    });
+
+    // Decrypt the sensitive fields
+    const decryptedComments = comments.map(c => ({
+      id: c.id,
+      caseId: c.caseId,
+      section: c.section,
+      comment: decrypt(c.comment),
+      createdBy: decrypt(c.createdBy),
+      isResolved: c.isResolved,
+      createdAt: c.createdAt,
+    }));
+
+    res.json({
+      success: true,
+      data: decryptedComments,
+      count: decryptedComments.length,
+    });
+  } catch (error: any) {
+    console.error('Error fetching review comments:', error);
+    res.status(500).json({
+      success: false,
+      error: 'Failed to fetch review comments',
+      details: error.message,
+    });
+  }
+});
+
+/**
+ * PATCH /api/conflict-cases/:id/review-comments/:commentId/resolve
+ * Mark a review comment as resolved
+ */
+router.patch('/:id/review-comments/:commentId/resolve', async (req: Request, res: Response) => {
+  try {
+    const { id, commentId } = req.params;
+
+    // Verify comment exists and belongs to this case
+    const existingComment = await prisma.conflictReviewComment.findFirst({
+      where: { 
+        id: commentId,
+        caseId: id,
+      },
+    });
+
+    if (!existingComment) {
+      return res.status(404).json({
+        success: false,
+        error: 'Review comment not found',
+      });
+    }
+
+    // Update the comment to resolved
+    const updatedComment = await prisma.conflictReviewComment.update({
+      where: { id: commentId },
+      data: { isResolved: true },
+    });
+
+    res.json({
+      success: true,
+      data: {
+        id: updatedComment.id,
+        caseId: updatedComment.caseId,
+        section: updatedComment.section,
+        comment: decrypt(updatedComment.comment),
+        createdBy: decrypt(updatedComment.createdBy),
+        isResolved: updatedComment.isResolved,
+        createdAt: updatedComment.createdAt,
+      },
+    });
+  } catch (error: any) {
+    console.error('Error resolving review comment:', error);
+    res.status(500).json({
+      success: false,
+      error: 'Failed to resolve review comment',
+      details: error.message,
+    });
+  }
+});
+
+/**
+ * DELETE /api/conflict-cases/:id/review-comments/:commentId
+ * Delete a specific review comment
+ */
+router.delete('/:id/review-comments/:commentId', async (req: Request, res: Response) => {
+  try {
+    const { id, commentId } = req.params;
+
+    // Verify comment exists and belongs to this case
+    const existingComment = await prisma.conflictReviewComment.findFirst({
+      where: { 
+        id: commentId,
+        caseId: id,
+      },
+    });
+
+    if (!existingComment) {
+      return res.status(404).json({
+        success: false,
+        error: 'Review comment not found',
+      });
+    }
+
+    // Delete the comment
+    await prisma.conflictReviewComment.delete({
+      where: { id: commentId },
+    });
+
+    res.json({
+      success: true,
+      message: 'Review comment deleted successfully',
+    });
+  } catch (error: any) {
+    console.error('Error deleting review comment:', error);
+    res.status(500).json({
+      success: false,
+      error: 'Failed to delete review comment',
       details: error.message,
     });
   }

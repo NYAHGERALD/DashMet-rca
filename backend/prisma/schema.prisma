@@ -2480,7 +2480,7 @@ model ConflictCase {
   involvedEmployees     ConflictInvolvedEmployee[]
   documents             ConflictCaseDocument[]
   auditLog              ConflictCaseAuditEntry[]
-  documentEdits         ConflictDocumentEdit[]
+  // Note: documentEdits relation removed - edit history uses caseId as plain string reference
   
   @@index([organizationId])
   @@index([facilityId])
@@ -2492,10 +2492,10 @@ model ConflictCase {
 }
 
 // Document Edit History (for tracking changes to generated documents)
+// Note: caseId is NOT a foreign key - edits can be stored for cases that only exist locally in the app
 model ConflictDocumentEdit {
   id              String          @id @default(uuid())
-  caseId          String
-  case            ConflictCase    @relation(fields: [caseId], references: [id], onDelete: Cascade)
+  caseId          String          // UUID of the case (may be local-only, not in DB)
   
   sectionId       String          // e.g., "expectations", "incidentSummary"
   sectionTitle    String          // e.g., "Expectations", "Incident Summary" (Encrypted)
@@ -2506,6 +2506,25 @@ model ConflictDocumentEdit {
   createdAt       DateTime        @default(now())
   
   @@index([caseId])
+  @@index([createdAt])
+}
+
+// Document Review Comments (for supervisor review feedback)
+// Note: caseId is NOT a foreign key - comments can be stored for cases that only exist locally in the app
+model ConflictReviewComment {
+  id              String          @id @default(uuid())
+  caseId          String          // UUID of the case (may be local-only, not in DB)
+  
+  section         String          // Section ID the comment is attached to
+  comment         String          @db.Text // Encrypted - The comment text
+  createdBy       String          // Encrypted - name or ID of commenter
+  isResolved      Boolean         @default(false)
+  
+  createdAt       DateTime        @default(now())
+  updatedAt       DateTime        @updatedAt
+  
+  @@index([caseId])
+  @@index([isResolved])
   @@index([createdAt])
 }
 
