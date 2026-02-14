@@ -2480,6 +2480,7 @@ model ConflictCase {
   involvedEmployees     ConflictInvolvedEmployee[]
   documents             ConflictCaseDocument[]
   auditLog              ConflictCaseAuditEntry[]
+  documentEdits         ConflictDocumentEdit[]
   
   @@index([organizationId])
   @@index([facilityId])
@@ -2488,6 +2489,24 @@ model ConflictCase {
   @@index([type])
   @@index([caseNumber])
   @@index([incidentDate])
+}
+
+// Document Edit History (for tracking changes to generated documents)
+model ConflictDocumentEdit {
+  id              String          @id @default(uuid())
+  caseId          String
+  case            ConflictCase    @relation(fields: [caseId], references: [id], onDelete: Cascade)
+  
+  sectionId       String          // e.g., "expectations", "incidentSummary"
+  sectionTitle    String          // e.g., "Expectations", "Incident Summary" (Encrypted)
+  originalContent String          @db.Text // Encrypted
+  newContent      String          @db.Text // Encrypted
+  editedBy        String          // Encrypted - name or ID of editor
+  
+  createdAt       DateTime        @default(now())
+  
+  @@index([caseId])
+  @@index([createdAt])
 }
 
 // Involved Employee (Encrypted)

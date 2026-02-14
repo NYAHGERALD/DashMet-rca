@@ -1436,4 +1436,167 @@ router.delete('/workplace-policies/:id', async (req: Request, res: Response) => 
   }
 });
 
+// ============================================================================
+// DOCUMENT EDIT HISTORY ENDPOINTS
+// ============================================================================
+
+/**
+ * POST /api/conflict-cases/:id/document-edits
+ * Save a document edit to the database
+ */
+router.post('/:id/document-edits', async (req: Request, res: Response) => {
+  try {
+    const { id } = req.params;
+    const { sectionId, sectionTitle, originalContent, newContent, editedBy } = req.body;
+
+    // Validate required fields
+    if (!sectionId || !sectionTitle || originalContent === undefined || newContent === undefined || !editedBy) {
+      return res.status(400).json({
+        success: false,
+        error: 'Missing required fields: sectionId, sectionTitle, originalContent, newContent, editedBy',
+      });
+    }
+
+    // Verify case exists
+    const existingCase = await prisma.conflictCase.findUnique({
+      where: { id },
+    });
+
+    if (!existingCase) {
+      return res.status(404).json({
+        success: false,
+        error: 'Case not found',
+      });
+    }
+
+    // Create the document edit with encrypted sensitive fields
+    const edit = await prisma.conflictDocumentEdit.create({
+      data: {
+        caseId: id,
+        sectionId,
+        sectionTitle: encrypt(sectionTitle),
+        originalContent: encrypt(originalContent),
+        newContent: encrypt(newContent),
+        editedBy: encrypt(editedBy),
+      },
+    });
+
+    res.status(201).json({
+      success: true,
+      data: {
+        id: edit.id,
+        caseId: edit.caseId,
+        sectionId: edit.sectionId,
+        sectionTitle,
+        originalContent,
+        newContent,
+        editedBy,
+        createdAt: edit.createdAt,
+      },
+    });
+  } catch (error: any) {
+    console.error('Error saving document edit:', error);
+    res.status(500).json({
+      success: false,
+      error: 'Failed to save document edit',
+      details: error.message,
+    });
+  }
+});
+
+/**
+ * GET /api/conflict-cases/:id/document-edits
+ * Get all document edits for a case (decrypted)
+ */
+router.get('/:id/document-edits', async (req: Request, res: Response) => {
+  try {
+    const { id } = req.params;
+
+    // Verify case exists
+    const existingCase = await prisma.conflictCase.findUnique({
+      where: { id },
+    });
+
+    if (!existingCase) {
+      return res.status(404).json({
+        success: false,
+        error: 'Case not found',
+      });
+    }
+
+    // Get all edits for this case, ordered by creation time
+    const edits = await prisma.conflictDocumentEdit.findMany({
+      where: { caseId: id },
+      orderBy: { createdAt: 'desc' },
+    });
+
+    // Decrypt the sensitive fields
+    const decryptedEdits = edits.map(edit => ({
+      id: edit.id,
+      caseId: edit.caseId,
+      sectionId: edit.sectionId,
+      sectionTitle: decrypt(edit.sectionTitle),
+      originalContent: decrypt(edit.originalContent),
+      newContent: decrypt(edit.newContent),
+      editedBy: decrypt(edit.editedBy),
+      createdAt: edit.createdAt,
+    }));
+
+    res.json({
+      success: true,
+      data: decryptedEdits,
+      count: decryptedEdits.length,
+    });
+  } catch (error: any) {
+    console.error('Error fetching document edits:', error);
+    res.status(500).json({
+      success: false,
+      error: 'Failed to fetch document edits',
+      details: error.message,
+    });
+  }
+});
+
+/**
+ * DELETE /api/conflict-cases/:id/document-edits/:editId
+ * Delete a specific document edit (for undo functionality)
+ */
+router.delete('/:id/document-edits/:editId', async (req: Request, res: Response) => {
+  try {
+    const { id, editId } = req.params;
+
+    // Verify edit exists and belongs to this case
+    const existingEdit = await prisma.conflictDocumentEdit.findFirst({
+      where: { 
+        id: editId,
+        caseId: id,
+      },
+    });
+
+    if (!existingEdit) {
+      return res.status(404).json({
+        success: false,
+        error: 'Document edit not found',
+      });
+    }
+
+    // Delete the edit
+    await prisma.conflictDocumentEdit.delete({
+      where: { id: editId },
+    });
+
+    res.json({
+      success: true,
+      message: 'Document edit deleted successfully',
+    });
+  } catch (error: any) {
+    console.error('Error deleting document edit:', error);
+    res.status(500).json({
+      success: false,
+      error: 'Failed to delete document edit',
+      details: error.message,
+    });
+  }
+});
+
 export default router;
