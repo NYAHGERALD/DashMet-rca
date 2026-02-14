@@ -163,14 +163,25 @@ router.post('/generate', async (req: Request, res: Response) => {
       analysisResult,
       policyMatches,
       recommendationRationale,
-      supervisorName
-    } = req.body as ActionGenerationRequest;
+      supervisorName,
+      targetEmployeeNames
+    } = req.body as ActionGenerationRequest & { targetEmployeeNames?: string[] };
 
     if (!actionType || !caseDetails || !complaintA || !complaintB) {
       return res.status(400).json({
         error: 'Action type, case details, and both complaints are required'
       });
     }
+
+    // Determine target employees - use AI recommendation if provided, otherwise both
+    const allEmployeeNames = [complaintA.employeeName, complaintB.employeeName];
+    const effectiveTargetNames: string[] = (targetEmployeeNames && targetEmployeeNames.length > 0)
+      ? targetEmployeeNames
+      : allEmployeeNames;
+    
+    // Format names for display
+    const targetNamesForTitle = effectiveTargetNames.join(' and ');
+    const targetNamesArray = JSON.stringify(effectiveTargetNames);
 
     const openai = getOpenAIClient();
     if (!openai) {
@@ -230,11 +241,13 @@ YOUR APPROACH:
 
         userPrompt = `${baseContext}
 
-Generate a comprehensive COACHING SESSION GUIDE for the supervisor to use when meeting with ${complaintA.employeeName} and ${complaintB.employeeName}.
+Generate a comprehensive COACHING SESSION GUIDE for the supervisor to use when meeting with the target employee(s): ${targetNamesForTitle}.
+
+IMPORTANT: This action applies ONLY to: ${targetNamesForTitle}. Use ONLY these employee names in the title and throughout the document.
 
 Respond in JSON format:
 {
-  "title": "Coaching Session Guide - [Brief topic]",
+  "title": "Coaching Session Guide for ${targetNamesForTitle}",
   "overview": "1-2 paragraph overview of the coaching session's purpose and approach",
   "discussionOutline": {
     "opening": "How to open the conversation positively",
@@ -242,8 +255,8 @@ Respond in JSON format:
     "transitionStatements": ["Phrases to use when moving between topics"]
   },
   "talkingPoints": [
-    "Specific talking point using ${complaintA.employeeName}'s name where relevant",
-    "Talking point for ${complaintB.employeeName}",
+    "Specific talking point for ${targetNamesForTitle}",
+    "Another talking point",
     "More talking points (5-7 total)"
   ],
   "questionsToAsk": [
@@ -280,13 +293,15 @@ YOUR APPROACH:
 
         userPrompt = `${baseContext}
 
-Generate a FORMAL COUNSELING DOCUMENT for this workplace incident involving ${complaintA.employeeName} and ${complaintB.employeeName}.
+Generate a FORMAL COUNSELING DOCUMENT for this workplace incident. This action applies to: ${targetNamesForTitle}.
+
+IMPORTANT: This action applies ONLY to: ${targetNamesForTitle}. Use ONLY these employee names in the title and employeeNames array.
 
 Respond in JSON format:
 {
-  "title": "Employee Counseling Documentation",
+  "title": "Documented Counseling for ${targetNamesForTitle}",
   "documentDate": "${new Date().toISOString().split('T')[0]}",
-  "employeeNames": ["${complaintA.employeeName}", "${complaintB.employeeName}"],
+  "employeeNames": ${targetNamesArray},
   "incidentSummary": "3-4 sentence objective summary of the incident",
   "discussionPoints": [
     "Point discussed with employees (5-6 points)",
@@ -325,13 +340,15 @@ YOUR APPROACH:
 
         userPrompt = `${baseContext}
 
-Generate a FORMAL WRITTEN WARNING DOCUMENT for this workplace incident involving ${complaintA.employeeName} and ${complaintB.employeeName}.
+Generate a FORMAL WRITTEN WARNING DOCUMENT for this workplace incident. This action applies to: ${targetNamesForTitle}.
+
+IMPORTANT: This action applies ONLY to: ${targetNamesForTitle}. Use ONLY these employee names in the title and employeeNames array.
 
 Respond in JSON format:
 {
-  "title": "Written Warning Notice",
+  "title": "Written Warning Notice for ${targetNamesForTitle}",
   "documentDate": "${new Date().toISOString().split('T')[0]}",
-  "employeeNames": ["${complaintA.employeeName}", "${complaintB.employeeName}"],
+  "employeeNames": ${targetNamesArray},
   "warningLevel": "First Written Warning / Final Written Warning",
   "companyRulesViolated": [
     "Specific company rule or policy violated",
