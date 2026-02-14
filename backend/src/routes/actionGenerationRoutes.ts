@@ -295,7 +295,9 @@ YOUR APPROACH:
 
 Generate a FORMAL COUNSELING DOCUMENT for this workplace incident. This action applies to: ${targetNamesForTitle}.
 
-IMPORTANT: This action applies ONLY to: ${targetNamesForTitle}. Use ONLY these employee names in the title and employeeNames array.
+IMPORTANT: 
+- This action applies ONLY to: ${targetNamesForTitle}. Use ONLY these employee names in the title and employeeNames array.
+- For policyReferences: Use the ACTUAL policy sections mentioned in "RELEVANT POLICY SECTIONS" above. Include the section number and title. If no policies are provided, leave this array empty [].
 
 Respond in JSON format:
 {
@@ -313,8 +315,8 @@ Respond in JSON format:
     "3-5 expectations total"
   ],
   "policyReferences": [
-    "Relevant policy reference if applicable",
-    "Another policy reference"
+    "Section X.X: Actual Policy Title from RELEVANT POLICY SECTIONS above",
+    "Include all relevant policies from the context"
   ],
   "improvementPlan": {
     "goals": ["Specific improvement goal 1", "Goal 2"],
@@ -342,7 +344,9 @@ YOUR APPROACH:
 
 Generate a FORMAL WRITTEN WARNING DOCUMENT for this workplace incident. This action applies to: ${targetNamesForTitle}.
 
-IMPORTANT: This action applies ONLY to: ${targetNamesForTitle}. Use ONLY these employee names in the title and employeeNames array.
+IMPORTANT: 
+- This action applies ONLY to: ${targetNamesForTitle}. Use ONLY these employee names in the title and employeeNames array.
+- For companyRulesViolated: Use the ACTUAL policy sections from "RELEVANT POLICY SECTIONS" above. Include the section number and title.
 
 Respond in JSON format:
 {
@@ -351,8 +355,8 @@ Respond in JSON format:
   "employeeNames": ${targetNamesArray},
   "warningLevel": "First Written Warning / Final Written Warning",
   "companyRulesViolated": [
-    "Specific company rule or policy violated",
-    "Another rule/policy if applicable"
+    "Use ACTUAL policy sections from RELEVANT POLICY SECTIONS above (e.g., 'Section X.X: Policy Title')",
+    "Include all applicable policies from the context"
   ],
   "describeInDetail": "Detailed, objective description of what happened. Include dates, times, locations, and specific behaviors observed or reported. This should be a thorough account of the incident (3-5 paragraphs).",
   "conductDeficiency": "Clear statement of the specific conduct deficiency. What behavior or action fell below company standards? Be specific about the gap between expected and actual conduct.",
@@ -386,6 +390,8 @@ YOUR APPROACH:
         userPrompt = `${baseContext}
 
 Generate a COMPREHENSIVE HR ESCALATION PACKAGE for this case. The supervisor${supervisorName ? ` (${supervisorName})` : ''} is requesting HR intervention.
+
+IMPORTANT: For policyReferences, use the ACTUAL policy sections from "RELEVANT POLICY SECTIONS" above. Include the real section numbers and titles.
 
 Respond in JSON format:
 {
@@ -421,7 +427,7 @@ Respond in JSON format:
     "Other evidence noted"
   ],
   "policyReferences": [
-    {"section": "Policy section number/title", "relevance": "Why this policy may apply"}
+    {"section": "Use ACTUAL section numbers/titles from RELEVANT POLICY SECTIONS above", "relevance": "Why this policy applies based on the context"}
   ],
   "analysisFindings": [
     "Key finding 1 from analysis",
