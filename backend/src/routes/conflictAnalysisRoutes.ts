@@ -67,6 +67,9 @@ interface AnalysisResult {
     partyBVersion: string;
     status: 'agreement' | 'contradiction' | 'partial' | 'unclear';
   }[];
+  // Dynamic fields based on evidence provided
+  witnessAnalysis?: string[];
+  priorHistoryAnalysis?: string[];
 }
 
 /**
@@ -105,26 +108,62 @@ router.post('/compare', async (req: Request, res: Response) => {
     const nameA = complaintA.employeeName;
     const nameB = complaintB.employeeName;
     
+    // Track what additional evidence we have
+    const hasWitnesses = witnessStatements && witnessStatements.length > 0;
+    const hasPriorHistory = priorHistory && priorHistory.length > 0;
+    
+    console.log(`📋 Analysis request - Witnesses: ${witnessStatements?.length || 0}, Prior History: ${priorHistory?.length || 0}`);
+    
     // Build witness context if available
     let witnessContext = '';
-    if (witnessStatements && witnessStatements.length > 0) {
-      witnessContext = `\n\nWITNESS ACCOUNTS:\n${witnessStatements.map((w, i) => 
-        `${w.witnessName}'s Statement:\n${w.text}`
-      ).join('\n\n')}`;
+    if (hasWitnesses) {
+      witnessContext = `\n\n═══════════════════════════════════════════════════════════════
+WITNESS ACCOUNTS (${witnessStatements.length} statement${witnessStatements.length > 1 ? 's' : ''})
+═══════════════════════════════════════════════════════════════
+${witnessStatements.map((w, i) => 
+        `WITNESS ${i+1}: ${w.witnessName}
+Statement: "${w.text}"`
+      ).join('\n\n')}
+
+IMPORTANT: You MUST analyze these witness statements and incorporate their perspectives into your analysis. Consider:
+- Do witnesses corroborate either party's account?
+- Do witnesses provide additional details not mentioned by the complainants?
+- Are there any contradictions between witness accounts and the main statements?`;
     }
     
     // Build prior history context if available
     let priorHistoryContext = '';
-    if (priorHistory && priorHistory.length > 0) {
+    if (hasPriorHistory) {
       const historyItems = priorHistory.map(h => {
         const typeLabel = h.type === 'prior_complaint' ? 'Prior Complaint' :
                           h.type === 'counseling_record' ? 'Counseling Record' :
                           h.type === 'warning_document' ? 'Written Warning' : 'Prior Record';
         const dateStr = h.documentDate ? ` (${h.documentDate})` : '';
-        const employeeStr = h.employeeName ? ` - ${h.employeeName}` : '';
-        return `${typeLabel}${dateStr}${employeeStr}:\n${h.summary}`;
+        const employeeStr = h.employeeName ? ` involving ${h.employeeName}` : '';
+        return `📄 ${typeLabel}${dateStr}${employeeStr}:\n${h.summary}`;
       }).join('\n\n');
-      priorHistoryContext = `\n\nPRIOR HISTORY/RECORDS:\n${historyItems}\n\nNote: This prior history should be considered as context for the current incident. Look for patterns of behavior, escalation, or recurring issues.`;
+      priorHistoryContext = `\n\n═══════════════════════════════════════════════════════════════
+PRIOR HISTORY/RECORDS (${priorHistory.length} document${priorHistory.length > 1 ? 's' : ''})
+═══════════════════════════════════════════════════════════════
+${historyItems}
+
+CRITICAL: This prior history MUST be incorporated into your analysis. Consider:
+- Does this history show a pattern of behavior?
+- Is this incident an escalation of previous issues?
+- How does this context affect your assessment of the current situation?`;
+    }
+    
+    // Build dynamic evidence section for the prompt
+    let evidenceInstruction = '';
+    if (hasWitnesses || hasPriorHistory) {
+      evidenceInstruction = `\n\nADDITIONAL EVIDENCE TO ANALYZE:`;
+      if (hasWitnesses) {
+        evidenceInstruction += `\n- ${witnessStatements.length} WITNESS STATEMENT(S) - You MUST reference these in your analysis`;
+      }
+      if (hasPriorHistory) {
+        evidenceInstruction += `\n- ${priorHistory.length} PRIOR HISTORY DOCUMENT(S) - You MUST reference these in your analysis`;
+      }
+      evidenceInstruction += `\n\nYour analysis MUST explicitly discuss all provided evidence. Do NOT say "no witnesses" if witness statements are provided above.`;
     }
     
     const systemPrompt = `You are a senior Human Resources professional with 20+ years of experience in workplace conflict resolution, employee relations, and organizational behavior. You have handled hundreds of workplace disputes and have developed keen insight into human dynamics, communication patterns, and the underlying factors that contribute to workplace conflicts.
@@ -138,6 +177,8 @@ YOUR APPROACH:
 - You understand workplace dynamics, power imbalances, and interpersonal friction
 - You write professionally but with warmth - as if briefing a colleague
 - You provide actionable observations that help supervisors understand the full picture
+- When witness statements are provided, you MUST analyze them and reference them explicitly
+- When prior history documents are provided, you MUST incorporate them into your analysis
 
 IMPORTANT BOUNDARIES:
 - You NEVER determine guilt or innocence
@@ -147,6 +188,36 @@ IMPORTANT BOUNDARIES:
 - You note concerns without making accusations
 
 Your analysis should feel like advice from a trusted HR mentor - thoughtful, nuanced, and genuinely helpful.`;
+
+    // Build dynamic JSON schema based on available evidence
+    let witnessAnalysisField = '';
+    let priorHistoryAnalysisField = '';
+    let witnessInstruction = '';
+    let priorHistoryInstruction = '';
+    
+    if (hasWitnesses) {
+      witnessAnalysisField = `,
+  "witnessAnalysis": [
+    "Analyze each witness statement provided above. For each witness, explain: What do they corroborate? What new details do they add? Do they contradict either party? Example: 'Witness [Name] confirms that ${nameA} was present at the location. Their account supports ${nameB}'s timeline but adds that there was a 5-minute gap before the altercation.'"
+  ]`;
+      witnessInstruction = `\n\nWITNESS ANALYSIS REQUIRED: ${witnessStatements.length} witness statement(s) have been provided above. You MUST:
+- Reference each witness by name
+- Explain what their statement corroborates or contradicts
+- Include their perspectives in the neutralSummary
+- Do NOT say "no witnesses" or suggest gathering witness statements if they are already provided`;
+    }
+    
+    if (hasPriorHistory) {
+      priorHistoryAnalysisField = `,
+  "priorHistoryAnalysis": [
+    "Analyze the prior history documents provided above. Explain how they relate to the current incident. Look for patterns, escalation, or context that affects your assessment. Example: 'A prior counseling record from 3 months ago shows ${nameA} received feedback about communication issues. This context suggests the current incident may be part of an ongoing pattern.'"
+  ]`;
+      priorHistoryInstruction = `\n\nPRIOR HISTORY ANALYSIS REQUIRED: ${priorHistory.length} prior history document(s) have been provided above. You MUST:
+- Reference each document and its type (warning, counseling record, prior complaint)
+- Explain how the history relates to the current incident
+- Identify any patterns of behavior or escalation
+- Include this context in the neutralSummary`;
+    }
 
     const userPrompt = `I need your expert analysis of a workplace incident. Please review both statements carefully and provide your professional assessment.
 
@@ -159,32 +230,32 @@ STATEMENT FROM ${nameA.toUpperCase()}:
 "${textA}"
 
 STATEMENT FROM ${nameB.toUpperCase()}:
-"${textB}"${witnessContext}${priorHistoryContext}
+"${textB}"${witnessContext}${priorHistoryContext}${evidenceInstruction}
 
-Please provide your analysis in JSON format. Remember to use "${nameA}" and "${nameB}" by name throughout - never use generic terms like "Party A" or "Party B".
+Please provide your analysis in JSON format. Remember to use "${nameA}" and "${nameB}" by name throughout - never use generic terms like "Party A" or "Party B".${witnessInstruction}${priorHistoryInstruction}
 
 {
   "timelineDifferences": [
-    "Describe specific timing discrepancies you've identified. Use their names. Example: '${nameA} places the conversation at around 10:30 AM, while ${nameB} recalls it happening closer to lunch, around 11:45 AM. This 75-minute gap is significant and worth clarifying.'"
+    "Describe specific timing discrepancies you've identified. Use their names."
   ],
   "agreementPoints": [
-    "Identify what both employees agree on - these are your foundation facts. Use their names. Example: 'Both ${nameA} and ${nameB} confirm that the interaction took place near the loading dock, and both acknowledge that voices were raised at some point.'"
+    "Identify what both employees agree on - these are your foundation facts. Use their names."
   ],
   "contradictions": [
-    "Describe key points where their accounts directly conflict. Present both versions WITH CONTEXT about why this matters. Use their names. Example: '${nameA} states that ${nameB} approached them first, while ${nameB} describes being called over by ${nameA}. Who initiated the interaction often sets the tone for what follows, making this an important point to clarify.'"
+    "Describe key points where their accounts directly conflict. Present both versions WITH CONTEXT about why this matters. Use their names."
   ],
   "emotionalLanguage": [
-    "Note emotional indicators in their language that reveal how they're feeling about this situation. Provide professional insight. Example: '${nameA} uses phrases like \"always does this\" and \"never listens\" - this pattern of absolute language suggests this may not be an isolated incident from their perspective, and there could be underlying frustration building over time.'"
+    "Note emotional indicators in their language that reveal how they're feeling about this situation. Provide professional insight."
   ],
   "missingDetails": [
-    "Identify gaps in the narrative that a thorough investigation should address. Be specific about WHY these details matter. Example: 'Neither statement mentions whether other team members witnessed the exchange. Given that this occurred during shift change, it's likely others were present - their perspectives could provide valuable context.'"
-  ],
-  "neutralSummary": "Write a 3-4 paragraph executive summary as if you're briefing a senior manager. Start with what we know happened (the common ground). Then describe where the accounts diverge and what that might indicate about the situation. Discuss any patterns or underlying dynamics you've observed. End with specific recommendations for what the supervisor should explore further. Use ${nameA} and ${nameB}'s names throughout. Write naturally, as a professional would speak.",
+    "Identify gaps in the narrative that still need investigation. If witnesses or prior history were provided, focus on what ADDITIONAL information is still needed beyond what was already provided."
+  ]${witnessAnalysisField}${priorHistoryAnalysisField},
+  "neutralSummary": "Write a 3-4 paragraph executive summary. IMPORTANT: If witness statements were provided, you MUST discuss what the witnesses observed. If prior history was provided, you MUST discuss how it provides context for this incident. Start with what we know happened (the common ground). Then describe where the accounts diverge. If witnesses were provided, discuss their perspectives. If prior history exists, explain how it relates to the current incident. End with specific recommendations. Use ${nameA} and ${nameB}'s names throughout.",
   "sideBySideComparison": [
     {
-      "topic": "A clear, specific aspect of the incident (e.g., 'Who initiated the conversation', 'Tone of the exchange', 'What was said about the deadline')",
-      "partyAVersion": "${nameA}'s perspective on this specific point, in your professional summary (not a direct quote)",
-      "partyBVersion": "${nameB}'s perspective on this specific point, in your professional summary (not a direct quote)", 
+      "topic": "A clear, specific aspect of the incident",
+      "partyAVersion": "${nameA}'s perspective on this specific point",
+      "partyBVersion": "${nameB}'s perspective on this specific point", 
       "status": "agreement|contradiction|partial|unclear"
     }
   ]
@@ -197,7 +268,8 @@ QUALITY STANDARDS:
 - The summary should read like a professional briefing, not a form response
 - Identify 4-6 comparison points that matter most for understanding this situation
 - If something seems significant, explain WHY it matters
-- Consider workplace dynamics, communication patterns, and what's left unsaid`;
+- If witness statements were provided above, you MUST reference them in your analysis - do NOT suggest gathering witnesses if statements are already included
+- If prior history was provided above, you MUST incorporate it into your analysis and summary`;
 
     console.log('Conflict Analysis: Starting comparison...');
     

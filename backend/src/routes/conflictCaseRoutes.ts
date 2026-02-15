@@ -574,6 +574,19 @@ router.patch('/:id', async (req: Request, res: Response, next) => {
             where: { id: emp.id },
             data: empUpdateData,
           });
+        } else {
+          // Create new employee - iOS provides the UUID, we preserve it
+          await prisma.conflictInvolvedEmployee.create({
+            data: {
+              id: emp.id,  // Use the UUID provided by iOS
+              caseId: id,
+              name: encrypt(emp.name || ''),
+              role: encrypt(emp.role || ''),
+              department: encrypt(emp.department || ''),
+              employeeFileNo: emp.employeeId ? encrypt(emp.employeeId) : null,
+              isComplainant: emp.isComplainant ?? false,
+            },
+          });
         }
       }
       changes.involvedEmployees = 'updated';
