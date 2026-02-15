@@ -1962,4 +1962,260 @@ router.delete('/:id/review-comments/:commentId', async (req: Request, res: Respo
   }
 });
 
+// ============================================================================
+// ANALYTICS ENDPOINTS
+// ============================================================================
+
+/**
+ * GET /api/conflict-cases/analytics
+ * Get comprehensive analytics data for conflict resolution cases
+ * 
+ * Query Parameters:
+ * - organizationId (required): Organization to get analytics for
+ * - startDate (optional): Start date for date range filter (ISO string)
+ * - endDate (optional): End date for date range filter (ISO string)
+ * - facilityId (optional): Filter by facility
+ */
+router.get('/analytics', async (req: Request, res: Response) => {
+  try {
+    const { organizationId, startDate, endDate, facilityId } = req.query;
+
+    if (!organizationId || typeof organizationId !== 'string') {
+      return res.status(400).json({
+        success: false,
+        error: 'Organization ID is required',
+      });
+    }
+
+    // Build date filter
+    const dateFilter: any = {};
+    if (startDate && typeof startDate === 'string') {
+      dateFilter.gte = new Date(startDate);
+    }
+    if (endDate && typeof endDate === 'string') {
+      dateFilter.lte = new Date(endDate);
+    }
+
+    // Build base where clause
+    const whereClause: any = {
+      organizationId: organizationId,
+    };
+    
+    if (facilityId && typeof facilityId === 'string') {
+      whereClause.facilityId = facilityId;
+    }
+    
+    if (Object.keys(dateFilter).length > 0) {
+      whereClause.createdAt = dateFilter;
+    }
+
+    // 1. Get total case counts by status
+    const statusCounts = await prisma.conflictCase.groupBy({
+      by: ['status'],
+      where: whereClause,
+      _count: { id: true },
+    });
+
+    // 2. Get total case counts by type
+    const typeCounts = await prisma.conflictCase.groupBy({
+      by: ['type'],
+      where: whereClause,
+      _count: { id: true },
+    });
+
+    // 3. Get closure reason distribution (only for closed cases)
+    const closedCasesWhere = { ...whereClause, status: 'CLOSED' as const };
+    const closureReasonCounts = await prisma.conflictCase.groupBy({
+      by: ['closureReason'],
+      where: closedCasesWhere,
+      _count: { id: true },
+    });
+
+    // 4. Get action type distribution
+    const actionTypeCounts = await prisma.conflictCase.groupBy({
+      by: ['selectedAction'],
+      where: {
+        ...whereClause,
+        selectedAction: { not: null },
+      },
+      _count: { id: true },
+    });
+
+    // 5. Calculate resolution time metrics (days from creation to closure)
+    const closedCases = await prisma.conflictCase.findMany({
+      where: closedCasesWhere,
+      select: {
+        createdAt: true,
+        closedAt: true,
+        updatedAt: true,
+      },
+    });
+
+    // Calculate average resolution time in days
+    let totalResolutionDays = 0;
+    let resolvedCount = 0;
+    let minResolutionDays = Infinity;
+    let maxResolutionDays = 0;
+
+    for (const caseItem of closedCases) {
+      const closeDate = caseItem.closedAt || caseItem.updatedAt;
+      const diffTime = closeDate.getTime() - caseItem.createdAt.getTime();
+      const diffDays = Math.ceil(diffTime / (1000 * 60 * 60 * 24));
+      
+      if (diffDays >= 0) {
+        totalResolutionDays += diffDays;
+        resolvedCount++;
+        minResolutionDays = Math.min(minResolutionDays, diffDays);
+        maxResolutionDays = Math.max(maxResolutionDays, diffDays);
+      }
+    }
+
+    const avgResolutionDays = resolvedCount > 0 ? Math.round(totalResolutionDays / resolvedCount * 10) / 10 : 0;
+
+    // 6. Get monthly trends (last 12 months)
+    const twelveMonthsAgo = new Date();
+    twelveMonthsAgo.setMonth(twelveMonthsAgo.getMonth() - 12);
+
+    const monthlyTrendCases = await prisma.conflictCase.findMany({
+      where: {
+        ...whereClause,
+        createdAt: { gte: twelveMonthsAgo },
+      },
+      select: {
+        id: true,
+        status: true,
+        createdAt: true,
+        closedAt: true,
+      },
+      orderBy: { createdAt: 'asc' },
+    });
+
+    // Group by month
+    const monthlyData: { [key: string]: { created: number; closed: number } } = {};
+    
+    for (const caseItem of monthlyTrendCases) {
+      const monthKey = `${caseItem.createdAt.getFullYear()}-${String(caseItem.createdAt.getMonth() + 1).padStart(2, '0')}`;
+      
+      if (!monthlyData[monthKey]) {
+        monthlyData[monthKey] = { created: 0, closed: 0 };
+      }
+      monthlyData[monthKey].created++;
+      
+      // Check if closed in same month
+      if (caseItem.closedAt) {
+        const closedMonthKey = `${caseItem.closedAt.getFullYear()}-${String(caseItem.closedAt.getMonth() + 1).padStart(2, '0')}`;
+        if (!monthlyData[closedMonthKey]) {
+          monthlyData[closedMonthKey] = { created: 0, closed: 0 };
+        }
+        monthlyData[closedMonthKey].closed++;
+      }
+    }
+
+    // Convert to sorted array
+    const monthlyTrends = Object.entries(monthlyData)
+      .map(([month, data]) => ({
+        month,
+        created: data.created,
+        closed: data.closed,
+      }))
+      .sort((a, b) => a.month.localeCompare(b.month));
+
+    // 7. Get overall totals
+    const totalCases = await prisma.conflictCase.count({ where: whereClause });
+    const activeCases = await prisma.conflictCase.count({
+      where: {
+        ...whereClause,
+        status: { in: ['DRAFT', 'IN_PROGRESS', 'PENDING_REVIEW', 'AWAITING_ACTION'] },
+      },
+    });
+    const closedCasesCount = await prisma.conflictCase.count({ where: closedCasesWhere });
+    const escalatedCases = await prisma.conflictCase.count({
+      where: { ...whereClause, status: 'ESCALATED' },
+    });
+
+    // 8. Get department breakdown (decrypt department names)
+    const departmentCases = await prisma.conflictCase.findMany({
+      where: whereClause,
+      select: {
+        department: true,
+        status: true,
+      },
+    });
+
+    const departmentStats: { [key: string]: { total: number; active: number; closed: number } } = {};
+    const activeStatuses = ['DRAFT', 'IN_PROGRESS', 'PENDING_REVIEW', 'AWAITING_ACTION', 'ESCALATED'];
+
+    for (const c of departmentCases) {
+      const deptName = c.department ? decrypt(c.department) : 'Unknown';
+      if (!departmentStats[deptName]) {
+        departmentStats[deptName] = { total: 0, active: 0, closed: 0 };
+      }
+      departmentStats[deptName].total++;
+      if (c.status === 'CLOSED') {
+        departmentStats[deptName].closed++;
+      } else if (activeStatuses.includes(c.status)) {
+        departmentStats[deptName].active++;
+      }
+    }
+
+    const departmentBreakdown = Object.entries(departmentStats)
+      .map(([department, stats]) => ({
+        department,
+        ...stats,
+      }))
+      .sort((a, b) => b.total - a.total);
+
+    // 9. Decrypt closure reasons for display
+    const closureReasonBreakdown = closureReasonCounts.map(item => ({
+      reason: item.closureReason ? decrypt(item.closureReason) : 'Not Specified',
+      count: item._count.id,
+    }));
+
+    // Build response
+    const analyticsData = {
+      summary: {
+        totalCases,
+        activeCases,
+        closedCases: closedCasesCount,
+        escalatedCases,
+        resolutionRate: totalCases > 0 ? Math.round((closedCasesCount / totalCases) * 100 * 10) / 10 : 0,
+      },
+      resolutionMetrics: {
+        averageDays: avgResolutionDays,
+        minDays: minResolutionDays === Infinity ? 0 : minResolutionDays,
+        maxDays: maxResolutionDays,
+        totalResolved: resolvedCount,
+      },
+      statusBreakdown: statusCounts.map(item => ({
+        status: item.status,
+        count: item._count.id,
+      })),
+      typeBreakdown: typeCounts.map(item => ({
+        type: item.type,
+        count: item._count.id,
+      })),
+      closureReasonBreakdown,
+      actionTypeBreakdown: actionTypeCounts.map(item => ({
+        actionType: item.selectedAction,
+        count: item._count.id,
+      })),
+      monthlyTrends,
+      departmentBreakdown,
+      generatedAt: new Date().toISOString(),
+    };
+
+    res.json({
+      success: true,
+      data: analyticsData,
+    });
+  } catch (error: any) {
+    console.error('Error fetching analytics:', error);
+    res.status(500).json({
+      success: false,
+      error: 'Failed to fetch analytics data',
+      details: error.message,
+    });
+  }
+});
+
 export default router;
