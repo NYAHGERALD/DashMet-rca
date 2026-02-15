@@ -79,6 +79,10 @@ function decryptCaseData(caseData: any): any {
   if (decrypted.policyMatchingResult) decrypted.policyMatchingResult = decrypt(decrypted.policyMatchingResult);
   if (decrypted.supervisorNotes) decrypted.supervisorNotes = decrypt(decrypted.supervisorNotes);
   
+  // Decrypt case closure fields
+  if (decrypted.closureReason) decrypted.closureReason = decrypt(decrypted.closureReason);
+  if (decrypted.closureSummary) decrypted.closureSummary = decrypt(decrypted.closureSummary);
+  
   // Legacy field names (for backwards compatibility)
   if (decrypted.description) decrypted.description = decrypt(decrypted.description);
   if (decrypted.aiComparisonResultJson) decrypted.aiComparisonResultJson = decrypt(decrypted.aiComparisonResultJson);
@@ -684,6 +688,173 @@ router.patch('/:id', async (req: Request, res: Response, next) => {
     res.status(500).json({
       success: false,
       error: 'Failed to update conflict case',
+      details: error.message,
+    });
+  }
+});
+
+// ============================================================================
+// POST /api/conflict-cases/:id/close
+// Close and lock a case - Enterprise-grade case finalization
+// ============================================================================
+router.post('/:id/close', async (req: Request, res: Response, next) => {
+  // Skip to next route if ID is not a valid UUID
+  if (!isValidUUID(req.params.id)) {
+    return next();
+  }
+  
+  try {
+    const { id } = req.params;
+    const {
+      closureReason,        // Required: The reason for closure (e.g., "RESOLVED", "NO_FURTHER_ACTION", etc.)
+      closureSummary,       // Optional: Final summary notes for the case
+      supervisorNotes,      // Optional: Additional supervisor notes
+      closedBy,            // Required: User ID who is closing the case
+      includeAuditTrail,    // Optional: Whether to include audit trail in closure record
+      includeAllDocuments,  // Optional: Whether to archive all documents
+    } = req.body;
+
+    // Validation
+    if (!closureReason) {
+      return res.status(400).json({
+        success: false,
+        error: 'Closure reason is required',
+      });
+    }
+
+    if (!closedBy) {
+      return res.status(400).json({
+        success: false,
+        error: 'User ID (closedBy) is required to close a case',
+      });
+    }
+
+    // Check if case exists
+    const existingCase = await prisma.conflictCase.findUnique({
+      where: { id },
+      include: {
+        involvedEmployees: true,
+        documents: true,
+      },
+    });
+
+    if (!existingCase) {
+      return res.status(404).json({
+        success: false,
+        error: 'Case not found',
+      });
+    }
+
+    // Check if case is already closed/locked
+    if (existingCase.isLocked) {
+      return res.status(400).json({
+        success: false,
+        error: 'Case is already locked and cannot be modified',
+      });
+    }
+
+    if (existingCase.status === 'CLOSED') {
+      return res.status(400).json({
+        success: false,
+        error: 'Case is already closed',
+      });
+    }
+
+    // Verify the user exists
+    const closingUser = await prisma.user.findUnique({
+      where: { id: closedBy },
+      select: { id: true, firstName: true, lastName: true, email: true },
+    });
+
+    if (!closingUser) {
+      return res.status(404).json({
+        success: false,
+        error: 'User not found',
+      });
+    }
+
+    const closedAt = new Date();
+    
+    // Update case with closure details
+    const closedCase = await prisma.conflictCase.update({
+      where: { id },
+      data: {
+        status: 'CLOSED',
+        closureReason: encrypt(closureReason),
+        closureSummary: closureSummary ? encrypt(closureSummary) : null,
+        supervisorNotes: supervisorNotes ? encrypt(supervisorNotes) : (existingCase.supervisorNotes || null),
+        closedBy,
+        closedAt,
+        isLocked: true, // Permanently lock the case
+      },
+      include: {
+        createdByUser: {
+          select: { id: true, firstName: true, lastName: true, email: true },
+        },
+        closedByUser: {
+          select: { id: true, firstName: true, lastName: true, email: true },
+        },
+        organization: {
+          select: { id: true, name: true },
+        },
+        facility: {
+          select: { id: true, name: true },
+        },
+        involvedEmployees: true,
+        documents: {
+          orderBy: { createdAt: 'desc' },
+        },
+        auditLog: {
+          orderBy: { timestamp: 'desc' },
+        },
+      },
+    });
+
+    // Create audit trail entry for case closure
+    const userName = `${closingUser.firstName || ''} ${closingUser.lastName || ''}`.trim() || 'Unknown User';
+    await prisma.conflictCaseAuditEntry.create({
+      data: {
+        caseId: id,
+        action: 'CASE_CLOSED',
+        details: encrypt(JSON.stringify({
+          closureReason,
+          closureSummary: closureSummary || null,
+          includedAuditTrail: includeAuditTrail || false,
+          includedAllDocuments: includeAllDocuments || false,
+          documentCount: existingCase.documents.length,
+          involvedEmployeesCount: existingCase.involvedEmployees.length,
+        })),
+        userId: closedBy,
+        userName: encrypt(userName),
+      },
+    });
+
+    // Prepare response with closure details
+    const decryptedCase = decryptCaseData(closedCase);
+    
+    res.json({
+      success: true,
+      message: 'Case closed and locked successfully',
+      data: {
+        ...decryptedCase,
+        closureDetails: {
+          closedAt: closedAt.toISOString(),
+          closedBy: {
+            id: closingUser.id,
+            name: userName,
+            email: closingUser.email,
+          },
+          closureReason,
+          closureSummary: closureSummary || null,
+          isLocked: true,
+        },
+      },
+    });
+  } catch (error: any) {
+    console.error('Error closing conflict case:', error);
+    res.status(500).json({
+      success: false,
+      error: 'Failed to close conflict case',
       details: error.message,
     });
   }

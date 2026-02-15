@@ -1341,6 +1341,7 @@ model User {
   
   // Conflict Resolution Relations
   ConflictCasesCreated                                                ConflictCase[]                       @relation("CaseCreator")
+  ConflictCasesClosed                                                 ConflictCase[]                       @relation("CaseClosure")
   WorkplacePoliciesCreated                                            WorkplacePolicyDoc[]                 @relation("PolicyCreator")
 
   @@index([email])
@@ -2406,6 +2407,16 @@ enum ConflictCaseStatus {
   ESCALATED
 }
 
+// Case Closure Reason Enum
+enum CaseClosureReason {
+  RESOLVED
+  NO_FURTHER_ACTION
+  EMPLOYEE_SEPARATION
+  COMPLAINT_WITHDRAWN
+  INSUFFICIENT_EVIDENCE
+  OTHER
+}
+
 // Document Type Enum
 enum ConflictDocumentType {
   COMPLAINT_A
@@ -2460,6 +2471,13 @@ model ConflictCase {
   
   // Supervisor Notes (Encrypted)
   supervisorNotes       String?                     @db.Text
+  
+  // Case Closure Details
+  closureReason         String?                     // Encrypted - reason for closing
+  closureSummary        String?                     @db.Text // Encrypted - final closure summary
+  closedBy              String?                     // User ID who closed the case
+  closedByUser          User?                       @relation("CaseClosure", fields: [closedBy], references: [id])
+  isLocked              Boolean                     @default(false) // Prevents further edits
   
   // Workplace Policy Reference
   activePolicyId        String?
