@@ -516,6 +516,7 @@ router.patch('/:id', async (req: Request, res: Response, next) => {
       aiRecommendationsJson,
       recommendationResultJson, // Full recommendation result for UI restoration
       selectedActionType,
+      selectedTargetEmployeeIdsJson, // Target employee IDs for the selected action
       generatedActionDocJson,
       fullGeneratedDocumentResultJson, // Full generated document result for complete UI display
       policyMatchesJson,
@@ -615,6 +616,10 @@ router.patch('/:id', async (req: Request, res: Response, next) => {
     if (fullGeneratedDocumentResultJson !== undefined) {
       updateData.fullGeneratedDocumentResult = encrypt(JSON.stringify(fullGeneratedDocumentResultJson));
       changes.fullGeneratedDocumentResult = 'updated';
+    }
+    if (selectedTargetEmployeeIdsJson !== undefined) {
+      updateData.selectedTargetEmployeeIds = JSON.stringify(selectedTargetEmployeeIdsJson);
+      changes.selectedTargetEmployeeIds = 'updated';
     }
     if (policyMatchesJson !== undefined) {
       updateData.policyMatches = encrypt(JSON.stringify(policyMatchesJson));
