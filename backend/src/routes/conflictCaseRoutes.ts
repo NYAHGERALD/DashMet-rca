@@ -482,9 +482,12 @@ router.get('/:id', async (req: Request, res: Response, next) => {
       });
     }
 
+    const decryptedCase = decryptCaseData(conflictCase);
+    console.log('🎯 Returning case - selectedTargetEmployeeIds:', decryptedCase.selectedTargetEmployeeIds);
+    
     res.json({
       success: true,
-      data: decryptCaseData(conflictCase),
+      data: decryptedCase,
     });
   } catch (error: any) {
     console.error('Error fetching conflict case:', error);
@@ -618,7 +621,9 @@ router.patch('/:id', async (req: Request, res: Response, next) => {
       changes.fullGeneratedDocumentResult = 'updated';
     }
     if (selectedTargetEmployeeIdsJson !== undefined) {
+      console.log('🎯 Saving selectedTargetEmployeeIdsJson:', selectedTargetEmployeeIdsJson);
       updateData.selectedTargetEmployeeIds = JSON.stringify(selectedTargetEmployeeIdsJson);
+      console.log('🎯 Saved as:', updateData.selectedTargetEmployeeIds);
       changes.selectedTargetEmployeeIds = 'updated';
     }
     if (policyMatchesJson !== undefined) {
