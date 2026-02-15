@@ -49,6 +49,7 @@ import policyMatchingRoutes from './policyMatchingRoutes';
 import decisionSupportRoutes from './decisionSupportRoutes';
 import actionGenerationRoutes from './actionGenerationRoutes';
 import conflictCaseRoutes from './conflictCaseRoutes';
+import dashboardRoutes from './dashboardRoutes';
 import { authenticate } from '../middleware/auth';
 import { getIncidentTranscripts } from '../controllers/transcriptController';
 
@@ -121,6 +122,10 @@ router.use('/action-generation', actionGenerationRoutes);
 // Conflict Case CRUD routes - PUBLIC for iOS app
 // Full CRUD for conflict cases with encryption
 router.use('/conflict-cases', conflictCaseRoutes);
+
+// Dashboard routes - PUBLIC for iOS app
+// Aggregated dashboard statistics and activity feed
+router.use('/mobile/dashboard', dashboardRoutes);
 
 // Phase 1: Legacy JWT Authentication routes (will be deprecated)
 router.use('/auth', authRoutes);
