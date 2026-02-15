@@ -250,28 +250,59 @@ QUALITY STANDARDS:
     try {
       const result = JSON.parse(content);
       
-      // All employee names for default fallback
-      const allEmployeeNames = [complaintA.employeeName, complaintB.employeeName];
+      // Employee names for inference
+      const employeeNameA = complaintA.employeeName;
+      const employeeNameB = complaintB.employeeName;
+
+      // Helper to infer target employee from text if AI didn't specify
+      const inferTargetFromText = (title: string, description: string): string[] => {
+        const text = `${title} ${description}`.toLowerCase();
+        const targets: string[] = [];
+        
+        // Check if employee A's name appears in title/description
+        if (employeeNameA && text.includes(employeeNameA.toLowerCase())) {
+          targets.push(employeeNameA);
+        }
+        
+        // Check if employee B's name appears in title/description
+        if (employeeNameB && text.includes(employeeNameB.toLowerCase())) {
+          targets.push(employeeNameB);
+        }
+        
+        return targets;
+      };
 
       // Validate and clean up recommendations
       const recommendations: RecommendationOption[] = (result.recommendations || [])
         .slice(0, 4)
-        .map((r: any, index: number) => ({
-          id: r.id || `option_${String.fromCharCode(97 + index)}`,
-          type: r.type || 'coaching',
-          title: r.title || '',
-          description: r.description || '',
-          rationale: r.rationale || '',
-          riskLevel: r.riskLevel || 'moderate',
-          riskExplanation: r.riskExplanation || '',
-          nextSteps: r.nextSteps || [],
-          timeframe: r.timeframe || '',
-          confidence: Math.min(1, Math.max(0, r.confidence || 0.7)),
-          // Include target employees - default to all if not specified
-          targetEmployeeNames: Array.isArray(r.targetEmployeeNames) && r.targetEmployeeNames.length > 0 
-            ? r.targetEmployeeNames 
-            : allEmployeeNames
-        }));
+        .map((r: any, index: number) => {
+          // If AI provided targetEmployeeNames, use them
+          let targetEmployeeNames: string[] = [];
+          if (Array.isArray(r.targetEmployeeNames) && r.targetEmployeeNames.length > 0) {
+            targetEmployeeNames = r.targetEmployeeNames;
+          } else {
+            // Try to infer from recommendation title/description
+            targetEmployeeNames = inferTargetFromText(r.title || '', r.description || '');
+            if (targetEmployeeNames.length > 0) {
+              console.log(`Inferred target employees from text: ${targetEmployeeNames.join(', ')}`);
+            }
+          }
+          
+          return {
+            id: r.id || `option_${String.fromCharCode(97 + index)}`,
+            type: r.type || 'coaching',
+            title: r.title || '',
+            description: r.description || '',
+            rationale: r.rationale || '',
+            riskLevel: r.riskLevel || 'moderate',
+            riskExplanation: r.riskExplanation || '',
+            nextSteps: r.nextSteps || [],
+            timeframe: r.timeframe || '',
+            confidence: Math.min(1, Math.max(0, r.confidence || 0.7)),
+            // Include target employees - inferred from title/description if not specified
+            targetEmployeeNames
+          };
+        });
 
       return res.json({
         success: true,
