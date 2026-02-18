@@ -22,7 +22,7 @@ const router = Router();
 // ============================================================================
 router.post('/check-phone', async (req: Request, res: Response) => {
   try {
-    const { phone } = req.body;
+    const { phone, countryCode } = req.body;
 
     if (!phone) {
       return res.status(400).json({
@@ -31,22 +31,48 @@ router.post('/check-phone', async (req: Request, res: Response) => {
       });
     }
 
-    // Normalize phone number (remove spaces)
-    const normalizedPhone = phone.replace(/\s+/g, '').trim();
+    // Normalize phone: remove spaces, dashes, parentheses
+    let normalizedPhone = phone.replace(/[\s\-\(\)]/g, '').trim();
     
-    // Create phone variants to search for (with/without country code)
-    const phoneVariants = [
-      normalizedPhone,
-      normalizedPhone.replace(/^\+1/, ''), // Remove +1
-      normalizedPhone.replace(/^\+/, ''),  // Remove +
-      `+1${normalizedPhone.replace(/^\+1?/, '')}`, // Add +1 if missing
-      `+${normalizedPhone.replace(/^\+/, '')}`, // Add + if missing
-    ];
+    // Build phone variants for matching
+    // Primary: exact match with E.164 format
+    // Fallback: try with/without + prefix for legacy data
+    const phoneVariants: string[] = [normalizedPhone];
+    
+    // If phone doesn't start with +, try adding it
+    if (!normalizedPhone.startsWith('+')) {
+      phoneVariants.push(`+${normalizedPhone}`);
+    }
+    
+    // If countryCode provided and phone is local (no country code), try with country code
+    // This handles case where iOS sends local number + country code separately
+    if (countryCode && !normalizedPhone.startsWith('+')) {
+      const cleanCountryCode = countryCode.replace(/[^0-9+]/g, '');
+      phoneVariants.push(`${cleanCountryCode}${normalizedPhone}`);
+      if (!cleanCountryCode.startsWith('+')) {
+        phoneVariants.push(`+${cleanCountryCode}${normalizedPhone}`);
+      }
+    }
+    
+    // LEGACY FIX: For US numbers (10 digits), also try with +1 prefix
+    // This handles existing US users whose phones were stored without +1
+    const digitsOnly = normalizedPhone.replace(/^\+/, '');
+    if (digitsOnly.length === 10 && /^[2-9]/.test(digitsOnly)) {
+      phoneVariants.push(`+1${digitsOnly}`);
+      phoneVariants.push(digitsOnly);
+    }
+    // If it's 11 digits starting with 1, also try without the 1
+    if (digitsOnly.length === 11 && digitsOnly.startsWith('1')) {
+      phoneVariants.push(`+${digitsOnly}`);
+      phoneVariants.push(`+${digitsOnly.substring(1)}`);
+    }
+    
+    console.log(`📱 check-phone: searching for variants:`, [...new Set(phoneVariants)]);
 
     // Check if user exists with any of these phone number variants
     const user = await prisma.user.findFirst({
       where: {
-        phone: { in: phoneVariants },
+        phone: { in: [...new Set(phoneVariants)] }, // Remove duplicates
       },
       select: {
         id: true,
@@ -469,9 +495,9 @@ router.post('/register', async (req: Request, res: Response) => {
 // ============================================================================
 router.post('/link-firebase', async (req: Request, res: Response) => {
   try {
-    const { phone, firebaseUid } = req.body;
+    const { phone, firebaseUid, countryCode } = req.body;
 
-    console.log(`📱 link-firebase called with phone: ${phone}, firebaseUid: ${firebaseUid}`);
+    console.log(`📱 link-firebase called with phone: ${phone}, firebaseUid: ${firebaseUid}, countryCode: ${countryCode}`);
 
     if (!phone || !firebaseUid) {
       return res.status(400).json({
@@ -480,23 +506,42 @@ router.post('/link-firebase', async (req: Request, res: Response) => {
       });
     }
 
-    const normalizedPhone = phone.replace(/\s+/g, '').trim();
+    // Normalize phone: remove spaces, dashes, parentheses
+    let normalizedPhone = phone.replace(/[\s\-\(\)]/g, '').trim();
     
-    // Create phone variants to search for (with/without country code)
-    const phoneVariants = [
-      normalizedPhone,
-      normalizedPhone.replace(/^\+1/, ''), // Remove +1
-      normalizedPhone.replace(/^\+/, ''),  // Remove +
-      `+1${normalizedPhone.replace(/^\+1?/, '')}`, // Add +1 if missing
-      `+${normalizedPhone.replace(/^\+/, '')}`, // Add + if missing
-    ];
+    // Build phone variants for matching (same logic as check-phone)
+    const phoneVariants: string[] = [normalizedPhone];
     
-    console.log(`📱 Searching for phone variants:`, phoneVariants);
+    if (!normalizedPhone.startsWith('+')) {
+      phoneVariants.push(`+${normalizedPhone}`);
+    }
+    
+    if (countryCode && !normalizedPhone.startsWith('+')) {
+      const cleanCountryCode = countryCode.replace(/[^0-9+]/g, '');
+      phoneVariants.push(`${cleanCountryCode}${normalizedPhone}`);
+      if (!cleanCountryCode.startsWith('+')) {
+        phoneVariants.push(`+${cleanCountryCode}${normalizedPhone}`);
+      }
+    }
+    
+    // LEGACY FIX: For US numbers (10 digits), also try with +1 prefix
+    const digitsOnly = normalizedPhone.replace(/^\+/, '');
+    if (digitsOnly.length === 10 && /^[2-9]/.test(digitsOnly)) {
+      phoneVariants.push(`+1${digitsOnly}`);
+      phoneVariants.push(digitsOnly);
+    }
+    if (digitsOnly.length === 11 && digitsOnly.startsWith('1')) {
+      phoneVariants.push(`+${digitsOnly}`);
+      phoneVariants.push(`+${digitsOnly.substring(1)}`);
+    }
+    
+    const uniqueVariants = [...new Set(phoneVariants)];
+    console.log(`📱 Searching for phone variants:`, uniqueVariants);
 
     // Find user by phone (try multiple formats)
     const user = await prisma.user.findFirst({
       where: { 
-        phone: { in: phoneVariants }
+        phone: { in: uniqueVariants }
       },
     });
     
