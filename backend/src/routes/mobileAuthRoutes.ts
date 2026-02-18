@@ -12,6 +12,7 @@
 import { Router, Request, Response } from 'express';
 import { prisma } from '../utils/prisma';
 import { v4 as uuidv4 } from 'uuid';
+import { registerDeviceToken, unregisterDeviceToken } from '../services/pushNotificationService';
 
 const router = Router();
 
@@ -608,6 +609,105 @@ router.post('/link-firebase', async (req: Request, res: Response) => {
     return res.status(500).json({
       success: false,
       error: 'Failed to link Firebase UID',
+    });
+  }
+});
+
+// ============================================================================
+// POST /api/mobile/device-token
+// Register a device token for push notifications
+// Body: { userId, token, platform?, deviceId?, appVersion? }
+// ============================================================================
+router.post('/device-token', async (req: Request, res: Response) => {
+  try {
+    const { userId, token, platform, deviceId, appVersion } = req.body;
+
+    if (!userId || !token) {
+      return res.status(400).json({
+        success: false,
+        error: 'userId and token are required',
+      });
+    }
+
+    // Verify user exists
+    const user = await prisma.user.findUnique({
+      where: { id: userId },
+      select: { id: true },
+    });
+
+    if (!user) {
+      return res.status(404).json({
+        success: false,
+        error: 'User not found',
+      });
+    }
+
+    // Register the device token
+    const success = await registerDeviceToken(
+      userId,
+      token,
+      platform || 'IOS',
+      deviceId,
+      appVersion
+    );
+
+    if (success) {
+      console.log(`✅ Device token registered for user ${userId}`);
+      return res.json({
+        success: true,
+        message: 'Device token registered successfully',
+      });
+    } else {
+      return res.status(500).json({
+        success: false,
+        error: 'Failed to register device token',
+      });
+    }
+  } catch (error: any) {
+    console.error('Device token registration error:', error);
+    return res.status(500).json({
+      success: false,
+      error: 'Failed to register device token',
+    });
+  }
+});
+
+// ============================================================================
+// DELETE /api/mobile/device-token
+// Unregister a device token (e.g., on logout)
+// Body: { userId, token }
+// ============================================================================
+router.delete('/device-token', async (req: Request, res: Response) => {
+  try {
+    const { userId, token } = req.body;
+
+    if (!userId || !token) {
+      return res.status(400).json({
+        success: false,
+        error: 'userId and token are required',
+      });
+    }
+
+    // Unregister the device token
+    const success = await unregisterDeviceToken(userId, token);
+
+    if (success) {
+      console.log(`✅ Device token unregistered for user ${userId}`);
+      return res.json({
+        success: true,
+        message: 'Device token unregistered successfully',
+      });
+    } else {
+      return res.status(500).json({
+        success: false,
+        error: 'Failed to unregister device token',
+      });
+    }
+  } catch (error: any) {
+    console.error('Device token unregistration error:', error);
+    return res.status(500).json({
+      success: false,
+      error: 'Failed to unregister device token',
     });
   }
 });

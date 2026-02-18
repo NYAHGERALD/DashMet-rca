@@ -27,6 +27,7 @@
 import { Router, Request, Response } from 'express';
 import { PrismaClient } from '@prisma/client';
 import OpenAI from 'openai';
+import { sendTaskActivityNotification } from '../services/pushNotificationService';
 
 const router = Router();
 const prisma = new PrismaClient();
@@ -60,6 +61,7 @@ async function createActivityLog({
   metadata,
 }: ActivityLogParams): Promise<void> {
   try {
+    // Create the activity log
     await prisma.taskActivityLog.create({
       data: {
         taskId,
@@ -71,6 +73,41 @@ async function createActivityLog({
         metadata: metadata || null,
       },
     });
+
+    // Send push notifications asynchronously (don't await - fire and forget)
+    // This ensures the main operation is not blocked by notification delivery
+    (async () => {
+      try {
+        // Get task title and user info for the notification
+        const [task, actor] = await Promise.all([
+          prisma.task.findUnique({
+            where: { id: taskId },
+            select: { title: true },
+          }),
+          prisma.user.findUnique({
+            where: { id: userId },
+            select: { firstName: true, lastName: true },
+          }),
+        ]);
+
+        if (task && actor) {
+          await sendTaskActivityNotification({
+            taskId,
+            taskTitle: task.title,
+            action,
+            actorName: `${actor.firstName} ${actor.lastName}`,
+            actorId: userId,
+            field: field || undefined,
+            previousValue: previousValue || undefined,
+            newValue: newValue || undefined,
+            metadata: metadata || undefined,
+          });
+        }
+      } catch (notifError) {
+        console.error('Failed to send push notification:', notifError);
+        // Don't throw - notification failure should not affect the main operation
+      }
+    })();
   } catch (error) {
     console.error('Failed to create activity log:', error);
     // Don't throw - activity logging should not break the main operation

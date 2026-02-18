@@ -274,6 +274,11 @@ function ActionItemDetailContent() {
   const [showDeleteConfirm, setShowDeleteConfirm] = useState(false);
   const [evidenceToDelete, setEvidenceToDelete] = useState<string | null>(null);
 
+  // Remove assignee confirmation state
+  const [showRemoveAssigneeConfirm, setShowRemoveAssigneeConfirm] = useState(false);
+  const [assigneeToRemove, setAssigneeToRemove] = useState<{ userId: string; firstName: string; lastName: string; email: string } | null>(null);
+  const [removingAssignee, setRemovingAssignee] = useState(false);
+
   // Edit mode state
   const [isEditing, setIsEditing] = useState(false);
   const [editTitle, setEditTitle] = useState('');
@@ -701,12 +706,17 @@ function ActionItemDetailContent() {
 
   const removeAssignee = async (userId: string) => {
     if (!task || !user) return;
+    setRemovingAssignee(true);
     try {
       await api.delete(`/mobile/tasks/${task.id}/assignees/${userId}?removedBy=${user.id}`);
       await fetchTask();
       fetchActivityLogs(); // Refresh activity logs
+      setShowRemoveAssigneeConfirm(false);
+      setAssigneeToRemove(null);
     } catch (err) {
       console.error('Error removing assignee:', err);
+    } finally {
+      setRemovingAssignee(false);
     }
   };
 
@@ -1702,6 +1712,37 @@ function ActionItemDetailContent() {
                   </div>
                 </div>
               )}
+
+              {/* Remove Assignee Confirmation Dialog */}
+              {showRemoveAssigneeConfirm && assigneeToRemove && (
+                <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50" onClick={() => { setShowRemoveAssigneeConfirm(false); setAssigneeToRemove(null); }}>
+                  <div className="bg-white dark:bg-gray-800 rounded-xl p-6 max-w-md mx-4 shadow-xl" onClick={e => e.stopPropagation()}>
+                    <h3 className="text-lg font-semibold text-gray-900 dark:text-white mb-2">Remove User</h3>
+                    <p className="text-gray-600 dark:text-gray-400 mb-2">
+                      Are you sure you want to remove <strong>{assigneeToRemove.firstName} {assigneeToRemove.lastName}</strong> from this action item?
+                    </p>
+                    <p className="text-gray-500 dark:text-gray-500 text-sm mb-4">
+                      They will no longer have access to this action item. You can always re-add them at any time.
+                    </p>
+                    <div className="flex justify-end gap-3">
+                      <button
+                        onClick={() => { setShowRemoveAssigneeConfirm(false); setAssigneeToRemove(null); }}
+                        className="px-4 py-2 text-sm text-gray-600 dark:text-gray-400 hover:bg-gray-100 dark:hover:bg-gray-700 rounded-lg"
+                      >
+                        Cancel
+                      </button>
+                      <button
+                        onClick={() => removeAssignee(assigneeToRemove.userId)}
+                        disabled={removingAssignee}
+                        className="px-4 py-2 text-sm bg-red-500 hover:bg-red-600 text-white rounded-lg disabled:opacity-50 inline-flex items-center gap-2"
+                      >
+                        {removingAssignee ? <Loader2 className="w-4 h-4 animate-spin" /> : null}
+                        Confirm Remove
+                      </button>
+                    </div>
+                  </div>
+                </div>
+              )}
             </div>
           </div>
 
@@ -1714,14 +1755,16 @@ function ActionItemDetailContent() {
                   <Users className="w-5 h-5 text-blue-500" />
                   <h3 className="font-semibold text-gray-900 dark:text-white">Responsible Parties</h3>
                 </div>
-                <button
-                  onClick={() => setShowAddAssignee(true)}
-                  disabled={task.isLocked === true}
-                  className={`inline-flex items-center gap-1 text-sm font-medium ${task.isLocked === true ? 'text-gray-400 cursor-not-allowed' : 'text-purple-600 hover:text-purple-700'}`}
-                >
-                  <Plus className="w-4 h-4" />
-                  Add
-                </button>
+                {user?.id === task.owner.id && (
+                  <button
+                    onClick={() => setShowAddAssignee(true)}
+                    disabled={task.isLocked === true}
+                    className={`inline-flex items-center gap-1 text-sm font-medium ${task.isLocked === true ? 'text-gray-400 cursor-not-allowed' : 'text-purple-600 hover:text-purple-700'}`}
+                  >
+                    <Plus className="w-4 h-4" />
+                    Add
+                  </button>
+                )}
               </div>
 
               {task.assignees.length > 0 ? (
@@ -1749,9 +1792,17 @@ function ActionItemDetailContent() {
                           <p className="text-xs text-gray-500">{assignee.user.email}</p>
                         </div>
                       </div>
-                      {task.isLocked !== true && (
+                      {task.isLocked !== true && user?.id === task.owner.id && (
                         <button
-                          onClick={() => removeAssignee(assignee.userId)}
+                          onClick={() => {
+                            setAssigneeToRemove({
+                              userId: assignee.userId,
+                              firstName: assignee.user.firstName,
+                              lastName: assignee.user.lastName,
+                              email: assignee.user.email
+                            });
+                            setShowRemoveAssigneeConfirm(true);
+                          }}
                           className="p-1 hover:bg-gray-200 dark:hover:bg-gray-700 rounded"
                         >
                           <X className="w-4 h-4 text-gray-400 hover:text-red-500" />
@@ -1886,6 +1937,14 @@ function ActionItemDetailContent() {
                               <div className="bg-red-50 dark:bg-red-900/20 text-red-700 dark:text-red-300 px-3 py-2 rounded-lg line-through">
                                 {log.previousValue.substring(0, 200)}{log.previousValue.length > 200 ? '...' : ''}
                               </div>
+                              {log.newValue && (
+                                <>
+                                  <div className="text-gray-400 mb-1.5 mt-3 text-xs font-medium">New value:</div>
+                                  <div className="bg-green-50 dark:bg-green-900/20 text-green-700 dark:text-green-300 px-3 py-2 rounded-lg">
+                                    {log.newValue.substring(0, 200)}{log.newValue.length > 200 ? '...' : ''}
+                                  </div>
+                                </>
+                              )}
                             </div>
                           )}
                         </div>
