@@ -20,6 +20,7 @@
  * - DELETE /api/mobile/tasks/:taskId/assignees/:userId - Remove an assignee
  * - PUT    /api/mobile/tasks/:taskId/assignees  - Replace all assignees
  * - GET    /api/mobile/tasks/:taskId/assignees  - Get all assignees for a task
+ * - GET    /api/mobile/tasks/:taskId/activity-logs - Get activity logs for a task
  */
 
 import { Router, Request, Response } from 'express';
@@ -33,6 +34,47 @@ const prisma = new PrismaClient();
 const openai = new OpenAI({
   apiKey: process.env.OPENAI_API_KEY,
 });
+
+// ============================================================================
+// ACTIVITY LOG HELPER
+// ============================================================================
+
+interface ActivityLogParams {
+  taskId: string;
+  userId: string;
+  action: string;
+  field?: string;
+  previousValue?: string | null;
+  newValue?: string | null;
+  metadata?: Record<string, any>;
+}
+
+async function createActivityLog({
+  taskId,
+  userId,
+  action,
+  field,
+  previousValue,
+  newValue,
+  metadata,
+}: ActivityLogParams): Promise<void> {
+  try {
+    await prisma.taskActivityLog.create({
+      data: {
+        taskId,
+        userId,
+        action,
+        field: field || null,
+        previousValue: previousValue || null,
+        newValue: newValue || null,
+        metadata: metadata || null,
+      },
+    });
+  } catch (error) {
+    console.error('Failed to create activity log:', error);
+    // Don't throw - activity logging should not break the main operation
+  }
+}
 
 // Include relations for tasks
 const taskInclude = {
@@ -101,6 +143,13 @@ const taskInclude = {
       },
     },
     orderBy: { createdAt: 'desc' as const },
+  },
+  meeting: {
+    select: {
+      id: true,
+      title: true,
+      meetingType: true,
+    },
   },
   _count: {
     select: {
@@ -259,12 +308,17 @@ router.get('/', async (req: Request, res: Response) => {
     if (filter === 'owned') {
       whereClause.ownerId = userId as string;
     } else if (filter === 'assigned') {
-      whereClause.assigneeId = userId as string;
+      // Check both legacy assigneeId and new assignees relation
+      whereClause.OR = [
+        { assigneeId: userId as string },
+        { assignees: { some: { userId: userId as string } } },
+      ];
     } else {
-      // 'all' - tasks where user is owner OR assignee
+      // 'all' - tasks where user is owner OR assignee (legacy or new)
       whereClause.OR = [
         { ownerId: userId as string },
         { assigneeId: userId as string },
+        { assignees: { some: { userId: userId as string } } },
       ];
     }
 
@@ -380,12 +434,12 @@ router.get('/:id', async (req: Request, res: Response) => {
 // ============================================================================
 // PATCH /api/mobile/tasks/:id
 // Update a task (status, assignment, details, progress)
-// Expects: { title?, description?, status?, priority?, dueDate?, assigneeId?, progress? }
+// Expects: { title?, description?, status?, priority?, dueDate?, assigneeId?, progress?, userId? (for logging) }
 // ============================================================================
 router.patch('/:id', async (req: Request, res: Response) => {
   try {
     const { id } = req.params;
-    const { title, description, status, priority, dueDate, assigneeId, progress } = req.body;
+    const { title, description, status, priority, dueDate, assigneeId, progress, userId } = req.body;
 
     // Check task exists
     const existingTask = await prisma.task.findUnique({
@@ -418,26 +472,63 @@ router.patch('/:id', async (req: Request, res: Response) => {
     
     if (title !== undefined) updateData.title = title.trim();
     if (description !== undefined) updateData.description = description?.trim() || null;
+    
+    // Handle bidirectional sync between status and progress
+    // Status update triggers progress adjustment
     if (status !== undefined) {
       updateData.status = status;
-      // Set completedAt when task is completed
       if (status === 'COMPLETED') {
         updateData.completedAt = new Date();
-        updateData.progress = 100; // Auto-set progress to 100%
-      } else if (existingTask.status === 'COMPLETED' && status !== 'COMPLETED') {
-        // If changing from COMPLETED to another status, clear completedAt
-        updateData.completedAt = null;
+        updateData.progress = 100; // COMPLETED always means 100%
+      } else if (status === 'PENDING') {
+        updateData.progress = 0; // PENDING always means 0%
+        if (existingTask.status === 'COMPLETED') {
+          updateData.completedAt = null;
+        }
+      } else if (status === 'IN_PROGRESS') {
+        // IN_PROGRESS: if progress was 0 or 100, set to 50; otherwise keep current
+        const currentProgress = existingTask.progress;
+        if (currentProgress === 0 || currentProgress === 100) {
+          updateData.progress = 50;
+        }
+        if (existingTask.status === 'COMPLETED') {
+          updateData.completedAt = null;
+        }
       }
     }
+    
     if (priority !== undefined) updateData.priority = priority;
     if (dueDate !== undefined) updateData.dueDate = dueDate ? new Date(dueDate) : null;
     if (assigneeId !== undefined) updateData.assigneeId = assigneeId;
+    
+    // Progress update triggers status adjustment
     if (progress !== undefined) {
-      updateData.progress = Math.max(0, Math.min(100, progress)); // Clamp 0-100
-      // Auto-complete if progress hits 100
-      if (progress >= 100 && existingTask.status !== 'COMPLETED') {
-        updateData.status = 'COMPLETED';
-        updateData.completedAt = new Date();
+      const clampedProgress = Math.max(0, Math.min(100, progress));
+      updateData.progress = clampedProgress;
+      
+      // Only auto-update status if status wasn't explicitly set in this request
+      if (status === undefined) {
+        if (clampedProgress === 0) {
+          // 0% → PENDING
+          updateData.status = 'PENDING';
+          if (existingTask.status === 'COMPLETED') {
+            updateData.completedAt = null;
+          }
+        } else if (clampedProgress === 100) {
+          // 100% → COMPLETED
+          if (existingTask.status !== 'COMPLETED') {
+            updateData.status = 'COMPLETED';
+            updateData.completedAt = new Date();
+          }
+        } else {
+          // 1-99% → IN_PROGRESS
+          if (existingTask.status !== 'IN_PROGRESS') {
+            updateData.status = 'IN_PROGRESS';
+            if (existingTask.status === 'COMPLETED') {
+              updateData.completedAt = null;
+            }
+          }
+        }
       }
     }
 
@@ -446,6 +537,79 @@ router.patch('/:id', async (req: Request, res: Response) => {
       data: updateData,
       include: taskInclude,
     });
+
+    // Log activity for each changed field
+    const logUserId = userId || existingTask.ownerId;
+    
+    if (title !== undefined && title.trim() !== existingTask.title) {
+      await createActivityLog({
+        taskId: id,
+        userId: logUserId,
+        action: 'UPDATE_TITLE',
+        field: 'title',
+        previousValue: existingTask.title,
+        newValue: title.trim(),
+      });
+    }
+    
+    if (description !== undefined && (description?.trim() || null) !== existingTask.description) {
+      await createActivityLog({
+        taskId: id,
+        userId: logUserId,
+        action: 'UPDATE_DESCRIPTION',
+        field: 'description',
+        previousValue: existingTask.description,
+        newValue: description?.trim() || null,
+      });
+    }
+    
+    if (status !== undefined && status !== existingTask.status) {
+      await createActivityLog({
+        taskId: id,
+        userId: logUserId,
+        action: 'UPDATE_STATUS',
+        field: 'status',
+        previousValue: existingTask.status,
+        newValue: status,
+      });
+    }
+    
+    if (priority !== undefined && priority !== existingTask.priority) {
+      await createActivityLog({
+        taskId: id,
+        userId: logUserId,
+        action: 'UPDATE_PRIORITY',
+        field: 'priority',
+        previousValue: existingTask.priority,
+        newValue: priority,
+      });
+    }
+    
+    if (progress !== undefined && progress !== existingTask.progress) {
+      await createActivityLog({
+        taskId: id,
+        userId: logUserId,
+        action: 'UPDATE_PROGRESS',
+        field: 'progress',
+        previousValue: String(existingTask.progress),
+        newValue: String(Math.max(0, Math.min(100, progress))),
+      });
+    }
+    
+    if (dueDate !== undefined) {
+      const oldDate = existingTask.dueDate ? existingTask.dueDate.toISOString() : null;
+      const newDate = dueDate ? new Date(dueDate).toISOString() : null;
+      if (oldDate !== newDate) {
+        await createActivityLog({
+          taskId: id,
+          userId: logUserId,
+          action: 'UPDATE_DUE_DATE',
+          field: 'dueDate',
+          previousValue: oldDate,
+          newValue: newDate,
+        });
+      }
+    }
 
     return res.json({
       success: true,
@@ -765,6 +929,19 @@ router.post('/:taskId/comments', async (req: Request, res: Response) => {
       },
     });
 
+    // Log the activity
+    await createActivityLog({
+      taskId,
+      userId: authorId,
+      action: 'ADD_COMMENT',
+      field: 'comment',
+      newValue: content.trim().substring(0, 100) + (content.length > 100 ? '...' : ''),
+      metadata: {
+        commentId: comment.id,
+        authorName: `${comment.author.firstName} ${comment.author.lastName}`,
+      },
+    });
+
     return res.status(201).json({
       success: true,
       comment,
@@ -887,8 +1064,20 @@ router.patch('/comments/:commentId', async (req: Request, res: Response) => {
 router.delete('/comments/:commentId', async (req: Request, res: Response) => {
   try {
     const { commentId } = req.params;
+    const { userId } = req.query; // Get userId from query params for logging
 
-    const existingComment = await prisma.taskComment.findUnique({ where: { id: commentId } });
+    const existingComment = await prisma.taskComment.findUnique({
+      where: { id: commentId },
+      include: {
+        author: {
+          select: {
+            id: true,
+            firstName: true,
+            lastName: true,
+          },
+        },
+      },
+    });
     if (!existingComment) {
       return res.status(404).json({
         success: false,
@@ -899,6 +1088,19 @@ router.delete('/comments/:commentId', async (req: Request, res: Response) => {
     // Delete replies first, then the comment
     await prisma.taskComment.deleteMany({ where: { parentId: commentId } });
     await prisma.taskComment.delete({ where: { id: commentId } });
+
+    // Log the activity
+    await createActivityLog({
+      taskId: existingComment.taskId,
+      userId: (userId as string) || existingComment.authorId,
+      action: 'DELETE_COMMENT',
+      field: 'comment',
+      previousValue: existingComment.content.substring(0, 100) + (existingComment.content.length > 100 ? '...' : ''),
+      metadata: {
+        commentId: existingComment.id,
+        authorName: `${existingComment.author.firstName} ${existingComment.author.lastName}`,
+      },
+    });
 
     return res.json({
       success: true,
@@ -958,6 +1160,21 @@ router.post('/:taskId/evidence', async (req: Request, res: Response) => {
             email: true,
           },
         },
+      },
+    });
+
+    // Log the activity
+    await createActivityLog({
+      taskId,
+      userId: uploaderId,
+      action: 'ADD_EVIDENCE',
+      field: 'evidence',
+      newValue: title.trim(),
+      metadata: {
+        evidenceId: evidence.id,
+        fileName: fileName || null,
+        fileType: fileType || null,
+        uploaderName: `${evidence.uploader.firstName} ${evidence.uploader.lastName}`,
       },
     });
 
@@ -1070,8 +1287,20 @@ router.patch('/evidence/:evidenceId', async (req: Request, res: Response) => {
 router.delete('/evidence/:evidenceId', async (req: Request, res: Response) => {
   try {
     const { evidenceId } = req.params;
+    const { userId } = req.query; // Get userId from query params for logging
 
-    const existingEvidence = await prisma.taskEvidence.findUnique({ where: { id: evidenceId } });
+    const existingEvidence = await prisma.taskEvidence.findUnique({
+      where: { id: evidenceId },
+      include: {
+        uploader: {
+          select: {
+            id: true,
+            firstName: true,
+            lastName: true,
+          },
+        },
+      },
+    });
     if (!existingEvidence) {
       return res.status(404).json({
         success: false,
@@ -1080,6 +1309,21 @@ router.delete('/evidence/:evidenceId', async (req: Request, res: Response) => {
     }
 
     await prisma.taskEvidence.delete({ where: { id: evidenceId } });
+
+    // Log the activity
+    await createActivityLog({
+      taskId: existingEvidence.taskId,
+      userId: (userId as string) || existingEvidence.uploaderId,
+      action: 'DELETE_EVIDENCE',
+      field: 'evidence',
+      previousValue: existingEvidence.title,
+      metadata: {
+        evidenceId: existingEvidence.id,
+        fileName: existingEvidence.fileName,
+        fileType: existingEvidence.fileType,
+        uploaderName: `${existingEvidence.uploader.firstName} ${existingEvidence.uploader.lastName}`,
+      },
+    });
 
     return res.json({
       success: true,
@@ -1271,6 +1515,21 @@ router.post('/:taskId/assignees', async (req: Request, res: Response) => {
       })
     );
 
+    // Log activity for each assignee added
+    for (const assignee of assignees) {
+      await createActivityLog({
+        taskId,
+        userId: assignedBy || task.ownerId,
+        action: 'ADD_ASSIGNEE',
+        field: 'assignee',
+        newValue: `${assignee.user.firstName} ${assignee.user.lastName}`,
+        metadata: {
+          assigneeId: assignee.user.id,
+          assigneeEmail: assignee.user.email,
+        },
+      });
+    }
+
     // Get updated task with all assignees
     const updatedTask = await prisma.task.findUnique({
       where: { id: taskId },
@@ -1295,11 +1554,22 @@ router.post('/:taskId/assignees', async (req: Request, res: Response) => {
 router.delete('/:taskId/assignees/:userId', async (req: Request, res: Response) => {
   try {
     const { taskId, userId } = req.params;
+    const { removedBy } = req.query; // Who is removing the assignee
 
-    // Verify the assignee exists
+    // Verify the assignee exists with user details
     const assignee = await prisma.taskAssignee.findUnique({
       where: {
         taskId_userId: { taskId, userId },
+      },
+      include: {
+        user: {
+          select: {
+            id: true,
+            firstName: true,
+            lastName: true,
+            email: true,
+          },
+        },
       },
     });
 
@@ -1310,9 +1580,25 @@ router.delete('/:taskId/assignees/:userId', async (req: Request, res: Response) 
       });
     }
 
+    // Get the task to find the owner for logging
+    const task = await prisma.task.findUnique({ where: { id: taskId } });
+
     await prisma.taskAssignee.delete({
       where: {
         taskId_userId: { taskId, userId },
+      },
+    });
+
+    // Log the activity
+    await createActivityLog({
+      taskId,
+      userId: (removedBy as string) || task?.ownerId || userId,
+      action: 'REMOVE_ASSIGNEE',
+      field: 'assignee',
+      previousValue: `${assignee.user.firstName} ${assignee.user.lastName}`,
+      metadata: {
+        assigneeId: assignee.user.id,
+        assigneeEmail: assignee.user.email,
       },
     });
 
@@ -1430,6 +1716,56 @@ router.get('/:taskId/assignees', async (req: Request, res: Response) => {
     return res.status(500).json({
       success: false,
       error: 'Failed to get assignees',
+    });
+  }
+});
+
+// ============================================================================
+// ACTIVITY LOG ENDPOINTS
+// ============================================================================
+
+// GET /api/mobile/tasks/:taskId/activity-logs - Get all activity logs for a task
+router.get('/:taskId/activity-logs', async (req: Request, res: Response) => {
+  try {
+    const { taskId } = req.params;
+    const { limit = '50' } = req.query;
+
+    // Verify task exists
+    const task = await prisma.task.findUnique({ where: { id: taskId } });
+    if (!task) {
+      return res.status(404).json({
+        success: false,
+        error: 'Task not found',
+      });
+    }
+
+    const logs = await prisma.taskActivityLog.findMany({
+      where: { taskId },
+      include: {
+        user: {
+          select: {
+            id: true,
+            firstName: true,
+            lastName: true,
+            email: true,
+            profilePicture: true,
+          },
+        },
+      },
+      orderBy: { createdAt: 'desc' },
+      take: parseInt(limit as string, 10),
+    });
+
+    return res.json({
+      success: true,
+      logs,
+      count: logs.length,
+    });
+  } catch (error: any) {
+    console.error('Get activity logs error:', error);
+    return res.status(500).json({
+      success: false,
+      error: 'Failed to get activity logs',
     });
   }
 });

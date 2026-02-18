@@ -21,6 +21,7 @@ function DashboardContent() {
   const isSystemAdmin = user?.role === 'SYSTEM_ADMIN';
   const [showDropdown, setShowDropdown] = useState(false);
   const [showProfileModal, setShowProfileModal] = useState(false);
+  const [sidebarOpen, setSidebarOpen] = useState(false);
   const dropdownRef = useRef<HTMLDivElement>(null);
 
   // Close dropdown when clicking outside
@@ -55,6 +56,26 @@ function DashboardContent() {
         <div className="px-4 sm:px-6 lg:px-8">
           <div className="flex justify-between h-16 sm:h-18">
             <div className="flex items-center space-x-4">
+              {/* Hamburger Menu Button */}
+              <button
+                onClick={() => setSidebarOpen(!sidebarOpen)}
+                className="p-2 rounded-lg hover:bg-gray-100 dark:hover:bg-gray-700 transition-colors"
+                aria-label={sidebarOpen ? 'Close menu' : 'Open menu'}
+              >
+                <svg
+                  className="w-6 h-6 text-gray-600 dark:text-gray-300"
+                  fill="none"
+                  viewBox="0 0 24 24"
+                  stroke="currentColor"
+                >
+                  {sidebarOpen ? (
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
+                  ) : (
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 6h16M4 12h16M4 18h16" />
+                  )}
+                </svg>
+              </button>
+              
               {/* Logo with glow effect */}
               <div className="relative w-10 h-10 sm:w-11 sm:h-11 rounded-xl bg-gradient-to-br from-blue-500 to-indigo-600 p-0.5 shadow-lg shadow-blue-500/25">
                 <div className="w-full h-full rounded-[10px] bg-white dark:bg-gray-900 flex items-center justify-center overflow-hidden">
@@ -198,10 +219,13 @@ function DashboardContent() {
               {t('dashboard.loggedInAs')} <strong>{user.role}</strong>
             </p>
 
-            {/* Sliding Sidebar for Quick Navigation - Left */}
+            {/* Sliding Sidebar for Quick Navigation - Left (controlled by hamburger button) */}
             <SlidingSidebar
               title={t('common.quickNavigation')}
               position="left"
+              hideHandle={true}
+              isOpen={sidebarOpen}
+              onOpenChange={setSidebarOpen}
               links={isSystemAdmin ? [
                 // SYSTEM_ADMIN only sees system-level features (no incident/RCA access)
                 { href: '/system-admin', icon: '🏢', label: t('nav.systemAdmin') || 'System Admin Portal' },
@@ -221,6 +245,8 @@ function DashboardContent() {
                 { href: '/investigation-report', icon: '🔎', label: t('nav.investigationReport') },
                 { href: '/fmir', icon: '⚠️', label: t('nav.fmir') || 'Foreign Material' },
                 { href: '/workplace-safety', icon: '🛡️', label: 'Safety Assessment', show: isSupervisorPlus },
+                { href: '/meetings', icon: '🎤', label: 'Meeting Intelligence' },
+                { href: '/assigned-actions', icon: '📌', label: 'My Action Items' },
                 { href: '/settings', icon: '⚙️', label: t('nav.settings') },
               ]}
             />

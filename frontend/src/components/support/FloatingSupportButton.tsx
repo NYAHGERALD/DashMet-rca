@@ -1,7 +1,7 @@
 'use client';
 
 import React, { useState, useRef, useCallback, useEffect } from 'react';
-import { MessageCircle, X, Minus, Send, Paperclip, Maximize2 } from 'lucide-react';
+import { MessageCircle, X, Minus, Send, Paperclip, Maximize2, GripVertical } from 'lucide-react';
 import { useAuth } from '@/components/providers/AuthProvider';
 
 type RecipientRole = 'ADMIN' | 'QUALITY_CONTROL_MANAGER';
@@ -38,12 +38,30 @@ export default function FloatingSupportButton() {
   const [size, setSize] = useState({ width: 360, height: 450 });
   const [isMobile, setIsMobile] = useState(false);
   
+  // Floating button position state
+  // useTopCenter: true means use top center positioning (desktop default), false means user has dragged it
+  const [buttonPosition, setButtonPosition] = useState({ x: 0, y: 20 });
+  const [useTopCenter, setUseTopCenter] = useState(true); // Desktop uses top center by default
+  const [isButtonDragging, setIsButtonDragging] = useState(false);
+  const buttonDragRef = useRef({ startX: 0, startY: 0, initialX: 0, initialY: 0 });
+  const buttonRef = useRef<HTMLDivElement>(null);
+  
   // Initialize position on mount and handle window resize
   useEffect(() => {
     const updatePosition = () => {
       const isSmallMobile = window.innerWidth < 400;
       const isMobileScreen = window.innerWidth < 640;
       setIsMobile(isMobileScreen);
+      
+      // Always reset button to default position on mount/resize
+      if (!isMobileScreen) {
+        // Desktop: top center - always reset to default
+        setUseTopCenter(true);
+      } else {
+        // Mobile: bottom left corner
+        setButtonPosition({ x: 20, y: window.innerHeight - 80 });
+        setUseTopCenter(false);
+      }
       
       if (isSmallMobile) {
         // On very small phones, take full width with small margins
@@ -72,6 +90,71 @@ export default function FloatingSupportButton() {
     window.addEventListener(OPEN_SUPPORT_MODAL_EVENT, handleOpenEvent);
     return () => window.removeEventListener(OPEN_SUPPORT_MODAL_EVENT, handleOpenEvent);
   }, []);
+
+  // Floating button drag handlers
+  const handleButtonDragStart = useCallback((e: React.MouseEvent | React.TouchEvent) => {
+    e.preventDefault();
+    e.stopPropagation();
+    setIsButtonDragging(true);
+    
+    const clientX = 'touches' in e ? e.touches[0].clientX : e.clientX;
+    const clientY = 'touches' in e ? e.touches[0].clientY : e.clientY;
+    
+    if (buttonRef.current) {
+      const rect = buttonRef.current.getBoundingClientRect();
+      buttonDragRef.current = {
+        startX: clientX,
+        startY: clientY,
+        initialX: rect.left,
+        initialY: rect.top
+      };
+    }
+  }, []);
+
+  useEffect(() => {
+    if (!isButtonDragging) return;
+
+    const handleButtonMove = (e: MouseEvent | TouchEvent) => {
+      // Once user starts dragging, disable top center positioning
+      setUseTopCenter(false);
+      
+      const clientX = 'touches' in e ? e.touches[0].clientX : e.clientX;
+      const clientY = 'touches' in e ? e.touches[0].clientY : e.clientY;
+      
+      const deltaX = clientX - buttonDragRef.current.startX;
+      const deltaY = clientY - buttonDragRef.current.startY;
+      
+      const newX = buttonDragRef.current.initialX + deltaX;
+      const newY = buttonDragRef.current.initialY + deltaY;
+      
+      // Constrain to viewport
+      const buttonWidth = buttonRef.current?.offsetWidth || 56;
+      const buttonHeight = buttonRef.current?.offsetHeight || 56;
+      const maxX = window.innerWidth - buttonWidth - 10;
+      const maxY = window.innerHeight - buttonHeight - 10;
+      
+      setButtonPosition({
+        x: Math.max(10, Math.min(maxX, newX)),
+        y: Math.max(10, Math.min(maxY, newY))
+      });
+    };
+
+    const handleButtonDragEnd = () => {
+      setIsButtonDragging(false);
+    };
+
+    window.addEventListener('mousemove', handleButtonMove);
+    window.addEventListener('mouseup', handleButtonDragEnd);
+    window.addEventListener('touchmove', handleButtonMove, { passive: false });
+    window.addEventListener('touchend', handleButtonDragEnd);
+
+    return () => {
+      window.removeEventListener('mousemove', handleButtonMove);
+      window.removeEventListener('mouseup', handleButtonDragEnd);
+      window.removeEventListener('touchmove', handleButtonMove);
+      window.removeEventListener('touchend', handleButtonDragEnd);
+    };
+  }, [isButtonDragging]);
   
   // Refs for smooth dragging/resizing
   const modalRef = useRef<HTMLDivElement>(null);
@@ -333,29 +416,71 @@ export default function FloatingSupportButton() {
 
   return (
     <>
-      {/* Floating Button - Bottom Left (only for non-Admin users) */}
+      {/* Floating Button - Top Center on Desktop (only for non-Admin users) */}
       {showFloatingButton && !isOpen && !isMinimized && (
-        <button
-          onClick={() => setIsOpen(true)}
-          className="fixed bottom-5 left-5 z-50 flex items-center justify-center bg-green-600 hover:bg-green-700 text-white w-14 h-14 rounded-full shadow-lg transition-all duration-200 hover:scale-105"
-          style={{ zIndex: 9999 }}
-          title="Contact Support"
+        <div
+          ref={buttonRef}
+          className={`fixed z-50 flex items-center gap-1 select-none ${
+            isButtonDragging ? 'cursor-grabbing' : ''
+          }`}
+          style={{
+            ...(useTopCenter
+              ? { left: '50%', top: 20, transform: 'translateX(-50%)' }
+              : { left: buttonPosition.x, top: buttonPosition.y, transform: 'none' }),
+            zIndex: 9999,
+            transition: isButtonDragging ? 'none' : 'box-shadow 0.2s ease',
+          }}
         >
-          <MessageCircle size={24} />
-        </button>
+          <div
+            onMouseDown={handleButtonDragStart}
+            onTouchStart={handleButtonDragStart}
+            className="cursor-grab active:cursor-grabbing bg-green-700 hover:bg-green-800 text-white p-2 rounded-l-full transition-colors"
+            title="Drag to move"
+          >
+            <GripVertical size={16} />
+          </div>
+          <button
+            onClick={() => setIsOpen(true)}
+            className="flex items-center justify-center bg-green-600 hover:bg-green-700 text-white w-12 h-12 rounded-r-full shadow-lg transition-all duration-200 hover:scale-105"
+            title="Contact Support"
+          >
+            <MessageCircle size={22} />
+          </button>
+        </div>
       )}
 
       {/* Minimized Dock - Bottom Left (only for non-Admin users) */}
       {showFloatingButton && isMinimized && (
-        <button
-          onClick={handleRestore}
-          className="fixed bottom-5 left-5 z-50 flex items-center gap-2 bg-green-600 hover:bg-green-700 text-white px-4 py-2 rounded-lg shadow-lg transition-all duration-200"
-          style={{ zIndex: 9999 }}
+        <div
+          ref={buttonRef}
+          className={`fixed z-50 flex items-center select-none ${
+            isButtonDragging ? 'cursor-grabbing' : ''
+          }`}
+          style={{
+            ...(useTopCenter
+              ? { left: '50%', top: 20, transform: 'translateX(-50%)' }
+              : { left: buttonPosition.x, top: buttonPosition.y, transform: 'none' }),
+            zIndex: 9999,
+            transition: isButtonDragging ? 'none' : 'box-shadow 0.2s ease',
+          }}
         >
-          <MessageCircle size={18} />
-          <span className="font-medium text-sm">Support Message</span>
-          <Maximize2 size={14} className="ml-1" />
-        </button>
+          <div
+            onMouseDown={handleButtonDragStart}
+            onTouchStart={handleButtonDragStart}
+            className="cursor-grab active:cursor-grabbing bg-green-700 hover:bg-green-800 text-white p-2 rounded-l-lg transition-colors"
+            title="Drag to move"
+          >
+            <GripVertical size={16} />
+          </div>
+          <button
+            onClick={handleRestore}
+            className="flex items-center gap-2 bg-green-600 hover:bg-green-700 text-white px-4 py-2 rounded-r-lg shadow-lg transition-all duration-200"
+          >
+            <MessageCircle size={18} />
+            <span className="font-medium text-sm">Support Message</span>
+            <Maximize2 size={14} className="ml-1" />
+          </button>
+        </div>
       )}
 
       {/* Modal */}

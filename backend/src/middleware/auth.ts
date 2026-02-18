@@ -74,8 +74,8 @@ export const authenticate = async (
     // Verify Firebase ID token
     const decodedToken = await adminAuth.verifyIdToken(token);
 
-    // Look up user in PostgreSQL by Firebase UID
-    const user = await prisma.user.findFirst({
+    // Look up user in PostgreSQL by Firebase UID first
+    let user = await prisma.user.findFirst({
       where: {
         firebaseUid: decodedToken.uid,
         isActive: true,
@@ -92,6 +92,38 @@ export const authenticate = async (
         profilePicture: true,
       },
     });
+
+    // If not found by firebaseUid, try to find by email (handles cross-platform auth)
+    // This supports users who registered on mobile (phone auth) and login on web (email/Google auth)
+    if (!user && decodedToken.email) {
+      user = await prisma.user.findFirst({
+        where: {
+          email: decodedToken.email.toLowerCase(),
+          isActive: true,
+        },
+        select: {
+          id: true,
+          email: true,
+          firstName: true,
+          lastName: true,
+          role: true,
+          organizationId: true,
+          firebaseUid: true,
+          isActive: true,
+          profilePicture: true,
+        },
+      });
+
+      // If found by email, link this Firebase UID to the existing account
+      if (user) {
+        console.log(`Linking Firebase UID ${decodedToken.uid} to existing user ${user.email}`);
+        await prisma.user.update({
+          where: { id: user.id },
+          data: { firebaseUid: decodedToken.uid },
+        });
+        user.firebaseUid = decodedToken.uid;
+      }
+    }
 
     if (!user) {
       throw new AuthenticationError('User not found in database');

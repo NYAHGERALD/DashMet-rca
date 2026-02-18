@@ -1330,6 +1330,7 @@ model User {
   TaskAssignmentsAssigned                                             TaskAssignee[]                       @relation("TaskAssigner")
   TaskComments                                                        TaskComment[]
   TaskEvidence                                                        TaskEvidence[]
+  TaskActivityLogs                                                    TaskActivityLog[]                    @relation("TaskActivityLogUser")
   MeetingsCreated                                                     Meeting[]                            @relation("MeetingCreator")
   MeetingParticipations                                               MeetingParticipant[]                 @relation("MeetingParticipantUser")
   Organization                                                        Organization?                        @relation(fields: [organizationId], references: [id], onDelete: Cascade)
@@ -1693,6 +1694,7 @@ model Task {
   meeting        Meeting?         @relation(fields: [meetingId], references: [id])
   comments       TaskComment[]
   evidence       TaskEvidence[]
+  activityLogs   TaskActivityLog[]
 
   @@index([ownerId])
   @@index([assigneeId])
@@ -1751,6 +1753,25 @@ model TaskEvidence {
 
   @@index([taskId])
   @@index([uploaderId])
+}
+
+// Task Activity Log - tracks all changes made to action items
+model TaskActivityLog {
+  id            String   @id @default(uuid())
+  taskId        String
+  userId        String   // User who made the change
+  action        String   // Type of change: CREATE, UPDATE_STATUS, UPDATE_PRIORITY, UPDATE_PROGRESS, UPDATE_TITLE, UPDATE_DESCRIPTION, UPDATE_DUE_DATE, ADD_ASSIGNEE, REMOVE_ASSIGNEE, ADD_COMMENT, DELETE_COMMENT, ADD_EVIDENCE, DELETE_EVIDENCE
+  field         String?  // Field that was changed (e.g., "status", "priority", "title")
+  previousValue String?  // Value before the change
+  newValue      String?  // Value after the change
+  metadata      Json?    // Additional info (e.g., file name for evidence, assignee name)
+  createdAt     DateTime @default(now())
+  task          Task     @relation(fields: [taskId], references: [id], onDelete: Cascade)
+  user          User     @relation("TaskActivityLogUser", fields: [userId], references: [id])
+
+  @@index([taskId])
+  @@index([userId])
+  @@index([createdAt])
 }
 
 enum ActionPriority {

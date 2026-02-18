@@ -170,6 +170,9 @@ router.get('/', async (req: Request, res: Response) => {
           },
         },
         bookmarks: { orderBy: { timestamp: 'asc' } },
+        summary: {
+          select: { rawTranscript: true, narrative: true, briefSummary: true },
+        },
         _count: { select: { actionItems: true, transcript: true } },
       },
       orderBy: [{ createdAt: 'desc' }],
@@ -177,11 +180,18 @@ router.get('/', async (req: Request, res: Response) => {
       skip: parseInt(offset as string),
     });
 
+    // Add hasTranscript and hasAISummary flags for each meeting
+    const meetingsWithFlags = meetings.map(m => ({
+      ...m,
+      hasTranscript: !!(m.summary?.rawTranscript || m._count?.transcript > 0),
+      hasAISummary: !!(m.summary?.narrative || m.summary?.briefSummary),
+    }));
+
     const totalCount = await prisma.meeting.count({ where: whereClause });
 
     return res.json({
       success: true,
-      meetings,
+      meetings: meetingsWithFlags,
       count: meetings.length,
       totalCount,
     });
@@ -219,7 +229,16 @@ router.get('/:id', async (req: Request, res: Response) => {
         transcript: { orderBy: { startTime: 'asc' } },
         summary: true,
         actionItems: {
-          include: {
+          select: {
+            id: true,
+            title: true,
+            description: true,
+            status: true,
+            priority: true,
+            dueDate: true,
+            isAiExtracted: true,
+            sourceText: true,
+            createdAt: true,
             owner: {
               select: { id: true, firstName: true, lastName: true, email: true },
             },
@@ -239,7 +258,15 @@ router.get('/:id', async (req: Request, res: Response) => {
       });
     }
 
-    return res.json({ success: true, meeting });
+    // Flatten summary data into meeting response for web app compatibility
+    const response: any = {
+      ...meeting,
+      rawTranscript: meeting.summary?.rawTranscript || null,
+      hasTranscript: !!(meeting.summary?.rawTranscript || meeting.transcript?.length > 0),
+      hasAISummary: !!(meeting.summary?.narrative || meeting.summary?.briefSummary),
+    };
+
+    return res.json({ success: true, meeting: response });
   } catch (error: any) {
     console.error('Get meeting error:', error);
     return res.status(500).json({
@@ -516,6 +543,24 @@ router.post('/:id/transcript', async (req: Request, res: Response) => {
         })),
       });
 
+      // Also save combined transcript to MeetingSummary for web app compatibility
+      const combinedTranscript = blocks.map((b: any) => b.content || b.text).join('\n\n');
+      const wordCount = combinedTranscript.split(/\s+/).filter((w: string) => w.length > 0).length;
+      await prisma.meetingSummary.upsert({
+        where: { meetingId: id },
+        update: {
+          rawTranscript: combinedTranscript,
+          transcriptWordCount: wordCount,
+          transcriptSavedAt: new Date(),
+        },
+        create: {
+          meetingId: id,
+          rawTranscript: combinedTranscript,
+          transcriptWordCount: wordCount,
+          transcriptSavedAt: new Date(),
+        },
+      });
+
       return res.status(201).json({
         success: true,
         message: `Created ${createdBlocks.count} transcript blocks`,
@@ -539,6 +584,27 @@ router.post('/:id/transcript', async (req: Request, res: Response) => {
           startTime: 0,
           endTime: existingMeeting.duration || 0,
           confidence: type === 'processed' ? 0.95 : 0.8,
+        },
+      });
+
+      // Also save to MeetingSummary table for web app compatibility
+      const wordCount = content.split(/\s+/).filter((w: string) => w.length > 0).length;
+      await prisma.meetingSummary.upsert({
+        where: { meetingId: id },
+        update: {
+          rawTranscript: rawText || content,
+          processedTranscript: processedText || null,
+          transcriptWordCount: wordCount,
+          transcriptDuration: existingMeeting.duration || 0,
+          transcriptSavedAt: new Date(),
+        },
+        create: {
+          meetingId: id,
+          rawTranscript: rawText || content,
+          processedTranscript: processedText || null,
+          transcriptWordCount: wordCount,
+          transcriptDuration: existingMeeting.duration || 0,
+          transcriptSavedAt: new Date(),
         },
       });
 

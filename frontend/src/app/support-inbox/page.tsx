@@ -371,9 +371,21 @@ export default function SupportInboxPage() {
             </div>
             
             {loading && requests.length === 0 ? (
-              <div className="p-8 text-center">
-                <Loader2 className="w-8 h-8 animate-spin text-emerald-600 mx-auto mb-3" />
-                <p className="text-gray-600 dark:text-gray-400">Loading...</p>
+              <div className="p-8 flex flex-col items-center justify-center min-h-[300px]">
+                <div className="relative mb-6">
+                  <div className="absolute inset-0 w-16 h-16 rounded-full border-4 border-emerald-200 dark:border-emerald-900/50" />
+                  <div className="w-16 h-16 rounded-full border-4 border-transparent border-t-emerald-600 border-r-emerald-600 animate-spin" />
+                  <div className="absolute inset-0 flex items-center justify-center">
+                    <MessageSquare className="w-6 h-6 text-emerald-600 animate-pulse" />
+                  </div>
+                </div>
+                <h3 className="text-lg font-semibold text-gray-900 dark:text-white mb-2">Hang tight!</h3>
+                <p className="text-gray-500 dark:text-gray-400 text-center text-sm">Loading messages...</p>
+                <div className="flex items-center gap-1.5 mt-4">
+                  <div className="w-1.5 h-1.5 bg-emerald-600 rounded-full animate-bounce" style={{ animationDelay: '0ms' }} />
+                  <div className="w-1.5 h-1.5 bg-emerald-500 rounded-full animate-bounce" style={{ animationDelay: '150ms' }} />
+                  <div className="w-1.5 h-1.5 bg-emerald-400 rounded-full animate-bounce" style={{ animationDelay: '300ms' }} />
+                </div>
               </div>
             ) : requests.length === 0 ? (
               <div className="p-8 text-center">

@@ -1,6 +1,6 @@
 'use client';
 
-import { useState, useEffect, useRef } from 'react';
+import { useState, useEffect, useRef, useCallback } from 'react';
 import Link from 'next/link';
 import { useRouter } from 'next/navigation';
 
@@ -27,6 +27,12 @@ interface SlidingSidebarProps {
     href: string;
     label?: string;
   };
+  /** Hide the edge handle/trigger button (use when controlling externally) */
+  hideHandle?: boolean;
+  /** External control: open state */
+  isOpen?: boolean;
+  /** External control: callback when open state changes */
+  onOpenChange?: (open: boolean) => void;
 }
 
 export default function SlidingSidebar({ 
@@ -36,12 +42,58 @@ export default function SlidingSidebar({
   showBackButton = false,
   backUrl,
   backLabel = 'Back',
-  editDraft
+  editDraft,
+  hideHandle = false,
+  isOpen: externalIsOpen,
+  onOpenChange,
 }: SlidingSidebarProps) {
   const router = useRouter();
-  const [isOpen, setIsOpen] = useState(false);
+  const [internalIsOpen, setInternalIsOpen] = useState(false);
+  
+  // Use external control if provided, otherwise use internal state
+  const isControlled = externalIsOpen !== undefined;
+  const isOpen = isControlled ? externalIsOpen : internalIsOpen;
+  const setIsOpen = (value: boolean) => {
+    if (onOpenChange) {
+      onOpenChange(value);
+    }
+    if (!isControlled) {
+      setInternalIsOpen(value);
+    }
+  };
+  
   const sidebarRef = useRef<HTMLDivElement>(null);
   const handleRef = useRef<HTMLButtonElement>(null);
+  const navRef = useRef<HTMLElement>(null);
+  const [canScrollUp, setCanScrollUp] = useState(false);
+  const [canScrollDown, setCanScrollDown] = useState(false);
+
+  // Check scroll state
+  const checkScroll = useCallback(() => {
+    if (navRef.current) {
+      const { scrollTop, scrollHeight, clientHeight } = navRef.current;
+      setCanScrollUp(scrollTop > 5);
+      setCanScrollDown(scrollTop + clientHeight < scrollHeight - 5);
+    }
+  }, []);
+
+  // Watch for scroll changes and initial load
+  useEffect(() => {
+    const nav = navRef.current;
+    if (!nav) return;
+    
+    checkScroll();
+    nav.addEventListener('scroll', checkScroll);
+    
+    // Recheck when sidebar opens (content may have changed)
+    const resizeObserver = new ResizeObserver(checkScroll);
+    resizeObserver.observe(nav);
+    
+    return () => {
+      nav.removeEventListener('scroll', checkScroll);
+      resizeObserver.disconnect();
+    };
+  }, [checkScroll, isOpen]);
 
   const handleBack = () => {
     if (backUrl) {
@@ -101,37 +153,39 @@ export default function SlidingSidebar({
         onClick={() => setIsOpen(false)}
       />
 
-      {/* Handle/Tab - positioned based on position prop */}
-      <button
-        ref={handleRef}
-        onClick={() => setIsOpen(!isOpen)}
-        className={`fixed top-20 z-50 transition-all duration-300 ease-in-out ${
-          position === 'left'
-            ? (isOpen ? 'left-64 sm:left-72' : 'left-0')
-            : (isOpen ? 'right-64 sm:right-72' : 'right-0')
-        }`}
-        aria-label={isOpen ? 'Close sidebar' : 'Open sidebar'}
-      >
-        <div className={`bg-primary-600 hover:bg-primary-700 text-white px-2 py-3 sm:px-3 sm:py-4 shadow-lg flex items-center gap-2 transition-colors ${
-          position === 'left' ? 'rounded-r-lg' : 'rounded-l-lg flex-row-reverse'
-        }`}>
-          <svg
-            className={`w-4 h-4 transition-transform duration-300 ${
-              position === 'left'
-                ? (isOpen ? 'rotate-180' : '')
-                : (isOpen ? '' : 'rotate-180')
-            }`}
-            fill="none"
-            viewBox="0 0 24 24"
-            stroke="currentColor"
-          >
-            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 5l7 7-7 7" />
-          </svg>
-          <span className="text-xs sm:text-sm font-medium hidden sm:inline">
-            {position === 'left' ? 'Menu' : 'Admin'}
-          </span>
-        </div>
-      </button>
+      {/* Handle/Tab - positioned based on position prop (hidden when hideHandle is true) */}
+      {!hideHandle && (
+        <button
+          ref={handleRef}
+          onClick={() => setIsOpen(!isOpen)}
+          className={`fixed top-20 z-50 transition-all duration-300 ease-in-out ${
+            position === 'left'
+              ? (isOpen ? 'left-64 sm:left-72' : 'left-0')
+              : (isOpen ? 'right-64 sm:right-72' : 'right-0')
+          }`}
+          aria-label={isOpen ? 'Close sidebar' : 'Open sidebar'}
+        >
+          <div className={`bg-primary-600 hover:bg-primary-700 text-white px-2 py-3 sm:px-3 sm:py-4 shadow-lg flex items-center gap-2 transition-colors ${
+            position === 'left' ? 'rounded-r-lg' : 'rounded-l-lg flex-row-reverse'
+          }`}>
+            <svg
+              className={`w-4 h-4 transition-transform duration-300 ${
+                position === 'left'
+                  ? (isOpen ? 'rotate-180' : '')
+                  : (isOpen ? '' : 'rotate-180')
+              }`}
+              fill="none"
+              viewBox="0 0 24 24"
+              stroke="currentColor"
+            >
+              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 5l7 7-7 7" />
+            </svg>
+            <span className="text-xs sm:text-sm font-medium hidden sm:inline">
+              {position === 'left' ? 'Menu' : 'Admin'}
+            </span>
+          </div>
+        </button>
+      )}
 
       {/* Sidebar panel - slides from left or right */}
       <div
@@ -212,8 +266,17 @@ export default function SlidingSidebar({
           </div>
         )}
 
+        {/* Scroll up indicator */}
+        {canScrollUp && (
+          <div className="absolute left-0 right-0 top-[52px] h-8 bg-gradient-to-b from-white dark:from-gray-800 to-transparent pointer-events-none z-10 flex items-start justify-center pt-1">
+            <svg className="w-4 h-4 text-gray-400 animate-bounce" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 15l7-7 7 7" />
+            </svg>
+          </div>
+        )}
+
         {/* Links */}
-        <nav className="p-2 sm:p-4 space-y-1 sm:space-y-2 overflow-y-auto" style={{ maxHeight: 'calc(100vh - 12rem)' }}>
+        <nav ref={navRef} className="p-2 sm:p-4 space-y-1 sm:space-y-2 overflow-y-auto scroll-smooth" style={{ maxHeight: 'calc(100vh - 12rem)' }}>
           {visibleLinks.map((link, index) => (
             <Link
               key={index}
@@ -234,6 +297,15 @@ export default function SlidingSidebar({
             </Link>
           ))}
         </nav>
+
+        {/* Scroll down indicator */}
+        {canScrollDown && (
+          <div className="absolute left-0 right-0 bottom-[52px] h-8 bg-gradient-to-t from-white dark:from-gray-800 to-transparent pointer-events-none z-10 flex items-end justify-center pb-1">
+            <svg className="w-4 h-4 text-gray-400 animate-bounce" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 9l-7 7-7-7" />
+            </svg>
+          </div>
+        )}
 
         {/* Footer hint */}
         <div className="absolute bottom-0 left-0 right-0 p-3 sm:p-4 border-t border-gray-200 dark:border-gray-700 bg-gray-50 dark:bg-gray-900/50">
