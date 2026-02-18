@@ -12,6 +12,7 @@ import {
   User,
   ChevronRight,
   ChevronLeft,
+  ChevronDown,
   Search,
   Loader2,
   AlertCircle,
@@ -21,6 +22,9 @@ import {
   ArrowLeft,
   GripVertical,
   Trash2,
+  MessageSquare,
+  Plus,
+  X,
 } from 'lucide-react';
 
 interface TaskAssignee {
@@ -54,6 +58,7 @@ interface Task {
     id: string;
     title: string | null;
     meetingType: string;
+    createdAt?: string;
   };
   owner: {
     id: string;
@@ -62,6 +67,18 @@ interface Task {
     email: string;
   };
   assignees: TaskAssignee[];
+}
+
+interface MeetingGroup {
+  meetingId: string;
+  meetingTitle: string;
+  meetingType: string;
+  meetingDate: string | null;
+  tasks: Task[];
+  pendingCount: number;
+  inProgressCount: number;
+  completedCount: number;
+  overdueCount: number;
 }
 
 const statusConfig: Record<string, { color: string; bg: string; label: string }> = {
@@ -77,6 +94,46 @@ const priorityConfig: Record<string, { color: string; bg: string; label: string 
   URGENT: { color: 'text-red-600', bg: 'bg-red-100', label: 'Urgent' },
 };
 
+// Group tasks by meeting
+function groupTasksByMeeting(tasks: Task[]): MeetingGroup[] {
+  const groups: Record<string, MeetingGroup> = {};
+  
+  tasks.forEach((task) => {
+    const meetingId = task.meetingId || 'unknown';
+    const isManual = task.meeting?.meetingType === 'MANUAL';
+    
+    if (!groups[meetingId]) {
+      groups[meetingId] = {
+        meetingId,
+        meetingTitle: isManual ? 'Manual' : (task.meeting?.title || task.meeting?.meetingType || 'Meeting'),
+        meetingType: task.meeting?.meetingType || 'GENERAL',
+        meetingDate: task.meeting?.createdAt || task.createdAt,
+        tasks: [],
+        pendingCount: 0,
+        inProgressCount: 0,
+        completedCount: 0,
+        overdueCount: 0,
+      };
+    }
+    
+    groups[meetingId].tasks.push(task);
+    
+    if (task.status === 'PENDING') groups[meetingId].pendingCount++;
+    if (task.status === 'IN_PROGRESS') groups[meetingId].inProgressCount++;
+    if (task.status === 'COMPLETED') groups[meetingId].completedCount++;
+    if (task.status !== 'COMPLETED' && task.dueDate && new Date(task.dueDate) < new Date()) {
+      groups[meetingId].overdueCount++;
+    }
+  });
+  
+  // Sort by meeting date descending
+  return Object.values(groups).sort((a, b) => {
+    const dateA = a.meetingDate ? new Date(a.meetingDate).getTime() : 0;
+    const dateB = b.meetingDate ? new Date(b.meetingDate).getTime() : 0;
+    return dateB - dateA;
+  });
+}
+
 function AssignedActionsContent() {
   const { user } = useAuth();
   const [tasks, setTasks] = useState<Task[]>([]);
@@ -87,11 +144,21 @@ function AssignedActionsContent() {
   const [viewFilter, setViewFilter] = useState<'owned' | 'assigned'>('owned');
   const [currentPage, setCurrentPage] = useState(1);
   const [pageSize, setPageSize] = useState(5);
+  const [expandedGroups, setExpandedGroups] = useState<Set<string>>(new Set());
   
   // Delete state
   const [taskToDelete, setTaskToDelete] = useState<Task | null>(null);
   const [showDeleteConfirm, setShowDeleteConfirm] = useState(false);
   const [isDeleting, setIsDeleting] = useState(false);
+
+  // Create manual task state
+  const [showCreateModal, setShowCreateModal] = useState(false);
+  const [createTitle, setCreateTitle] = useState('');
+  const [createDescription, setCreateDescription] = useState('');
+  const [createDueDate, setCreateDueDate] = useState('');
+  const [createPriority, setCreatePriority] = useState('MEDIUM');
+  const [isCreating, setIsCreating] = useState(false);
+  const [createError, setCreateError] = useState<string | null>(null);
 
   // Draggable pagination state
   const [paginationPosition, setPaginationPosition] = useState({ x: 0, y: 0 });
@@ -187,6 +254,52 @@ function AssignedActionsContent() {
     }
   }, [user?.id, viewFilter]);
 
+  // Create manual task handler
+  const handleCreateManualTask = async () => {
+    if (!user?.id || !user?.organizationId || !createTitle.trim()) {
+      setCreateError('Title is required');
+      return;
+    }
+
+    setIsCreating(true);
+    setCreateError(null);
+
+    const payload = {
+      title: createTitle.trim(),
+      description: createDescription.trim() || null,
+      dueDate: createDueDate || null,
+      priority: createPriority,
+      ownerId: user.id,
+      organizationId: user.organizationId,
+    };
+    
+    console.log('Creating manual task with payload:', payload);
+
+    try {
+      const response = await api.post('/mobile/tasks/manual', payload);
+
+      if (response.data.success) {
+        // Add new task to list
+        setTasks(prev => [response.data.task, ...prev]);
+        // Reset form
+        setCreateTitle('');
+        setCreateDescription('');
+        setCreateDueDate('');
+        setCreatePriority('MEDIUM');
+        setShowCreateModal(false);
+        // Refresh to ensure proper grouping
+        fetchMyTasks();
+      } else {
+        setCreateError(response.data.error || 'Failed to create action item');
+      }
+    } catch (err: any) {
+      console.error('Error creating task:', err);
+      setCreateError(err.response?.data?.error || 'Failed to create action item');
+    } finally {
+      setIsCreating(false);
+    }
+  };
+
   useEffect(() => {
     fetchMyTasks();
   }, [fetchMyTasks]);
@@ -207,11 +320,34 @@ function AssignedActionsContent() {
     return matchesSearch && matchesStatus;
   });
 
-  // Pagination calculations
-  const totalPages = Math.ceil(filteredTasks.length / pageSize);
+  // Group filtered tasks by meeting
+  const meetingGroups = groupTasksByMeeting(filteredTasks);
+
+  // Expand all groups by default when data loads
+  useEffect(() => {
+    if (meetingGroups.length > 0 && expandedGroups.size === 0) {
+      setExpandedGroups(new Set(meetingGroups.map(g => g.meetingId)));
+    }
+  }, [meetingGroups.length]);
+
+  // Toggle group expansion
+  const toggleGroup = (meetingId: string) => {
+    setExpandedGroups(prev => {
+      const newSet = new Set(prev);
+      if (newSet.has(meetingId)) {
+        newSet.delete(meetingId);
+      } else {
+        newSet.add(meetingId);
+      }
+      return newSet;
+    });
+  };
+
+  // Pagination calculations (now based on groups)
+  const totalPages = Math.ceil(meetingGroups.length / pageSize);
   const startIndex = (currentPage - 1) * pageSize;
   const endIndex = startIndex + pageSize;
-  const paginatedTasks = filteredTasks.slice(startIndex, endIndex);
+  const paginatedGroups = meetingGroups.slice(startIndex, endIndex);
 
   // Delete handler
   const handleDeleteTask = async () => {
@@ -270,13 +406,22 @@ function AssignedActionsContent() {
                 </h1>
               </div>
             </div>
-            <button
-              onClick={fetchMyTasks}
-              disabled={loading}
-              className="p-2 hover:bg-gray-100 dark:hover:bg-gray-700 rounded-lg transition-colors"
-            >
-              <RefreshCw className={`w-5 h-5 text-gray-600 dark:text-gray-400 ${loading ? 'animate-spin' : ''}`} />
-            </button>
+            <div className="flex items-center gap-2">
+              <button
+                onClick={() => setShowCreateModal(true)}
+                className="inline-flex items-center gap-2 px-4 py-2 bg-purple-600 text-white text-sm font-medium rounded-lg hover:bg-purple-700 transition-colors"
+              >
+                <Plus className="w-4 h-4" />
+                Create
+              </button>
+              <button
+                onClick={fetchMyTasks}
+                disabled={loading}
+                className="p-2 hover:bg-gray-100 dark:hover:bg-gray-700 rounded-lg transition-colors"
+              >
+                <RefreshCw className={`w-5 h-5 text-gray-600 dark:text-gray-400 ${loading ? 'animate-spin' : ''}`} />
+              </button>
+            </div>
           </div>
         </div>
       </header>
@@ -395,126 +540,183 @@ function AssignedActionsContent() {
             </p>
           </div>
         ) : (
-          <div className="space-y-3">
-            {paginatedTasks.map((task) => {
-              const isOverdue = task.status !== 'COMPLETED' && task.dueDate && new Date(task.dueDate) < new Date();
-              const daysOverdue = task.dueDate ? getDaysOverdue(task.dueDate) : 0;
-              const status = statusConfig[task.status] || statusConfig.PENDING;
-              const priority = priorityConfig[task.priority] || priorityConfig.MEDIUM;
-
+          <div className="space-y-4">
+            {paginatedGroups.map((group) => {
+              const isExpanded = expandedGroups.has(group.meetingId);
+              
               return (
-                <Link
-                  key={task.id}
-                  href={`/meetings/${task.meetingId}/actions/${task.id}`}
-                  className="block bg-white dark:bg-gray-800 rounded-xl shadow-sm border border-gray-200 dark:border-gray-700 p-4 hover:shadow-md hover:border-purple-300 dark:hover:border-purple-600 transition-all"
-                >
-                  <div className="flex items-start gap-4">
-                    {/* Status Indicator */}
-                    <div className={`w-3 h-3 rounded-full mt-1.5 flex-shrink-0 ${
-                      task.status === 'COMPLETED' ? 'bg-green-500' :
-                      task.status === 'IN_PROGRESS' ? 'bg-blue-500' : 'bg-gray-400'
-                    }`} />
-
-                    {/* Content */}
-                    <div className="flex-1 min-w-0">
-                      <div className="flex items-start justify-between gap-4">
-                        <div className="flex-1 min-w-0">
-                          <h3 className="font-semibold text-gray-900 dark:text-white truncate">
-                            {task.title}
-                          </h3>
-                          {task.description && (
-                            <p className="text-sm text-gray-600 dark:text-gray-400 mt-1 line-clamp-2">
-                              {task.description}
-                            </p>
+                <div key={group.meetingId} className="bg-white dark:bg-gray-800 rounded-xl shadow-sm border border-gray-200 dark:border-gray-700 overflow-hidden">
+                  {/* Meeting Header */}
+                  <button
+                    onClick={() => toggleGroup(group.meetingId)}
+                    className="w-full px-4 py-3 flex items-center justify-between bg-gray-50 dark:bg-gray-750 hover:bg-gray-100 dark:hover:bg-gray-700 transition-colors"
+                  >
+                    <div className="flex items-center gap-3">
+                      <ChevronDown className={`w-5 h-5 text-gray-500 transition-transform ${isExpanded ? '' : '-rotate-90'}`} />
+                      <div className="text-left">
+                        <h3 className="font-semibold text-gray-900 dark:text-white">
+                          {group.meetingTitle}
+                        </h3>
+                        <div className="flex items-center gap-2 text-xs text-gray-500 dark:text-gray-400 mt-0.5">
+                          <span className={group.meetingType === 'MANUAL' ? 'text-purple-600 dark:text-purple-400 font-medium' : 'capitalize'}>
+                            {group.meetingType === 'MANUAL' ? 'Manual Entry' : group.meetingType.replace(/_/g, ' ').toLowerCase()}
+                          </span>
+                          {group.meetingDate && (
+                            <>
+                              <span>•</span>
+                              <span>{formatDate(group.meetingDate)}</span>
+                            </>
                           )}
                         </div>
-                        <span className={`px-2 py-1 text-xs font-medium rounded-full flex-shrink-0 ${status.bg} ${status.color}`}>
-                          {status.label}
-                        </span>
                       </div>
-
-                      {/* Meta Info */}
-                      <div className="flex flex-wrap items-center gap-3 mt-3">
-                        {/* Overdue */}
-                        {isOverdue && (
-                          <span className="inline-flex items-center gap-1 text-xs font-medium text-red-600 bg-red-50 dark:bg-red-900/30 px-2 py-1 rounded-full">
-                            <Calendar className="w-3 h-3" />
-                            {daysOverdue}d overdue
-                          </span>
-                        )}
-
-                        {/* AI Badge */}
-                        {task.isAiExtracted && (
-                          <span className="inline-flex items-center gap-1 text-xs font-medium text-purple-600 bg-purple-50 dark:bg-purple-900/30 px-2 py-1 rounded-full">
-                            <Sparkles className="w-3 h-3" />
-                            System
-                          </span>
-                        )}
-
-                        {/* Priority */}
-                        <span className={`inline-flex items-center gap-1 text-xs font-medium px-2 py-1 rounded-full ${priority.bg} ${priority.color}`}>
-                          ! {priority.label}
-                        </span>
-
-                        {/* Meeting Info */}
-                        {task.meeting && (
-                          <span className="text-xs text-gray-500 dark:text-gray-400">
-                            From: {task.meeting.title || task.meeting.meetingType}
-                          </span>
-                        )}
-
-                        {/* Due Date */}
-                        {task.dueDate && !isOverdue && (
-                          <span className="inline-flex items-center gap-1 text-xs text-gray-500 dark:text-gray-400">
-                            <Clock className="w-3 h-3" />
-                            Due: {formatDate(task.dueDate)}
-                          </span>
-                        )}
-
-                        {/* Owner */}
-                        <span className="inline-flex items-center gap-1 text-xs text-gray-500 dark:text-gray-400">
-                          <User className="w-3 h-3" />
-                          {task.owner.firstName} {task.owner.lastName}
-                        </span>
-                      </div>
-
-                      {/* Progress Bar */}
-                      {task.progress > 0 && (
-                        <div className="mt-3">
-                          <div className="flex items-center justify-between text-xs mb-1">
-                            <span className="text-gray-500 dark:text-gray-400">Progress</span>
-                            <span className="font-medium text-purple-600">{task.progress}%</span>
-                          </div>
-                          <div className="w-full h-1.5 bg-gray-200 dark:bg-gray-700 rounded-full overflow-hidden">
-                            <div
-                              className="h-full bg-gradient-to-r from-purple-500 to-indigo-500 rounded-full transition-all duration-300"
-                              style={{ width: `${task.progress}%` }}
-                            />
-                          </div>
-                        </div>
-                      )}
                     </div>
-
-                    <div className="flex items-center gap-2 flex-shrink-0">
-                      {/* Delete button - only show for owned tasks */}
-                      {viewFilter === 'owned' && (
-                        <button
-                          onClick={(e) => {
-                            e.preventDefault();
-                            e.stopPropagation();
-                            setTaskToDelete(task);
-                            setShowDeleteConfirm(true);
-                          }}
-                          className="p-2 text-gray-400 hover:text-red-500 hover:bg-red-50 dark:hover:bg-red-900/30 rounded-lg transition-colors"
-                          title="Delete action item"
-                        >
-                          <Trash2 className="w-4 h-4" />
-                        </button>
+                    <div className="flex items-center gap-2">
+                      {group.overdueCount > 0 && (
+                        <span className="px-2 py-0.5 text-xs font-medium bg-red-100 text-red-700 dark:bg-red-900/30 dark:text-red-400 rounded-full">
+                          {group.overdueCount} overdue
+                        </span>
                       )}
-                      <ChevronRight className="w-5 h-5 text-gray-400" />
+                      {group.inProgressCount > 0 && (
+                        <span className="px-2 py-0.5 text-xs font-medium bg-blue-100 text-blue-700 dark:bg-blue-900/30 dark:text-blue-400 rounded-full">
+                          {group.inProgressCount} in progress
+                        </span>
+                      )}
+                      {group.pendingCount > 0 && (
+                        <span className="px-2 py-0.5 text-xs font-medium bg-gray-100 text-gray-700 dark:bg-gray-700 dark:text-gray-300 rounded-full">
+                          {group.pendingCount} pending
+                        </span>
+                      )}
+                      {group.completedCount > 0 && (
+                        <span className="px-2 py-0.5 text-xs font-medium bg-green-100 text-green-700 dark:bg-green-900/30 dark:text-green-400 rounded-full">
+                          {group.completedCount} done
+                        </span>
+                      )}
+                      <span className="text-sm text-gray-500 dark:text-gray-400 ml-2">
+                        {group.tasks.length} item{group.tasks.length !== 1 ? 's' : ''}
+                      </span>
                     </div>
-                  </div>
-                </Link>
+                  </button>
+
+                  {/* Tasks List */}
+                  {isExpanded && (
+                    <div className="divide-y divide-gray-100 dark:divide-gray-700">
+                      {group.tasks.map((task) => {
+                        const isOverdue = task.status !== 'COMPLETED' && task.dueDate && new Date(task.dueDate) < new Date();
+                        const daysOverdue = task.dueDate ? getDaysOverdue(task.dueDate) : 0;
+                        const status = statusConfig[task.status] || statusConfig.PENDING;
+                        const priority = priorityConfig[task.priority] || priorityConfig.MEDIUM;
+
+                        return (
+                          <Link
+                            key={task.id}
+                            href={`/meetings/${task.meetingId}/actions/${task.id}`}
+                            className="block px-4 py-3 hover:bg-gray-50 dark:hover:bg-gray-750 transition-colors"
+                          >
+                            <div className="flex items-start gap-3">
+                              {/* Status Indicator */}
+                              <div className={`w-2.5 h-2.5 rounded-full mt-1.5 flex-shrink-0 ${
+                                task.status === 'COMPLETED' ? 'bg-green-500' :
+                                task.status === 'IN_PROGRESS' ? 'bg-blue-500' : 'bg-gray-400'
+                              }`} />
+
+                              {/* Content */}
+                              <div className="flex-1 min-w-0">
+                                <div className="flex items-start justify-between gap-3">
+                                  <div className="flex-1 min-w-0">
+                                    <h4 className="font-medium text-gray-900 dark:text-white truncate text-sm">
+                                      {task.title}
+                                    </h4>
+                                    {task.description && (
+                                      <p className="text-xs text-gray-600 dark:text-gray-400 mt-0.5 line-clamp-1">
+                                        {task.description}
+                                      </p>
+                                    )}
+                                  </div>
+                                  <span className={`px-2 py-0.5 text-xs font-medium rounded-full flex-shrink-0 ${status.bg} ${status.color}`}>
+                                    {status.label}
+                                  </span>
+                                </div>
+
+                                {/* Meta Info */}
+                                <div className="flex flex-wrap items-center gap-2 mt-2">
+                                  {isOverdue && (
+                                    <span className="inline-flex items-center gap-1 text-xs font-medium text-red-600 bg-red-50 dark:bg-red-900/30 px-1.5 py-0.5 rounded-full">
+                                      <Calendar className="w-3 h-3" />
+                                      {daysOverdue}d overdue
+                                    </span>
+                                  )}
+
+                                  <span className={`inline-flex items-center gap-1 text-xs font-medium px-1.5 py-0.5 rounded-full ${priority.bg} ${priority.color}`}>
+                                    ! {priority.label}
+                                  </span>
+
+                                  {task.dueDate && !isOverdue && (
+                                    <span className="inline-flex items-center gap-1 text-xs text-gray-500 dark:text-gray-400">
+                                      <Clock className="w-3 h-3" />
+                                      Due: {formatDate(task.dueDate)}
+                                    </span>
+                                  )}
+
+                                  <span className="inline-flex items-center gap-1 text-xs text-gray-500 dark:text-gray-400">
+                                    <User className="w-3 h-3" />
+                                    {task.owner.firstName} {task.owner.lastName}
+                                  </span>
+                                </div>
+
+                                {/* Progress Bar */}
+                                {task.progress > 0 && (
+                                  <div className="mt-2">
+                                    <div className="flex items-center justify-between text-xs mb-0.5">
+                                      <span className="text-gray-500 dark:text-gray-400">Progress</span>
+                                      <span className={`font-medium ${
+                                        task.progress <= 20 ? 'text-red-500' :
+                                        task.progress <= 50 ? 'text-yellow-500' :
+                                        task.progress <= 80 ? 'text-green-500' : 'text-blue-500'
+                                      }`}>{task.progress}%</span>
+                                    </div>
+                                    <div className="w-full h-1 bg-gray-200 dark:bg-gray-700 rounded-full overflow-hidden">
+                                      <div
+                                        className="h-full rounded-full transition-all duration-300"
+                                        style={{ 
+                                          width: `${task.progress}%`,
+                                          background: task.progress <= 20 
+                                            ? '#ef4444' 
+                                            : task.progress <= 50 
+                                              ? `linear-gradient(90deg, #ef4444 0%, #ef4444 ${(20/task.progress)*100}%, #eab308 100%)`
+                                              : task.progress <= 80
+                                                ? `linear-gradient(90deg, #ef4444 0%, #ef4444 ${(20/task.progress)*100}%, #eab308 ${(20/task.progress)*100}%, #eab308 ${(50/task.progress)*100}%, #22c55e 100%)`
+                                                : `linear-gradient(90deg, #ef4444 0%, #ef4444 ${(20/task.progress)*100}%, #eab308 ${(20/task.progress)*100}%, #eab308 ${(50/task.progress)*100}%, #22c55e ${(50/task.progress)*100}%, #22c55e ${(80/task.progress)*100}%, #3b82f6 100%)`
+                                        }}
+                                      />
+                                    </div>
+                                  </div>
+                                )}
+                              </div>
+
+                              <div className="flex items-center gap-1 flex-shrink-0">
+                                {viewFilter === 'owned' && (
+                                  <button
+                                    onClick={(e) => {
+                                      e.preventDefault();
+                                      e.stopPropagation();
+                                      setTaskToDelete(task);
+                                      setShowDeleteConfirm(true);
+                                    }}
+                                    className="p-1.5 text-gray-400 hover:text-red-500 hover:bg-red-50 dark:hover:bg-red-900/30 rounded-lg transition-colors"
+                                    title="Delete action item"
+                                  >
+                                    <Trash2 className="w-4 h-4" />
+                                  </button>
+                                )}
+                                <ChevronRight className="w-4 h-4 text-gray-400" />
+                              </div>
+                            </div>
+                          </Link>
+                        );
+                      })}
+                    </div>
+                  )}
+                </div>
               );
             })}
           </div>
@@ -575,6 +777,134 @@ function AssignedActionsContent() {
         </div>
       )}
 
+      {/* Create Manual Task Modal */}
+      {showCreateModal && (
+        <div className="fixed inset-0 bg-black/50 backdrop-blur-sm flex items-center justify-center z-50 p-4" onClick={() => setShowCreateModal(false)}>
+          <div className="bg-white dark:bg-gray-800 rounded-xl shadow-xl max-w-lg w-full p-6" onClick={e => e.stopPropagation()}>
+            <div className="flex items-center justify-between mb-6">
+              <div className="flex items-center gap-3">
+                <div className="p-2 bg-purple-100 dark:bg-purple-900/30 rounded-full">
+                  <Plus className="w-6 h-6 text-purple-600" />
+                </div>
+                <h3 className="text-lg font-semibold text-gray-900 dark:text-white">
+                  Create Action Item
+                </h3>
+              </div>
+              <button
+                onClick={() => setShowCreateModal(false)}
+                className="p-2 hover:bg-gray-100 dark:hover:bg-gray-700 rounded-full"
+              >
+                <X className="w-5 h-5 text-gray-500" />
+              </button>
+            </div>
+
+            {createError && (
+              <div className="mb-4 p-3 bg-red-50 dark:bg-red-900/30 border border-red-200 dark:border-red-800 rounded-lg text-red-700 dark:text-red-300 text-sm">
+                {createError}
+              </div>
+            )}
+
+            <div className="space-y-4">
+              {/* Title */}
+              <div>
+                <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">
+                  Title <span className="text-red-500">*</span>
+                </label>
+                <input
+                  type="text"
+                  value={createTitle}
+                  onChange={(e) => setCreateTitle(e.target.value)}
+                  placeholder="Enter action item title"
+                  className="w-full px-4 py-2 border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-700 text-gray-900 dark:text-white placeholder-gray-400 focus:ring-2 focus:ring-purple-500 focus:border-transparent"
+                />
+              </div>
+
+              {/* Description */}
+              <div>
+                <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">
+                  Description
+                </label>
+                <textarea
+                  value={createDescription}
+                  onChange={(e) => setCreateDescription(e.target.value)}
+                  placeholder="Enter description (optional)"
+                  rows={3}
+                  className="w-full px-4 py-2 border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-700 text-gray-900 dark:text-white placeholder-gray-400 focus:ring-2 focus:ring-purple-500 focus:border-transparent resize-none"
+                />
+              </div>
+
+              {/* Due Date and Priority Row */}
+              <div className="grid grid-cols-2 gap-4">
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">
+                    Due Date
+                  </label>
+                  <input
+                    type="date"
+                    value={createDueDate}
+                    onChange={(e) => setCreateDueDate(e.target.value)}
+                    className="w-full px-4 py-2 border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-700 text-gray-900 dark:text-white focus:ring-2 focus:ring-purple-500 focus:border-transparent"
+                  />
+                </div>
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">
+                    Priority
+                  </label>
+                  <select
+                    value={createPriority}
+                    onChange={(e) => setCreatePriority(e.target.value)}
+                    className="w-full px-4 py-2 border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-700 text-gray-900 dark:text-white focus:ring-2 focus:ring-purple-500 focus:border-transparent"
+                  >
+                    <option value="LOW">Low</option>
+                    <option value="MEDIUM">Medium</option>
+                    <option value="HIGH">High</option>
+                    <option value="URGENT">Urgent</option>
+                  </select>
+                </div>
+              </div>
+
+              <p className="text-xs text-gray-500 dark:text-gray-400">
+                This action item will be created under the "Manual" group.
+              </p>
+            </div>
+
+            <div className="flex gap-3 justify-end mt-6">
+              <button
+                onClick={() => {
+                  setShowCreateModal(false);
+                  setCreateTitle('');
+                  setCreateDescription('');
+                  setCreateDueDate('');
+                  setCreatePriority('MEDIUM');
+                  setCreateError(null);
+                }}
+                disabled={isCreating}
+                className="px-4 py-2 text-gray-700 dark:text-gray-300 bg-gray-100 dark:bg-gray-700 hover:bg-gray-200 dark:hover:bg-gray-600 rounded-lg transition-colors disabled:opacity-50"
+              >
+                Cancel
+              </button>
+              <button
+                onClick={handleCreateManualTask}
+                disabled={isCreating || !createTitle.trim()}
+                className="px-4 py-2 bg-purple-600 hover:bg-purple-700 text-white rounded-lg transition-colors disabled:opacity-50 flex items-center gap-2"
+              >
+                {isCreating ? (
+                  <>
+                    <Loader2 className="w-4 h-4 animate-spin" />
+                    Creating...
+                  </>
+                ) : (
+                  <>
+                    <Plus className="w-4 h-4" />
+                    Create
+                  </>
+                )}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
       {/* Draggable Pagination Footer */}
       {!loading && !error && filteredTasks.length > 0 && (
         <div
@@ -603,7 +933,7 @@ function AssignedActionsContent() {
             </div>
             {/* Page Size Selector */}
             <div className="flex items-center gap-2">
-              <span className="text-sm text-gray-500 dark:text-gray-400">Rows per page:</span>
+              <span className="text-sm text-gray-500 dark:text-gray-400">Meetings per page:</span>
               <select
                 value={pageSize}
                 onChange={(e) => setPageSize(Number(e.target.value))}
@@ -619,7 +949,7 @@ function AssignedActionsContent() {
 
             {/* Page Info */}
             <div className="text-sm text-gray-500 dark:text-gray-400">
-              Showing {startIndex + 1}-{Math.min(endIndex, filteredTasks.length)} of {filteredTasks.length} {viewFilter} action items
+              Showing {startIndex + 1}-{Math.min(endIndex, meetingGroups.length)} of {meetingGroups.length} meetings ({filteredTasks.length} {viewFilter} items)
             </div>
 
             {/* Page Navigation */}

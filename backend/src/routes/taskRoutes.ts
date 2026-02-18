@@ -3,6 +3,7 @@
  * 
  * Endpoints:
  * - POST   /api/mobile/tasks                    - Create a new task
+ * - POST   /api/mobile/tasks/manual             - Create a manual task (grouped under "Manual")
  * - GET    /api/mobile/tasks                    - Get tasks for user (owned or assigned)
  * - GET    /api/mobile/tasks/:id                - Get single task by ID
  * - PATCH  /api/mobile/tasks/:id                - Update task (status, assignment, etc.)
@@ -150,6 +151,7 @@ const taskInclude = {
       title: true,
       meetingType: true,
       scheduledAt: true,
+      createdAt: true,
     },
   },
   completedBy: {
@@ -304,6 +306,131 @@ router.post('/', async (req: Request, res: Response) => {
 });
 
 // ============================================================================
+// POST /api/mobile/tasks/manual
+// Create a manual task (not from AI extraction)
+// Automatically creates/uses a "Manual" meeting group for the organization
+// Expects: { title, description?, dueDate?, priority?, ownerId, organizationId, facilityId? }
+// ============================================================================
+router.post('/manual', async (req: Request, res: Response) => {
+  try {
+    const { 
+      title, 
+      description, 
+      dueDate, 
+      priority, 
+      ownerId, 
+      organizationId, 
+      facilityId,
+    } = req.body;
+
+    console.log('Creating manual task:', { title, ownerId, organizationId, facilityId });
+
+    // Validate required fields
+    if (!title || !ownerId || !organizationId) {
+      return res.status(400).json({
+        success: false,
+        error: 'Missing required fields: title, ownerId, organizationId',
+      });
+    }
+
+    // Validate owner exists - try by id first, then by firebaseUid
+    let owner = await prisma.user.findUnique({
+      where: { id: ownerId },
+    });
+
+    if (!owner) {
+      // Try finding by firebaseUid
+      owner = await prisma.user.findFirst({
+        where: { firebaseUid: ownerId },
+      });
+    }
+
+    if (!owner) {
+      console.log('Owner not found for ownerId:', ownerId);
+      return res.status(404).json({
+        success: false,
+        error: 'Owner not found',
+      });
+    }
+
+    console.log('Owner found:', owner.id, owner.email);
+
+    // Use the actual database owner ID (in case we looked up by firebaseUid)
+    const actualOwnerId = owner.id;
+
+    // Find or create a "Manual" meeting for this organization
+    // We use a unique meeting per day for Manual tasks to keep them organized
+    const today = new Date();
+    today.setHours(0, 0, 0, 0);
+    const tomorrow = new Date(today);
+    tomorrow.setDate(tomorrow.getDate() + 1);
+
+    let manualMeeting = await prisma.meeting.findFirst({
+      where: {
+        organizationId,
+        meetingType: 'MANUAL',
+        creatorId: actualOwnerId,
+        createdAt: {
+          gte: today,
+          lt: tomorrow,
+        },
+      },
+    });
+
+    // If no manual meeting exists for today, create one
+    if (!manualMeeting) {
+      manualMeeting = await prisma.meeting.create({
+        data: {
+          title: 'Manual',
+          meetingType: 'MANUAL',
+          status: 'COMPLETED',
+          creatorId: actualOwnerId,
+          organizationId,
+          facilityId: facilityId || null,
+        },
+      });
+    }
+
+    // Create task linked to the manual meeting
+    const task = await prisma.task.create({
+      data: {
+        title: title.trim(),
+        description: description?.trim() || null,
+        dueDate: dueDate ? new Date(dueDate) : null,
+        priority: priority || 'MEDIUM',
+        ownerId: actualOwnerId,
+        organizationId,
+        facilityId: facilityId || null,
+        meetingId: manualMeeting.id,
+        sourceText: null,
+        isAiExtracted: false,
+      },
+      include: taskInclude,
+    });
+
+    // Create activity log
+    await createActivityLog({
+      taskId: task.id,
+      userId: actualOwnerId,
+      action: 'CREATE_MANUAL_TASK',
+      newValue: title.trim(),
+    });
+
+    return res.status(201).json({
+      success: true,
+      task,
+      manualMeetingId: manualMeeting.id,
+    });
+  } catch (error: any) {
+    console.error('Create manual task error:', error);
+    return res.status(500).json({
+      success: false,
+      error: 'Failed to create manual task',
+    });
+  }
+});
+
+// ============================================================================
 // GET /api/mobile/tasks
 // Get tasks for a user (owned by them OR assigned to them)
 // Query params: userId (required), status?, filter (owned|assigned|all), meetingId?
@@ -319,23 +446,44 @@ router.get('/', async (req: Request, res: Response) => {
       });
     }
 
-    // Build where clause based on filter
+    // Resolve userId - could be internal ID or Firebase UID (from iOS)
+    let actualUserId = userId as string;
+    
+    // First check if it's a valid internal user ID
+    let user = await prisma.user.findUnique({
+      where: { id: actualUserId },
+      select: { id: true },
+    });
+    
+    // If not found by ID, try finding by firebaseUid (iOS sends Firebase UID)
+    if (!user) {
+      user = await prisma.user.findUnique({
+        where: { firebaseUid: actualUserId },
+        select: { id: true },
+      });
+      if (user) {
+        actualUserId = user.id;
+        console.log(`📱 Resolved Firebase UID ${userId} to internal ID ${actualUserId}`);
+      }
+    }
+
+    // Build where clause based on filter using the resolved user ID
     let whereClause: any = {};
     
     if (filter === 'owned') {
-      whereClause.ownerId = userId as string;
+      whereClause.ownerId = actualUserId;
     } else if (filter === 'assigned') {
       // Check both legacy assigneeId and new assignees relation
       whereClause.OR = [
-        { assigneeId: userId as string },
-        { assignees: { some: { userId: userId as string } } },
+        { assigneeId: actualUserId },
+        { assignees: { some: { userId: actualUserId } } },
       ];
     } else {
       // 'all' - tasks where user is owner OR assignee (legacy or new)
       whereClause.OR = [
-        { ownerId: userId as string },
-        { assigneeId: userId as string },
-        { assignees: { some: { userId: userId as string } } },
+        { ownerId: actualUserId },
+        { assigneeId: actualUserId },
+        { assignees: { some: { userId: actualUserId } } },
       ];
     }
 

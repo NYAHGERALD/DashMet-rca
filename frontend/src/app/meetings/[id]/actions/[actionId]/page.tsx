@@ -35,6 +35,8 @@ import {
   Check,
   History,
   GripVertical,
+  Lock,
+  Unlock,
 } from 'lucide-react';
 
 interface TaskDetail {
@@ -46,6 +48,22 @@ interface TaskDetail {
   progress: number;
   dueDate: string | null;
   completedAt: string | null;
+  completedById: string | null;
+  completedBy: {
+    id: string;
+    firstName: string;
+    lastName: string;
+    email: string;
+  } | null;
+  isLocked: boolean;
+  lockedAt: string | null;
+  lockedById: string | null;
+  lockedBy: {
+    id: string;
+    firstName: string;
+    lastName: string;
+    email: string;
+  } | null;
   sourceText: string | null;
   isAiExtracted: boolean;
   createdAt: string;
@@ -196,6 +214,10 @@ function getActionDescription(log: ActivityLog): string {
       return `${userName} assigned "${log.newValue}" to this task`;
     case 'REMOVE_ASSIGNEE':
       return `${userName} removed "${log.previousValue}" from this task`;
+    case 'LOCK_TASK':
+      return `${userName} locked this task`;
+    case 'UNLOCK_TASK':
+      return `${userName} unlocked this task`;
     case 'ADD_COMMENT':
       return `${userName} added a comment`;
     case 'DELETE_COMMENT':
@@ -258,6 +280,19 @@ function ActionItemDetailContent() {
   const [editDescription, setEditDescription] = useState('');
   const [saving, setSaving] = useState(false);
   const descriptionTextareaRef = useRef<HTMLTextAreaElement>(null);
+
+  // Lock state
+  const [locking, setLocking] = useState(false);
+
+  // Due Date edit state
+  const [isEditingDueDate, setIsEditingDueDate] = useState(false);
+  const [editDueDate, setEditDueDate] = useState<string>('');
+  const [savingDueDate, setSavingDueDate] = useState(false);
+
+  // Completion edit state
+  const [editCompletedDate, setEditCompletedDate] = useState<string>('');
+  const [editCompletedTime, setEditCompletedTime] = useState<string>('');
+  const [savingCompletion, setSavingCompletion] = useState(false);
 
   // AI Enhancement state
   const [isEnhancingDescription, setIsEnhancingDescription] = useState(false);
@@ -556,6 +591,94 @@ function ActionItemDetailContent() {
     }
   };
 
+  const toggleLock = async () => {
+    if (!task || !user) return;
+    setLocking(true);
+    try {
+      const response = await api.patch(`/mobile/tasks/${task.id}`, { 
+        isLocked: !task.isLocked, 
+        userId: user.id 
+      });
+      if (response.data.success) {
+        setTask(response.data.task);
+        fetchActivityLogs(); // Refresh activity logs
+      }
+    } catch (err: any) {
+      console.error('Error toggling lock:', err);
+      if (err.response?.data?.error) {
+        alert(err.response.data.error);
+      }
+    } finally {
+      setLocking(false);
+    }
+  };
+
+  const updateDueDate = async () => {
+    if (!task || !user) return;
+    setSavingDueDate(true);
+    try {
+      const dueDate = editDueDate ? new Date(editDueDate).toISOString() : null;
+      const response = await api.patch(`/mobile/tasks/${task.id}`, { 
+        dueDate, 
+        userId: user.id 
+      });
+      if (response.data.success) {
+        setTask(response.data.task);
+        fetchActivityLogs(); // Refresh activity logs
+        setIsEditingDueDate(false);
+      }
+    } catch (err: any) {
+      console.error('Error updating due date:', err);
+      if (err.response?.data?.error) {
+        alert(err.response.data.error);
+      }
+    } finally {
+      setSavingDueDate(false);
+    }
+  };
+
+  const updateCompletionDetails = async () => {
+    if (!task || !user) return;
+    if (!editCompletedDate && !editCompletedTime) return;
+    
+    setSavingCompletion(true);
+    try {
+      // Get current values or use edited ones
+      const currentDate = task.completedAt ? new Date(task.completedAt).toISOString().split('T')[0] : '';
+      const currentTime = task.completedAt ? new Date(task.completedAt).toTimeString().slice(0, 5) : '12:00';
+      
+      const finalDate = editCompletedDate || currentDate;
+      const finalTime = editCompletedTime || currentTime;
+      
+      if (!finalDate) {
+        alert('Please enter a completion date');
+        setSavingCompletion(false);
+        return;
+      }
+      
+      // Combine date and time into a single datetime
+      const dateTime = new Date(`${finalDate}T${finalTime}:00`);
+      
+      const response = await api.patch(`/mobile/tasks/${task.id}`, { 
+        completedAt: dateTime.toISOString(),
+        userId: user.id 
+      });
+      if (response.data.success) {
+        setTask(response.data.task);
+        setEditCompletedDate('');
+        setEditCompletedTime('');
+        fetchActivityLogs();
+      }
+    } catch (err: any) {
+      console.error('Error updating completion details:', err);
+      if (err.response?.data?.error) {
+        alert(err.response.data.error);
+      }
+    } finally {
+      setSavingCompletion(false);
+    }
+  };
+
   const addAssignee = async (userId: string) => {
     if (!task || !user) return;
     setAddingAssignee(true);
@@ -816,17 +939,46 @@ function ActionItemDetailContent() {
                   </button>
                 </div>
               ) : (
-                <button
-                  onClick={() => {
-                    setEditTitle(task?.title || '');
-                    setEditDescription(task?.description || '');
-                    setIsEditing(true);
-                  }}
-                  className="inline-flex items-center gap-2 px-4 py-2 border border-gray-200 dark:border-gray-600 text-gray-700 dark:text-gray-300 text-sm font-medium rounded-lg hover:bg-gray-50 dark:hover:bg-gray-700 transition-colors"
-                >
-                  <Pencil className="w-4 h-4" />
-                  Edit
-                </button>
+                <div className="flex items-center gap-2">
+                  {/* Lock/Unlock Button */}
+                  <button
+                    onClick={toggleLock}
+                    disabled={locking}
+                    className={`inline-flex items-center gap-2 px-4 py-2 text-sm font-medium rounded-lg transition-colors ${
+                      task.isLocked === true
+                        ? 'bg-amber-100 text-amber-700 border border-amber-300 hover:bg-amber-200 dark:bg-amber-900/30 dark:text-amber-400 dark:border-amber-700'
+                        : 'border border-gray-200 dark:border-gray-600 text-gray-700 dark:text-gray-300 hover:bg-gray-50 dark:hover:bg-gray-700'
+                    }`}
+                    title={task.isLocked === true ? 'Unlock this action item' : 'Lock this action item'}
+                  >
+                    {locking ? (
+                      <Loader2 className="w-4 h-4 animate-spin" />
+                    ) : task.isLocked === true ? (
+                      <Lock className="w-4 h-4" />
+                    ) : (
+                      <Unlock className="w-4 h-4" />
+                    )}
+                    {task.isLocked === true ? 'Locked' : 'Lock'}
+                  </button>
+                  {/* Edit Button - disabled when locked */}
+                  <button
+                    onClick={() => {
+                      setEditTitle(task?.title || '');
+                      setEditDescription(task?.description || '');
+                      setIsEditing(true);
+                    }}
+                    disabled={task.isLocked === true}
+                    className={`inline-flex items-center gap-2 px-4 py-2 border border-gray-200 dark:border-gray-600 text-sm font-medium rounded-lg transition-colors ${
+                      task.isLocked === true
+                        ? 'opacity-50 cursor-not-allowed text-gray-400 dark:text-gray-500'
+                        : 'text-gray-700 dark:text-gray-300 hover:bg-gray-50 dark:hover:bg-gray-700'
+                    }`}
+                    title={task.isLocked === true ? 'Unlock the task to edit' : 'Edit this action item'}
+                  >
+                    <Pencil className="w-4 h-4" />
+                    Edit
+                  </button>
+                </div>
               )}
             </div>
           </div>
@@ -883,20 +1035,85 @@ function ActionItemDetailContent() {
           <div className="lg:col-span-2 space-y-6">
             {/* Status & Priority Card */}
             <div className="bg-white dark:bg-gray-800 rounded-xl shadow-sm border border-gray-200 dark:border-gray-700 p-6">
+              {/* Locked Banner */}
+              {task.isLocked && (
+                <div className="flex items-center gap-2 mb-4 p-3 bg-amber-50 dark:bg-amber-900/20 border border-amber-200 dark:border-amber-800 rounded-lg">
+                  <Lock className="w-4 h-4 text-amber-600 dark:text-amber-400" />
+                  <span className="text-sm text-amber-700 dark:text-amber-300">
+                    This action item is locked and cannot be modified.
+                    {task.lockedBy && (
+                      <span className="ml-1 text-amber-600 dark:text-amber-400">
+                        Locked by {task.lockedBy.firstName} {task.lockedBy.lastName}
+                        {task.lockedAt && ` on ${new Date(task.lockedAt).toLocaleString()}`}
+                      </span>
+                    )}
+                  </span>
+                </div>
+              )}
+
+              {/* Due Date Field at Top */}
+              <div className="flex items-center justify-between mb-4 pb-4 border-b border-gray-200 dark:border-gray-700">
+                <div className="flex items-center gap-2 text-gray-500">
+                  <Calendar className="w-4 h-4" />
+                  <span className="text-sm font-medium">Due Date</span>
+                </div>
+                {isEditingDueDate ? (
+                  <div className="flex items-center gap-2">
+                    <input
+                      type="date"
+                      value={editDueDate}
+                      onChange={(e) => setEditDueDate(e.target.value)}
+                      className="px-3 py-1.5 text-sm border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-800 text-gray-900 dark:text-white focus:ring-2 focus:ring-purple-500 focus:border-transparent"
+                    />
+                    <button
+                      onClick={() => setIsEditingDueDate(false)}
+                      className="px-2 py-1 text-xs text-gray-500 hover:text-gray-700"
+                    >
+                      Cancel
+                    </button>
+                    <button
+                      onClick={updateDueDate}
+                      disabled={savingDueDate}
+                      className="px-3 py-1.5 text-xs bg-purple-600 text-white rounded-lg hover:bg-purple-700 disabled:opacity-50"
+                    >
+                      {savingDueDate ? 'Saving...' : 'Save'}
+                    </button>
+                  </div>
+                ) : (
+                  <div className="flex items-center gap-2">
+                    <span className={`text-sm font-medium ${task.dueDate && new Date(task.dueDate) < new Date() && task.status !== 'COMPLETED' ? 'text-red-600' : 'text-gray-900 dark:text-white'}`}>
+                      {task.dueDate ? new Date(task.dueDate).toLocaleDateString() : 'Not set'}
+                    </span>
+                    {task.isLocked !== true && (
+                      <button
+                        onClick={() => {
+                          setEditDueDate(task.dueDate ? new Date(task.dueDate).toISOString().split('T')[0] : '');
+                          setIsEditingDueDate(true);
+                        }}
+                        className="p-1 text-gray-400 hover:text-purple-600 rounded"
+                        title="Edit due date"
+                      >
+                        <Pencil className="w-3.5 h-3.5" />
+                      </button>
+                    )}
+                  </div>
+                )}
+              </div>
+
               <div className="flex flex-wrap items-center gap-3 mb-6">
                 {/* Status Dropdown */}
                 <div className="relative">
                   <select
                     value={task.status}
                     onChange={(e) => updateStatus(e.target.value)}
-                    disabled={updating}
+                    disabled={updating || task.isLocked}
                     className={`appearance-none px-4 py-2 pr-10 rounded-full text-sm font-semibold cursor-pointer transition-colors ${
                       task.status === 'COMPLETED'
                         ? 'bg-green-500 text-white'
                         : task.status === 'IN_PROGRESS'
                         ? 'bg-blue-500 text-white'
                         : 'bg-gray-200 text-gray-700 dark:bg-gray-700 dark:text-gray-200'
-                    }`}
+                    } ${task.isLocked ? 'opacity-60 cursor-not-allowed' : ''}`}
                   >
                     <option value="PENDING">Pending</option>
                     <option value="IN_PROGRESS">In Progress</option>
@@ -910,7 +1127,7 @@ function ActionItemDetailContent() {
                   <select
                     value={task.priority}
                     onChange={(e) => updatePriority(e.target.value)}
-                    disabled={updating}
+                    disabled={updating || task.isLocked}
                     className={`appearance-none px-4 py-2 pr-10 rounded-full text-sm font-semibold cursor-pointer transition-colors ${
                       task.priority === 'URGENT'
                         ? 'bg-red-500 text-white'
@@ -919,7 +1136,7 @@ function ActionItemDetailContent() {
                         : task.priority === 'MEDIUM'
                         ? 'bg-blue-500 text-white'
                         : 'bg-gray-200 text-gray-700 dark:bg-gray-700 dark:text-gray-200'
-                    }`}
+                    } ${task.isLocked ? 'opacity-60 cursor-not-allowed' : ''}`}
                   >
                     <option value="LOW">Low</option>
                     <option value="MEDIUM">Medium</option>
@@ -928,13 +1145,6 @@ function ActionItemDetailContent() {
                   </select>
                   <ChevronDown className="w-4 h-4 absolute right-3 top-1/2 -translate-y-1/2 pointer-events-none" />
                 </div>
-
-                {task.isAiExtracted && (
-                  <span className="inline-flex items-center gap-1 px-3 py-1.5 text-sm font-medium rounded-full bg-purple-100 text-purple-700 dark:bg-purple-900/30 dark:text-purple-300">
-                    <Sparkles className="w-4 h-4" />
-                    System
-                  </span>
-                )}
               </div>
 
               {/* Title */}
@@ -1076,7 +1286,7 @@ function ActionItemDetailContent() {
                     <button
                       key={value}
                       onClick={() => updateProgress(value)}
-                      disabled={updating}
+                      disabled={updating || task.isLocked}
                       className={`px-2.5 py-1.5 rounded-lg text-xs font-medium transition-all ${
                         task.progress === value
                           ? value <= 20 ? 'bg-red-500 text-white ring-2 ring-red-300'
@@ -1084,7 +1294,7 @@ function ActionItemDetailContent() {
                           : value <= 80 ? 'bg-green-500 text-white ring-2 ring-green-300'
                           : 'bg-blue-500 text-white ring-2 ring-blue-300'
                           : 'bg-gray-100 dark:bg-gray-700 text-gray-700 dark:text-gray-300 hover:bg-gray-200 dark:hover:bg-gray-600'
-                      }`}
+                      } ${task.isLocked ? 'opacity-50 cursor-not-allowed' : ''}`}
                     >
                       {value}%
                     </button>
@@ -1092,6 +1302,76 @@ function ActionItemDetailContent() {
                 </div>
               </div>
             </div>
+
+            {/* Completion Section - shown when task is 100% and COMPLETED */}
+            {task.progress === 100 && task.status === 'COMPLETED' && task.completedAt && (
+              <div className="bg-gradient-to-r from-green-50 to-emerald-50 dark:from-green-900/20 dark:to-emerald-900/20 rounded-xl border border-green-200 dark:border-green-700/50 p-6">
+                <div className="flex items-center justify-between mb-4">
+                  <div className="flex items-center gap-2">
+                    <CheckCircle className="w-5 h-5 text-green-600" />
+                    <h3 className="font-semibold text-green-700 dark:text-green-300">Completion Details</h3>
+                  </div>
+                  {task.isLocked !== true && (editCompletedDate || editCompletedTime) && (
+                    <button
+                      onClick={updateCompletionDetails}
+                      disabled={savingCompletion}
+                      className="inline-flex items-center gap-2 px-4 py-2 text-sm font-medium bg-green-600 text-white rounded-lg hover:bg-green-700 disabled:opacity-50 transition-all active:scale-95"
+                    >
+                      {savingCompletion ? (
+                        <>
+                          <Loader2 className="w-4 h-4 animate-spin" />
+                          Saving...
+                        </>
+                      ) : (
+                        <>
+                          <Save className="w-4 h-4" />
+                          Save Changes
+                        </>
+                      )}
+                    </button>
+                  )}
+                </div>
+                <div className="flex flex-wrap gap-4">
+                  <div className="flex-1 min-w-[160px] bg-white dark:bg-gray-800 rounded-lg p-3 shadow-sm">
+                    <div className="flex items-center gap-2 text-gray-500 mb-2">
+                      <Calendar className="w-3.5 h-3.5" />
+                      <span className="text-xs font-medium">Completed Date</span>
+                    </div>
+                    <input
+                      type="date"
+                      value={editCompletedDate || (task.completedAt ? new Date(task.completedAt).toISOString().split('T')[0] : '')}
+                      onChange={(e) => setEditCompletedDate(e.target.value)}
+                      disabled={task.isLocked === true}
+                      className="w-full text-sm font-semibold text-gray-900 dark:text-white bg-gray-50 dark:bg-gray-700 border border-gray-300 dark:border-gray-600 rounded-lg px-3 py-2 focus:ring-2 focus:ring-green-500 focus:border-green-500 disabled:opacity-60 disabled:cursor-not-allowed cursor-pointer hover:border-green-400"
+                    />
+                  </div>
+                  <div className="flex-1 min-w-[160px] bg-white dark:bg-gray-800 rounded-lg p-3 shadow-sm">
+                    <div className="flex items-center gap-2 text-gray-500 mb-2">
+                      <Clock className="w-3.5 h-3.5" />
+                      <span className="text-xs font-medium">Completed Time</span>
+                    </div>
+                    <input
+                      type="time"
+                      value={editCompletedTime || (task.completedAt ? new Date(task.completedAt).toTimeString().slice(0, 5) : '')}
+                      onChange={(e) => setEditCompletedTime(e.target.value)}
+                      disabled={task.isLocked === true}
+                      className="w-full text-sm font-semibold text-gray-900 dark:text-white bg-gray-50 dark:bg-gray-700 border border-gray-300 dark:border-gray-600 rounded-lg px-3 py-2 focus:ring-2 focus:ring-green-500 focus:border-green-500 disabled:opacity-60 disabled:cursor-not-allowed cursor-pointer hover:border-green-400"
+                    />
+                  </div>
+                  <div className="flex-1 min-w-[160px] bg-white dark:bg-gray-800 rounded-lg p-3 shadow-sm">
+                    <div className="flex items-center gap-2 text-gray-500 mb-2">
+                      <User className="w-3.5 h-3.5" />
+                      <span className="text-xs font-medium">Completed By</span>
+                    </div>
+                    <div className="text-sm font-semibold text-gray-900 dark:text-white px-3 py-2">
+                      {task.completedBy 
+                        ? `${task.completedBy.firstName} ${task.completedBy.lastName}`
+                        : `${task.owner.firstName} ${task.owner.lastName}`}
+                    </div>
+                  </div>
+                </div>
+              </div>
+            )}
 
             {/* Extracted From Section */}
             {task.sourceText && (
@@ -1115,7 +1395,8 @@ function ActionItemDetailContent() {
                 </div>
                 <button
                   onClick={() => setShowAddComment(true)}
-                  className="inline-flex items-center gap-1 text-sm font-medium text-purple-600 hover:text-purple-700"
+                  disabled={task.isLocked === true}
+                  className={`inline-flex items-center gap-1 text-sm font-medium ${task.isLocked === true ? 'text-gray-400 cursor-not-allowed' : 'text-purple-600 hover:text-purple-700'}`}
                 >
                   <Plus className="w-4 h-4" />
                   Add
@@ -1189,7 +1470,8 @@ function ActionItemDetailContent() {
                 </div>
                 <button
                   onClick={() => setShowAddEvidence(true)}
-                  className="inline-flex items-center gap-1 text-sm font-medium text-purple-600 hover:text-purple-700"
+                  disabled={task.isLocked === true}
+                  className={`inline-flex items-center gap-1 text-sm font-medium ${task.isLocked === true ? 'text-gray-400 cursor-not-allowed' : 'text-purple-600 hover:text-purple-700'}`}
                 >
                   <Plus className="w-4 h-4" />
                   Add
@@ -1308,22 +1590,24 @@ function ActionItemDetailContent() {
                     
                     return (
                       <div key={item.id} className="bg-gray-50 dark:bg-gray-900/50 rounded-lg overflow-hidden relative group inline-block">
-                        {/* Delete button */}
-                        <button
-                          onClick={() => {
-                            setEvidenceToDelete(item.id);
-                            setShowDeleteConfirm(true);
-                          }}
-                          disabled={deletingEvidenceId === item.id}
-                          className="absolute top-2 right-2 z-10 p-1.5 bg-red-500 hover:bg-red-600 text-white rounded-full opacity-0 group-hover:opacity-100 transition-opacity shadow-lg disabled:opacity-50"
-                          title="Delete evidence"
-                        >
-                          {deletingEvidenceId === item.id ? (
-                            <Loader2 className="w-4 h-4 animate-spin" />
-                          ) : (
-                            <X className="w-4 h-4" />
-                          )}
-                        </button>
+                        {/* Delete button - hidden when locked */}
+                        {task.isLocked !== true && (
+                          <button
+                            onClick={() => {
+                              setEvidenceToDelete(item.id);
+                              setShowDeleteConfirm(true);
+                            }}
+                            disabled={deletingEvidenceId === item.id}
+                            className="absolute top-2 right-2 z-10 p-1.5 bg-red-500 hover:bg-red-600 text-white rounded-full opacity-0 group-hover:opacity-100 transition-opacity shadow-lg disabled:opacity-50"
+                            title="Delete evidence"
+                          >
+                            {deletingEvidenceId === item.id ? (
+                              <Loader2 className="w-4 h-4 animate-spin" />
+                            ) : (
+                              <X className="w-4 h-4" />
+                            )}
+                          </button>
+                        )}
                         
                         {/* Image Preview - natural size, no stretching */}
                         {isImage && item.fileUrl ? (
@@ -1381,16 +1665,16 @@ function ActionItemDetailContent() {
                   })}
                 </div>
               ) : !showAddEvidence ? (
-                <button
-                  onClick={() => setShowAddEvidence(true)}
-                  className="w-full text-center py-8 hover:bg-gray-50 dark:hover:bg-gray-700/30 rounded-lg transition-colors cursor-pointer"
+                <div
+                  onClick={() => task.isLocked !== true && setShowAddEvidence(true)}
+                  className={`w-full text-center py-8 rounded-lg transition-colors ${task.isLocked === true ? 'cursor-not-allowed opacity-60' : 'hover:bg-gray-50 dark:hover:bg-gray-700/30 cursor-pointer'}`}
                 >
                   <div className="w-16 h-16 mx-auto mb-3 bg-gray-100 dark:bg-gray-700 rounded-lg flex items-center justify-center">
                     <ImageIcon className="w-8 h-8 text-gray-400" />
                   </div>
                   <p className="text-gray-500 text-sm">No evidence attached</p>
-                  <p className="text-gray-400 text-xs mt-1">Click to attach photos or files</p>
-                </button>
+                  <p className="text-gray-400 text-xs mt-1">{task.isLocked === true ? 'Unlock to attach photos or files' : 'Click to attach photos or files'}</p>
+                </div>
               ) : null}
               
               {/* Delete Confirmation Dialog */}
@@ -1432,7 +1716,8 @@ function ActionItemDetailContent() {
                 </div>
                 <button
                   onClick={() => setShowAddAssignee(true)}
-                  className="inline-flex items-center gap-1 text-sm font-medium text-purple-600 hover:text-purple-700"
+                  disabled={task.isLocked === true}
+                  className={`inline-flex items-center gap-1 text-sm font-medium ${task.isLocked === true ? 'text-gray-400 cursor-not-allowed' : 'text-purple-600 hover:text-purple-700'}`}
                 >
                   <Plus className="w-4 h-4" />
                   Add
@@ -1464,12 +1749,14 @@ function ActionItemDetailContent() {
                           <p className="text-xs text-gray-500">{assignee.user.email}</p>
                         </div>
                       </div>
-                      <button
-                        onClick={() => removeAssignee(assignee.userId)}
-                        className="p-1 hover:bg-gray-200 dark:hover:bg-gray-700 rounded"
-                      >
-                        <X className="w-4 h-4 text-gray-400 hover:text-red-500" />
-                      </button>
+                      {task.isLocked !== true && (
+                        <button
+                          onClick={() => removeAssignee(assignee.userId)}
+                          className="p-1 hover:bg-gray-200 dark:hover:bg-gray-700 rounded"
+                        >
+                          <X className="w-4 h-4 text-gray-400 hover:text-red-500" />
+                        </button>
+                      )}
                     </div>
                   ))}
                 </div>

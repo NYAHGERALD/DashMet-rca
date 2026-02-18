@@ -2122,6 +2122,7 @@ enum MeetingType {
   BRAINSTORM
   REVIEW
   OTHER
+  MANUAL
 }
 
 model Meeting {
