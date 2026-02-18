@@ -149,6 +149,23 @@ const taskInclude = {
       id: true,
       title: true,
       meetingType: true,
+      scheduledAt: true,
+    },
+  },
+  completedBy: {
+    select: {
+      id: true,
+      firstName: true,
+      lastName: true,
+      email: true,
+    },
+  },
+  lockedBy: {
+    select: {
+      id: true,
+      firstName: true,
+      lastName: true,
+      email: true,
     },
   },
   _count: {
@@ -439,7 +456,7 @@ router.get('/:id', async (req: Request, res: Response) => {
 router.patch('/:id', async (req: Request, res: Response) => {
   try {
     const { id } = req.params;
-    const { title, description, status, priority, dueDate, assigneeId, progress, userId } = req.body;
+    const { title, description, status, priority, dueDate, assigneeId, progress, userId, isLocked } = req.body;
 
     // Check task exists
     const existingTask = await prisma.task.findUnique({
@@ -450,6 +467,22 @@ router.patch('/:id', async (req: Request, res: Response) => {
       return res.status(404).json({
         success: false,
         error: 'Task not found',
+      });
+    }
+
+    // Check if task is locked - only allow locking operation if currently locked
+    if (existingTask.isLocked && isLocked !== false) {
+      return res.status(403).json({
+        success: false,
+        error: 'Task is locked and cannot be modified',
+      });
+    }
+
+    // Due date can only be edited by the owner
+    if (dueDate !== undefined && userId && userId !== existingTask.ownerId) {
+      return res.status(403).json({
+        success: false,
+        error: 'Only the owner can edit the due date',
       });
     }
 
@@ -479,11 +512,13 @@ router.patch('/:id', async (req: Request, res: Response) => {
       updateData.status = status;
       if (status === 'COMPLETED') {
         updateData.completedAt = new Date();
+        updateData.completedById = userId || existingTask.ownerId; // Track who completed it
         updateData.progress = 100; // COMPLETED always means 100%
       } else if (status === 'PENDING') {
         updateData.progress = 0; // PENDING always means 0%
         if (existingTask.status === 'COMPLETED') {
           updateData.completedAt = null;
+          updateData.completedById = null;
         }
       } else if (status === 'IN_PROGRESS') {
         // IN_PROGRESS: if progress was 0 or 100, set to 50; otherwise keep current
@@ -493,6 +528,7 @@ router.patch('/:id', async (req: Request, res: Response) => {
         }
         if (existingTask.status === 'COMPLETED') {
           updateData.completedAt = null;
+          updateData.completedById = null;
         }
       }
     }
@@ -500,6 +536,23 @@ router.patch('/:id', async (req: Request, res: Response) => {
     if (priority !== undefined) updateData.priority = priority;
     if (dueDate !== undefined) updateData.dueDate = dueDate ? new Date(dueDate) : null;
     if (assigneeId !== undefined) updateData.assigneeId = assigneeId;
+    
+    // Handle direct completedAt update (for editing completion date/time)
+    if (req.body.completedAt !== undefined) {
+      updateData.completedAt = req.body.completedAt ? new Date(req.body.completedAt) : null;
+    }
+    
+    // Handle lock functionality
+    if (isLocked !== undefined) {
+      updateData.isLocked = isLocked;
+      if (isLocked) {
+        updateData.lockedAt = new Date();
+        updateData.lockedById = userId || existingTask.ownerId;
+      } else {
+        updateData.lockedAt = null;
+        updateData.lockedById = null;
+      }
+    }
     
     // Progress update triggers status adjustment
     if (progress !== undefined) {
@@ -513,12 +566,14 @@ router.patch('/:id', async (req: Request, res: Response) => {
           updateData.status = 'PENDING';
           if (existingTask.status === 'COMPLETED') {
             updateData.completedAt = null;
+            updateData.completedById = null;
           }
         } else if (clampedProgress === 100) {
           // 100% → COMPLETED
           if (existingTask.status !== 'COMPLETED') {
             updateData.status = 'COMPLETED';
             updateData.completedAt = new Date();
+            updateData.completedById = userId || existingTask.ownerId;
           }
         } else {
           // 1-99% → IN_PROGRESS
@@ -526,6 +581,7 @@ router.patch('/:id', async (req: Request, res: Response) => {
             updateData.status = 'IN_PROGRESS';
             if (existingTask.status === 'COMPLETED') {
               updateData.completedAt = null;
+              updateData.completedById = null;
             }
           }
         }
@@ -609,6 +665,18 @@ router.patch('/:id', async (req: Request, res: Response) => {
           newValue: newDate,
         });
       }
+    }
+
+    // Log lock/unlock action
+    if (isLocked !== undefined && isLocked !== existingTask.isLocked) {
+      await createActivityLog({
+        taskId: id,
+        userId: logUserId,
+        action: isLocked ? 'LOCK_TASK' : 'UNLOCK_TASK',
+        field: 'isLocked',
+        previousValue: String(existingTask.isLocked),
+        newValue: String(isLocked),
+      });
     }
 
     return res.json({

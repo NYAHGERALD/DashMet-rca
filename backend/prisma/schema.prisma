@@ -1331,6 +1331,8 @@ model User {
   TaskComments                                                        TaskComment[]
   TaskEvidence                                                        TaskEvidence[]
   TaskActivityLogs                                                    TaskActivityLog[]                    @relation("TaskActivityLogUser")
+  TasksCompleted                                                      Task[]                               @relation("TaskCompletedBy")
+  TasksLocked                                                         Task[]                               @relation("TaskLockedBy")
   MeetingsCreated                                                     Meeting[]                            @relation("MeetingCreator")
   MeetingParticipations                                               MeetingParticipant[]                 @relation("MeetingParticipantUser")
   Organization                                                        Organization?                        @relation(fields: [organizationId], references: [id], onDelete: Cascade)
@@ -1676,7 +1678,16 @@ model Task {
   priority       TaskPriority     @default(MEDIUM)
   dueDate        DateTime?
   completedAt    DateTime?
+  completedById  String?          // Who marked this task as completed
+  completedBy    User?            @relation("TaskCompletedBy", fields: [completedById], references: [id])
   progress       Int              @default(0) // 0-100 percentage
+  
+  // Lock fields
+  isLocked       Boolean          @default(false)
+  lockedAt       DateTime?
+  lockedById     String?
+  lockedBy       User?            @relation("TaskLockedBy", fields: [lockedById], references: [id])
+  
   ownerId        String
   assigneeId     String?          // Legacy single assignee (kept for backwards compatibility)
   organizationId String
@@ -1701,6 +1712,8 @@ model Task {
   @@index([organizationId])
   @@index([status])
   @@index([meetingId])
+  @@index([completedById])
+  @@index([lockedById])
 }
 
 // Task Assignees - junction table for multiple assignees
