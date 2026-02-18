@@ -31,13 +31,22 @@ router.post('/check-phone', async (req: Request, res: Response) => {
       });
     }
 
-    // Normalize phone number (remove spaces, ensure E.164 format)
+    // Normalize phone number (remove spaces)
     const normalizedPhone = phone.replace(/\s+/g, '').trim();
+    
+    // Create phone variants to search for (with/without country code)
+    const phoneVariants = [
+      normalizedPhone,
+      normalizedPhone.replace(/^\+1/, ''), // Remove +1
+      normalizedPhone.replace(/^\+/, ''),  // Remove +
+      `+1${normalizedPhone.replace(/^\+1?/, '')}`, // Add +1 if missing
+      `+${normalizedPhone.replace(/^\+/, '')}`, // Add + if missing
+    ];
 
-    // Check if user exists with this phone number
+    // Check if user exists with any of these phone number variants
     const user = await prisma.user.findFirst({
       where: {
-        phone: normalizedPhone,
+        phone: { in: phoneVariants },
       },
       select: {
         id: true,
@@ -462,6 +471,8 @@ router.post('/link-firebase', async (req: Request, res: Response) => {
   try {
     const { phone, firebaseUid } = req.body;
 
+    console.log(`📱 link-firebase called with phone: ${phone}, firebaseUid: ${firebaseUid}`);
+
     if (!phone || !firebaseUid) {
       return res.status(400).json({
         success: false,
@@ -470,13 +481,29 @@ router.post('/link-firebase', async (req: Request, res: Response) => {
     }
 
     const normalizedPhone = phone.replace(/\s+/g, '').trim();
+    
+    // Create phone variants to search for (with/without country code)
+    const phoneVariants = [
+      normalizedPhone,
+      normalizedPhone.replace(/^\+1/, ''), // Remove +1
+      normalizedPhone.replace(/^\+/, ''),  // Remove +
+      `+1${normalizedPhone.replace(/^\+1?/, '')}`, // Add +1 if missing
+      `+${normalizedPhone.replace(/^\+/, '')}`, // Add + if missing
+    ];
+    
+    console.log(`📱 Searching for phone variants:`, phoneVariants);
 
-    // Find user by phone
+    // Find user by phone (try multiple formats)
     const user = await prisma.user.findFirst({
-      where: { phone: normalizedPhone },
+      where: { 
+        phone: { in: phoneVariants }
+      },
     });
+    
+    console.log(`📱 Found user:`, user ? { id: user.id, phone: user.phone, email: user.email } : 'null');
 
     if (!user) {
+      console.log(`❌ link-firebase: No user found for phone variants`);
       return res.status(404).json({
         success: false,
         error: 'User not found with this phone number',
@@ -492,6 +519,7 @@ router.post('/link-firebase', async (req: Request, res: Response) => {
     });
 
     if (existingFirebaseUser) {
+      console.log(`⚠️ link-firebase: Firebase UID already linked to user ${existingFirebaseUser.id}`);
       return res.status(400).json({
         success: false,
         error: 'Firebase UID already linked to another account',
@@ -515,6 +543,8 @@ router.post('/link-firebase', async (req: Request, res: Response) => {
         defaultSiteId: true,
       },
     });
+    
+    console.log(`✅ link-firebase: Updated user ${updatedUser.id} with new Firebase UID`);
 
     return res.json({
       success: true,
