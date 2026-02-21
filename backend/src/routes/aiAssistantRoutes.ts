@@ -3,27 +3,28 @@
  * 
  * REST API for the Workplace AI Assistant.
  * Provides conversational AI with persistent memory and TTS.
+ * 
+ * All routes use Firebase authentication via the `authenticate` middleware.
+ * The authenticated user's DB ID (`req.user.id`) is used for all operations,
+ * ensuring the correct foreign key reference to the User table.
  */
 
 import { Router, Request, Response } from 'express';
 import * as aiService from '../services/aiAssistantService';
+import { authenticate, AuthRequest } from '../middleware/auth';
 
 const router = Router();
 
+// Apply authentication to all AI assistant routes
+router.use(authenticate);
+
 // ─── GET /conversations ──────────────────────────────────
-// List all conversations for a user
-router.get('/conversations', async (req: Request, res: Response) => {
+// List all conversations for the authenticated user
+router.get('/conversations', async (req: AuthRequest, res: Response) => {
   try {
-    const userId = req.query.userId as string;
+    const userId = req.user!.id;
     const limit = parseInt(req.query.limit as string) || 50;
     const offset = parseInt(req.query.offset as string) || 0;
-
-    if (!userId) {
-      return res.status(400).json({
-        success: false,
-        error: 'userId query parameter is required',
-      });
-    }
 
     const conversations = await aiService.getConversations(userId, limit, offset);
 
@@ -41,17 +42,12 @@ router.get('/conversations', async (req: Request, res: Response) => {
 });
 
 // ─── POST /conversations ─────────────────────────────────
-// Create a new conversation
-router.post('/conversations', async (req: Request, res: Response) => {
+// Create a new conversation for the authenticated user
+router.post('/conversations', async (req: AuthRequest, res: Response) => {
   try {
-    const { userId, organizationId, title } = req.body;
-
-    if (!userId) {
-      return res.status(400).json({
-        success: false,
-        error: 'userId is required',
-      });
-    }
+    const userId = req.user!.id;
+    const organizationId = req.user!.organizationId || req.body.organizationId;
+    const { title } = req.body;
 
     const conversation = await aiService.createConversation(
       userId,
@@ -74,7 +70,7 @@ router.post('/conversations', async (req: Request, res: Response) => {
 
 // ─── GET /conversations/:id ──────────────────────────────
 // Get a conversation with all messages
-router.get('/conversations/:id', async (req: Request, res: Response) => {
+router.get('/conversations/:id', async (req: AuthRequest, res: Response) => {
   try {
     const conversation = await aiService.getConversation(req.params.id);
 
@@ -100,7 +96,7 @@ router.get('/conversations/:id', async (req: Request, res: Response) => {
 
 // ─── DELETE /conversations/:id ───────────────────────────
 // Soft-delete a conversation
-router.delete('/conversations/:id', async (req: Request, res: Response) => {
+router.delete('/conversations/:id', async (req: AuthRequest, res: Response) => {
   try {
     await aiService.deleteConversation(req.params.id);
 
@@ -119,7 +115,7 @@ router.delete('/conversations/:id', async (req: Request, res: Response) => {
 
 // ─── POST /conversations/:id/messages ────────────────────
 // Send a message and get AI response (with memory context)
-router.post('/conversations/:id/messages', async (req: Request, res: Response) => {
+router.post('/conversations/:id/messages', async (req: AuthRequest, res: Response) => {
   try {
     const { content } = req.body;
 
@@ -155,7 +151,7 @@ router.post('/conversations/:id/messages', async (req: Request, res: Response) =
 
 // ─── POST /tts ───────────────────────────────────────────
 // Convert text to speech audio (returns MP3 binary)
-router.post('/tts', async (req: Request, res: Response) => {
+router.post('/tts', async (req: AuthRequest, res: Response) => {
   try {
     const { text, voice } = req.body;
 
@@ -189,7 +185,7 @@ router.post('/tts', async (req: Request, res: Response) => {
 
 // ─── POST /conversations/:id/summarize ───────────────────
 // Generate a summary for a conversation (for long-term memory)
-router.post('/conversations/:id/summarize', async (req: Request, res: Response) => {
+router.post('/conversations/:id/summarize', async (req: AuthRequest, res: Response) => {
   try {
     const summary = await aiService.summarizeConversation(req.params.id);
 
@@ -208,14 +204,15 @@ router.post('/conversations/:id/summarize', async (req: Request, res: Response) 
 
 // ─── POST /memory/search ─────────────────────────────────
 // Search across all conversations for relevant context
-router.post('/memory/search', async (req: Request, res: Response) => {
+router.post('/memory/search', async (req: AuthRequest, res: Response) => {
   try {
-    const { userId, query } = req.body;
+    const userId = req.user!.id;
+    const { query } = req.body;
 
-    if (!userId || !query) {
+    if (!query) {
       return res.status(400).json({
         success: false,
-        error: 'userId and query are required',
+        error: 'query is required',
       });
     }
 
