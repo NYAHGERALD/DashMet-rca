@@ -52,6 +52,7 @@ Rules:
 - When you're unsure about facts, dates, people, events, statistics, or anything that needs accuracy, use the search_web tool to look it up. Always prefer verified information over guessing.
 - After searching, weave the information naturally into your spoken answer. Never say "according to my search" — just share the facts conversationally.
 - When the user asks about their personal tasks, to-do items, meetings, follow-ups, goals, projects, schedule, what they have today or this week, or anything remotely about their Leaders Standard Work — ALWAYS use the get_my_tasks tool. This is the ONLY way to get the user's real data. You have NO knowledge of the user's tasks without calling this tool. Never say "you have nothing" or "no tasks" without first calling get_my_tasks.
+- When the user asks about something discussed in a previous conversation, references a past discussion, asks "what did we talk about", "remember when", "last time", "yesterday", "last week", "last month", a specific date, or anything that refers to prior conversations — ALWAYS use the recall_past_conversations tool to search your memory. You have NO knowledge of past conversations without calling this tool. Never say "I don't remember" or "I have no record" without first searching.
 - Today's date is ${todayStr}. The current ISO week number is ${weekNumber} of ${year}.`;
 }
 
@@ -96,6 +97,29 @@ const AI_TOOLS: OpenAI.ChatCompletionTool[] = [
           },
         },
         required: ['scope'],
+      },
+    },
+  },
+  {
+    type: 'function',
+    function: {
+      name: 'recall_past_conversations',
+      description:
+        'Search across ALL of the user\'s past conversations to recall what was discussed previously. Use this whenever the user asks about a previous conversation, references something discussed before, asks "what did we talk about", "do you remember", "last time", or any question that refers to past interactions. Also use this when the user asks about what was discussed on a specific day, week, month, or time period. The query should describe what the user is looking for.',
+      parameters: {
+        type: 'object',
+        properties: {
+          query: {
+            type: 'string',
+            description: 'A search query describing what to look for in past conversations. Use the key topic or keywords the user is asking about. For date-based queries, include time references like "last Monday" or "January".',
+          },
+          time_filter: {
+            type: 'string',
+            enum: ['today', 'yesterday', 'this_week', 'last_week', 'this_month', 'last_month', 'this_year', 'all_time'],
+            description: 'Optional time filter to narrow the search. Use "all_time" if the user doesn\'t specify a time period.',
+          },
+        },
+        required: ['query'],
       },
     },
   },
@@ -500,15 +524,7 @@ export async function sendMessage(
     buildMessagesArray(conversation, userMessage),
   ]);
 
-  // Fire memory search in background (non-blocking for speed)
-  searchUserMemory(conversation.userId, userMessage, conversationId)
-    .then((ctx) => {
-      if (ctx) {
-        // Memory context will be available for future messages
-        console.log('📝 Memory context found for future reference');
-      }
-    })
-    .catch(() => {});
+  // Memory search is now handled by the recall_past_conversations tool
 
   let completion = await openai.chat.completions.create({
     model: CHAT_MODEL,
@@ -537,6 +553,9 @@ export async function sendMessage(
       } else if (fn?.name === 'get_my_tasks') {
         const args = JSON.parse(fn.arguments);
         result = await fetchUserLswData(conversation.userId, conversation.organizationId ?? null, args.scope || 'all');
+      } else if (fn?.name === 'recall_past_conversations') {
+        const args = JSON.parse(fn.arguments);
+        result = await recallPastConversations(conversation.userId, args.query, args.time_filter, conversationId);
       }
       messages.push({
         role: 'tool',
@@ -715,6 +734,11 @@ export async function sendMessageStream(
       fullText += 'Checking your schedule... ';
       const args = JSON.parse(toolCallArgs);
       toolResult = await fetchUserLswData(conversation.userId, conversation.organizationId ?? null, args.scope || 'all');
+    } else if (toolCallName === 'recall_past_conversations') {
+      res.write(`event: token\ndata: ${JSON.stringify({ t: 'Let me check our past conversations... ' })}\n\n`);
+      fullText += 'Let me check our past conversations... ';
+      const args = JSON.parse(toolCallArgs);
+      toolResult = await recallPastConversations(conversation.userId, args.query, args.time_filter, conversationId);
     }
 
     // Build messages with tool call and result
@@ -923,6 +947,198 @@ async function generateTitle(
     );
   } catch {
     return 'New Conversation';
+  }
+}
+
+// ─── Recall Past Conversations (GPT tool) ────────────────
+
+async function recallPastConversations(
+  userId: string,
+  query: string,
+  timeFilter?: string,
+  excludeConversationId?: string
+): Promise<string> {
+  try {
+    console.log(`🧠 Recall past conversations: userId=${userId}, query="${query}", timeFilter=${timeFilter || 'all_time'}`);
+
+    // Build date filter based on time_filter parameter
+    const now = new Date();
+    let dateFilter: Date | undefined;
+
+    switch (timeFilter) {
+      case 'today':
+        dateFilter = new Date(now.getFullYear(), now.getMonth(), now.getDate());
+        break;
+      case 'yesterday': {
+        const yesterday = new Date(now);
+        yesterday.setDate(yesterday.getDate() - 1);
+        dateFilter = new Date(yesterday.getFullYear(), yesterday.getMonth(), yesterday.getDate());
+        break;
+      }
+      case 'this_week': {
+        const startOfWeek = new Date(now);
+        startOfWeek.setDate(startOfWeek.getDate() - startOfWeek.getDay());
+        dateFilter = new Date(startOfWeek.getFullYear(), startOfWeek.getMonth(), startOfWeek.getDate());
+        break;
+      }
+      case 'last_week': {
+        const startOfLastWeek = new Date(now);
+        startOfLastWeek.setDate(startOfLastWeek.getDate() - startOfLastWeek.getDay() - 7);
+        dateFilter = new Date(startOfLastWeek.getFullYear(), startOfLastWeek.getMonth(), startOfLastWeek.getDate());
+        break;
+      }
+      case 'this_month':
+        dateFilter = new Date(now.getFullYear(), now.getMonth(), 1);
+        break;
+      case 'last_month':
+        dateFilter = new Date(now.getFullYear(), now.getMonth() - 1, 1);
+        break;
+      case 'this_year':
+        dateFilter = new Date(now.getFullYear(), 0, 1);
+        break;
+      default:
+        // all_time — no date filter
+        break;
+    }
+
+    // Extract keywords for content search
+    const stopWords = new Set([
+      'the', 'and', 'for', 'are', 'but', 'not', 'you', 'all',
+      'can', 'had', 'her', 'was', 'one', 'our', 'out', 'has',
+      'have', 'been', 'will', 'with', 'this', 'that', 'from',
+      'they', 'what', 'when', 'where', 'which', 'their', 'about',
+      'would', 'there', 'could', 'other', 'into', 'more', 'some',
+      'than', 'them', 'then', 'these', 'just', 'also', 'should',
+      'talked', 'discussed', 'said', 'told', 'asked', 'remember',
+      'conversation', 'last', 'time', 'week', 'month', 'year', 'day',
+      'yesterday', 'today', 'discuss', 'talk', 'tell',
+    ]);
+
+    const keywords = query
+      .toLowerCase()
+      .replace(/[^\w\s]/g, '')
+      .split(/\s+/)
+      .filter((w) => w.length > 2 && !stopWords.has(w));
+
+    // Strategy 1: Search by keywords in message content
+    const keywordConditions = keywords.length > 0
+      ? keywords.slice(0, 6).map((keyword) => ({
+          content: { contains: keyword, mode: 'insensitive' as const },
+        }))
+      : [];
+
+    // Strategy 2: Search by conversation title
+    const titleConditions = keywords.length > 0
+      ? keywords.slice(0, 6).map((keyword) => ({
+          conversation: {
+            title: { contains: keyword, mode: 'insensitive' as const },
+          },
+        }))
+      : [];
+
+    // Also search conversation summaries
+    const conversations = await prisma.aiAssistantConversation.findMany({
+      where: {
+        userId,
+        isActive: true,
+        ...(excludeConversationId && { id: { not: excludeConversationId } }),
+        ...(dateFilter && { createdAt: { gte: dateFilter } }),
+      },
+      orderBy: { updatedAt: 'desc' },
+      take: 50,
+      select: {
+        id: true,
+        title: true,
+        summary: true,
+        createdAt: true,
+        updatedAt: true,
+        _count: { select: { messages: true } },
+      },
+    });
+
+    if (conversations.length === 0) {
+      return 'No past conversations found for this user in the specified time period.';
+    }
+
+    // Search messages across those conversations
+    const relevantMessages = await prisma.aiAssistantMessage.findMany({
+      where: {
+        conversation: {
+          userId,
+          isActive: true,
+          ...(excludeConversationId && { id: { not: excludeConversationId } }),
+          ...(dateFilter && { createdAt: { gte: dateFilter } }),
+        },
+        ...(keywordConditions.length > 0 && {
+          OR: [...keywordConditions, ...titleConditions],
+        }),
+      },
+      orderBy: { createdAt: 'desc' },
+      take: 15,
+      include: {
+        conversation: { select: { title: true, createdAt: true, updatedAt: true } },
+      },
+    });
+
+    // Build context for GPT
+    const sections: string[] = [];
+
+    // Include conversation summaries as overview
+    const conversationsWithSummaries = conversations.filter(c => c.summary);
+    if (conversationsWithSummaries.length > 0) {
+      sections.push('=== Past Conversation Summaries ===');
+      for (const conv of conversationsWithSummaries.slice(0, 10)) {
+        const dateStr = conv.updatedAt.toLocaleDateString('en-US', {
+          weekday: 'long', year: 'numeric', month: 'long', day: 'numeric',
+        });
+        sections.push(`\n📅 "${conv.title}" (${dateStr}, ${conv._count.messages} messages):\n${conv.summary}`);
+      }
+    }
+
+    // Include matching messages with context
+    if (relevantMessages.length > 0) {
+      sections.push('\n=== Matching Messages from Past Conversations ===');
+      // Group messages by conversation
+      const grouped = new Map<string, typeof relevantMessages>();
+      for (const msg of relevantMessages) {
+        const key = msg.conversationId;
+        if (!grouped.has(key)) grouped.set(key, []);
+        grouped.get(key)!.push(msg);
+      }
+
+      for (const [_, msgs] of grouped) {
+        const conv = msgs[0].conversation;
+        const dateStr = conv.createdAt.toLocaleDateString('en-US', {
+          weekday: 'long', year: 'numeric', month: 'long', day: 'numeric',
+        });
+        sections.push(`\n📅 Conversation: "${conv.title}" (${dateStr})`);
+        for (const m of msgs) {
+          const msgTime = m.createdAt.toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit' });
+          const role = m.role === 'user' ? 'User' : 'AI';
+          sections.push(`  [${msgTime}] ${role}: ${m.content.substring(0, 300)}`);
+        }
+      }
+    }
+
+    // If no keyword matches but we have conversations, list recent ones
+    if (relevantMessages.length === 0 && conversationsWithSummaries.length === 0) {
+      sections.push('=== Recent Conversations (no keyword matches found) ===');
+      for (const conv of conversations.slice(0, 10)) {
+        const dateStr = conv.updatedAt.toLocaleDateString('en-US', {
+          weekday: 'long', year: 'numeric', month: 'long', day: 'numeric',
+        });
+        sections.push(`- "${conv.title}" (${dateStr}, ${conv._count.messages} messages)`);
+      }
+      sections.push('\nThese are the user\'s recent conversations. You can mention the topics/titles that are relevant to what the user asked about.');
+    }
+
+    const result = sections.join('\n');
+    console.log(`🧠 Recall found: ${relevantMessages.length} messages, ${conversationsWithSummaries.length} summaries, ${conversations.length} total conversations`);
+    return result;
+
+  } catch (error: any) {
+    console.error('🧠 Recall past conversations error:', error.message);
+    return `Error searching past conversations: ${error.message}`;
   }
 }
 
