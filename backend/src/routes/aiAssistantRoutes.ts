@@ -149,6 +149,62 @@ router.post('/conversations/:id/messages', async (req: AuthRequest, res: Respons
   }
 });
 
+// ─── POST /conversations/:id/messages/stream ────────────
+// Stream AI response via SSE with sentence-chunked TTS audio
+// This is the primary endpoint for real-time voice conversations.
+// SSE Events:
+//   token    - {t: "word "}          text token for live display
+//   audio    - {a: "<base64>", i: 0} TTS audio chunk (MP3)
+//   user_msg - {id: "msg-id"}        saved user message ID
+//   done     - {id: "msg-id", text: "full response"}
+//   error    - {error: "message"}
+router.post('/conversations/:id/messages/stream', async (req: AuthRequest, res: Response) => {
+  try {
+    const { content, voice } = req.body;
+
+    if (!content || !content.trim()) {
+      return res.status(400).json({
+        success: false,
+        error: 'Message content is required',
+      });
+    }
+
+    // Set SSE headers
+    res.writeHead(200, {
+      'Content-Type': 'text/event-stream',
+      'Cache-Control': 'no-cache',
+      'Connection': 'keep-alive',
+      'X-Accel-Buffering': 'no',         // Disable Nginx/Render buffering
+      'Access-Control-Allow-Origin': '*',
+    });
+
+    // Handle client disconnect
+    req.on('close', () => {
+      console.log('SSE client disconnected');
+    });
+
+    await aiService.sendMessageStream(
+      req.params.id,
+      content.trim(),
+      res,
+      voice || 'nova'
+    );
+  } catch (error: any) {
+    console.error('Error in streaming message:', error);
+
+    // If headers already sent, write error as SSE event
+    if (res.headersSent) {
+      res.write(`event: error\ndata: ${JSON.stringify({ error: error.message })}\n\n`);
+      res.end();
+    } else {
+      return res.status(500).json({
+        success: false,
+        error: error.message || 'Failed to stream message',
+      });
+    }
+  }
+});
+
 // ─── POST /tts ───────────────────────────────────────────
 // Convert text to speech audio (returns MP3 binary)
 router.post('/tts', async (req: AuthRequest, res: Response) => {

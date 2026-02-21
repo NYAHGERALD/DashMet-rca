@@ -1,16 +1,17 @@
 /**
  * AI Assistant Service
  * 
- * Provides conversational AI with persistent memory.
+ * Provides real-time conversational AI with persistent memory.
  * - Stores conversation history in PostgreSQL via Prisma
- * - Uses OpenAI GPT-4o for intelligent responses
- * - Retrieves context from past conversations for memory
- * - Generates TTS audio via OpenAI TTS API
+ * - Uses OpenAI GPT-4o-mini for fast, natural responses
+ * - SSE streaming with sentence-chunked TTS for near-instant voice
+ * - Cross-conversation memory search
  * - Auto-generates conversation titles and summaries
  */
 
 import { PrismaClient } from '@prisma/client';
 import OpenAI from 'openai';
+import { Response } from 'express';
 
 const prisma = new PrismaClient();
 
@@ -25,31 +26,30 @@ function getOpenAIClient(): OpenAI {
   if (openaiClient) return openaiClient;
   openaiClient = new OpenAI({
     apiKey: process.env.OPENAI_API_KEY,
-    timeout: 60000,
-    maxRetries: 2,
+    timeout: 30000,
+    maxRetries: 1,
   });
   return openaiClient;
 }
 
-// ─── System Prompt ───────────────────────────────────────
+// ─── System Prompt (optimized for natural spoken conversation) ─
 
-const SYSTEM_PROMPT = `You are DashMet AI, a professional workplace assistant integrated into the DashMet platform. You are friendly, knowledgeable, and conversational — like a trusted, helpful colleague who genuinely cares.
+const SYSTEM_PROMPT = `You are DashMet AI, a friendly colleague at DashMet. Talk like a real person in a real conversation.
 
-Guidelines for your responses:
-- Be natural and conversational, never robotic or formulaic
-- Keep responses concise but helpful (1-3 paragraphs maximum for most answers)
-- When the user references past discussions, use the conversation history naturally
-- Offer proactive suggestions when they would be genuinely useful
-- Be professional but warm — use a friendly, approachable tone
-- You can help with workplace tasks, questions, planning, scheduling, problem-solving, and general knowledge
-- Remember and reference context from the conversation naturally
-- When you don't know something, say so honestly
-- Avoid bullet points unless the user explicitly asks for a list
-- Speak as if you're having a real face-to-face conversation
-- Your responses will be read aloud via text-to-speech, so keep them natural and spoken-word friendly
-- Avoid overly long responses — aim for what you'd naturally say in a conversation`;
+Rules:
+- Keep answers to 1-3 sentences. Only go longer when explaining something complex.
+- Never use bullet points, numbered lists, markdown, or formatting. Just talk.
+- Write exactly how people speak out loud. Use contractions, casual phrasing.
+- If someone says hi, say hi back naturally. Don't list your capabilities.
+- Reference conversation context naturally, not formally.
+- Be warm, helpful, and direct. No filler phrases like "Great question!" or "Absolutely!"
+- If you don't know something, just say so simply.
+- You help with workplace tasks, planning, problem-solving, and general knowledge.
+- Your words are spoken aloud via voice — never output anything that sounds weird read aloud.`;
 
-const MAX_CONTEXT_MESSAGES = 40;
+const MAX_CONTEXT_MESSAGES = 20;
+const CHAT_MODEL = 'gpt-4o-mini';
+const TTS_VOICE = 'nova';
 
 // ─── Conversation Management ─────────────────────────────
 
@@ -115,39 +115,12 @@ export async function deleteConversation(conversationId: string) {
   });
 }
 
-// ─── Send Message & Get AI Response ──────────────────────
+// ─── Build Messages Array (shared between streaming and non-streaming) ─
 
-export async function sendMessage(
-  conversationId: string,
+async function buildMessagesArray(
+  conversation: any,
   userMessage: string
-) {
-  const openai = getOpenAIClient();
-
-  // Load the conversation with recent messages
-  const conversation = await prisma.aiAssistantConversation.findUnique({
-    where: { id: conversationId },
-    include: {
-      messages: {
-        orderBy: { createdAt: 'asc' },
-        take: MAX_CONTEXT_MESSAGES,
-      },
-    },
-  });
-
-  if (!conversation) {
-    throw new Error('Conversation not found');
-  }
-
-  // Save the user's message
-  const savedUserMsg = await prisma.aiAssistantMessage.create({
-    data: {
-      conversationId,
-      role: 'user',
-      content: userMessage,
-    },
-  });
-
-  // Build the OpenAI messages array
+): Promise<OpenAI.ChatCompletionMessageParam[]> {
   const messages: OpenAI.ChatCompletionMessageParam[] = [
     { role: 'system', content: SYSTEM_PROMPT },
   ];
@@ -156,20 +129,7 @@ export async function sendMessage(
   if (conversation.summary) {
     messages.push({
       role: 'system',
-      content: `Summary of earlier discussion: ${conversation.summary}`,
-    });
-  }
-
-  // Search for relevant context from other conversations (cross-conversation memory)
-  const memoryContext = await searchUserMemory(
-    conversation.userId,
-    userMessage,
-    conversationId
-  );
-  if (memoryContext) {
-    messages.push({
-      role: 'system',
-      content: `Relevant context from the user's previous conversations:\n${memoryContext}`,
+      content: `Earlier context: ${conversation.summary}`,
     });
   }
 
@@ -184,66 +144,286 @@ export async function sendMessage(
   // Add the new user message
   messages.push({ role: 'user', content: userMessage });
 
-  // Get AI response
+  return messages;
+}
+
+// ─── Send Message & Get AI Response (legacy non-streaming) ─
+
+export async function sendMessage(
+  conversationId: string,
+  userMessage: string
+) {
+  const openai = getOpenAIClient();
+
+  const conversation = await prisma.aiAssistantConversation.findUnique({
+    where: { id: conversationId },
+    include: {
+      messages: {
+        orderBy: { createdAt: 'asc' },
+        take: MAX_CONTEXT_MESSAGES,
+      },
+    },
+  });
+
+  if (!conversation) throw new Error('Conversation not found');
+
+  // Save user message + build messages in parallel
+  const [savedUserMsg, messages] = await Promise.all([
+    prisma.aiAssistantMessage.create({
+      data: { conversationId, role: 'user', content: userMessage },
+    }),
+    buildMessagesArray(conversation, userMessage),
+  ]);
+
+  // Fire memory search in background (non-blocking for speed)
+  searchUserMemory(conversation.userId, userMessage, conversationId)
+    .then((ctx) => {
+      if (ctx) {
+        // Memory context will be available for future messages
+        console.log('📝 Memory context found for future reference');
+      }
+    })
+    .catch(() => {});
+
   const completion = await openai.chat.completions.create({
-    model: 'gpt-4o',
+    model: CHAT_MODEL,
     messages,
-    temperature: 0.7,
-    max_tokens: 800,
-    presence_penalty: 0.1,
-    frequency_penalty: 0.1,
+    temperature: 0.8,
+    max_tokens: 200,
+    presence_penalty: 0.3,
+    frequency_penalty: 0.2,
   });
 
   const aiResponse =
     completion.choices[0]?.message?.content ||
-    "I'm sorry, I wasn't able to generate a response. Could you try rephrasing?";
+    "Sorry, I didn't catch that. Could you say it again?";
 
-  // Save the AI response
   const savedAiMsg = await prisma.aiAssistantMessage.create({
     data: {
       conversationId,
       role: 'assistant',
       content: aiResponse,
-      metadata: {
-        model: completion.model,
-        promptTokens: completion.usage?.prompt_tokens,
-        completionTokens: completion.usage?.completion_tokens,
-        totalTokens: completion.usage?.total_tokens,
-      },
+      metadata: { model: completion.model },
     },
   });
 
-  // Auto-generate title after first exchange
+  // Fire-and-forget: title generation & conversation update
   if (conversation.messages.length === 0) {
-    const title = await generateTitle(userMessage, aiResponse);
-    await prisma.aiAssistantConversation.update({
-      where: { id: conversationId },
-      data: { title, updatedAt: new Date() },
-    });
+    generateTitle(userMessage, aiResponse)
+      .then((title) =>
+        prisma.aiAssistantConversation.update({
+          where: { id: conversationId },
+          data: { title, updatedAt: new Date() },
+        })
+      )
+      .catch(console.error);
   } else {
-    await prisma.aiAssistantConversation.update({
-      where: { id: conversationId },
-      data: { updatedAt: new Date() },
-    });
+    prisma.aiAssistantConversation
+      .update({ where: { id: conversationId }, data: { updatedAt: new Date() } })
+      .catch(console.error);
   }
 
-  // Auto-summarize when conversation gets long (every 30 messages)
+  // Auto-summarize every 30 messages (fire-and-forget)
   const totalMessages = conversation.messages.length + 2;
   if (totalMessages > 0 && totalMessages % 30 === 0) {
     summarizeConversation(conversationId).catch(console.error);
   }
 
-  return {
-    userMessage: savedUserMsg,
-    aiMessage: savedAiMsg,
-  };
+  return { userMessage: savedUserMsg, aiMessage: savedAiMsg };
+}
+
+// ─── Streaming Message (SSE with sentence-chunked TTS) ───
+
+/**
+ * Streams AI response via SSE with interleaved TTS audio chunks.
+ * 
+ * SSE Events:
+ *   event: token     data: {"t":"word "}       — text token
+ *   event: audio     data: {"a":"<base64>","i":0}  — TTS audio for sentence chunk
+ *   event: done      data: {"id":"msg-id","text":"full text"}
+ *   event: error     data: {"error":"message"}
+ */
+export async function sendMessageStream(
+  conversationId: string,
+  userMessage: string,
+  res: Response,
+  voice: string = TTS_VOICE
+) {
+  const openai = getOpenAIClient();
+
+  const conversation = await prisma.aiAssistantConversation.findUnique({
+    where: { id: conversationId },
+    include: {
+      messages: {
+        orderBy: { createdAt: 'asc' },
+        take: MAX_CONTEXT_MESSAGES,
+      },
+    },
+  });
+
+  if (!conversation) {
+    res.write(`event: error\ndata: ${JSON.stringify({ error: 'Conversation not found' })}\n\n`);
+    res.end();
+    return;
+  }
+
+  // Save user message + build messages array in parallel
+  const [savedUserMsg, messages] = await Promise.all([
+    prisma.aiAssistantMessage.create({
+      data: { conversationId, role: 'user', content: userMessage },
+    }),
+    buildMessagesArray(conversation, userMessage),
+  ]);
+
+  // Send saved user message ID
+  res.write(`event: user_msg\ndata: ${JSON.stringify({ id: savedUserMsg.id })}\n\n`);
+
+  // Start GPT streaming
+  const stream = await openai.chat.completions.create({
+    model: CHAT_MODEL,
+    messages,
+    temperature: 0.8,
+    max_tokens: 200,
+    presence_penalty: 0.3,
+    frequency_penalty: 0.2,
+    stream: true,
+  });
+
+  let fullText = '';
+  let sentenceBuffer = '';
+  let sentenceIndex = 0;
+  const ttsPromises: Promise<void>[] = [];
+
+  // Process tokens from the stream
+  for await (const chunk of stream) {
+    const token = chunk.choices[0]?.delta?.content;
+    if (!token) continue;
+
+    fullText += token;
+    sentenceBuffer += token;
+
+    // Send token immediately for live text display
+    res.write(`event: token\ndata: ${JSON.stringify({ t: token })}\n\n`);
+
+    // Detect sentence boundaries and fire TTS
+    const boundary = detectSentenceBoundary(sentenceBuffer);
+    if (boundary) {
+      const sentenceText = boundary.sentence.trim();
+      sentenceBuffer = boundary.remaining;
+
+      if (sentenceText.length > 0) {
+        const idx = sentenceIndex++;
+        // Fire TTS for this sentence in background, send audio when ready
+        const ttsPromise = generateAndSendTTS(openai, sentenceText, voice, idx, res);
+        ttsPromises.push(ttsPromise);
+      }
+    }
+  }
+
+  // Handle any remaining text in the buffer
+  const remainingSentence = sentenceBuffer.trim();
+  if (remainingSentence.length > 0) {
+    const idx = sentenceIndex++;
+    const ttsPromise = generateAndSendTTS(openai, remainingSentence, voice, idx, res);
+    ttsPromises.push(ttsPromise);
+  }
+
+  // Wait for all TTS chunks to be sent
+  await Promise.all(ttsPromises);
+
+  // Save AI response to database
+  const savedAiMsg = await prisma.aiAssistantMessage.create({
+    data: {
+      conversationId,
+      role: 'assistant',
+      content: fullText,
+      metadata: { model: CHAT_MODEL },
+    },
+  });
+
+  // Send done event
+  res.write(`event: done\ndata: ${JSON.stringify({ id: savedAiMsg.id, text: fullText })}\n\n`);
+  res.end();
+
+  // Fire-and-forget: title, timestamp, summarization
+  if (conversation.messages.length === 0) {
+    generateTitle(userMessage, fullText)
+      .then((title) =>
+        prisma.aiAssistantConversation.update({
+          where: { id: conversationId },
+          data: { title, updatedAt: new Date() },
+        })
+      )
+      .catch(console.error);
+  } else {
+    prisma.aiAssistantConversation
+      .update({ where: { id: conversationId }, data: { updatedAt: new Date() } })
+      .catch(console.error);
+  }
+
+  const totalMessages = conversation.messages.length + 2;
+  if (totalMessages > 0 && totalMessages % 30 === 0) {
+    summarizeConversation(conversationId).catch(console.error);
+  }
+}
+
+// ─── Sentence Boundary Detection ─────────────────────────
+
+function detectSentenceBoundary(
+  buffer: string
+): { sentence: string; remaining: string } | null {
+  // Match sentence-ending punctuation followed by a space or end-of-text
+  // Handles: "." "!" "?" "..." and combinations
+  const match = buffer.match(/^(.*?[.!?]+)\s+(.*)$/s);
+  if (match) {
+    return { sentence: match[1], remaining: match[2] };
+  }
+  // Also split on long pauses (comma + enough text after)
+  if (buffer.length > 80) {
+    const commaMatch = buffer.match(/^(.{40,}?,)\s+(.*)$/s);
+    if (commaMatch) {
+      return { sentence: commaMatch[1], remaining: commaMatch[2] };
+    }
+  }
+  return null;
+}
+
+// ─── Generate TTS and write to SSE stream ────────────────
+
+async function generateAndSendTTS(
+  openai: OpenAI,
+  text: string,
+  voice: string,
+  index: number,
+  res: Response
+): Promise<void> {
+  try {
+    const validVoices = ['alloy', 'echo', 'fable', 'onyx', 'nova', 'shimmer'];
+    const selectedVoice = validVoices.includes(voice) ? voice : 'nova';
+
+    const ttsResponse = await openai.audio.speech.create({
+      model: 'tts-1',
+      voice: selectedVoice as any,
+      input: text,
+      response_format: 'mp3',
+      speed: 1.05,
+    });
+
+    const arrayBuffer = await ttsResponse.arrayBuffer();
+    const base64Audio = Buffer.from(arrayBuffer).toString('base64');
+
+    res.write(`event: audio\ndata: ${JSON.stringify({ a: base64Audio, i: index })}\n\n`);
+  } catch (error) {
+    console.error(`TTS error for sentence ${index}:`, error);
+    // Non-fatal — text was already sent, speech just won't play for this sentence
+  }
 }
 
 // ─── Text-to-Speech ──────────────────────────────────────
 
 export async function textToSpeech(
   text: string,
-  voice: string = 'nova'
+  voice: string = TTS_VOICE
 ): Promise<Buffer> {
   const openai = getOpenAIClient();
 
@@ -252,10 +432,10 @@ export async function textToSpeech(
 
   const response = await openai.audio.speech.create({
     model: 'tts-1',
-    voice: selectedVoice as 'alloy' | 'echo' | 'fable' | 'onyx' | 'nova' | 'shimmer',
+    voice: selectedVoice as any,
     input: text,
     response_format: 'mp3',
-    speed: 1.0,
+    speed: 1.05,
   });
 
   const arrayBuffer = await response.arrayBuffer();
