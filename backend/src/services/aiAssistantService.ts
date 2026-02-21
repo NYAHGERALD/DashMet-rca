@@ -147,93 +147,180 @@ async function searchWeb(query: string): Promise<string> {
 
 // ─── LSW Data Fetch for AI ──────────────────────────────
 
-function getCurrentWeekInfo(): { weekNumber: number; year: number; dayOfWeek: string } {
-  const now = new Date();
-  const year = now.getFullYear();
-  const dayNames = ['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday'];
-  const dayOfWeek = dayNames[now.getDay()];
-  
-  // ISO week number calculation
-  const jan1 = new Date(year, 0, 1);
-  const dayOfYear = Math.ceil((now.getTime() - jan1.getTime()) / 86400000) + 1;
-  const weekNumber = Math.ceil((dayOfYear + jan1.getDay()) / 7);
-  
-  return { weekNumber, year, dayOfWeek };
+/**
+ * Compute ISO 8601 week number — MUST match the frontend getWeekNumber() exactly.
+ * Uses UTC to avoid timezone drift issues on the server.
+ */
+function getISOWeekNumber(date: Date): { weekNumber: number; year: number } {
+  const d = new Date(Date.UTC(date.getFullYear(), date.getMonth(), date.getDate()));
+  const dayNum = d.getUTCDay() || 7; // Sunday = 7
+  d.setUTCDate(d.getUTCDate() + 4 - dayNum); // Nearest Thursday
+  const yearStart = new Date(Date.UTC(d.getUTCFullYear(), 0, 1));
+  const weekNumber = Math.ceil((((d.getTime() - yearStart.getTime()) / 86400000) + 1) / 7);
+  return { weekNumber, year: d.getUTCFullYear() };
 }
 
-async function fetchUserLswData(userId: string, organizationId: string, scope: string): Promise<string> {
-  try {
-    const { weekNumber, year, dayOfWeek } = getCurrentWeekInfo();
-    console.log(`📊 Fetching LSW data for user ${userId}, scope: ${scope}, week ${weekNumber}/${year}, day: ${dayOfWeek}`);
+/**
+ * Compute org-relative week number if org has a custom calendar year start.
+ * Mirrors the frontend's getWeekNumber(date, config) logic exactly.
+ */
+function getOrgWeekNumber(date: Date, calendarYearStartMonth: number, calendarYearStartDay: number): { weekNumber: number; year: number } {
+  // Default ISO if org uses standard calendar
+  if (calendarYearStartMonth === 1 && calendarYearStartDay === 1) {
+    return getISOWeekNumber(date);
+  }
 
-    const sections: string[] = [];
-    sections.push(`Current context: ${dayOfWeek}, Week ${weekNumber} of ${year}`);
+  // Find the org cycle start that this date belongs to
+  const month = calendarYearStartMonth - 1; // 0-indexed
+  const day = calendarYearStartDay;
+
+  let cycleStart = new Date(date.getFullYear(), month, day);
+  if (cycleStart > date) {
+    cycleStart = new Date(date.getFullYear() - 1, month, day);
+  }
+
+  const diffMs = date.getTime() - cycleStart.getTime();
+  const diffDays = Math.floor(diffMs / 86400000);
+  const weekNumber = Math.floor(diffDays / 7) + 1;
+  return { weekNumber, year: cycleStart.getFullYear() };
+}
+
+/**
+ * Resolve the user's organizationId — falls back to the user's record if not on the conversation.
+ */
+async function resolveOrganizationId(userId: string, conversationOrgId: string | null | undefined): Promise<string> {
+  if (conversationOrgId) return conversationOrgId;
+  const user = await prisma.user.findUnique({
+    where: { id: userId },
+    select: { organizationId: true },
+  });
+  return user?.organizationId || '';
+}
+
+async function fetchUserLswData(userId: string, conversationOrgId: string | null, scope: string): Promise<string> {
+  try {
+    const now = new Date();
+    const dayNames = ['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday'];
+    const dayOfWeek = dayNames[now.getDay()];
+    const dayKey = dayOfWeek.toLowerCase();
+
+    // Resolve organizationId — fall back to user record if not on conversation
+    const organizationId = await resolveOrganizationId(userId, conversationOrgId);
+    console.log(`📊 LSW fetch: userId=${userId}, orgId=${organizationId}, scope=${scope}`);
+
+    // Fetch org calendar config to compute the correct week number
+    let calMonth = 1, calDay = 1;
+    if (organizationId) {
+      const org = await prisma.organization.findUnique({
+        where: { id: organizationId },
+        select: { calendarYearStartMonth: true, calendarYearStartDay: true },
+      });
+      if (org) {
+        calMonth = org.calendarYearStartMonth;
+        calDay = org.calendarYearStartDay;
+      }
+    }
+
+    const { weekNumber, year } = getOrgWeekNumber(now, calMonth, calDay);
+    console.log(`📊 Org calendar: start=${calMonth}/${calDay}, computed week=${weekNumber}, year=${year}, today=${dayOfWeek}`);
 
     // Helper to format dates
-    const fmtDate = (d: any) => d ? new Date(d).toLocaleDateString('en-US', { weekday: 'short', month: 'short', day: 'numeric' }) : 'no date';
-    const dayKey = dayOfWeek.toLowerCase() as string;
+    const fmtDate = (d: any) => {
+      if (!d) return 'no date';
+      const dt = new Date(d);
+      return isNaN(dt.getTime()) ? String(d) : dt.toLocaleDateString('en-US', { weekday: 'short', month: 'short', day: 'numeric' });
+    };
 
+    const sections: string[] = [];
+    sections.push(`Current context: ${dayOfWeek}, Week ${weekNumber} of ${year} (today is ${now.toLocaleDateString('en-US', { month: 'long', day: 'numeric', year: 'numeric' })})`);
+
+    // ── Daily Tasks ──────────────────────────────
     if (scope === 'all' || scope === 'daily_tasks') {
       const tasks = await lswService.getDailyTasks(userId, weekNumber, year);
+      console.log(`📊 Daily tasks returned: ${tasks.length}`);
       if (tasks.length > 0) {
-        const todayTasks = tasks.filter((t: any) => t[dayKey] !== undefined);
         const taskLines = tasks.map((t: any) => {
-          const scheduledDays = ['monday','tuesday','wednesday','thursday','friday','saturday','sunday']
-            .filter(d => (t as any)[d]).map(d => d.charAt(0).toUpperCase() + d.slice(1,3));
-          const completedToday = (t as any)[dayKey] === true;
-          return `- "${t.task}" (${t.minutes || '?'}min at ${t.time || '?'}) [${scheduledDays.join(',')}] ${completedToday ? '✅ done' : '⬜ pending'}`;
+          // After getDailyTasks, day fields = completion status for this week
+          const completedToday = t[dayKey] === true;
+          const completedDays = ['monday','tuesday','wednesday','thursday','friday','saturday','sunday']
+            .filter(d => t[d] === true);
+          return `- "${t.task}" (${t.minutes || '?'}min, scheduled at ${t.time || 'unset'}) — today: ${completedToday ? 'DONE' : 'NOT YET DONE'}, completed this week: ${completedDays.length > 0 ? completedDays.join(', ') : 'none yet'}`;
         });
         sections.push(`DAILY TASKS (${tasks.length} total):\n${taskLines.join('\n')}`);
       } else {
-        sections.push('DAILY TASKS: None set up');
+        sections.push('DAILY TASKS: None set up for this user');
       }
     }
 
+    // ── To-Do Items (week-scoped — try current week, then fall back to all active) ──
     if (scope === 'all' || scope === 'todos') {
-      const todos = await lswService.getTodoItems(userId, weekNumber, year);
+      let todos = await lswService.getTodoItems(userId, weekNumber, year);
+      console.log(`📊 Todo items (week ${weekNumber}): ${todos.length}`);
+
+      // Fallback: if no todos this week, fetch ALL active todos (any week)
+      if (todos.length === 0) {
+        todos = await lswService.getTodoItems(userId);
+        console.log(`📊 Todo items (all weeks fallback): ${todos.length}`);
+      }
+
       if (todos.length > 0) {
         const todoLines = todos.map((t: any) =>
-          `- "${t.task}" ${t.dueDate ? '(due ' + fmtDate(t.dueDate) + ')' : ''} ${t.completed ? '✅ done' : '⬜ pending'}`
+          `- "${t.task}" ${t.dueDate ? '(due/time: ' + t.dueDate + ')' : ''} — ${t.completed ? 'DONE' : 'NOT DONE'}${t.weekNumber ? ' (week ' + t.weekNumber + ')' : ''}`
         );
-        sections.push(`TO-DO ITEMS (${todos.length} total, ${todos.filter((t: any) => t.completed).length} completed):\n${todoLines.join('\n')}`);
+        const doneCount = todos.filter((t: any) => t.completed).length;
+        sections.push(`TO-DO ITEMS (${todos.length} total, ${doneCount} done, ${todos.length - doneCount} remaining):\n${todoLines.join('\n')}`);
       } else {
-        sections.push('TO-DO ITEMS: None for this week');
+        sections.push('TO-DO ITEMS: None');
       }
     }
 
+    // ── Meetings (week-scoped — try current week, then fall back to all active) ──
     if (scope === 'all' || scope === 'meetings') {
-      const meetings = await lswService.getMeetingRails(userId, weekNumber, year);
+      let meetings = await lswService.getMeetingRails(userId, weekNumber, year);
+      console.log(`📊 Meeting rails (week ${weekNumber}): ${meetings.length}`);
+
+      // Fallback: fetch all active meetings if none found for this week
+      if (meetings.length === 0) {
+        meetings = await lswService.getMeetingRails(userId);
+        console.log(`📊 Meeting rails (all weeks fallback): ${meetings.length}`);
+      }
+
       if (meetings.length > 0) {
         const meetingLines = meetings.map((m: any) =>
-          `- "${m.rail}" on ${fmtDate(m.dueDate)} ${m.completed ? '✅ attended' : '⬜ upcoming'}`
+          `- "${m.rail}" on ${fmtDate(m.dueDate)} — ${m.completed ? 'ATTENDED' : 'NOT YET ATTENDED'}${m.weekNumber ? ' (week ' + m.weekNumber + ')' : ''}`
         );
         sections.push(`MEETINGS (${meetings.length} total):\n${meetingLines.join('\n')}`);
       } else {
-        sections.push('MEETINGS: None scheduled this week');
+        sections.push('MEETINGS: None scheduled');
       }
     }
 
+    // ── Follow-Ups (not week-scoped) ──
     if (scope === 'all' || scope === 'follow_ups') {
       const followUps = await lswService.getFollowUps(userId);
+      console.log(`📊 Follow-ups: ${followUps.length}`);
       if (followUps.length > 0) {
         const fuLines = followUps.map((f: any) => {
           const responsible = f.responsibleUser
             ? `${f.responsibleUser.firstName} ${f.responsibleUser.lastName}`
             : f.responsibleName || 'Unassigned';
-          return `- "${f.task}" (due ${fmtDate(f.dueDate)}, assigned to ${responsible}) ${f.completed ? '✅ done' : '⬜ open'}`;
+          return `- "${f.task}" (due ${fmtDate(f.dueDate)}, assigned to ${responsible}) — ${f.completed ? 'DONE' : 'OPEN'}`;
         });
-        sections.push(`FOLLOW-UPS (${followUps.length} total, ${followUps.filter((f: any) => !f.completed).length} open):\n${fuLines.join('\n')}`);
+        const openCount = followUps.filter((f: any) => !f.completed).length;
+        sections.push(`FOLLOW-UPS (${followUps.length} total, ${openCount} open):\n${fuLines.join('\n')}`);
       } else {
         sections.push('FOLLOW-UPS: None');
       }
     }
 
+    // ── Projects (not week-scoped) ──
     if (scope === 'all' || scope === 'projects') {
       const projects = await lswService.getProjects(userId);
+      console.log(`📊 Projects: ${projects.length}`);
       if (projects.length > 0) {
         const projLines = projects.map((p: any) => {
           const latestUpdate = p.updates?.[p.updates.length - 1];
-          return `- "${p.name}" ${latestUpdate ? '(latest: ' + latestUpdate.text?.substring(0, 80) + ')' : ''}`;
+          return `- "${p.name}"${latestUpdate?.text ? ' — latest update: "' + latestUpdate.text.substring(0, 100) + '"' : ''}`;
         });
         sections.push(`IMPROVEMENT PROJECTS (${projects.length}):\n${projLines.join('\n')}`);
       } else {
@@ -241,11 +328,13 @@ async function fetchUserLswData(userId: string, organizationId: string, scope: s
       }
     }
 
+    // ── Personal Goals (not week-scoped) ──
     if (scope === 'all' || scope === 'goals') {
       const goals = await lswService.getPersonalGoals(userId);
+      console.log(`📊 Goals: ${goals.length}`);
       if (goals.length > 0) {
         const goalLines = goals.map((g: any) =>
-          `- "${g.objective}" (due ${fmtDate(g.dueDate)}, ${g.progress}% complete)`
+          `- "${g.objective}" (due ${fmtDate(g.dueDate)}, progress: ${g.progress ?? 0}%)`
         );
         sections.push(`PERSONAL GOALS (${goals.length}):\n${goalLines.join('\n')}`);
       } else {
@@ -253,23 +342,33 @@ async function fetchUserLswData(userId: string, organizationId: string, scope: s
       }
     }
 
+    // ── Frequency Tasks (period-scoped) ──
     if (scope === 'all' || scope === 'frequency_tasks') {
-      const freqTasks = await lswService.getFrequencyTasks(userId, weekNumber, year);
+      let freqTasks = await lswService.getFrequencyTasks(userId, weekNumber, year);
+      console.log(`📊 Frequency tasks (week ${weekNumber}): ${freqTasks.length}`);
+
+      // Fallback to all if none for this period
+      if (freqTasks.length === 0) {
+        freqTasks = await lswService.getFrequencyTasks(userId);
+        console.log(`📊 Frequency tasks (all fallback): ${freqTasks.length}`);
+      }
+
       if (freqTasks.length > 0) {
         const ftLines = freqTasks.map((f: any) =>
-          `- "${f.task}" (${f.frequency.toLowerCase()}, ${f.minutes || '?'}min, due ${fmtDate(f.dueDate)})`
+          `- "${f.task}" (${f.frequency?.toLowerCase() || 'recurring'}, ${f.minutes || '?'}min, due ${fmtDate(f.dueDate)})`
         );
-        sections.push(`SCHEDULED RECURRING TASKS (${freqTasks.length}):\n${ftLines.join('\n')}`);
+        sections.push(`RECURRING TASKS (${freqTasks.length}):\n${ftLines.join('\n')}`);
       } else {
-        sections.push('SCHEDULED RECURRING TASKS: None this period');
+        sections.push('RECURRING TASKS: None');
       }
     }
 
-    console.log(`📊 LSW data fetched: ${sections.length - 1} sections`);
-    return sections.join('\n\n');
+    const result = sections.join('\n\n');
+    console.log(`📊 LSW data result (${result.length} chars):\n${result}`);
+    return result;
   } catch (error: any) {
-    console.error('📊 LSW fetch error:', error.message);
-    return `Could not load your task data right now: ${error.message}. Please try again.`;
+    console.error('📊 LSW fetch error:', error.message, error.stack);
+    return `Error fetching your data: ${error.message}. Please try again.`;
   }
 }
 
@@ -433,7 +532,7 @@ export async function sendMessage(
         result = await searchWeb(args.query);
       } else if (fn?.name === 'get_my_tasks') {
         const args = JSON.parse(fn.arguments);
-        result = await fetchUserLswData(conversation.userId, conversation.organizationId || '', args.scope || 'all');
+        result = await fetchUserLswData(conversation.userId, conversation.organizationId ?? null, args.scope || 'all');
       }
       messages.push({
         role: 'tool',
@@ -611,7 +710,7 @@ export async function sendMessageStream(
       res.write(`event: token\ndata: ${JSON.stringify({ t: 'Checking your schedule... ' })}\n\n`);
       fullText += 'Checking your schedule... ';
       const args = JSON.parse(toolCallArgs);
-      toolResult = await fetchUserLswData(conversation.userId, conversation.organizationId || '', args.scope || 'all');
+      toolResult = await fetchUserLswData(conversation.userId, conversation.organizationId ?? null, args.scope || 'all');
     }
 
     // Build messages with tool call and result
