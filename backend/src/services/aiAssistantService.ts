@@ -48,7 +48,7 @@ Rules:
 - Your words are spoken aloud via voice — never output anything that sounds weird read aloud.`;
 
 const MAX_CONTEXT_MESSAGES = 20;
-const CHAT_MODEL = 'gpt-4o-mini';
+const CHAT_MODEL = 'gpt-5.2';
 const TTS_VOICE = 'nova';
 
 // ─── Conversation Management ─────────────────────────────
