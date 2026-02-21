@@ -189,7 +189,7 @@ export async function sendMessage(
     model: CHAT_MODEL,
     messages,
     temperature: 0.8,
-    max_tokens: 200,
+    max_completion_tokens: 200,
     presence_penalty: 0.3,
     frequency_penalty: 0.2,
   });
@@ -283,7 +283,7 @@ export async function sendMessageStream(
     model: CHAT_MODEL,
     messages,
     temperature: 0.8,
-    max_tokens: 200,
+    max_completion_tokens: 200,
     presence_penalty: 0.3,
     frequency_penalty: 0.2,
     stream: true,
