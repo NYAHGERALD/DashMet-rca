@@ -12,8 +12,9 @@ import { createServer } from 'http';
 
 console.log('✅ Core imports loaded');
 
-dotenv.config();
+dotenv.config({ path: path.resolve(__dirname, '../../.env') });
 console.log('✅ Environment loaded');
+console.log('📂 .env path:', path.resolve(__dirname, '../../.env'));
 console.log('🔑 DATABASE_URL exists:', !!process.env.DATABASE_URL);
 console.log('🔑 JWT_SECRET exists:', !!process.env.JWT_SECRET);
 

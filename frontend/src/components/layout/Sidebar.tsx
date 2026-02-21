@@ -21,6 +21,7 @@ import {
   AlertTriangle,
   Inbox,
   Shield,
+  Scale,
 } from 'lucide-react';
 
 export default function Sidebar() {
@@ -91,6 +92,12 @@ export default function Sidebar() {
       href: '/workplace-safety',
       icon: Shield,
       roles: ['SUPERVISOR', 'QA_FOOD_SAFETY', 'MAINTENANCE_ENGINEERING', 'SAFETY_SECURITY_MANAGER', 'CI_MANAGER', 'ADMIN', 'SYSTEM_ADMIN'],
+    },
+    {
+      name: 'HR Resolution',
+      href: '/hr',
+      icon: Scale,
+      roles: ['SUPERVISOR', 'QA_FOOD_SAFETY', 'MAINTENANCE_ENGINEERING', 'CI_MANAGER', 'ADMIN', 'SYSTEM_ADMIN'],
     },
   ];
 

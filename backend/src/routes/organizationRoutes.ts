@@ -65,6 +65,72 @@ router.get('/stats', authenticate, requireMinimumRole(UserRole.SYSTEM_ADMIN), as
   });
 });
 
+// ─────────────────────────────────────────────────────────────────────────────
+// Calendar Year Configuration (for LSW week numbering)
+// MUST be before /:id route to avoid "calendar-config" being treated as an ID
+// ─────────────────────────────────────────────────────────────────────────────
+
+// GET /api/organizations/calendar-config - Get current user's org calendar config
+router.get('/calendar-config', authenticate, async (req: AuthRequest, res) => {
+  try {
+    const orgId = req.user!.organizationId;
+    if (!orgId) {
+      return res.status(400).json({ success: false, error: 'No organization associated with your account' });
+    }
+    const org = await prisma.organization.findUnique({
+      where: { id: orgId },
+      select: { id: true, name: true, calendarYearStartMonth: true, calendarYearStartDay: true },
+    });
+    if (!org) {
+      return res.status(404).json({ success: false, error: 'Organization not found' });
+    }
+    res.json({ success: true, data: org });
+  } catch (error: any) {
+    res.status(500).json({ success: false, error: error.message });
+  }
+});
+
+// PATCH /api/organizations/calendar-config - Update calendar year start date
+router.patch('/calendar-config', authenticate, requireMinimumRole(UserRole.ADMIN), async (req: AuthRequest, res) => {
+  try {
+    const { calendarYearStartMonth, calendarYearStartDay } = req.body;
+    const orgId = req.user!.organizationId;
+
+    if (!orgId) {
+      return res.status(400).json({ success: false, error: 'No organization associated with your account' });
+    }
+
+    // Validate month
+    if (calendarYearStartMonth !== undefined) {
+      const month = Number(calendarYearStartMonth);
+      if (!Number.isInteger(month) || month < 1 || month > 12) {
+        return res.status(400).json({ success: false, error: 'Month must be between 1 and 12' });
+      }
+    }
+
+    // Validate day
+    if (calendarYearStartDay !== undefined) {
+      const day = Number(calendarYearStartDay);
+      if (!Number.isInteger(day) || day < 1 || day > 31) {
+        return res.status(400).json({ success: false, error: 'Day must be between 1 and 31' });
+      }
+    }
+
+    const updated = await prisma.organization.update({
+      where: { id: orgId },
+      data: {
+        ...(calendarYearStartMonth !== undefined && { calendarYearStartMonth: Number(calendarYearStartMonth) }),
+        ...(calendarYearStartDay !== undefined && { calendarYearStartDay: Number(calendarYearStartDay) }),
+      },
+      select: { id: true, name: true, calendarYearStartMonth: true, calendarYearStartDay: true },
+    });
+
+    res.json({ success: true, data: updated });
+  } catch (error: any) {
+    res.status(500).json({ success: false, error: error.message });
+  }
+});
+
 // GET /api/organizations/:id - Get single organization
 // Users can access their own organization, ADMINs can access any
 router.get('/:id', authenticate, async (req, res) => {

@@ -173,6 +173,15 @@ function AdminContent() {
           </div>
         )}
 
+        {/* Admin Quick Links */}
+        <div className="grid grid-cols-1 md:grid-cols-4 gap-6 mb-8">
+          <Link href="/admin/calendar-config" className="bg-white dark:bg-gray-800 p-6 rounded-lg shadow hover:shadow-md transition-shadow cursor-pointer border-2 border-transparent hover:border-emerald-300 dark:hover:border-emerald-700">
+            <h3 className="text-sm font-medium text-gray-500 dark:text-gray-400">📅 Calendar Year</h3>
+            <p className="mt-2 text-sm font-semibold text-emerald-600 dark:text-emerald-400">Configure Start Date →</p>
+            <p className="text-xs text-gray-400 dark:text-gray-500 mt-1">Set when your org year begins for LSW week numbering</p>
+          </Link>
+        </div>
+
         {/* Stats Cards */}
         {stats && (
           <div className="grid grid-cols-1 md:grid-cols-4 gap-6 mb-8">
@@ -188,10 +197,15 @@ function AdminContent() {
               <h3 className="text-sm font-medium text-gray-500 dark:text-gray-400">Inactive</h3>
               <p className="mt-2 text-3xl font-semibold text-danger-600 dark:text-danger-400">{stats.inactive}</p>
             </div>
+          </div>
+        )}
+
+        {/* Quick Links */}
+        <div className="grid grid-cols-1 md:grid-cols-4 gap-6 mb-8">
             <div className="bg-white dark:bg-gray-800 p-6 rounded-lg shadow">
               <h3 className="text-sm font-medium text-gray-500 dark:text-gray-400 mb-2">By Role</h3>
               <div className="space-y-1">
-                {stats.byRole.map((r) => (
+                {stats?.byRole.map((r) => (
                   <div key={r.role} className="text-xs text-gray-600 dark:text-gray-400">
                     {r.role}: <span className="font-semibold">{r.count}</span>
                   </div>

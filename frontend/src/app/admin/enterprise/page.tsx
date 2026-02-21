@@ -1,11 +1,16 @@
 'use client';
 
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useRef } from 'react';
 import ProtectedRoute from '@/components/auth/ProtectedRoute';
 import { useAuth } from '@/components/providers/AuthProvider';
 import Link from 'next/link';
 import Image from 'next/image';
 import { formatDateTime, formatDate } from '@/lib/dateUtils';
+import {
+  LswKeyResultSet, LswKeyResult,
+  createLswKeyResultSet, updateLswKeyResultSet, deleteLswKeyResultSet,
+  createLswKeyResult, updateLswKeyResult, deleteLswKeyResult,
+} from '@/lib/lswApi';
 
 // Types
 interface AuditLog {
@@ -128,7 +133,7 @@ interface Facility {
 
 function EnterpriseAdminContent() {
   const { user, getIdToken } = useAuth();
-  const [activeTab, setActiveTab] = useState<'health' | 'audit' | 'regulatory'>('health');
+  const [activeTab, setActiveTab] = useState<'health' | 'audit' | 'regulatory' | 'keyresults'>('health');
   const [isLoading, setIsLoading] = useState(true);
   const [error, setError] = useState('');
 
@@ -141,6 +146,20 @@ function EnterpriseAdminContent() {
   const [trackingHistory, setTrackingHistory] = useState<RegulatorySnapshot[]>([]);
   const [showHistory, setShowHistory] = useState(false);
   const [trackingAction, setTrackingAction] = useState<'idle' | 'starting' | 'resetting'>('idle');
+
+  // Key Results state
+  const [keyResultSets, setKeyResultSets] = useState<LswKeyResultSet[]>([]);
+  const [krLoading, setKrLoading] = useState(false);
+  const [krSaving, setKrSaving] = useState(false);
+  const [expandedSetId, setExpandedSetId] = useState<string | null>(null);
+  const [editingSetId, setEditingSetId] = useState<string | null>(null);
+  const [showNewSetForm, setShowNewSetForm] = useState(false);
+  const [newSetForm, setNewSetForm] = useState({ name: '', scope: 'PLANT' as 'PLANT' | 'CORPORATE' | 'DEPARTMENT' | 'CUSTOM', description: '', icon: '' });
+  const [editSetForm, setEditSetForm] = useState({ name: '', scope: 'PLANT' as 'PLANT' | 'CORPORATE' | 'DEPARTMENT' | 'CUSTOM', description: '', icon: '' });
+  const [showNewKrForm, setShowNewKrForm] = useState<string | null>(null); // setId for which to show form
+  const [newKrForm, setNewKrForm] = useState({ metric: '', value: '', target: '', trend: '' as '' | 'UP' | 'DOWN' | 'STABLE' });
+  const [editingKrId, setEditingKrId] = useState<string | null>(null);
+  const [editKrForm, setEditKrForm] = useState({ metric: '', value: '', target: '', trend: '' as '' | 'UP' | 'DOWN' | 'STABLE' });
 
   // Filters
   const [auditFilters, setAuditFilters] = useState({ entity: '', action: '' });
@@ -201,6 +220,16 @@ function EnterpriseAdminContent() {
             if (!regRes.ok) throw new Error('Failed to fetch regulatory check');
             const regData = await regRes.json();
             setRegulatoryCheck(regData.data);
+            break;
+
+          case 'keyresults':
+            if (user?.role === 'SYSTEM_ADMIN') break; // No org for system admin
+            setKrLoading(true);
+            const krRes = await fetch(`${apiUrl}/lsw/key-result-sets`, { headers });
+            if (!krRes.ok) throw new Error('Failed to fetch key result sets');
+            const krData = await krRes.json();
+            setKeyResultSets(krData.data || []);
+            setKrLoading(false);
             break;
         }
       } catch (err: any) {
@@ -355,6 +384,7 @@ function EnterpriseAdminContent() {
             { id: 'health', label: '🖥️ System Health' },
             { id: 'audit', label: '📋 Audit Logs' },
             { id: 'regulatory', label: '📜 Regulatory Readiness' },
+            { id: 'keyresults', label: '🎯 Key Results' },
           ].map((tab) => (
             <button
               key={tab.id}
@@ -970,6 +1000,518 @@ function EnterpriseAdminContent() {
                       </>
                     )}
                   </>
+                )}
+              </div>
+            )}
+
+            {/* Key Results Tab */}
+            {activeTab === 'keyresults' && (
+              <div className="space-y-6">
+                {/* SYSTEM_ADMIN has no org - show message */}
+                {user?.role === 'SYSTEM_ADMIN' ? (
+                  <div className="bg-white dark:bg-gray-800 rounded-lg shadow-sm border border-gray-200 dark:border-gray-700 p-12 text-center">
+                    <div className="w-20 h-20 mx-auto mb-4 rounded-full bg-yellow-50 dark:bg-yellow-900/20 flex items-center justify-center">
+                      <span className="text-4xl">⚠️</span>
+                    </div>
+                    <h3 className="text-xl font-bold text-gray-900 dark:text-white mb-2">Organization Required</h3>
+                    <p className="text-gray-500 dark:text-gray-400">
+                      Key Result Sets are organization-specific. Sign in as an organization admin to manage them.
+                    </p>
+                  </div>
+                ) : (
+                <>
+                {/* Header + Add Button */}
+                <div className="flex items-center justify-between">
+                  <div>
+                    <h2 className="text-lg font-semibold text-gray-900 dark:text-white">Key Result Sets</h2>
+                    <p className="text-sm text-gray-500 dark:text-gray-400">
+                      Configure key result metric groups that appear on every user&apos;s LSW board.
+                    </p>
+                  </div>
+                  <button
+                    onClick={() => { setShowNewSetForm(true); setNewSetForm({ name: '', scope: 'PLANT', description: '', icon: '' }); }}
+                    className="px-4 py-2 bg-purple-600 hover:bg-purple-700 text-white rounded-lg font-medium transition-colors flex items-center space-x-2"
+                  >
+                    <span>＋</span>
+                    <span>New Set</span>
+                  </button>
+                </div>
+
+                {/* New Set Form */}
+                {showNewSetForm && (
+                  <div className="bg-white dark:bg-gray-800 rounded-lg shadow-sm border-2 border-purple-300 dark:border-purple-600 p-6">
+                    <h3 className="font-semibold text-gray-900 dark:text-white mb-4">Create Key Result Set</h3>
+                    <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                      <div>
+                        <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">Name *</label>
+                        <input
+                          type="text"
+                          value={newSetForm.name}
+                          onChange={(e) => setNewSetForm({ ...newSetForm, name: e.target.value })}
+                          placeholder='e.g. "Plant Metrics", "Corporate Metrics"'
+                          className="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-700 text-gray-900 dark:text-white"
+                        />
+                      </div>
+                      <div>
+                        <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">Scope</label>
+                        <select
+                          value={newSetForm.scope}
+                          onChange={(e) => setNewSetForm({ ...newSetForm, scope: e.target.value as any })}
+                          className="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-700 text-gray-900 dark:text-white"
+                        >
+                          <option value="PLANT">🏭 Plant</option>
+                          <option value="CORPORATE">🏢 Corporate</option>
+                          <option value="DEPARTMENT">🏬 Department</option>
+                          <option value="CUSTOM">⚙️ Custom</option>
+                        </select>
+                      </div>
+                      <div>
+                        <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">Description</label>
+                        <input
+                          type="text"
+                          value={newSetForm.description}
+                          onChange={(e) => setNewSetForm({ ...newSetForm, description: e.target.value })}
+                          placeholder="Optional description"
+                          className="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-700 text-gray-900 dark:text-white"
+                        />
+                      </div>
+                      <div>
+                        <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">Icon</label>
+                        <input
+                          type="text"
+                          value={newSetForm.icon}
+                          onChange={(e) => setNewSetForm({ ...newSetForm, icon: e.target.value })}
+                          placeholder="e.g. 📊 or 🏭"
+                          className="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-700 text-gray-900 dark:text-white"
+                        />
+                      </div>
+                    </div>
+                    <div className="flex justify-end space-x-3 mt-4">
+                      <button
+                        onClick={() => setShowNewSetForm(false)}
+                        className="px-4 py-2 border border-gray-300 dark:border-gray-600 rounded-lg text-gray-700 dark:text-gray-300 hover:bg-gray-50 dark:hover:bg-gray-700 transition-colors"
+                      >
+                        Cancel
+                      </button>
+                      <button
+                        onClick={async () => {
+                          if (!newSetForm.name.trim()) return;
+                          setKrSaving(true);
+                          try {
+                            const created = await createLswKeyResultSet({
+                              name: newSetForm.name.trim(),
+                              scope: newSetForm.scope,
+                              description: newSetForm.description.trim() || undefined,
+                              icon: newSetForm.icon.trim() || undefined,
+                            });
+                            setKeyResultSets([...keyResultSets, created]);
+                            setShowNewSetForm(false);
+                            setExpandedSetId(created.id);
+                          } catch (err: any) {
+                            setError(err.message || 'Failed to create key result set');
+                          } finally {
+                            setKrSaving(false);
+                          }
+                        }}
+                        disabled={!newSetForm.name.trim() || krSaving}
+                        className="px-4 py-2 bg-purple-600 hover:bg-purple-700 text-white rounded-lg font-medium transition-colors disabled:opacity-50"
+                      >
+                        {krSaving ? 'Creating...' : 'Create Set'}
+                      </button>
+                    </div>
+                  </div>
+                )}
+
+                {/* Key Result Sets List */}
+                {krLoading ? (
+                  <div className="flex justify-center items-center h-32">
+                    <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-purple-600"></div>
+                  </div>
+                ) : keyResultSets.length === 0 && !showNewSetForm ? (
+                  <div className="bg-white dark:bg-gray-800 rounded-lg shadow-sm border border-gray-200 dark:border-gray-700 p-12 text-center">
+                    <div className="w-20 h-20 mx-auto mb-4 rounded-full bg-purple-50 dark:bg-purple-900/20 flex items-center justify-center">
+                      <span className="text-4xl">🎯</span>
+                    </div>
+                    <h3 className="text-xl font-bold text-gray-900 dark:text-white mb-2">No Key Result Sets</h3>
+                    <p className="text-gray-500 dark:text-gray-400 mb-6">
+                      Create key result sets to define the metrics that appear on your organization&apos;s LSW boards.
+                    </p>
+                    <button
+                      onClick={() => { setShowNewSetForm(true); setNewSetForm({ name: '', scope: 'PLANT', description: '', icon: '' }); }}
+                      className="px-6 py-3 bg-purple-600 hover:bg-purple-700 text-white rounded-lg font-medium transition-colors"
+                    >
+                      ＋ Create First Set
+                    </button>
+                  </div>
+                ) : (
+                  <div className="space-y-4">
+                    {keyResultSets.map((set) => (
+                      <div key={set.id} className="bg-white dark:bg-gray-800 rounded-lg shadow-sm border border-gray-200 dark:border-gray-700 overflow-hidden">
+                        {/* Set Header */}
+                        <div
+                          className="flex items-center justify-between p-4 cursor-pointer hover:bg-gray-50 dark:hover:bg-gray-750"
+                          onClick={() => setExpandedSetId(expandedSetId === set.id ? null : set.id)}
+                        >
+                          <div className="flex items-center space-x-3">
+                            <span className="text-xl">{set.icon || '📊'}</span>
+                            {editingSetId === set.id ? (
+                              <div className="flex items-center space-x-2" onClick={(e) => e.stopPropagation()}>
+                                <input
+                                  type="text"
+                                  value={editSetForm.name}
+                                  onChange={(e) => setEditSetForm({ ...editSetForm, name: e.target.value })}
+                                  className="px-2 py-1 border border-gray-300 dark:border-gray-600 rounded bg-white dark:bg-gray-700 text-gray-900 dark:text-white text-sm"
+                                  autoFocus
+                                />
+                                <select
+                                  value={editSetForm.scope}
+                                  onChange={(e) => setEditSetForm({ ...editSetForm, scope: e.target.value as any })}
+                                  className="px-2 py-1 border border-gray-300 dark:border-gray-600 rounded bg-white dark:bg-gray-700 text-gray-900 dark:text-white text-sm"
+                                >
+                                  <option value="PLANT">Plant</option>
+                                  <option value="CORPORATE">Corporate</option>
+                                  <option value="DEPARTMENT">Department</option>
+                                  <option value="CUSTOM">Custom</option>
+                                </select>
+                                <input
+                                  type="text"
+                                  value={editSetForm.icon}
+                                  onChange={(e) => setEditSetForm({ ...editSetForm, icon: e.target.value })}
+                                  placeholder="Icon"
+                                  className="px-2 py-1 border border-gray-300 dark:border-gray-600 rounded bg-white dark:bg-gray-700 text-gray-900 dark:text-white text-sm w-16"
+                                />
+                                <button
+                                  onClick={async () => {
+                                    setKrSaving(true);
+                                    try {
+                                      const updated = await updateLswKeyResultSet(set.id, {
+                                        name: editSetForm.name.trim(),
+                                        scope: editSetForm.scope,
+                                        description: editSetForm.description.trim() || undefined,
+                                        icon: editSetForm.icon.trim() || undefined,
+                                      } as any);
+                                      setKeyResultSets(keyResultSets.map(s => s.id === set.id ? updated : s));
+                                      setEditingSetId(null);
+                                    } catch (err: any) {
+                                      setError(err.message || 'Failed to update set');
+                                    } finally {
+                                      setKrSaving(false);
+                                    }
+                                  }}
+                                  className="px-2 py-1 bg-purple-600 hover:bg-purple-700 text-white rounded text-sm"
+                                >
+                                  Save
+                                </button>
+                                <button
+                                  onClick={() => setEditingSetId(null)}
+                                  className="px-2 py-1 border border-gray-300 dark:border-gray-600 rounded text-gray-700 dark:text-gray-300 text-sm hover:bg-gray-100 dark:hover:bg-gray-700"
+                                >
+                                  ✕
+                                </button>
+                              </div>
+                            ) : (
+                              <div>
+                                <h3 className="font-semibold text-gray-900 dark:text-white">{set.name}</h3>
+                                <div className="flex items-center space-x-2 mt-0.5">
+                                  <span className={`px-2 py-0.5 rounded-full text-xs font-medium ${
+                                    set.scope === 'PLANT' ? 'bg-green-100 dark:bg-green-900/30 text-green-800 dark:text-green-300' :
+                                    set.scope === 'CORPORATE' ? 'bg-blue-100 dark:bg-blue-900/30 text-blue-800 dark:text-blue-300' :
+                                    set.scope === 'DEPARTMENT' ? 'bg-orange-100 dark:bg-orange-900/30 text-orange-800 dark:text-orange-300' :
+                                    'bg-gray-100 dark:bg-gray-700 text-gray-800 dark:text-gray-300'
+                                  }`}>
+                                    {set.scope}
+                                  </span>
+                                  <span className="text-xs text-gray-400 dark:text-gray-500">
+                                    {set.keyResults.length} metric{set.keyResults.length !== 1 ? 's' : ''}
+                                  </span>
+                                  {set.description && (
+                                    <span className="text-xs text-gray-400 dark:text-gray-500">• {set.description}</span>
+                                  )}
+                                </div>
+                              </div>
+                            )}
+                          </div>
+                          <div className="flex items-center space-x-2" onClick={(e) => e.stopPropagation()}>
+                            <button
+                              onClick={() => {
+                                setEditingSetId(set.id);
+                                setEditSetForm({ name: set.name, scope: set.scope, description: set.description || '', icon: set.icon || '' });
+                              }}
+                              className="p-1.5 text-gray-400 hover:text-purple-600 dark:hover:text-purple-400 transition-colors"
+                              title="Edit set"
+                            >
+                              ✏️
+                            </button>
+                            <button
+                              onClick={async () => {
+                                if (!confirm(`Delete "${set.name}" and all its metrics?`)) return;
+                                try {
+                                  await deleteLswKeyResultSet(set.id);
+                                  setKeyResultSets(keyResultSets.filter(s => s.id !== set.id));
+                                } catch (err: any) {
+                                  setError(err.message || 'Failed to delete set');
+                                }
+                              }}
+                              className="p-1.5 text-gray-400 hover:text-red-600 dark:hover:text-red-400 transition-colors"
+                              title="Delete set"
+                            >
+                              🗑️
+                            </button>
+                            <span className={`text-gray-400 transition-transform ${expandedSetId === set.id ? 'rotate-180' : ''}`}>
+                              ▼
+                            </span>
+                          </div>
+                        </div>
+
+                        {/* Expanded Content: Key Results */}
+                        {expandedSetId === set.id && (
+                          <div className="border-t border-gray-200 dark:border-gray-700 p-4">
+                            {/* Key Results Table */}
+                            {set.keyResults.length > 0 && (
+                              <table className="min-w-full mb-4">
+                                <thead>
+                                  <tr className="text-left text-xs font-medium text-gray-500 dark:text-gray-400 uppercase">
+                                    <th className="pb-2 pr-4">Metric</th>
+                                    <th className="pb-2 pr-4">Value</th>
+                                    <th className="pb-2 pr-4">Target</th>
+                                    <th className="pb-2 pr-4">Trend</th>
+                                    <th className="pb-2 w-20">Actions</th>
+                                  </tr>
+                                </thead>
+                                <tbody className="divide-y divide-gray-100 dark:divide-gray-700">
+                                  {set.keyResults.map((kr) => (
+                                    <tr key={kr.id}>
+                                      {editingKrId === kr.id ? (
+                                        <>
+                                          <td className="py-2 pr-4">
+                                            <input
+                                              type="text"
+                                              value={editKrForm.metric}
+                                              onChange={(e) => setEditKrForm({ ...editKrForm, metric: e.target.value })}
+                                              className="w-full px-2 py-1 border border-gray-300 dark:border-gray-600 rounded bg-white dark:bg-gray-700 text-gray-900 dark:text-white text-sm"
+                                            />
+                                          </td>
+                                          <td className="py-2 pr-4">
+                                            <input
+                                              type="text"
+                                              value={editKrForm.value}
+                                              onChange={(e) => setEditKrForm({ ...editKrForm, value: e.target.value })}
+                                              className="w-full px-2 py-1 border border-gray-300 dark:border-gray-600 rounded bg-white dark:bg-gray-700 text-gray-900 dark:text-white text-sm"
+                                            />
+                                          </td>
+                                          <td className="py-2 pr-4">
+                                            <input
+                                              type="text"
+                                              value={editKrForm.target}
+                                              onChange={(e) => setEditKrForm({ ...editKrForm, target: e.target.value })}
+                                              className="w-full px-2 py-1 border border-gray-300 dark:border-gray-600 rounded bg-white dark:bg-gray-700 text-gray-900 dark:text-white text-sm"
+                                            />
+                                          </td>
+                                          <td className="py-2 pr-4">
+                                            <select
+                                              value={editKrForm.trend}
+                                              onChange={(e) => setEditKrForm({ ...editKrForm, trend: e.target.value as any })}
+                                              className="w-full px-2 py-1 border border-gray-300 dark:border-gray-600 rounded bg-white dark:bg-gray-700 text-gray-900 dark:text-white text-sm"
+                                            >
+                                              <option value="">None</option>
+                                              <option value="UP">↑ Up</option>
+                                              <option value="DOWN">↓ Down</option>
+                                              <option value="STABLE">→ Stable</option>
+                                            </select>
+                                          </td>
+                                          <td className="py-2">
+                                            <div className="flex space-x-1">
+                                              <button
+                                                onClick={async () => {
+                                                  setKrSaving(true);
+                                                  try {
+                                                    const updated = await updateLswKeyResult(kr.id, {
+                                                      metric: editKrForm.metric.trim(),
+                                                      value: editKrForm.value.trim(),
+                                                      target: editKrForm.target.trim() || undefined,
+                                                      trend: editKrForm.trend || undefined,
+                                                    } as any);
+                                                    setKeyResultSets(keyResultSets.map(s => s.id === set.id ? {
+                                                      ...s,
+                                                      keyResults: s.keyResults.map(k => k.id === kr.id ? updated : k),
+                                                    } : s));
+                                                    setEditingKrId(null);
+                                                  } catch (err: any) {
+                                                    setError(err.message || 'Failed to update metric');
+                                                  } finally {
+                                                    setKrSaving(false);
+                                                  }
+                                                }}
+                                                className="px-2 py-1 bg-purple-600 text-white rounded text-xs"
+                                              >
+                                                ✓
+                                              </button>
+                                              <button
+                                                onClick={() => setEditingKrId(null)}
+                                                className="px-2 py-1 border border-gray-300 dark:border-gray-600 rounded text-xs text-gray-700 dark:text-gray-300"
+                                              >
+                                                ✕
+                                              </button>
+                                            </div>
+                                          </td>
+                                        </>
+                                      ) : (
+                                        <>
+                                          <td className="py-2 pr-4 text-sm text-gray-900 dark:text-white font-medium">{kr.metric}</td>
+                                          <td className="py-2 pr-4 text-sm text-gray-700 dark:text-gray-300">{kr.value}</td>
+                                          <td className="py-2 pr-4 text-sm text-gray-500 dark:text-gray-400">{kr.target || '—'}</td>
+                                          <td className="py-2 pr-4">
+                                            {kr.trend && (
+                                              <span className={`px-2 py-0.5 rounded text-xs font-medium ${
+                                                kr.trend === 'UP' ? 'bg-green-100 dark:bg-green-900/30 text-green-800 dark:text-green-300' :
+                                                kr.trend === 'DOWN' ? 'bg-red-100 dark:bg-red-900/30 text-red-800 dark:text-red-300' :
+                                                'bg-gray-100 dark:bg-gray-700 text-gray-800 dark:text-gray-300'
+                                              }`}>
+                                                {kr.trend === 'UP' ? '↑ Up' : kr.trend === 'DOWN' ? '↓ Down' : '→ Stable'}
+                                              </span>
+                                            )}
+                                          </td>
+                                          <td className="py-2">
+                                            <div className="flex space-x-1">
+                                              <button
+                                                onClick={() => {
+                                                  setEditingKrId(kr.id);
+                                                  setEditKrForm({ metric: kr.metric, value: kr.value, target: kr.target || '', trend: (kr.trend || '') as any });
+                                                }}
+                                                className="p-1 text-gray-400 hover:text-purple-600 dark:hover:text-purple-400 text-xs"
+                                              >
+                                                ✏️
+                                              </button>
+                                              <button
+                                                onClick={async () => {
+                                                  if (!confirm(`Delete metric "${kr.metric}"?`)) return;
+                                                  try {
+                                                    await deleteLswKeyResult(kr.id);
+                                                    setKeyResultSets(keyResultSets.map(s => s.id === set.id ? {
+                                                      ...s,
+                                                      keyResults: s.keyResults.filter(k => k.id !== kr.id),
+                                                    } : s));
+                                                  } catch (err: any) {
+                                                    setError(err.message || 'Failed to delete metric');
+                                                  }
+                                                }}
+                                                className="p-1 text-gray-400 hover:text-red-600 dark:hover:text-red-400 text-xs"
+                                              >
+                                                🗑️
+                                              </button>
+                                            </div>
+                                          </td>
+                                        </>
+                                      )}
+                                    </tr>
+                                  ))}
+                                </tbody>
+                              </table>
+                            )}
+
+                            {set.keyResults.length === 0 && !showNewKrForm && (
+                              <p className="text-sm text-gray-400 dark:text-gray-500 italic mb-4">No metrics added yet.</p>
+                            )}
+
+                            {/* Add Key Result Form */}
+                            {showNewKrForm === set.id ? (
+                              <div className="flex flex-wrap items-end gap-3 p-3 bg-gray-50 dark:bg-gray-900 rounded-lg">
+                                <div className="flex-1 min-w-[140px]">
+                                  <label className="block text-xs font-medium text-gray-500 dark:text-gray-400 mb-1">Metric *</label>
+                                  <input
+                                    type="text"
+                                    value={newKrForm.metric}
+                                    onChange={(e) => setNewKrForm({ ...newKrForm, metric: e.target.value })}
+                                    placeholder='e.g. "TCIR", "Net Sales"'
+                                    className="w-full px-2 py-1.5 border border-gray-300 dark:border-gray-600 rounded bg-white dark:bg-gray-700 text-gray-900 dark:text-white text-sm"
+                                    autoFocus
+                                  />
+                                </div>
+                                <div className="w-28">
+                                  <label className="block text-xs font-medium text-gray-500 dark:text-gray-400 mb-1">Value *</label>
+                                  <input
+                                    type="text"
+                                    value={newKrForm.value}
+                                    onChange={(e) => setNewKrForm({ ...newKrForm, value: e.target.value })}
+                                    placeholder='e.g. "0.45"'
+                                    className="w-full px-2 py-1.5 border border-gray-300 dark:border-gray-600 rounded bg-white dark:bg-gray-700 text-gray-900 dark:text-white text-sm"
+                                  />
+                                </div>
+                                <div className="w-28">
+                                  <label className="block text-xs font-medium text-gray-500 dark:text-gray-400 mb-1">Target</label>
+                                  <input
+                                    type="text"
+                                    value={newKrForm.target}
+                                    onChange={(e) => setNewKrForm({ ...newKrForm, target: e.target.value })}
+                                    placeholder='e.g. "< 1.0"'
+                                    className="w-full px-2 py-1.5 border border-gray-300 dark:border-gray-600 rounded bg-white dark:bg-gray-700 text-gray-900 dark:text-white text-sm"
+                                  />
+                                </div>
+                                <div className="w-28">
+                                  <label className="block text-xs font-medium text-gray-500 dark:text-gray-400 mb-1">Trend</label>
+                                  <select
+                                    value={newKrForm.trend}
+                                    onChange={(e) => setNewKrForm({ ...newKrForm, trend: e.target.value as any })}
+                                    className="w-full px-2 py-1.5 border border-gray-300 dark:border-gray-600 rounded bg-white dark:bg-gray-700 text-gray-900 dark:text-white text-sm"
+                                  >
+                                    <option value="">None</option>
+                                    <option value="UP">↑ Up</option>
+                                    <option value="DOWN">↓ Down</option>
+                                    <option value="STABLE">→ Stable</option>
+                                  </select>
+                                </div>
+                                <div className="flex space-x-2">
+                                  <button
+                                    onClick={async () => {
+                                      if (!newKrForm.metric.trim() || !newKrForm.value.trim()) return;
+                                      setKrSaving(true);
+                                      try {
+                                        const created = await createLswKeyResult({
+                                          keyResultSetId: set.id,
+                                          metric: newKrForm.metric.trim(),
+                                          value: newKrForm.value.trim(),
+                                          target: newKrForm.target.trim() || undefined,
+                                          trend: newKrForm.trend || undefined,
+                                        });
+                                        setKeyResultSets(keyResultSets.map(s => s.id === set.id ? {
+                                          ...s,
+                                          keyResults: [...s.keyResults, created],
+                                        } : s));
+                                        setNewKrForm({ metric: '', value: '', target: '', trend: '' });
+                                      } catch (err: any) {
+                                        setError(err.message || 'Failed to add metric');
+                                      } finally {
+                                        setKrSaving(false);
+                                      }
+                                    }}
+                                    disabled={!newKrForm.metric.trim() || !newKrForm.value.trim() || krSaving}
+                                    className="px-3 py-1.5 bg-purple-600 hover:bg-purple-700 text-white rounded text-sm font-medium transition-colors disabled:opacity-50"
+                                  >
+                                    {krSaving ? '...' : 'Add'}
+                                  </button>
+                                  <button
+                                    onClick={() => { setShowNewKrForm(null); setNewKrForm({ metric: '', value: '', target: '', trend: '' }); }}
+                                    className="px-3 py-1.5 border border-gray-300 dark:border-gray-600 rounded text-sm text-gray-700 dark:text-gray-300 hover:bg-gray-100 dark:hover:bg-gray-700"
+                                  >
+                                    Done
+                                  </button>
+                                </div>
+                              </div>
+                            ) : (
+                              <button
+                                onClick={() => { setShowNewKrForm(set.id); setNewKrForm({ metric: '', value: '', target: '', trend: '' }); }}
+                                className="text-sm text-purple-600 dark:text-purple-400 hover:text-purple-700 dark:hover:text-purple-300 font-medium"
+                              >
+                                ＋ Add Metric
+                              </button>
+                            )}
+                          </div>
+                        )}
+                      </div>
+                    ))}
+                  </div>
+                )}
+                </>
                 )}
               </div>
             )}

@@ -241,6 +241,14 @@ router.use('/evidence', spotlightRoutes);
 // Meeting Recordings routes (record and store meeting videos)
 router.use('/recordings', recordingsRoutes);
 
+// Leader Standard Work (LSW) routes - authenticated
+import lswRoutes from './lswRoutes';
+router.use('/lsw', lswRoutes);
+
+// AI Assistant routes - Conversational AI with memory and TTS
+import aiAssistantRoutes from './aiAssistantRoutes';
+router.use('/ai-assistant', aiAssistantRoutes);
+
 // Get transcripts for a specific incident (nested under incidents for convenience)
 router.get('/incidents/:incidentId/transcripts', authenticate, getIncidentTranscripts);
 

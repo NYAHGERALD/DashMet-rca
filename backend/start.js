@@ -1,9 +1,15 @@
 #!/usr/bin/env node
+const path = require('path');
+require('dotenv').config({ path: path.resolve(__dirname, '.env') });
+
 console.log('=== START SCRIPT RUNNING ===');
 console.log('Node version:', process.version);
 console.log('Current dir:', process.cwd());
+console.log('.env path:', path.resolve(__dirname, '.env'));
 console.log('PORT:', process.env.PORT);
 console.log('DATABASE_URL exists:', !!process.env.DATABASE_URL);
+console.log('JWT_SECRET exists:', !!process.env.JWT_SECRET);
+console.log('SYSTEM_ADMIN_MASTER_KEY exists:', !!process.env.SYSTEM_ADMIN_MASTER_KEY);
 
 // Auto-seed System Admin on startup if configured
 async function ensureSystemAdmin() {

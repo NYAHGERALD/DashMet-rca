@@ -332,6 +332,11 @@ model Department {
   WorkplaceSafetyAssessment WorkplaceSafetyAssessment[]
   Meeting                   Meeting[]
 
+  // LSW Relations
+  LswBoards                 LswBoard[]                  @relation("LswBoardDepartment")
+  LswDailyTasks             LswDailyTask[]              @relation("LswDailyTaskDepartment")
+  LswTodoItems              LswTodoItem[]               @relation("LswTodoItemDepartment")
+
   @@index([facilityId])
 }
 
@@ -490,6 +495,18 @@ model Facility {
   // Conflict Resolution Relations
   ConflictCases             ConflictCase[]
   WorkplacePolicies         WorkplacePolicyDoc[]
+
+  // LSW Relations
+  LswBoards                 LswBoard[]
+  LswDailyTasks             LswDailyTask[]             @relation("LswDailyTaskFacility")
+  LswFrequencyTasks         LswFrequencyTask[]         @relation("LswFrequencyTaskFacility")
+  LswProjects               LswProject[]               @relation("LswProjectFacility")
+  LswMeetingRails           LswMeetingRail[]            @relation("LswMeetingRailFacility")
+  LswFollowUps              LswFollowUp[]               @relation("LswFollowUpFacility")
+  LswKeyResultSets          LswKeyResultSet[]           @relation("LswKeyResultSetFacility")
+  LswPersonalGoals          LswPersonalGoal[]           @relation("LswPersonalGoalFacility")
+  LswRcaTriggers            LswRcaTrigger[]             @relation("LswRcaTriggerFacility")
+  LswDepartments            LswDepartment[]             @relation("LswDepartmentFacility")
 
   @@index([organizationId])
 }
@@ -915,6 +932,19 @@ model Organization {
   ConflictCases             ConflictCase[]
   WorkplacePolicies         WorkplacePolicyDoc[]
 
+  // LSW Configuration
+  calendarYearStartMonth    Int                         @default(1)   // 1=Jan .. 12=Dec
+  calendarYearStartDay      Int                         @default(1)   // Day of month (1-31)
+
+  // LSW Relations
+  LswBoards                 LswBoard[]                  @relation("LswBoardOrganization")
+  LswDepartments            LswDepartment[]             @relation("LswDepartmentOrganization")
+  LswKeyResultSets          LswKeyResultSet[]           @relation("LswKeyResultSetOrganization")
+  LswRcaTriggers            LswRcaTrigger[]             @relation("LswRcaTriggerOrganization")
+
+  // AI Assistant Relations
+  AiAssistantConversations  AiAssistantConversation[]  @relation("AiAssistantConversationOrg")
+
   @@index([name])
   @@index([signupCode])
 }
@@ -1292,6 +1322,7 @@ model User {
   profilePicture                                                      String?
   autoSaveEnabled                                                     Boolean                              @default(false)
   phone                                                               String?                              @unique
+  lswWorkDaysPerWeek                                                  Int                                  @default(5)  // 5=Mon-Fri, 6=Mon-Sat, 7=All days
   AIFishboneSessionsUpdated                                           AIFishboneSession[]                  @relation("AIFishboneSessionUpdatedBy")
   AIFishboneSessionsStarted                                           AIFishboneSession[]                  @relation("AIFishboneSessionStartedBy")
   AuditLog                                                            AuditLog[]
@@ -1349,6 +1380,22 @@ model User {
   
   // Push Notification Device Tokens
   DeviceTokens                                                        DeviceToken[]
+
+  // LSW (Leader Standard Work) Relations
+  LswBoards                                                           LswBoard[]                           @relation("LswBoardOwner")
+  LswDailyTasks                                                       LswDailyTask[]                       @relation("LswDailyTaskUser")
+  LswTodoItems                                                        LswTodoItem[]                        @relation("LswTodoItemUser")
+  LswFrequencyTasks                                                   LswFrequencyTask[]                   @relation("LswFrequencyTaskUser")
+  LswProjects                                                         LswProject[]                         @relation("LswProjectUser")
+  LswMeetingRails                                                     LswMeetingRail[]                     @relation("LswMeetingRailUser")
+  LswFollowUps                                                        LswFollowUp[]                        @relation("LswFollowUpUser")
+  LswFollowUpsResponsible                                             LswFollowUp[]                        @relation("LswFollowUpResponsible")
+  LswKeyResultSets                                                    LswKeyResultSet[]                    @relation("LswKeyResultSetUser")
+  LswPersonalGoals                                                    LswPersonalGoal[]                    @relation("LswPersonalGoalUser")
+  LswRcaTriggers                                                      LswRcaTrigger[]                      @relation("LswRcaTriggerUser")
+
+  // AI Assistant Relations
+  AiAssistantConversations                                            AiAssistantConversation[]             @relation("AiAssistantConversationUser")
 
   @@index([email])
   @@index([isOnline])
@@ -2735,4 +2782,611 @@ model WorkplacePolicyDoc {
   @@index([organizationId])
   @@index([status])
   @@index([createdBy])
+}
+
+// ============================================================================
+// LEADER STANDARD WORK (LSW) MODELS
+// ============================================================================
+
+// LSW Enums
+enum LswFrequency {
+  BIWEEKLY
+  MONTHLY
+  QUARTERLY
+  ANNUALLY
+}
+
+enum LswTrend {
+  UP
+  DOWN
+  STABLE
+}
+
+enum LswKeyResultScope {
+  PLANT
+  CORPORATE
+  DEPARTMENT
+  CUSTOM
+}
+
+enum LswDayOfWeek {
+  MONDAY
+  TUESDAY
+  WEDNESDAY
+  THURSDAY
+  FRIDAY
+  SATURDAY
+  SUNDAY
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// LswBoard: Master container for a user's LSW page per week
+// Stores page-level settings and preferences
+// ─────────────────────────────────────────────────────────────────────────────
+model LswBoard {
+  id               String        @id @default(uuid())
+  
+  // Ownership & Scoping
+  userId           String
+  user             User          @relation("LswBoardOwner", fields: [userId], references: [id], onDelete: Cascade)
+  organizationId   String
+  organization     Organization  @relation("LswBoardOrganization", fields: [organizationId], references: [id], onDelete: Cascade)
+  facilityId       String?
+  facility         Facility?     @relation(fields: [facilityId], references: [id], onDelete: SetNull)
+  departmentId     String?
+  department       Department?   @relation("LswBoardDepartment", fields: [departmentId], references: [id], onDelete: SetNull)
+  
+  // Week Context
+  weekNumber       Int
+  year             Int
+  
+  // Page-Level Preferences
+  selectedDay      LswDayOfWeek  @default(MONDAY)
+  todoTab          String        @default("today")  // 'today' | 'thisWeek'
+  
+  // Timestamps
+  createdAt        DateTime      @default(now())
+  updatedAt        DateTime      @updatedAt
+  
+  @@unique([userId, weekNumber, year])
+  @@index([userId])
+  @@index([organizationId])
+  @@index([facilityId])
+  @@index([departmentId])
+  @@index([weekNumber, year])
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// LswDepartment: Organization-managed LSW department options
+// Replaces the hardcoded departments array on the LSW page
+// ─────────────────────────────────────────────────────────────────────────────
+model LswDepartment {
+  id              String        @id @default(uuid())
+  name            String
+  code            String        // Short code like 'production', 'quality', etc.
+  description     String?
+  sortOrder       Int           @default(0)
+  isActive        Boolean       @default(true)
+  
+  // Scoping
+  organizationId  String
+  organization    Organization  @relation("LswDepartmentOrganization", fields: [organizationId], references: [id], onDelete: Cascade)
+  facilityId      String?
+  facility        Facility?     @relation("LswDepartmentFacility", fields: [facilityId], references: [id], onDelete: SetNull)
+  
+  createdAt       DateTime      @default(now())
+  updatedAt       DateTime      @updatedAt
+  
+  @@unique([organizationId, code])
+  @@index([organizationId])
+  @@index([facilityId])
+  @@index([isActive])
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// LswDailyTask: Daily & Weekly Standard Tasks/Meetings
+// Each row in the daily task table with time, minutes, and day-of-week toggles
+// ─────────────────────────────────────────────────────────────────────────────
+model LswDailyTask {
+  id              String        @id @default(uuid())
+  
+  // Ownership & Scoping
+  userId          String
+  user            User          @relation("LswDailyTaskUser", fields: [userId], references: [id], onDelete: Cascade)
+  facilityId      String?
+  facility        Facility?     @relation("LswDailyTaskFacility", fields: [facilityId], references: [id], onDelete: SetNull)
+  departmentId    String?
+  department      Department?   @relation("LswDailyTaskDepartment", fields: [departmentId], references: [id], onDelete: SetNull)
+  
+  // Task Data
+  task            String
+  minutes         Int           @default(15)
+  time            String        // HH:MM format, e.g. "06:00"
+  
+  // Day-of-Week Schedule (legacy / defaults – actual completions stored in LswDailyTaskCompletion)
+  monday          Boolean       @default(false)
+  tuesday         Boolean       @default(false)
+  wednesday       Boolean       @default(false)
+  thursday        Boolean       @default(false)
+  friday          Boolean       @default(false)
+  saturday        Boolean       @default(false)
+  sunday          Boolean       @default(false)
+  
+  // Ordering
+  sortOrder       Int           @default(0)
+  isActive        Boolean       @default(true)
+  
+  // Timestamps
+  createdAt       DateTime      @default(now())
+  updatedAt       DateTime      @updatedAt
+
+  // Per-week completions
+  completions     LswDailyTaskCompletion[]
+  
+  @@index([userId])
+  @@index([facilityId])
+  @@index([departmentId])
+  @@index([isActive])
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// LswDailyTaskCompletion: Per-week checkbox state for daily tasks
+// Each record tracks which days are checked off for a specific task in a specific week
+// ─────────────────────────────────────────────────────────────────────────────
+model LswDailyTaskCompletion {
+  id              String        @id @default(uuid())
+  
+  // Link to the task
+  dailyTaskId     String
+  dailyTask       LswDailyTask  @relation(fields: [dailyTaskId], references: [id], onDelete: Cascade)
+  
+  // Week Context
+  weekNumber      Int
+  year            Int
+  
+  // Day-of-Week Completion
+  monday          Boolean       @default(false)
+  tuesday         Boolean       @default(false)
+  wednesday       Boolean       @default(false)
+  thursday        Boolean       @default(false)
+  friday          Boolean       @default(false)
+  saturday        Boolean       @default(false)
+  sunday          Boolean       @default(false)
+  
+  // Timestamps
+  createdAt       DateTime      @default(now())
+  updatedAt       DateTime      @updatedAt
+  
+  @@unique([dailyTaskId, weekNumber, year])
+  @@index([dailyTaskId])
+  @@index([weekNumber, year])
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// LswTodoItem: To-Do Today & This Week items
+// Checkbox list with completion tracking
+// ─────────────────────────────────────────────────────────────────────────────
+model LswTodoItem {
+  id              String        @id @default(uuid())
+  
+  // Ownership & Scoping
+  userId          String
+  user            User          @relation("LswTodoItemUser", fields: [userId], references: [id], onDelete: Cascade)
+  departmentId    String?
+  department      Department?   @relation("LswTodoItemDepartment", fields: [departmentId], references: [id], onDelete: SetNull)
+  
+  // Item Data
+  task            String
+  completed       Boolean       @default(false)
+  completedAt     DateTime?
+  dueDate         String?       // Used as time HH:MM or date depending on context
+  
+  // Week Context
+  weekNumber      Int?
+  year            Int?
+  
+  // Ordering
+  sortOrder       Int           @default(0)
+  isActive        Boolean       @default(true)
+  
+  // Timestamps
+  createdAt       DateTime      @default(now())
+  updatedAt       DateTime      @updatedAt
+  
+  @@index([userId])
+  @@index([departmentId])
+  @@index([completed])
+  @@index([weekNumber, year])
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// LswFrequencyTask: Scheduled Tasks/Meetings (Bi-Weekly, Monthly, etc.)
+// Tasks grouped by frequency with duration and due date
+// ─────────────────────────────────────────────────────────────────────────────
+model LswFrequencyTask {
+  id              String        @id @default(uuid())
+  
+  // Ownership & Scoping
+  userId          String
+  user            User          @relation("LswFrequencyTaskUser", fields: [userId], references: [id], onDelete: Cascade)
+  facilityId      String?
+  facility        Facility?     @relation("LswFrequencyTaskFacility", fields: [facilityId], references: [id], onDelete: SetNull)
+  
+  // Task Data
+  task            String
+  minutes         Int           @default(60)
+  dueDate         DateTime
+  frequency       LswFrequency
+  
+  // Period-based scoping (e.g., "BW-4-2026", "M-3-2026", "Q-1-2026", "A-2026")
+  periodKey       String?
+  
+  // Ordering
+  sortOrder       Int           @default(0)
+  isActive        Boolean       @default(true)
+  
+  // Timestamps
+  createdAt       DateTime      @default(now())
+  updatedAt       DateTime      @updatedAt
+  
+  @@index([userId])
+  @@index([facilityId])
+  @@index([frequency])
+  @@index([dueDate])
+  @@index([periodKey])
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// LswProject: Improvement Projects and Updates
+// Supports rich styling per project and per update
+// ─────────────────────────────────────────────────────────────────────────────
+model LswProject {
+  id                          String             @id @default(uuid())
+  
+  // Ownership & Scoping
+  userId                      String
+  user                        User               @relation("LswProjectUser", fields: [userId], references: [id], onDelete: Cascade)
+  facilityId                  String?
+  facility                    Facility?          @relation("LswProjectFacility", fields: [facilityId], references: [id], onDelete: SetNull)
+  
+  // Project Data
+  name                        String
+  
+  // Project Name Cell Styling
+  fontColor                   String?            @default("#1f2937")
+  fontFamily                  String?            @default("Inter")
+  fontBold                    Boolean            @default(false)
+  fontItalic                  Boolean            @default(false)
+  cellColor                   String?            @default("#3b82f6")
+  cellColorIntensity          Int                @default(20)
+  
+  // Default Update Column Styling (applied to newly created updates)
+  defaultUpdateFontColor      String?            @default("#4b5563")
+  defaultUpdateFontItalic     Boolean            @default(false)
+  defaultUpdateCellColor      String?            @default("#10b981")
+  defaultUpdateCellColorIntensity Int            @default(10)
+  
+  // Ordering
+  sortOrder                   Int                @default(0)
+  isActive                    Boolean            @default(true)
+  
+  // Timestamps
+  createdAt                   DateTime           @default(now())
+  updatedAt                   DateTime           @updatedAt
+  
+  // Relations
+  updates                     LswProjectUpdate[]
+  
+  @@index([userId])
+  @@index([facilityId])
+  @@index([isActive])
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// LswProjectUpdate: Individual updates within an Improvement Project
+// Each project can have multiple updates with individual styling
+// ─────────────────────────────────────────────────────────────────────────────
+model LswProjectUpdate {
+  id                  String      @id @default(uuid())
+  
+  // Parent Project
+  projectId           String
+  project             LswProject  @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  
+  // Update Data
+  text                String      @default("")   @db.Text
+  
+  // Per-Update Styling
+  fontColor           String?
+  fontItalic          Boolean     @default(false)
+  cellColor           String?
+  cellColorIntensity  Int?
+  
+  // Ordering
+  sortOrder           Int         @default(0)
+  
+  // Timestamps
+  createdAt           DateTime    @default(now())
+  updatedAt           DateTime    @updatedAt
+  
+  @@index([projectId])
+  @@index([sortOrder])
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// LswMeetingRail: Level 1, 2 & 3 Meeting Rails
+// Checkbox list with due dates and completion tracking
+// ─────────────────────────────────────────────────────────────────────────────
+model LswMeetingRail {
+  id              String        @id @default(uuid())
+  
+  // Ownership & Scoping
+  userId          String
+  user            User          @relation("LswMeetingRailUser", fields: [userId], references: [id], onDelete: Cascade)
+  facilityId      String?
+  facility        Facility?     @relation("LswMeetingRailFacility", fields: [facilityId], references: [id], onDelete: SetNull)
+  
+  // Rail Data
+  rail            String        // e.g. "Level 1 - Daily Accountability"
+  dueDate         DateTime
+  completed       Boolean       @default(false)
+  completedAt     DateTime?
+  
+  // Week Context
+  weekNumber      Int?
+  year            Int?
+  
+  // Ordering
+  sortOrder       Int           @default(0)
+  isActive        Boolean       @default(true)
+  
+  // Timestamps
+  createdAt       DateTime      @default(now())
+  updatedAt       DateTime      @updatedAt
+  
+  @@index([userId])
+  @@index([facilityId])
+  @@index([completed])
+  @@index([weekNumber, year])
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// LswFollowUp: Follow Up items with responsible person tracking
+// ─────────────────────────────────────────────────────────────────────────────
+model LswFollowUp {
+  id                String        @id @default(uuid())
+  
+  // Ownership & Scoping
+  userId            String
+  user              User          @relation("LswFollowUpUser", fields: [userId], references: [id], onDelete: Cascade)
+  facilityId        String?
+  facility          Facility?     @relation("LswFollowUpFacility", fields: [facilityId], references: [id], onDelete: SetNull)
+  
+  // Follow Up Data
+  task              String
+  dueDate           DateTime
+  responsibleUserId String?
+  responsibleUser   User?         @relation("LswFollowUpResponsible", fields: [responsibleUserId], references: [id], onDelete: SetNull)
+  responsibleName   String?       // Free-text fallback when user isn't in system
+  comments          String?       @db.Text
+  
+  // Status
+  completed         Boolean       @default(false)
+  completedAt       DateTime?
+  
+  // Ordering
+  sortOrder         Int           @default(0)
+  isActive          Boolean       @default(true)
+  
+  // Timestamps
+  createdAt         DateTime      @default(now())
+  updatedAt         DateTime      @updatedAt
+  
+  @@index([userId])
+  @@index([facilityId])
+  @@index([responsibleUserId])
+  @@index([dueDate])
+  @@index([completed])
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// LswKeyResultSet: Container for Key Result groups
+// Maps to sections like "Plant Metrics" (Don Miguel) or "Corporate Metrics" (MegaMex)
+// ─────────────────────────────────────────────────────────────────────────────
+model LswKeyResultSet {
+  id              String            @id @default(uuid())
+  
+  // Ownership & Scoping
+  userId          String
+  user            User              @relation("LswKeyResultSetUser", fields: [userId], references: [id], onDelete: Cascade)
+  organizationId  String
+  organization    Organization      @relation("LswKeyResultSetOrganization", fields: [organizationId], references: [id], onDelete: Cascade)
+  facilityId      String?
+  facility        Facility?         @relation("LswKeyResultSetFacility", fields: [facilityId], references: [id], onDelete: SetNull)
+  
+  // Set Metadata
+  name            String            // e.g. "Plant Metrics", "Corporate Metrics"
+  scope           LswKeyResultScope @default(PLANT)
+  description     String?
+  icon            String?           // Emoji or icon identifier
+  
+  // Ordering
+  sortOrder       Int               @default(0)
+  isActive        Boolean           @default(true)
+  
+  // Timestamps
+  createdAt       DateTime          @default(now())
+  updatedAt       DateTime          @updatedAt
+  
+  // Relations
+  keyResults      LswKeyResult[]
+  
+  @@index([userId])
+  @@index([organizationId])
+  @@index([facilityId])
+  @@index([scope])
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// LswKeyResult: Individual key result metrics
+// Metric/value/target/trend data within a key result set
+// ─────────────────────────────────────────────────────────────────────────────
+model LswKeyResult {
+  id              String          @id @default(uuid())
+  
+  // Parent Set
+  keyResultSetId  String
+  keyResultSet    LswKeyResultSet @relation(fields: [keyResultSetId], references: [id], onDelete: Cascade)
+  
+  // Metric Data
+  metric          String          // e.g. "TCIR", "Quality CPM", "Net Sales"
+  value           String          // Current value (string to support formats like "$845M")
+  target          String?         // Target value
+  trend           LswTrend?       // UP, DOWN, STABLE
+  
+  // Ordering
+  sortOrder       Int             @default(0)
+  
+  // Timestamps
+  createdAt       DateTime        @default(now())
+  updatedAt       DateTime        @updatedAt
+  
+  @@index([keyResultSetId])
+  @@index([sortOrder])
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// LswPersonalGoal: Personal Objectives/Goals with progress tracking
+// ─────────────────────────────────────────────────────────────────────────────
+model LswPersonalGoal {
+  id              String        @id @default(uuid())
+  
+  // Ownership & Scoping
+  userId          String
+  user            User          @relation("LswPersonalGoalUser", fields: [userId], references: [id], onDelete: Cascade)
+  facilityId      String?
+  facility        Facility?     @relation("LswPersonalGoalFacility", fields: [facilityId], references: [id], onDelete: SetNull)
+  
+  // Goal Data
+  objective       String
+  dueDate         DateTime
+  progress        Int           @default(0)  // 0-100 percentage
+  
+  // Ordering
+  sortOrder       Int           @default(0)
+  isActive        Boolean       @default(true)
+  
+  // Timestamps
+  createdAt       DateTime      @default(now())
+  updatedAt       DateTime      @updatedAt
+  
+  @@index([userId])
+  @@index([facilityId])
+  @@index([dueDate])
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// LswRcaTrigger: Plant Specific Cause RCA Triggers
+// Organization-level trigger definitions with per-user event tracking
+// ─────────────────────────────────────────────────────────────────────────────
+model LswRcaTrigger {
+  id              String        @id @default(uuid())
+  
+  // Ownership & Scoping
+  userId          String
+  user            User          @relation("LswRcaTriggerUser", fields: [userId], references: [id], onDelete: Cascade)
+  organizationId  String
+  organization    Organization  @relation("LswRcaTriggerOrganization", fields: [organizationId], references: [id], onDelete: Cascade)
+  facilityId      String?
+  facility        Facility?     @relation("LswRcaTriggerFacility", fields: [facilityId], references: [id], onDelete: SetNull)
+  
+  // Trigger Data
+  trigger         String        // e.g. "People Safety - OSHA recordable"
+  eventDate       DateTime?
+  comments        String?       @db.Text
+  
+  // Ordering
+  sortOrder       Int           @default(0)
+  isActive        Boolean       @default(true)
+  
+  // Timestamps
+  createdAt       DateTime      @default(now())
+  updatedAt       DateTime      @updatedAt
+  
+  @@index([userId])
+  @@index([organizationId])
+  @@index([facilityId])
+  @@index([eventDate])
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// LswStylePreset: Reusable style presets for fonts, colors, etc.
+// Stores the color/font option palettes per organization
+// ─────────────────────────────────────────────────────────────────────────────
+model LswStylePreset {
+  id              String        @id @default(uuid())
+  
+  // Scoping
+  organizationId  String
+  
+  // Preset Identity
+  name            String        // e.g. "Project Font Colors", "Cell Colors", "Font Families"
+  category        String        // 'fontColor' | 'cellColor' | 'fontFamily'
+  context         String        // 'project' | 'update' | 'general'
+  
+  // Preset Values (JSON array of options)
+  // For fontColor: ["#1f2937", "#dc2626", "#16a34a", ...]
+  // For cellColor: ["#3b82f6", "#22c55e", "#eab308", ...]
+  // For fontFamily: ["Inter", "Arial", "Georgia", ...]
+  values          Json
+  
+  // Defaults
+  isDefault       Boolean       @default(false)
+  sortOrder       Int           @default(0)
+  isActive        Boolean       @default(true)
+  
+  // Timestamps
+  createdAt       DateTime      @default(now())
+  updatedAt       DateTime      @updatedAt
+  
+  @@unique([organizationId, name, category, context])
+  @@index([organizationId])
+  @@index([category])
+}
+
+// ──────────────────────────────────────────────
+// AI ASSISTANT - Conversational AI with Memory
+// ──────────────────────────────────────────────
+
+model AiAssistantConversation {
+  id             String                  @id @default(uuid())
+  userId         String
+  organizationId String?
+  title          String                  @default("New Conversation")
+  summary        String?                 // AI-generated summary for long-term memory
+  isActive       Boolean                 @default(true)
+  createdAt      DateTime                @default(now())
+  updatedAt      DateTime                @updatedAt
+
+  messages       AiAssistantMessage[]
+  user           User                    @relation("AiAssistantConversationUser", fields: [userId], references: [id], onDelete: Cascade)
+  organization   Organization?           @relation("AiAssistantConversationOrg", fields: [organizationId], references: [id], onDelete: Cascade)
+
+  @@index([userId])
+  @@index([organizationId])
+  @@index([createdAt])
+}
+
+model AiAssistantMessage {
+  id             String                  @id @default(uuid())
+  conversationId String
+  role           String                  // 'user' | 'assistant' | 'system'
+  content        String
+  metadata       Json?                   // Token usage, model info, etc.
+  createdAt      DateTime                @default(now())
+
+  conversation   AiAssistantConversation @relation(fields: [conversationId], references: [id], onDelete: Cascade)
+
+  @@index([conversationId])
+  @@index([createdAt])
 }

@@ -278,3 +278,14 @@ push.
 
 All sections in this report is should be marked as required and be validated before making the Submition button Active. in each section, validate wheather "A", "U", or "N/A" was selected, If "U" was selected, validate weather these Text areas where filled "Deficiency Found", "Corrective Action", that means it have Data in them, and at least a word. 
 All Fields in the "Assessment Information" section mut be filled and mark as required as well
+
+Change the Edit button to an Option button that have "Edit", and "Log" inside, Then Implement the Log UX on the iOS app. remember that we already have the Action Item Log endpoint in the backend, so you are not recreating that just create the Log UX view on the iOS App
+
+
+
+
+
+On the Leader Standard Work Page, 
+design a comprehensive professional tables in the database hosted on render, that will store every single elements and attributes on that page. there will be no harded values, no fallback values, no local storage. everything will be dynamically stored in the database in including form settings options like colors font, states etc. Analyze the page thorough in order to create the correct tables, views functions triggers permissions etc and like tables properly to users, facility, and organization correctly.
+
+note that you are not allow to break existing code, program flow, schema or any other current working code or schema to avoid program failures and issue with the Application that will cause us hours to fix. you have to be veery extra careful and do this professional and thorough.
