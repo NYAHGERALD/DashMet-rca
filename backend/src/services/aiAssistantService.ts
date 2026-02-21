@@ -12,6 +12,7 @@
 import { PrismaClient } from '@prisma/client';
 import OpenAI from 'openai';
 import { Response } from 'express';
+import * as lswService from './lswService';
 
 const prisma = new PrismaClient();
 
@@ -46,7 +47,9 @@ Rules:
 - You help with workplace tasks, planning, problem-solving, and general knowledge.
 - Your words are spoken aloud via voice — never output anything that sounds weird read aloud.
 - When you're unsure about facts, dates, people, events, statistics, or anything that needs accuracy, use the search_web tool to look it up. Always prefer verified information over guessing.
-- After searching, weave the information naturally into your spoken answer. Never say "according to my search" — just share the facts conversationally.`;
+- After searching, weave the information naturally into your spoken answer. Never say "according to my search" — just share the facts conversationally.
+- When the user asks about their personal tasks, to-do items, meetings, follow-ups, goals, projects, or anything about their Leaders Standard Work schedule, ALWAYS use the get_my_tasks tool to fetch their real data. Never guess or make up task information.
+- Today's date is ${new Date().toLocaleDateString('en-US', { weekday: 'long', year: 'numeric', month: 'long', day: 'numeric' })}.`;
 
 const MAX_CONTEXT_MESSAGES = 20;
 const CHAT_MODEL = process.env.AI_MODEL || 'gpt-5.2';
@@ -54,7 +57,7 @@ const TTS_VOICE = 'nova';
 
 // ─── Web Search Tool Definition ──────────────────────────
 
-const WEB_SEARCH_TOOLS: OpenAI.ChatCompletionTool[] = [
+const AI_TOOLS: OpenAI.ChatCompletionTool[] = [
   {
     type: 'function',
     function: {
@@ -70,6 +73,25 @@ const WEB_SEARCH_TOOLS: OpenAI.ChatCompletionTool[] = [
           },
         },
         required: ['query'],
+      },
+    },
+  },
+  {
+    type: 'function',
+    function: {
+      name: 'get_my_tasks',
+      description:
+        'Fetch the current user\'s personal Leaders Standard Work (LSW) data including daily tasks, to-do items, scheduled meetings, follow-up items, improvement projects, personal goals, frequency tasks, and key results. Use this whenever the user asks about their own tasks, todos, meetings, schedule, goals, follow-ups, projects, what they have to do today/this week, or anything related to their work plan. The scope parameter lets you fetch specific categories or everything at once.',
+      parameters: {
+        type: 'object',
+        properties: {
+          scope: {
+            type: 'string',
+            enum: ['all', 'daily_tasks', 'todos', 'meetings', 'follow_ups', 'projects', 'goals', 'frequency_tasks'],
+            description: 'What data to fetch. Use "all" when the user asks a general question like "what do I have today". Use specific scopes for targeted questions like "show me my todos" or "what meetings do I have".',
+          },
+        },
+        required: ['scope'],
       },
     },
   },
@@ -120,6 +142,134 @@ async function searchWeb(query: string): Promise<string> {
   } catch (error: any) {
     console.error('🌐 Web search error:', error.message);
     return `Web search failed: ${error.message}. Answer based on your general knowledge and mention you couldn't verify.`;
+  }
+}
+
+// ─── LSW Data Fetch for AI ──────────────────────────────
+
+function getCurrentWeekInfo(): { weekNumber: number; year: number; dayOfWeek: string } {
+  const now = new Date();
+  const year = now.getFullYear();
+  const dayNames = ['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday'];
+  const dayOfWeek = dayNames[now.getDay()];
+  
+  // ISO week number calculation
+  const jan1 = new Date(year, 0, 1);
+  const dayOfYear = Math.ceil((now.getTime() - jan1.getTime()) / 86400000) + 1;
+  const weekNumber = Math.ceil((dayOfYear + jan1.getDay()) / 7);
+  
+  return { weekNumber, year, dayOfWeek };
+}
+
+async function fetchUserLswData(userId: string, organizationId: string, scope: string): Promise<string> {
+  try {
+    const { weekNumber, year, dayOfWeek } = getCurrentWeekInfo();
+    console.log(`📊 Fetching LSW data for user ${userId}, scope: ${scope}, week ${weekNumber}/${year}, day: ${dayOfWeek}`);
+
+    const sections: string[] = [];
+    sections.push(`Current context: ${dayOfWeek}, Week ${weekNumber} of ${year}`);
+
+    // Helper to format dates
+    const fmtDate = (d: any) => d ? new Date(d).toLocaleDateString('en-US', { weekday: 'short', month: 'short', day: 'numeric' }) : 'no date';
+    const dayKey = dayOfWeek.toLowerCase() as string;
+
+    if (scope === 'all' || scope === 'daily_tasks') {
+      const tasks = await lswService.getDailyTasks(userId, weekNumber, year);
+      if (tasks.length > 0) {
+        const todayTasks = tasks.filter((t: any) => t[dayKey] !== undefined);
+        const taskLines = tasks.map((t: any) => {
+          const scheduledDays = ['monday','tuesday','wednesday','thursday','friday','saturday','sunday']
+            .filter(d => (t as any)[d]).map(d => d.charAt(0).toUpperCase() + d.slice(1,3));
+          const completedToday = (t as any)[dayKey] === true;
+          return `- "${t.task}" (${t.minutes || '?'}min at ${t.time || '?'}) [${scheduledDays.join(',')}] ${completedToday ? '✅ done' : '⬜ pending'}`;
+        });
+        sections.push(`DAILY TASKS (${tasks.length} total):\n${taskLines.join('\n')}`);
+      } else {
+        sections.push('DAILY TASKS: None set up');
+      }
+    }
+
+    if (scope === 'all' || scope === 'todos') {
+      const todos = await lswService.getTodoItems(userId, weekNumber, year);
+      if (todos.length > 0) {
+        const todoLines = todos.map((t: any) =>
+          `- "${t.task}" ${t.dueDate ? '(due ' + fmtDate(t.dueDate) + ')' : ''} ${t.completed ? '✅ done' : '⬜ pending'}`
+        );
+        sections.push(`TO-DO ITEMS (${todos.length} total, ${todos.filter((t: any) => t.completed).length} completed):\n${todoLines.join('\n')}`);
+      } else {
+        sections.push('TO-DO ITEMS: None for this week');
+      }
+    }
+
+    if (scope === 'all' || scope === 'meetings') {
+      const meetings = await lswService.getMeetingRails(userId, weekNumber, year);
+      if (meetings.length > 0) {
+        const meetingLines = meetings.map((m: any) =>
+          `- "${m.rail}" on ${fmtDate(m.dueDate)} ${m.completed ? '✅ attended' : '⬜ upcoming'}`
+        );
+        sections.push(`MEETINGS (${meetings.length} total):\n${meetingLines.join('\n')}`);
+      } else {
+        sections.push('MEETINGS: None scheduled this week');
+      }
+    }
+
+    if (scope === 'all' || scope === 'follow_ups') {
+      const followUps = await lswService.getFollowUps(userId);
+      if (followUps.length > 0) {
+        const fuLines = followUps.map((f: any) => {
+          const responsible = f.responsibleUser
+            ? `${f.responsibleUser.firstName} ${f.responsibleUser.lastName}`
+            : f.responsibleName || 'Unassigned';
+          return `- "${f.task}" (due ${fmtDate(f.dueDate)}, assigned to ${responsible}) ${f.completed ? '✅ done' : '⬜ open'}`;
+        });
+        sections.push(`FOLLOW-UPS (${followUps.length} total, ${followUps.filter((f: any) => !f.completed).length} open):\n${fuLines.join('\n')}`);
+      } else {
+        sections.push('FOLLOW-UPS: None');
+      }
+    }
+
+    if (scope === 'all' || scope === 'projects') {
+      const projects = await lswService.getProjects(userId);
+      if (projects.length > 0) {
+        const projLines = projects.map((p: any) => {
+          const latestUpdate = p.updates?.[p.updates.length - 1];
+          return `- "${p.name}" ${latestUpdate ? '(latest: ' + latestUpdate.text?.substring(0, 80) + ')' : ''}`;
+        });
+        sections.push(`IMPROVEMENT PROJECTS (${projects.length}):\n${projLines.join('\n')}`);
+      } else {
+        sections.push('IMPROVEMENT PROJECTS: None');
+      }
+    }
+
+    if (scope === 'all' || scope === 'goals') {
+      const goals = await lswService.getPersonalGoals(userId);
+      if (goals.length > 0) {
+        const goalLines = goals.map((g: any) =>
+          `- "${g.objective}" (due ${fmtDate(g.dueDate)}, ${g.progress}% complete)`
+        );
+        sections.push(`PERSONAL GOALS (${goals.length}):\n${goalLines.join('\n')}`);
+      } else {
+        sections.push('PERSONAL GOALS: None set');
+      }
+    }
+
+    if (scope === 'all' || scope === 'frequency_tasks') {
+      const freqTasks = await lswService.getFrequencyTasks(userId, weekNumber, year);
+      if (freqTasks.length > 0) {
+        const ftLines = freqTasks.map((f: any) =>
+          `- "${f.task}" (${f.frequency.toLowerCase()}, ${f.minutes || '?'}min, due ${fmtDate(f.dueDate)})`
+        );
+        sections.push(`SCHEDULED RECURRING TASKS (${freqTasks.length}):\n${ftLines.join('\n')}`);
+      } else {
+        sections.push('SCHEDULED RECURRING TASKS: None this period');
+      }
+    }
+
+    console.log(`📊 LSW data fetched: ${sections.length - 1} sections`);
+    return sections.join('\n\n');
+  } catch (error: any) {
+    console.error('📊 LSW fetch error:', error.message);
+    return `Could not load your task data right now: ${error.message}. Please try again.`;
   }
 }
 
@@ -264,11 +414,11 @@ export async function sendMessage(
     max_completion_tokens: 200,
     presence_penalty: 0.3,
     frequency_penalty: 0.2,
-    tools: WEB_SEARCH_TOOLS,
+    tools: AI_TOOLS,
     tool_choice: 'auto',
   });
 
-  // Handle tool calls (web search)
+  // Handle tool calls (web search + LSW)
   let assistantMsg = completion.choices[0]?.message;
   if (assistantMsg?.tool_calls && assistantMsg.tool_calls.length > 0) {
     // Add assistant message with tool calls
@@ -277,23 +427,27 @@ export async function sendMessage(
     // Execute each tool call
     for (const toolCall of assistantMsg.tool_calls) {
       const fn = (toolCall as any).function;
+      let result = 'Unknown tool';
       if (fn?.name === 'search_web') {
         const args = JSON.parse(fn.arguments);
-        const searchResult = await searchWeb(args.query);
-        messages.push({
-          role: 'tool',
-          tool_call_id: toolCall.id,
-          content: searchResult,
-        });
+        result = await searchWeb(args.query);
+      } else if (fn?.name === 'get_my_tasks') {
+        const args = JSON.parse(fn.arguments);
+        result = await fetchUserLswData(conversation.userId, conversation.organizationId || '', args.scope || 'all');
       }
+      messages.push({
+        role: 'tool',
+        tool_call_id: toolCall.id,
+        content: result,
+      });
     }
 
-    // Get final response with search results
+    // Get final response with tool results
     completion = await openai.chat.completions.create({
       model: CHAT_MODEL,
       messages,
       temperature: 0.8,
-      max_completion_tokens: 300,
+      max_completion_tokens: 400,
       presence_penalty: 0.3,
       frequency_penalty: 0.2,
     });
@@ -383,7 +537,7 @@ export async function sendMessageStream(
   // Send saved user message ID
   res.write(`event: user_msg\ndata: ${JSON.stringify({ id: savedUserMsg.id })}\n\n`);
 
-  // Start GPT streaming (with web search tool)
+  // Start GPT streaming (with tools)
   let stream = await openai.chat.completions.create({
     model: CHAT_MODEL,
     messages,
@@ -392,7 +546,7 @@ export async function sendMessageStream(
     presence_penalty: 0.3,
     frequency_penalty: 0.2,
     stream: true,
-    tools: WEB_SEARCH_TOOLS,
+    tools: AI_TOOLS,
     tool_choice: 'auto',
   });
 
@@ -443,15 +597,22 @@ export async function sendMessageStream(
     }
   }
 
-  // If model requested a web search, execute it and stream a second round
-  if (toolCallName === 'search_web' && toolCallId) {
-    console.log(`🌐 Streaming: model requested web search`);
-    // Send a "searching" indicator to the client
-    res.write(`event: token\ndata: ${JSON.stringify({ t: 'Looking that up... ' })}\n\n`);
-    fullText += 'Looking that up... ';
+  // If model requested a tool call, execute it and stream a second round
+  if (toolCallName && toolCallId) {
+    console.log(`🔧 Streaming: model called tool: ${toolCallName}`);
 
-    const args = JSON.parse(toolCallArgs);
-    const searchResult = await searchWeb(args.query);
+    let toolResult = 'Unknown tool';
+    if (toolCallName === 'search_web') {
+      res.write(`event: token\ndata: ${JSON.stringify({ t: 'Looking that up... ' })}\n\n`);
+      fullText += 'Looking that up... ';
+      const args = JSON.parse(toolCallArgs);
+      toolResult = await searchWeb(args.query);
+    } else if (toolCallName === 'get_my_tasks') {
+      res.write(`event: token\ndata: ${JSON.stringify({ t: 'Checking your schedule... ' })}\n\n`);
+      fullText += 'Checking your schedule... ';
+      const args = JSON.parse(toolCallArgs);
+      toolResult = await fetchUserLswData(conversation.userId, conversation.organizationId || '', args.scope || 'all');
+    }
 
     // Build messages with tool call and result
     messages.push({
@@ -468,7 +629,7 @@ export async function sendMessageStream(
     messages.push({
       role: 'tool',
       tool_call_id: toolCallId,
-      content: searchResult,
+      content: toolResult,
     });
 
     // Clear the "looking that up" prefix from fullText — we'll rebuild
@@ -480,7 +641,7 @@ export async function sendMessageStream(
       model: CHAT_MODEL,
       messages,
       temperature: 0.8,
-      max_completion_tokens: 300,
+      max_completion_tokens: 400,
       presence_penalty: 0.3,
       frequency_penalty: 0.2,
       stream: true,
