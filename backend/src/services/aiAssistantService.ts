@@ -43,13 +43,85 @@ Rules:
 - If someone says hi, say hi back naturally. Don't list your capabilities.
 - Reference conversation context naturally, not formally.
 - Be warm, helpful, and direct. No filler phrases like "Great question!" or "Absolutely!"
-- If you don't know something, just say so simply.
 - You help with workplace tasks, planning, problem-solving, and general knowledge.
-- Your words are spoken aloud via voice — never output anything that sounds weird read aloud.`;
+- Your words are spoken aloud via voice — never output anything that sounds weird read aloud.
+- When you're unsure about facts, dates, people, events, statistics, or anything that needs accuracy, use the search_web tool to look it up. Always prefer verified information over guessing.
+- After searching, weave the information naturally into your spoken answer. Never say "according to my search" — just share the facts conversationally.`;
 
 const MAX_CONTEXT_MESSAGES = 20;
 const CHAT_MODEL = process.env.AI_MODEL || 'gpt-5.2';
 const TTS_VOICE = 'nova';
+
+// ─── Web Search Tool Definition ──────────────────────────
+
+const WEB_SEARCH_TOOLS: OpenAI.ChatCompletionTool[] = [
+  {
+    type: 'function',
+    function: {
+      name: 'search_web',
+      description:
+        'Search the internet for factual, current, or verified information. Use when you are unsure about facts, dates, people, events, statistics, history, science, geography, or anything that requires accuracy. Uses Wikipedia and other reliable sources.',
+      parameters: {
+        type: 'object',
+        properties: {
+          query: {
+            type: 'string',
+            description: 'The search query to look up on the internet',
+          },
+        },
+        required: ['query'],
+      },
+    },
+  },
+];
+
+// ─── Web Search via Wikipedia ────────────────────────────
+
+async function searchWeb(query: string): Promise<string> {
+  try {
+    console.log(`🌐 Web search: "${query}"`);
+
+    // Search Wikipedia for matching articles
+    const searchUrl = `https://en.wikipedia.org/w/api.php?action=query&list=search&srsearch=${encodeURIComponent(
+      query
+    )}&format=json&srlimit=3&origin=*`;
+    const searchRes = await fetch(searchUrl);
+    const searchData = (await searchRes.json()) as any;
+
+    if (!searchData.query?.search?.length) {
+      return `No Wikipedia results found for "${query}". Answer based on your general knowledge and be transparent about uncertainty.`;
+    }
+
+    // Fetch summaries of top results
+    const results: string[] = [];
+    for (const hit of searchData.query.search.slice(0, 2)) {
+      try {
+        const summaryUrl = `https://en.wikipedia.org/api/rest_v1/page/summary/${encodeURIComponent(
+          hit.title
+        )}`;
+        const summaryRes = await fetch(summaryUrl);
+        const summaryData = (await summaryRes.json()) as any;
+        if (summaryData.extract) {
+          results.push(
+            `${summaryData.title}: ${summaryData.extract.substring(0, 600)}`
+          );
+        }
+      } catch {
+        // Skip failed summary fetch
+      }
+    }
+
+    if (results.length === 0) {
+      return `Search returned results but summaries could not be loaded. Answer based on your general knowledge.`;
+    }
+
+    console.log(`🌐 Search returned ${results.length} result(s)`);
+    return `Wikipedia search results for "${query}":\n\n${results.join('\n\n')}`;
+  } catch (error: any) {
+    console.error('🌐 Web search error:', error.message);
+    return `Web search failed: ${error.message}. Answer based on your general knowledge and mention you couldn't verify.`;
+  }
+}
 
 // ─── Conversation Management ─────────────────────────────
 
@@ -185,14 +257,47 @@ export async function sendMessage(
     })
     .catch(() => {});
 
-  const completion = await openai.chat.completions.create({
+  let completion = await openai.chat.completions.create({
     model: CHAT_MODEL,
     messages,
     temperature: 0.8,
     max_completion_tokens: 200,
     presence_penalty: 0.3,
     frequency_penalty: 0.2,
+    tools: WEB_SEARCH_TOOLS,
+    tool_choice: 'auto',
   });
+
+  // Handle tool calls (web search)
+  let assistantMsg = completion.choices[0]?.message;
+  if (assistantMsg?.tool_calls && assistantMsg.tool_calls.length > 0) {
+    // Add assistant message with tool calls
+    messages.push(assistantMsg as any);
+
+    // Execute each tool call
+    for (const toolCall of assistantMsg.tool_calls) {
+      const fn = (toolCall as any).function;
+      if (fn?.name === 'search_web') {
+        const args = JSON.parse(fn.arguments);
+        const searchResult = await searchWeb(args.query);
+        messages.push({
+          role: 'tool',
+          tool_call_id: toolCall.id,
+          content: searchResult,
+        });
+      }
+    }
+
+    // Get final response with search results
+    completion = await openai.chat.completions.create({
+      model: CHAT_MODEL,
+      messages,
+      temperature: 0.8,
+      max_completion_tokens: 300,
+      presence_penalty: 0.3,
+      frequency_penalty: 0.2,
+    });
+  }
 
   const aiResponse =
     completion.choices[0]?.message?.content ||
@@ -278,8 +383,8 @@ export async function sendMessageStream(
   // Send saved user message ID
   res.write(`event: user_msg\ndata: ${JSON.stringify({ id: savedUserMsg.id })}\n\n`);
 
-  // Start GPT streaming
-  const stream = await openai.chat.completions.create({
+  // Start GPT streaming (with web search tool)
+  let stream = await openai.chat.completions.create({
     model: CHAT_MODEL,
     messages,
     temperature: 0.8,
@@ -287,6 +392,8 @@ export async function sendMessageStream(
     presence_penalty: 0.3,
     frequency_penalty: 0.2,
     stream: true,
+    tools: WEB_SEARCH_TOOLS,
+    tool_choice: 'auto',
   });
 
   let fullText = '';
@@ -294,28 +401,110 @@ export async function sendMessageStream(
   let sentenceIndex = 0;
   const ttsPromises: Promise<void>[] = [];
 
+  // Track tool calls during streaming
+  let toolCallId = '';
+  let toolCallName = '';
+  let toolCallArgs = '';
+
   // Process tokens from the stream
   for await (const chunk of stream) {
-    const token = chunk.choices[0]?.delta?.content;
-    if (!token) continue;
+    const delta = chunk.choices[0]?.delta;
 
-    fullText += token;
-    sentenceBuffer += token;
+    // Handle content tokens
+    const token = delta?.content;
+    if (token) {
+      fullText += token;
+      sentenceBuffer += token;
 
-    // Send token immediately for live text display
-    res.write(`event: token\ndata: ${JSON.stringify({ t: token })}\n\n`);
+      // Send token immediately for live text display
+      res.write(`event: token\ndata: ${JSON.stringify({ t: token })}\n\n`);
 
-    // Detect sentence boundaries and fire TTS
-    const boundary = detectSentenceBoundary(sentenceBuffer);
-    if (boundary) {
-      const sentenceText = boundary.sentence.trim();
-      sentenceBuffer = boundary.remaining;
+      // Detect sentence boundaries and fire TTS
+      const boundary = detectSentenceBoundary(sentenceBuffer);
+      if (boundary) {
+        const sentenceText = boundary.sentence.trim();
+        sentenceBuffer = boundary.remaining;
 
-      if (sentenceText.length > 0) {
-        const idx = sentenceIndex++;
-        // Fire TTS for this sentence in background, send audio when ready
-        const ttsPromise = generateAndSendTTS(openai, sentenceText, voice, idx, res);
-        ttsPromises.push(ttsPromise);
+        if (sentenceText.length > 0) {
+          const idx = sentenceIndex++;
+          const ttsPromise = generateAndSendTTS(openai, sentenceText, voice, idx, res);
+          ttsPromises.push(ttsPromise);
+        }
+      }
+    }
+
+    // Handle tool calls
+    if (delta?.tool_calls) {
+      for (const tc of delta.tool_calls) {
+        if (tc.id) toolCallId = tc.id;
+        if (tc.function?.name) toolCallName = tc.function.name;
+        if (tc.function?.arguments) toolCallArgs += tc.function.arguments;
+      }
+    }
+  }
+
+  // If model requested a web search, execute it and stream a second round
+  if (toolCallName === 'search_web' && toolCallId) {
+    console.log(`🌐 Streaming: model requested web search`);
+    // Send a "searching" indicator to the client
+    res.write(`event: token\ndata: ${JSON.stringify({ t: 'Looking that up... ' })}\n\n`);
+    fullText += 'Looking that up... ';
+
+    const args = JSON.parse(toolCallArgs);
+    const searchResult = await searchWeb(args.query);
+
+    // Build messages with tool call and result
+    messages.push({
+      role: 'assistant',
+      content: null,
+      tool_calls: [
+        {
+          id: toolCallId,
+          type: 'function',
+          function: { name: toolCallName, arguments: toolCallArgs },
+        },
+      ],
+    } as any);
+    messages.push({
+      role: 'tool',
+      tool_call_id: toolCallId,
+      content: searchResult,
+    });
+
+    // Clear the "looking that up" prefix from fullText — we'll rebuild
+    fullText = '';
+    sentenceBuffer = '';
+
+    // Stream the final response (no tools this round to prevent loops)
+    const stream2 = await openai.chat.completions.create({
+      model: CHAT_MODEL,
+      messages,
+      temperature: 0.8,
+      max_completion_tokens: 300,
+      presence_penalty: 0.3,
+      frequency_penalty: 0.2,
+      stream: true,
+    });
+
+    for await (const chunk of stream2) {
+      const token = chunk.choices[0]?.delta?.content;
+      if (!token) continue;
+
+      fullText += token;
+      sentenceBuffer += token;
+
+      res.write(`event: token\ndata: ${JSON.stringify({ t: token })}\n\n`);
+
+      const boundary = detectSentenceBoundary(sentenceBuffer);
+      if (boundary) {
+        const sentenceText = boundary.sentence.trim();
+        sentenceBuffer = boundary.remaining;
+
+        if (sentenceText.length > 0) {
+          const idx = sentenceIndex++;
+          const ttsPromise = generateAndSendTTS(openai, sentenceText, voice, idx, res);
+          ttsPromises.push(ttsPromise);
+        }
       }
     }
   }
