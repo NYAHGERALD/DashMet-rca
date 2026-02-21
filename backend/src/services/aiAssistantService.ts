@@ -9,12 +9,10 @@
  * - Auto-generates conversation titles and summaries
  */
 
-import { PrismaClient } from '@prisma/client';
 import OpenAI from 'openai';
 import { Response } from 'express';
 import * as lswService from './lswService';
-
-const prisma = new PrismaClient();
+import { prisma } from '../utils/prisma';
 
 // ─── OpenAI Client (Lazy Singleton) ──────────────────────
 
@@ -33,9 +31,14 @@ function getOpenAIClient(): OpenAI {
   return openaiClient;
 }
 
-// ─── System Prompt (optimized for natural spoken conversation) ─
+// ─── System Prompt (computed fresh per-request for accurate date/week) ─
 
-const SYSTEM_PROMPT = `You are DashMet AI, a friendly colleague at DashMet. Talk like a real person in a real conversation.
+function getSystemPrompt(): string {
+  const now = new Date();
+  const todayStr = now.toLocaleDateString('en-US', { weekday: 'long', year: 'numeric', month: 'long', day: 'numeric' });
+  const { weekNumber, year } = getISOWeekNumber(now);
+
+  return `You are DashMet AI, a friendly colleague at DashMet. Talk like a real person in a real conversation.
 
 Rules:
 - Keep answers to 1-3 sentences. Only go longer when explaining something complex.
@@ -48,8 +51,9 @@ Rules:
 - Your words are spoken aloud via voice — never output anything that sounds weird read aloud.
 - When you're unsure about facts, dates, people, events, statistics, or anything that needs accuracy, use the search_web tool to look it up. Always prefer verified information over guessing.
 - After searching, weave the information naturally into your spoken answer. Never say "according to my search" — just share the facts conversationally.
-- When the user asks about their personal tasks, to-do items, meetings, follow-ups, goals, projects, or anything about their Leaders Standard Work schedule, ALWAYS use the get_my_tasks tool to fetch their real data. Never guess or make up task information.
-- Today's date is ${new Date().toLocaleDateString('en-US', { weekday: 'long', year: 'numeric', month: 'long', day: 'numeric' })}.`;
+- When the user asks about their personal tasks, to-do items, meetings, follow-ups, goals, projects, schedule, what they have today or this week, or anything remotely about their Leaders Standard Work — ALWAYS use the get_my_tasks tool. This is the ONLY way to get the user's real data. You have NO knowledge of the user's tasks without calling this tool. Never say "you have nothing" or "no tasks" without first calling get_my_tasks.
+- Today's date is ${todayStr}. The current ISO week number is ${weekNumber} of ${year}.`;
+}
 
 const MAX_CONTEXT_MESSAGES = 20;
 const CHAT_MODEL = process.env.AI_MODEL || 'gpt-5.2';
@@ -443,7 +447,7 @@ async function buildMessagesArray(
   userMessage: string
 ): Promise<OpenAI.ChatCompletionMessageParam[]> {
   const messages: OpenAI.ChatCompletionMessageParam[] = [
-    { role: 'system', content: SYSTEM_PROMPT },
+    { role: 'system', content: getSystemPrompt() },
   ];
 
   // Include conversation summary for long-term context
