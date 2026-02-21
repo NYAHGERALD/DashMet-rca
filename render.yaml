@@ -17,7 +17,7 @@ services:
     plan: free # Change to 'starter' for production
     region: oregon
     rootDir: backend
-    buildCommand: npm install && npx prisma generate && npx prisma migrate deploy && npm run build
+    buildCommand: npm install && npx prisma generate && npx prisma db push --accept-data-loss && npm run build
     startCommand: npm run start
     healthCheckPath: /api/health
     envVars:
