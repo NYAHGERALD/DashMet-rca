@@ -51,8 +51,14 @@ router.post('/', async (req: Request, res: Response) => {
       });
     }
 
-    const creator = await prisma.user.findUnique({
-      where: { id: creatorId },
+    // Look up creator by Prisma UUID or Firebase UID
+    const creator = await prisma.user.findFirst({
+      where: {
+        OR: [
+          { id: creatorId },
+          { firebaseUid: creatorId },
+        ],
+      },
     });
 
     if (!creator) {
@@ -78,7 +84,7 @@ router.post('/', async (req: Request, res: Response) => {
         liveTranscriptionEnabled: liveTranscriptionEnabled !== false,
         aiProcessingMode: aiProcessingMode || null,
         confidentialityLevel: confidentialityLevel || null,
-        creatorId,
+        creatorId: creator.id,
         organizationId,
         facilityId: facilityId || null,
       },
@@ -151,7 +157,20 @@ router.get('/', async (req: Request, res: Response) => {
       });
     }
 
-    let whereClause: any = { creatorId: userId as string };
+    // Resolve userId — could be Prisma UUID or Firebase UID
+    const resolvedUser = await prisma.user.findFirst({
+      where: {
+        OR: [
+          { id: userId as string },
+          { firebaseUid: userId as string },
+        ],
+      },
+      select: { id: true },
+    });
+
+    const resolvedUserId = resolvedUser?.id || (userId as string);
+
+    let whereClause: any = { creatorId: resolvedUserId };
     if (status) {
       whereClause.status = status as MeetingStatus;
     }
@@ -465,8 +484,14 @@ router.post('/:id/participants', async (req: Request, res: Response) => {
     }
 
     if (userId) {
-      const user = await prisma.user.findUnique({
-        where: { id: userId },
+      // Resolve userId — could be Prisma UUID or Firebase UID
+      const user = await prisma.user.findFirst({
+        where: {
+          OR: [
+            { id: userId },
+            { firebaseUid: userId },
+          ],
+        },
       });
 
       if (!user) {
