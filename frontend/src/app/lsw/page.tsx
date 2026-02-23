@@ -4,6 +4,7 @@ import { useState, useEffect, useRef, useCallback } from 'react';
 import { useAuth } from '@/components/providers/AuthProvider';
 import ProtectedRoute from '@/components/auth/ProtectedRoute';
 import Link from 'next/link';
+import { useSearchParams } from 'next/navigation';
 import {
   fetchLswData, updateLswBoard,
   createLswDailyTask, updateLswDailyTask, deleteLswDailyTask, updateLswDailyTaskCompletion,
@@ -16,11 +17,12 @@ import {
   createLswPersonalGoal, updateLswPersonalGoal, deleteLswPersonalGoal,
   createLswRcaTrigger, updateLswRcaTrigger, deleteLswRcaTrigger,
   updateLswWorkDaysPerWeek,
+  getOutlookStatus, getOutlookAuthUrl, disconnectOutlook, fetchOutlookCalendar,
   type LswDailyTask, type LswTodoItem, type LswFrequencyTask,
   type LswProject, type LswProjectUpdate, type LswMeetingRail,
   type LswFollowUp, type LswKeyResultSet, type LswKeyResult,
   type LswPersonalGoal, type LswRcaTrigger, type LswDepartment,
-  type LswCalendarConfig,
+  type LswCalendarConfig, type OutlookMeeting, type OutlookStatus,
 } from '@/lib/lswApi';
 
 // Types (mapped from DB models for UI convenience)
@@ -626,6 +628,13 @@ function LSWContent() {
   const [personalGoals, setPersonalGoals] = useState<PersonalGoal[]>([]);
   const [rcaTriggers, setRcaTriggers] = useState<RCATrigger[]>([]);
 
+  // ─── Outlook Calendar Integration ──────────────────────────────────────────
+  const [outlookStatus, setOutlookStatus] = useState<OutlookStatus>({ connected: false });
+  const [outlookMeetings, setOutlookMeetings] = useState<OutlookMeeting[]>([]);
+  const [outlookLoading, setOutlookLoading] = useState(false);
+  const [outlookError, setOutlookError] = useState<string | null>(null);
+  const searchParams = useSearchParams();
+
   // ─── Data Loading ──────────────────────────────────────────────────────────
   const initialLoad = useRef(true);
   const loadLswData = useCallback(async () => {
@@ -681,6 +690,8 @@ function LSWContent() {
   useEffect(() => {
     if (user) {
       loadLswData();
+      // Check Outlook connection status
+      getOutlookStatus().then(setOutlookStatus).catch(() => {});
     }
   }, [user, loadLswData]);
 
@@ -704,6 +715,69 @@ function LSWContent() {
       rails.map(r => r.id === id ? { ...r, completed: newCompleted } : r)
     );
     try { await updateLswMeetingRail(id, { completed: newCompleted } as any); } catch (e) { console.error('Failed to toggle meeting rail:', e); }
+  };
+
+  // ─── Outlook Calendar Sync ─────────────────────────────────────────────────
+  const DB_DAY_TO_KEY: Record<string, keyof DailyTask['days']> = {
+    monday: 'M', tuesday: 'T', wednesday: 'W', thursday: 'H', friday: 'F', saturday: 'S1', sunday: 'S2',
+  };
+
+  const loadOutlookMeetings = useCallback(async () => {
+    if (!outlookStatus.connected) return;
+    setOutlookLoading(true);
+    setOutlookError(null);
+    try {
+      const result = await fetchOutlookCalendar(currentWeek, currentYear);
+      setOutlookMeetings(result.events);
+    } catch (err: any) {
+      console.error('Failed to fetch Outlook calendar:', err);
+      if (err?.response?.status === 401) {
+        setOutlookStatus({ connected: false });
+        setOutlookError('Outlook session expired. Please reconnect.');
+      } else {
+        setOutlookError(err?.response?.data?.error || 'Failed to load Outlook meetings');
+      }
+    } finally {
+      setOutlookLoading(false);
+    }
+  }, [outlookStatus.connected, currentWeek, currentYear]);
+
+  // Fetch Outlook meetings when connected and week changes
+  useEffect(() => {
+    if (outlookStatus.connected) {
+      loadOutlookMeetings();
+    }
+  }, [outlookStatus.connected, loadOutlookMeetings]);
+
+  // Handle ?outlookConnected=true redirect from callback page
+  useEffect(() => {
+    if (searchParams.get('outlookConnected') === 'true') {
+      getOutlookStatus().then((status) => {
+        setOutlookStatus(status);
+      }).catch(() => {});
+      // Clean URL
+      window.history.replaceState({}, '', '/lsw');
+    }
+  }, [searchParams]);
+
+  const handleConnectOutlook = async () => {
+    try {
+      const { url } = await getOutlookAuthUrl();
+      window.location.href = url;
+    } catch (err) {
+      console.error('Failed to get Outlook auth URL:', err);
+      setOutlookError('Failed to start Outlook connection. Please try again.');
+    }
+  };
+
+  const handleDisconnectOutlook = async () => {
+    try {
+      await disconnectOutlook();
+      setOutlookStatus({ connected: false });
+      setOutlookMeetings([]);
+    } catch (err) {
+      console.error('Failed to disconnect Outlook:', err);
+    }
   };
 
   // Get the visible days based on workDaysPerWeek setting
@@ -1110,6 +1184,43 @@ function LSWContent() {
                   Daily & Weekly Standard Tasks/Meetings
                 </h2>
                 <div className="flex items-center gap-2">
+                  {/* Outlook Calendar Integration */}
+                  {outlookStatus.connected ? (
+                    <div className="flex items-center gap-1.5">
+                      <span className="text-xs text-green-600 dark:text-green-400 flex items-center gap-1">
+                        <svg className="w-3.5 h-3.5" viewBox="0 0 24 24" fill="currentColor"><path d="M22 6c0-1.1-.9-2-2-2H4c-1.1 0-2 .9-2 2v12c0 1.1.9 2 2 2h16c1.1 0 2-.9 2-2V6m-2 0-8 5-8-5h16m0 12H4V8l8 5 8-5v10Z"/></svg>
+                        {outlookStatus.email ? outlookStatus.email.split('@')[0] : 'Outlook'}
+                      </span>
+                      <button
+                        onClick={loadOutlookMeetings}
+                        className="p-1 text-blue-500 hover:text-blue-700 dark:text-blue-400 dark:hover:text-blue-300 transition-colors"
+                        title="Refresh Outlook meetings"
+                      >
+                        <svg className={`w-3.5 h-3.5 ${outlookLoading ? 'animate-spin' : ''}`} fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15" />
+                        </svg>
+                      </button>
+                      <button
+                        onClick={handleDisconnectOutlook}
+                        className="p-1 text-gray-400 hover:text-red-500 transition-colors"
+                        title="Disconnect Outlook"
+                      >
+                        <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
+                        </svg>
+                      </button>
+                    </div>
+                  ) : (
+                    <button
+                      onClick={handleConnectOutlook}
+                      className="text-xs px-3 py-1.5 rounded-lg bg-blue-600 hover:bg-blue-700 text-white font-medium transition-colors flex items-center gap-1.5 shadow-sm"
+                      title="Connect your Outlook calendar to auto-populate meetings"
+                    >
+                      <svg className="w-3.5 h-3.5" viewBox="0 0 24 24" fill="currentColor"><path d="M22 6c0-1.1-.9-2-2-2H4c-1.1 0-2 .9-2 2v12c0 1.1.9 2 2 2h16c1.1 0 2-.9 2-2V6m-2 0-8 5-8-5h16m0 12H4V8l8 5 8-5v10Z"/></svg>
+                      Connect Outlook
+                    </button>
+                  )}
+                  <span className="text-gray-300 dark:text-gray-600">|</span>
                   <span className="text-xs text-gray-500 dark:text-gray-400">Days/week:</span>
                   <select
                     value={workDaysPerWeek}
@@ -1188,6 +1299,82 @@ function LSWContent() {
                         </td>
                       </tr>
                     ))}
+
+                    {/* Outlook Calendar Meetings */}
+                    {outlookStatus?.connected && outlookMeetings.length > 0 && (
+                      <>
+                        <tr className="bg-blue-50/50 dark:bg-blue-900/20 border-t-2 border-blue-200 dark:border-blue-700">
+                          <td colSpan={2} className="px-3 py-2">
+                            <div className="flex items-center gap-2">
+                              <svg className="w-4 h-4 text-blue-500" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M8 7V3m8 4V3m-9 8h10M5 21h14a2 2 0 002-2V7a2 2 0 00-2-2H5a2 2 0 00-2 2v12a2 2 0 002 2z" />
+                              </svg>
+                              <span className="text-xs font-semibold text-blue-600 dark:text-blue-400 uppercase tracking-wider">Outlook Calendar</span>
+                            </div>
+                          </td>
+                          <td colSpan={8} className="px-3 py-2"></td>
+                        </tr>
+                        {outlookMeetings.map((meeting) => {
+                          const dayKey = DB_DAY_TO_KEY[meeting.dayOfWeek.toLowerCase() as keyof typeof DB_DAY_TO_KEY];
+                          return (
+                            <tr key={meeting.outlookEventId} className="border-b border-gray-100 dark:border-gray-700/50 bg-blue-50/30 dark:bg-blue-900/10 hover:bg-blue-50/60 dark:hover:bg-blue-900/20 transition-colors">
+                              <td className="px-3 py-2 text-sm text-gray-600 dark:text-gray-400 w-16 text-center">
+                                <span className="text-xs bg-blue-100 dark:bg-blue-900/40 text-blue-600 dark:text-blue-400 px-1.5 py-0.5 rounded">
+                                  {meeting.durationMinutes}m
+                                </span>
+                              </td>
+                              <td className="px-3 py-2">
+                                <div className="flex items-center gap-2">
+                                  <svg className="w-3.5 h-3.5 text-blue-400 flex-shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M3 8l7.89 5.26a2 2 0 002.22 0L21 8M5 19h14a2 2 0 002-2V7a2 2 0 00-2-2H5a2 2 0 00-2 2v10a2 2 0 002 2z" />
+                                  </svg>
+                                  <span className="text-sm text-gray-700 dark:text-gray-300">{meeting.subject}</span>
+                                  <span className="text-xs text-gray-400 dark:text-gray-500">
+                                    {new Date(meeting.startTime).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
+                                  </span>
+                                </div>
+                              </td>
+                              {['M', 'T', 'W', 'Th', 'F', 'Sa', 'Su'].map((day) => (
+                                <td key={day} className="px-2 py-3 text-center">
+                                  {dayKey === day && (
+                                    <svg className="w-5 h-5 text-blue-500 mx-auto" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 13l4 4L19 7" />
+                                    </svg>
+                                  )}
+                                </td>
+                              ))}
+                              <td className="px-2 py-3 text-center">
+                                <span className="text-xs text-blue-400" title="Synced from Outlook">📅</span>
+                              </td>
+                            </tr>
+                          );
+                        })}
+                      </>
+                    )}
+
+                    {/* Outlook Loading */}
+                    {outlookLoading && (
+                      <tr className="border-b border-gray-100 dark:border-gray-700/50">
+                        <td colSpan={10} className="px-3 py-3 text-center">
+                          <div className="flex items-center justify-center gap-2 text-sm text-blue-500">
+                            <svg className="w-4 h-4 animate-spin" fill="none" viewBox="0 0 24 24">
+                              <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"></circle>
+                              <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z"></path>
+                            </svg>
+                            Loading Outlook meetings...
+                          </div>
+                        </td>
+                      </tr>
+                    )}
+
+                    {/* Outlook Error */}
+                    {outlookError && (
+                      <tr className="border-b border-gray-100 dark:border-gray-700/50">
+                        <td colSpan={10} className="px-3 py-2 text-center">
+                          <span className="text-xs text-red-500">{outlookError}</span>
+                        </td>
+                      </tr>
+                    )}
                   </tbody>
                 </table>
               </div>

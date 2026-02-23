@@ -1397,6 +1397,9 @@ model User {
   // AI Assistant Relations
   AiAssistantConversations                                            AiAssistantConversation[]             @relation("AiAssistantConversationUser")
 
+  // Microsoft Outlook Calendar Integration
+  MicrosoftOAuthToken                                                 MicrosoftOAuthToken?                  @relation("MicrosoftOAuthTokenUser")
+
   @@index([email])
   @@index([isOnline])
   @@index([organizationId])
@@ -3389,4 +3392,24 @@ model AiAssistantMessage {
 
   @@index([conversationId])
   @@index([createdAt])
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Microsoft Outlook Calendar Integration
+// Stores OAuth tokens for Microsoft Graph API calendar access (per user).
+// ─────────────────────────────────────────────────────────────────────────────
+model MicrosoftOAuthToken {
+  id                     String    @id @default(uuid())
+  userId                 String    @unique
+  accessToken            String    @db.Text
+  refreshToken           String    @db.Text
+  tokenExpiry            DateTime
+  scope                  String?   // Granted scopes
+  microsoftEmail         String?   // The Microsoft account email used
+  createdAt              DateTime  @default(now())
+  updatedAt              DateTime  @updatedAt
+
+  user                   User      @relation("MicrosoftOAuthTokenUser", fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId])
 }

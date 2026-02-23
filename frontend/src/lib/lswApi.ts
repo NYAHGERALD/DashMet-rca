@@ -419,3 +419,46 @@ export async function upsertLswStylePreset(data: { name: string; category: strin
   const res = await api.post('/lsw/style-presets', data);
   return res.data.data as LswStylePreset;
 }
+
+// ─── Outlook Calendar Integration ─────────────────────────────────────────────
+
+export interface OutlookStatus {
+  connected: boolean;
+  email?: string;
+  lastSynced?: string;
+}
+
+export interface OutlookMeeting {
+  outlookEventId: string;
+  subject: string;
+  startTime: string;   // HH:MM
+  endTime: string;      // HH:MM
+  durationMinutes: number;
+  dayOfWeek: string;    // 'monday' | 'tuesday' | ... | 'sunday'
+  date: string;         // YYYY-MM-DD
+  isAllDay: boolean;
+}
+
+export async function getOutlookStatus(): Promise<OutlookStatus> {
+  const res = await api.get('/outlook/status');
+  return res.data.data;
+}
+
+export async function getOutlookAuthUrl(): Promise<{ url: string; state: string }> {
+  const res = await api.get('/outlook/auth-url');
+  return res.data.data;
+}
+
+export async function exchangeOutlookCode(code: string, state: string): Promise<{ connected: boolean; email?: string }> {
+  const res = await api.post('/outlook/callback', { code, state });
+  return res.data.data;
+}
+
+export async function disconnectOutlook(): Promise<void> {
+  await api.delete('/outlook/disconnect');
+}
+
+export async function fetchOutlookCalendar(weekNumber: number, year: number): Promise<{ events: OutlookMeeting[]; weekRange: { startDate: string; endDate: string } }> {
+  const res = await api.get(`/outlook/calendar?weekNumber=${weekNumber}&year=${year}`);
+  return res.data.data;
+}

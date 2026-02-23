@@ -249,6 +249,10 @@ router.use('/lsw', lswRoutes);
 import aiAssistantRoutes from './aiAssistantRoutes';
 router.use('/ai-assistant', aiAssistantRoutes);
 
+// Outlook Calendar integration routes - Connect Outlook for LSW
+import outlookRoutes from './outlookRoutes';
+router.use('/outlook', outlookRoutes);
+
 // Get transcripts for a specific incident (nested under incidents for convenience)
 router.get('/incidents/:incidentId/transcripts', authenticate, getIncidentTranscripts);
 

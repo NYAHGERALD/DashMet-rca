@@ -609,7 +609,7 @@ function AssignedActionsContent() {
                         return (
                           <Link
                             key={task.id}
-                            href={`/meetings/${task.meetingId}/actions/${task.id}`}
+                            href={`/meetings/${task.meetingId}/actions/${task.id}${viewFilter === 'assigned' ? '?source=assigned' : ''}`}
                             className="block px-4 py-3 hover:bg-gray-50 dark:hover:bg-gray-750 transition-colors"
                           >
                             <div className="flex items-start gap-3">

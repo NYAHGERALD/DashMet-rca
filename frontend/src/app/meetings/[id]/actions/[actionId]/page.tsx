@@ -1,7 +1,7 @@
 'use client';
 
-import { useState, useEffect, useCallback, useRef } from 'react';
-import { useRouter, useParams } from 'next/navigation';
+import { useState, useEffect, useCallback, useRef, Suspense } from 'react';
+import { useRouter, useParams, useSearchParams } from 'next/navigation';
 import { useAuth } from '@/components/providers/AuthProvider';
 import ProtectedRoute from '@/components/auth/ProtectedRoute';
 import api from '@/lib/api';
@@ -237,6 +237,8 @@ function ActionItemDetailContent() {
   const { user } = useAuth();
   const router = useRouter();
   const params = useParams();
+  const searchParams = useSearchParams();
+  const isReadOnly = searchParams?.get('source') === 'assigned';
   const meetingId = params?.id as string;
   const actionId = params?.actionId as string;
 
@@ -948,7 +950,7 @@ function ActionItemDetailContent() {
                     Save
                   </button>
                 </div>
-              ) : (
+              ) : !isReadOnly ? (
                 <div className="flex items-center gap-2">
                   {/* Lock/Unlock Button */}
                   <button
@@ -989,7 +991,7 @@ function ActionItemDetailContent() {
                     Edit
                   </button>
                 </div>
-              )}
+              ) : null}
             </div>
           </div>
         </div>
@@ -1137,7 +1139,7 @@ function ActionItemDetailContent() {
                   <select
                     value={task.priority}
                     onChange={(e) => updatePriority(e.target.value)}
-                    disabled={updating || task.isLocked}
+                    disabled={updating || task.isLocked || isReadOnly}
                     className={`appearance-none px-4 py-2 pr-10 rounded-full text-sm font-semibold cursor-pointer transition-colors ${
                       task.priority === 'URGENT'
                         ? 'bg-red-500 text-white'
@@ -1146,14 +1148,14 @@ function ActionItemDetailContent() {
                         : task.priority === 'MEDIUM'
                         ? 'bg-blue-500 text-white'
                         : 'bg-gray-200 text-gray-700 dark:bg-gray-700 dark:text-gray-200'
-                    } ${task.isLocked ? 'opacity-60 cursor-not-allowed' : ''}`}
+                    } ${(task.isLocked || isReadOnly) ? 'opacity-60 cursor-not-allowed' : ''}`}
                   >
                     <option value="LOW">Low</option>
                     <option value="MEDIUM">Medium</option>
                     <option value="HIGH">High</option>
                     <option value="URGENT">Urgent</option>
                   </select>
-                  <ChevronDown className="w-4 h-4 absolute right-3 top-1/2 -translate-y-1/2 pointer-events-none" />
+                  {!isReadOnly && <ChevronDown className="w-4 h-4 absolute right-3 top-1/2 -translate-y-1/2 pointer-events-none" />}
                 </div>
               </div>
 
@@ -2115,7 +2117,9 @@ function ActionItemDetailContent() {
 export default function ActionItemDetailPage() {
   return (
     <ProtectedRoute>
-      <ActionItemDetailContent />
+      <Suspense fallback={null}>
+        <ActionItemDetailContent />
+      </Suspense>
     </ProtectedRoute>
   );
 }
