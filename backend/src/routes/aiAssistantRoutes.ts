@@ -12,8 +12,16 @@
 import { Router, Request, Response } from 'express';
 import * as aiService from '../services/aiAssistantService';
 import { authenticate, AuthRequest } from '../middleware/auth';
+import multer from 'multer';
+import OpenAI from 'openai';
 
 const router = Router();
+
+// Multer for STT audio uploads (small voice clips, max 10MB)
+const sttUpload = multer({
+  storage: multer.memoryStorage(),
+  limits: { fileSize: 10 * 1024 * 1024 },
+});
 
 // Apply authentication to all AI assistant routes
 router.use(authenticate);
@@ -283,6 +291,64 @@ router.post('/memory/search', async (req: AuthRequest, res: Response) => {
     return res.status(500).json({
       success: false,
       error: error.message || 'Failed to search memory',
+    });
+  }
+});
+
+// ─── POST /stt ───────────────────────────────────────────
+// Speech-to-text: accepts an audio file and returns transcription via OpenAI Whisper.
+// Used by mobile apps as a fallback when on-device speech recognition is unavailable.
+router.post('/stt', sttUpload.single('audio'), async (req: AuthRequest, res: Response) => {
+  try {
+    const file = req.file;
+    if (!file) {
+      return res.status(400).json({
+        success: false,
+        error: 'No audio file provided',
+      });
+    }
+
+    const apiKey = process.env.OPENAI_API_KEY;
+    if (!apiKey) {
+      return res.status(503).json({
+        success: false,
+        error: 'Transcription service is not configured',
+      });
+    }
+
+    const openai = new OpenAI({ apiKey, timeout: 30000 });
+
+    const language = (req.body?.language as string) || 'en';
+
+    console.log(`[AI STT] Transcribing ${file.originalname || 'audio'} (${(file.size / 1024).toFixed(1)}KB, ${file.mimetype})`);
+
+    // Create a File object from the buffer for Whisper API
+    const audioFile = new File(
+      [file.buffer],
+      file.originalname || 'audio.wav',
+      { type: file.mimetype || 'audio/wav' }
+    );
+
+    const transcription = await openai.audio.transcriptions.create({
+      model: 'whisper-1',
+      file: audioFile,
+      language,
+      response_format: 'text',
+    });
+
+    console.log(`[AI STT] Transcription result: "${(transcription as string).substring(0, 80)}..."`);
+
+    return res.json({
+      success: true,
+      data: {
+        text: transcription,
+      },
+    });
+  } catch (error: any) {
+    console.error('Error in STT:', error);
+    return res.status(500).json({
+      success: false,
+      error: error.message || 'Failed to transcribe audio',
     });
   }
 });
