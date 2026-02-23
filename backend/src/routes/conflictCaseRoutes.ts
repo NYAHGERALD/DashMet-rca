@@ -1359,6 +1359,12 @@ function decryptPolicyData(policy: any): any {
 // Create a new workplace policy
 router.post('/workplace-policies', async (req: Request, res: Response) => {
   try {
+    // Debug: log what the backend actually receives
+    console.log('[DEBUG] workplace-policies POST - Content-Type:', req.headers['content-type']);
+    console.log('[DEBUG] workplace-policies POST - body type:', typeof req.body);
+    console.log('[DEBUG] workplace-policies POST - body keys:', Object.keys(req.body || {}));
+    console.log('[DEBUG] workplace-policies POST - name:', req.body?.name, '| version:', req.body?.version, '| createdBy:', req.body?.createdBy, '| organizationId:', req.body?.organizationId);
+
     const {
       name,
       version,
@@ -1377,6 +1383,7 @@ router.post('/workplace-policies', async (req: Request, res: Response) => {
     } = req.body;
 
     if (!name || !version || !createdBy || !organizationId) {
+      console.log('[DEBUG] workplace-policies POST - VALIDATION FAILED. raw body (first 500):', JSON.stringify(req.body).substring(0, 500));
       return res.status(400).json({
         success: false,
         error: 'Missing required fields: name, version, createdBy, organizationId',
