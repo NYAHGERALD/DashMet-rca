@@ -153,10 +153,21 @@ Return the structured JSON with all sections, their progressive disciplinary act
         : [],
     }));
 
+    // Build a top-level progressive discipline array aggregating all section actions
+    // Each entry includes sectionNumber, sectionTitle, and the discipline steps
+    const progressiveDiscipline = sections
+      .filter((s: any) => s.progressiveActions && s.progressiveActions.length > 0)
+      .map((s: any) => ({
+        sectionNumber: s.sectionNumber,
+        sectionTitle: s.title,
+        actions: s.progressiveActions,
+      }));
+
     return res.json({
       success: true,
       data: {
         sections,
+        progressiveDiscipline,
         summary: parsed.summary || {
           totalSections: sections.length,
           sectionsWithDiscipline: sections.filter((s: any) => s.progressiveActions.length > 0).length,
