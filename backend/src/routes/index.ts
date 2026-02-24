@@ -48,6 +48,7 @@ import conflictAnalysisRoutes from './conflictAnalysisRoutes';
 import policyMatchingRoutes from './policyMatchingRoutes';
 import decisionSupportRoutes from './decisionSupportRoutes';
 import actionGenerationRoutes from './actionGenerationRoutes';
+import policyParsingRoutes from './policyParsingRoutes';
 import conflictCaseRoutes from './conflictCaseRoutes';
 import dashboardRoutes from './dashboardRoutes';
 import { authenticate } from '../middleware/auth';
@@ -118,6 +119,9 @@ router.use('/decision-support', decisionSupportRoutes);
 // Action Generation routes - PUBLIC for iOS app
 // Generate documents based on selected action (coaching, counseling, warning, escalate)
 router.use('/action-generation', actionGenerationRoutes);
+
+// AI-powered policy parsing - PUBLIC for mobile apps
+router.use('/policy-parsing', policyParsingRoutes);
 
 // Conflict Case CRUD routes - PUBLIC for iOS app
 // Full CRUD for conflict cases with encryption
