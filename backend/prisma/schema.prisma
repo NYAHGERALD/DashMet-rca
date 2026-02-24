@@ -2766,11 +2766,8 @@ model WorkplacePolicyDoc {
   originalText      String?               @db.Text // Encrypted
   
   // Parsed Sections (Encrypted JSON)
+  // Each section includes: firstProgression, secondProgression, thirdProgression, fourthProgression
   sections          String?               @db.Text // Encrypted JSON array
-  
-  // Progressive Discipline (Encrypted JSON) — separate column for organized storage
-  // Stores the AI-identified disciplinary actions (verbal warning, written warning, suspension, discharge)
-  progressiveDiscipline String?           @db.Text // Encrypted JSON array
   
   // Audit
   organizationId    String

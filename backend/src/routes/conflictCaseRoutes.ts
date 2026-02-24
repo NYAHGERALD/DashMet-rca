@@ -1352,7 +1352,6 @@ function decryptPolicyData(policy: any): any {
     ...policy,
     originalText: policy.originalText ? decrypt(policy.originalText) : null,
     sections: policy.sections ? decrypt(policy.sections) : null,
-    progressiveDiscipline: policy.progressiveDiscipline ? decrypt(policy.progressiveDiscipline) : null,
   };
 }
 
@@ -1372,7 +1371,6 @@ router.post('/workplace-policies', async (req: Request, res: Response) => {
       documentPageCount,
       originalText,
       sections,
-      progressiveDiscipline,
       createdBy,
       organizationId,
       facilityId,
@@ -1410,7 +1408,6 @@ router.post('/workplace-policies', async (req: Request, res: Response) => {
         documentPageCount: documentPageCount || null,
         originalText: originalText ? encrypt(originalText) : null,
         sections: sections ? encrypt(JSON.stringify(sections)) : null,
-        progressiveDiscipline: progressiveDiscipline ? encrypt(JSON.stringify(progressiveDiscipline)) : null,
         createdBy,
         organizationId,
         facilityId: facilityId || null,
@@ -1545,7 +1542,6 @@ router.patch('/workplace-policies/:id', async (req: Request, res: Response) => {
       documentPageCount,
       originalText,
       sections,
-      progressiveDiscipline,
     } = req.body;
 
     const existing = await prisma.workplacePolicyDoc.findUnique({
@@ -1571,7 +1567,6 @@ router.patch('/workplace-policies/:id', async (req: Request, res: Response) => {
     if (documentPageCount !== undefined) updateData.documentPageCount = documentPageCount;
     if (originalText !== undefined) updateData.originalText = encrypt(originalText);
     if (sections !== undefined) updateData.sections = encrypt(JSON.stringify(sections));
-    if (progressiveDiscipline !== undefined) updateData.progressiveDiscipline = encrypt(JSON.stringify(progressiveDiscipline));
 
     const policy = await prisma.workplacePolicyDoc.update({
       where: { id },

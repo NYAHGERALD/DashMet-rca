@@ -25,8 +25,102 @@ function getOpenAIClient(): OpenAI | null {
 }
 
 // ============================================================================
+// SYSTEMATIC PROGRESSIVE DISCIPLINE CLASSIFICATION
+// This runs AFTER AI parsing to ensure correct categorization.
+// Uses keyword matching to guarantee each action is placed in the right column.
+// ============================================================================
+
+const VERBAL_KEYWORDS = ['verbal', 'verbal warning', 'oral', 'oral warning', 'counseling', 'coaching'];
+const WRITTEN_KEYWORDS = ['written', 'written warning', 'written reprimand', 'written notice', 'letter of warning', 'formal warning'];
+const SUSPENSION_KEYWORDS = ['suspension', 'suspend', 'suspended', 'unpaid leave', 'without pay', 'disciplinary leave', 'days off'];
+const DISCHARGE_KEYWORDS = ['discharge', 'termination', 'terminate', 'terminated', 'dismissal', 'dismissed', 'fired', 'separation', 'end of employment', 'removal'];
+
+function classifyProgression(actionText: string): 'first' | 'second' | 'third' | 'fourth' | null {
+  const lower = actionText.toLowerCase().trim();
+
+  // Check discharge/termination FIRST (highest severity)
+  if (DISCHARGE_KEYWORDS.some(kw => lower.includes(kw))) return 'fourth';
+
+  // Check suspension
+  if (SUSPENSION_KEYWORDS.some(kw => lower.includes(kw))) return 'third';
+
+  // Check written warning (before verbal, since "written" is more specific)
+  if (WRITTEN_KEYWORDS.some(kw => lower.includes(kw))) return 'second';
+
+  // Check verbal warning
+  if (VERBAL_KEYWORDS.some(kw => lower.includes(kw))) return 'first';
+
+  return null;
+}
+
+/**
+ * Systematically extract and validate the 4 progressive discipline columns
+ * from a section's progressive actions array.
+ *
+ * This is the authoritative classification — it overrides AI categorization
+ * to ensure legal accuracy.
+ */
+function extractProgressionColumns(progressiveActions: any[]): {
+  firstProgression: string | null;
+  secondProgression: string | null;
+  thirdProgression: string | null;
+  fourthProgression: string | null;
+} {
+  const result = {
+    firstProgression: null as string | null,
+    secondProgression: null as string | null,
+    thirdProgression: null as string | null,
+    fourthProgression: null as string | null,
+  };
+
+  if (!Array.isArray(progressiveActions) || progressiveActions.length === 0) {
+    return result;
+  }
+
+  for (const action of progressiveActions) {
+    const actionText = (action.action || '').trim();
+    const description = (action.description || '').trim();
+    const fullText = description ? `${actionText} - ${description}` : actionText;
+
+    if (!actionText) continue;
+
+    const classification = classifyProgression(actionText);
+
+    switch (classification) {
+      case 'first':
+        if (!result.firstProgression) result.firstProgression = fullText;
+        break;
+      case 'second':
+        if (!result.secondProgression) result.secondProgression = fullText;
+        break;
+      case 'third':
+        if (!result.thirdProgression) result.thirdProgression = fullText;
+        break;
+      case 'fourth':
+        if (!result.fourthProgression) result.fourthProgression = fullText;
+        break;
+      default:
+        // If we can't classify by keyword, use offense ordering as fallback
+        const offense = (action.offense || '').toLowerCase();
+        if (offense.includes('1st') || offense.includes('first')) {
+          if (!result.firstProgression) result.firstProgression = fullText;
+        } else if (offense.includes('2nd') || offense.includes('second')) {
+          if (!result.secondProgression) result.secondProgression = fullText;
+        } else if (offense.includes('3rd') || offense.includes('third')) {
+          if (!result.thirdProgression) result.thirdProgression = fullText;
+        } else if (offense.includes('4th') || offense.includes('fourth')) {
+          if (!result.fourthProgression) result.fourthProgression = fullText;
+        }
+        break;
+    }
+  }
+
+  return result;
+}
+
+// ============================================================================
 // POST /api/policy-parsing/parse-sections
-// AI-powered policy document parsing with disciplinary progressive action detection
+// AI-powered policy document parsing with 4-column progressive discipline
 // ============================================================================
 
 router.post('/parse-sections', async (req: Request, res: Response) => {
@@ -48,61 +142,40 @@ router.post('/parse-sections', async (req: Request, res: Response) => {
       });
     }
 
-    const systemPrompt = `You are an expert HR policy analyst. Your job is to parse workplace policy documents into structured, consistently formatted sections.
+    const systemPrompt = `You are an expert HR policy analyst specializing in workplace progressive discipline. Parse the policy into structured sections.
 
-For EACH rule or section in the policy, you must:
-1. Identify the rule/section number and title
-2. Extract the full content/description of the rule
-3. Identify the progressive disciplinary actions if they exist for that rule. Progressive discipline typically follows this hierarchy:
-   - Verbal Warning (1st offense)
-   - Written Warning (2nd offense)
-   - Suspension (3rd offense)
-   - Discharge/Termination (4th offense or severe violations)
+For EACH rule or section, identify:
+1. The rule/section number and title
+2. The full content/description
+3. The progressive disciplinary actions. Look carefully for these 4 levels:
+   - 1st Offense / First Progression: Usually a Verbal Warning, Oral Warning, Counseling, or Coaching
+   - 2nd Offense / Second Progression: Usually a Written Warning, Written Reprimand, or Formal Warning
+   - 3rd Offense / Third Progression: Usually a Suspension (with or without pay), Disciplinary Leave
+   - 4th Offense / Fourth Progression: Usually Discharge, Termination, Dismissal, or Separation
 
-Some rules may have different progressive steps (e.g., immediate discharge for severe violations, or only verbal + written warning for minor infractions). Capture exactly what the policy states.
+CRITICAL RULES:
+- Some rules may skip levels (e.g., immediate termination for severe violations)
+- Some rules may have fewer than 4 levels — only include what the policy states
+- NEVER invent or assume disciplinary actions not explicitly in the policy text
+- If a section has NO disciplinary actions, return an empty progressiveActions array
+- Preserve the EXACT wording from the policy document for each action
 
-4. Classify each section into one of these types: OVERVIEW, DEFINITIONS, GUIDELINES, PROCEDURES, VIOLATIONS, CONSEQUENCES, REPORTING, APPEALS, OTHER
+4. Section type: OVERVIEW, DEFINITIONS, GUIDELINES, PROCEDURES, VIOLATIONS, CONSEQUENCES, REPORTING, APPEALS, or OTHER
 
-5. Extract relevant keywords from each section (up to 10)
-
-IMPORTANT:
-- Format ALL sections consistently regardless of the original document format
-- If the document doesn't specify progressive discipline for a section, set progressiveActions to an empty array
-- If a rule says "immediate termination" or "immediate discharge", represent that as a single action
-- Preserve the original meaning — do not invent disciplinary actions that aren't in the policy
-- If the text is a general overview/introduction with no rules, still parse it as a section with no progressive actions
-
-Return a JSON object with this exact structure:
+Return JSON:
 {
   "sections": [
     {
       "sectionNumber": "1",
       "title": "Section Title",
-      "content": "Full text content of this section...",
+      "content": "Full text content...",
       "type": "VIOLATIONS",
-      "keywords": ["keyword1", "keyword2"],
       "orderIndex": 0,
       "progressiveActions": [
-        {
-          "offense": "1st Offense",
-          "action": "Verbal Warning",
-          "description": "Optional additional details from the policy"
-        },
-        {
-          "offense": "2nd Offense",
-          "action": "Written Warning",
-          "description": ""
-        },
-        {
-          "offense": "3rd Offense",
-          "action": "Suspension",
-          "description": "3-day suspension without pay"
-        },
-        {
-          "offense": "4th Offense",
-          "action": "Discharge",
-          "description": "Termination of employment"
-        }
+        {"offense": "1st Offense", "action": "Verbal Warning", "description": ""},
+        {"offense": "2nd Offense", "action": "Written Warning", "description": ""},
+        {"offense": "3rd Offense", "action": "Suspension", "description": "3-day suspension without pay"},
+        {"offense": "4th Offense", "action": "Discharge", "description": ""}
       ]
     }
   ],
@@ -113,13 +186,13 @@ Return a JSON object with this exact structure:
   }
 }`;
 
-    const userPrompt = `Parse the following workplace policy document${policyName ? ` titled "${policyName}"` : ''} into structured sections with progressive disciplinary actions:
+    const userPrompt = `Parse this workplace policy document${policyName ? ` titled "${policyName}"` : ''} into structured sections. For every rule, identify the progressive disciplinary actions (verbal warning, written warning, suspension, discharge/termination):
 
 ---
 ${extractedText.substring(0, 30000)}
 ---
 
-Return the structured JSON with all sections, their progressive disciplinary actions, and a summary.`;
+Return the structured JSON.`;
 
     const completion = await openai.chat.completions.create({
       model: 'gpt-4o',
@@ -128,49 +201,53 @@ Return the structured JSON with all sections, their progressive disciplinary act
         { role: 'user', content: userPrompt },
       ],
       max_tokens: 8000,
-      temperature: 0.2,
+      temperature: 0.1,
       response_format: { type: 'json_object' },
     });
 
     const content = completion.choices[0]?.message?.content || '';
     const parsed = JSON.parse(content);
 
-    // Validate and ensure each section has an id
-    const sections = (parsed.sections || []).map((section: any, index: number) => ({
-      id: `section-${Date.now()}-${index}`,
-      sectionNumber: section.sectionNumber || `${index + 1}`,
-      title: section.title || `Section ${index + 1}`,
-      content: section.content || '',
-      type: section.type || 'OTHER',
-      keywords: Array.isArray(section.keywords) ? section.keywords : [],
-      orderIndex: section.orderIndex ?? index,
-      progressiveActions: Array.isArray(section.progressiveActions)
+    // Process each section: AI parsing + systematic code validation
+    const sections = (parsed.sections || []).map((section: any, index: number) => {
+      const progressiveActions = Array.isArray(section.progressiveActions)
         ? section.progressiveActions.map((action: any) => ({
             offense: action.offense || '',
             action: action.action || '',
             description: action.description || '',
           }))
-        : [],
-    }));
+        : [];
 
-    // Build a top-level progressive discipline array aggregating all section actions
-    // Each entry includes sectionNumber, sectionTitle, and the discipline steps
-    const progressiveDiscipline = sections
-      .filter((s: any) => s.progressiveActions && s.progressiveActions.length > 0)
-      .map((s: any) => ({
-        sectionNumber: s.sectionNumber,
-        sectionTitle: s.title,
-        actions: s.progressiveActions,
-      }));
+      // SYSTEMATIC CODE VALIDATION: Extract the 4 progression columns
+      // This overrides AI categorization with keyword-based classification
+      const progressions = extractProgressionColumns(progressiveActions);
+
+      return {
+        id: `section-${Date.now()}-${index}`,
+        sectionNumber: section.sectionNumber || `${index + 1}`,
+        title: section.title || `Section ${index + 1}`,
+        content: section.content || '',
+        type: section.type || 'OTHER',
+        orderIndex: section.orderIndex ?? index,
+        // The 4 progression columns — stored per section
+        firstProgression: progressions.firstProgression,
+        secondProgression: progressions.secondProgression,
+        thirdProgression: progressions.thirdProgression,
+        fourthProgression: progressions.fourthProgression,
+      };
+    });
+
+    const sectionsWithDiscipline = sections.filter((s: any) =>
+      s.firstProgression || s.secondProgression || s.thirdProgression || s.fourthProgression
+    ).length;
 
     return res.json({
       success: true,
       data: {
         sections,
-        progressiveDiscipline,
         summary: parsed.summary || {
           totalSections: sections.length,
-          sectionsWithDiscipline: sections.filter((s: any) => s.progressiveActions.length > 0).length,
+          sectionsWithDiscipline,
           policyType: policyName || 'Workplace Policy',
         },
         parsedAt: new Date().toISOString(),
@@ -179,7 +256,6 @@ Return the structured JSON with all sections, their progressive disciplinary act
   } catch (error: any) {
     console.error('Error parsing policy with AI:', error);
 
-    // If it's a JSON parse error from GPT response, give specific message
     if (error instanceof SyntaxError) {
       return res.status(500).json({
         success: false,
