@@ -30,7 +30,11 @@ interface PolicySection {
   title: string;
   content: string;
   type: string;
-  keywords: string[];
+  keywords?: string[];
+  firstProgression?: string;
+  secondProgression?: string;
+  thirdProgression?: string;
+  fourthProgression?: string;
 }
 
 interface PolicyMatchRequest {
@@ -115,19 +119,39 @@ router.post('/match', async (req: Request, res: Response) => {
     // Build analysis context if available
     let analysisContext = '';
     if (analysisResult) {
+      const contradictions = analysisResult.contradictions || [];
+      const agreementPoints = analysisResult.agreementPoints || [];
+      const summary = analysisResult.neutralSummary || '';
       analysisContext = `\n\nPREVIOUS ANALYSIS FINDINGS:
-Key Contradictions: ${analysisResult.contradictions.slice(0, 3).join('; ')}
-Agreement Points: ${analysisResult.agreementPoints.slice(0, 3).join('; ')}
-Summary: ${analysisResult.neutralSummary.substring(0, 500)}`;
+Key Contradictions: ${contradictions.slice(0, 3).join('; ')}
+Agreement Points: ${agreementPoints.slice(0, 3).join('; ')}
+Summary: ${summary.substring(0, 500)}`;
     }
 
     // Format policy sections for the prompt
-    const policySectionsText = policySections.map(section =>
-      `[Section ${section.sectionNumber}: ${section.title}]
+    const policySectionsText = policySections.map(section => {
+      let sectionText = `[Section ${section.sectionNumber}: ${section.title}]
 Type: ${section.type}
-Content: ${section.content.substring(0, 800)}${section.content.length > 800 ? '...' : ''}
-Keywords: ${section.keywords.join(', ')}`
-    ).join('\n\n---\n\n');
+Content: ${section.content.substring(0, 800)}${section.content.length > 800 ? '...' : ''}`;
+
+      // Include progressive discipline if available
+      const progressions: string[] = [];
+      if (section.firstProgression) progressions.push(`1st Offense: ${section.firstProgression}`);
+      if (section.secondProgression) progressions.push(`2nd Offense: ${section.secondProgression}`);
+      if (section.thirdProgression) progressions.push(`3rd Offense: ${section.thirdProgression}`);
+      if (section.fourthProgression) progressions.push(`4th Offense: ${section.fourthProgression}`);
+      
+      if (progressions.length > 0) {
+        sectionText += `\nProgressive Discipline: ${progressions.join(' | ')}`;
+      }
+
+      // Legacy keywords support
+      if (section.keywords && section.keywords.length > 0) {
+        sectionText += `\nKeywords: ${section.keywords.join(', ')}`;
+      }
+
+      return sectionText;
+    }).join('\n\n---\n\n');
 
     const systemPrompt = `You are a senior HR Policy Specialist with 20+ years of experience in workplace policy interpretation and compliance. Your role is to analyze workplace incidents and identify which company policy sections MAY be relevant.
 
@@ -139,6 +163,7 @@ YOUR APPROACH:
 - You present policy relevance as "This section may be relevant because..." NOT "This person violated..."
 - You focus on the BEHAVIORS described, not the people
 - You prioritize sections that address the core issues raised in both statements
+- When progressive discipline levels are provided, reference the appropriate offense level based on context
 
 IMPORTANT BOUNDARIES:
 - You are NOT determining if a policy was violated
