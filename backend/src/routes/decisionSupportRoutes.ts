@@ -81,9 +81,127 @@ interface RecommendationRequest {
   };
 }
 
+// ─── Per-Employee GPT Call ─────────────────────────────────────
+// Makes a SEPARATE GPT call for a SINGLE employee. This structurally
+// guarantees the response is about ONE employee only — no mixing possible.
+
+async function generateForOneEmployee(
+  openai: OpenAI,
+  employeeName: string,
+  employeeStatement: string,
+  otherEmployeeName: string,
+  otherEmployeeStatement: string,
+  employeeIndex: number,
+  caseDetails: RecommendationRequest['caseDetails'],
+  sharedContext: string
+): Promise<{
+  employeeName: string;
+  assessment: string;
+  recommendations: RecommendationOption[];
+  primaryRecommendation: string;
+}> {
+  const idPrefix = `emp${employeeIndex + 1}`;
+
+  const systemPrompt = `You are a senior HR Director with 25+ years of experience in employee relations, workplace investigations, and conflict resolution.
+
+You are evaluating ONE specific employee: ${employeeName}.
+You must ONLY generate recommendations for ${employeeName}. Do NOT mention the other employee in recommendation titles or descriptions.
+
+RECOMMENDATION TYPES (least to most severe):
+1. COACHING – Informal guidance. Use for minor/first issues.
+2. COUNSELING – Documented formal discussion. Use for moderate/emerging patterns.
+3. WARNING – Formal disciplinary action. Use for serious/repeated violations.
+4. ESCALATE – Refer to HR. Use for severe allegations or legal risk.
+
+PRINCIPLES:
+- NEVER suggest termination
+- DO NOT determine guilt
+- ALWAYS consider proportionality
+- Every recommendation title, description, and rationale must refer ONLY to ${employeeName}
+- Do NOT mention "${otherEmployeeName}" in any recommendation field`;
+
+  const userPrompt = `Evaluate ${employeeName}'s role in this workplace incident and provide 2-3 recommendation options for the supervisor.
+
+INCIDENT:
+- Type: ${caseDetails.caseType}
+- Date: ${caseDetails.incidentDate}
+- Location: ${caseDetails.location}
+- Department: ${caseDetails.department}
+
+${employeeName.toUpperCase()}'S STATEMENT:
+"${employeeStatement}"
+
+THE OTHER PARTY (${otherEmployeeName.toUpperCase()}'s STATEMENT — for context only):
+"${otherEmployeeStatement}"${sharedContext}
+
+Respond in JSON:
+{
+  "assessment": "1-2 sentences about ${employeeName}'s specific behavior in this incident",
+  "recommendations": [
+    {
+      "id": "${idPrefix}_option_a",
+      "type": "coaching|counseling|warning|escalate",
+      "title": "Action title mentioning ONLY ${employeeName}",
+      "description": "2-3 sentences about this action for ${employeeName} specifically",
+      "rationale": "3-4 sentences why this is appropriate for ${employeeName}'s behavior",
+      "riskLevel": "low|moderate|high|critical",
+      "riskExplanation": "1-2 sentences about risk",
+      "nextSteps": ["Step 1", "Step 2", "Step 3"],
+      "timeframe": "e.g. Within 48 hours",
+      "confidence": 0.85
+    }
+  ],
+  "primaryRecommendation": "${idPrefix}_option_a"
+}
+
+RULES:
+- Generate 2-3 options ordered least to most severe
+- Every field must be about ${employeeName} ONLY
+- Do NOT reference "${otherEmployeeName}" in titles, descriptions, or rationale
+- Confidence between 0.5-1.0`;
+
+  const completion = await openai.chat.completions.create({
+    model: 'gpt-4o',
+    messages: [
+      { role: 'system', content: systemPrompt },
+      { role: 'user', content: userPrompt }
+    ],
+    max_tokens: 2500,
+    temperature: 0.4,
+    response_format: { type: 'json_object' }
+  });
+
+  const content = completion.choices[0]?.message?.content || '{}';
+  const result = JSON.parse(content);
+
+  const recommendations: RecommendationOption[] = (result.recommendations || []).slice(0, 4).map((r: any, index: number) => ({
+    id: r.id || `${idPrefix}_option_${String.fromCharCode(97 + index)}`,
+    type: r.type || 'coaching',
+    title: r.title || '',
+    description: r.description || '',
+    rationale: r.rationale || '',
+    riskLevel: r.riskLevel || 'moderate',
+    riskExplanation: r.riskExplanation || '',
+    nextSteps: r.nextSteps || [],
+    timeframe: r.timeframe || '',
+    confidence: Math.min(1, Math.max(0, r.confidence || 0.7)),
+    targetEmployeeNames: [employeeName]
+  }));
+
+  return {
+    employeeName,
+    assessment: result.assessment || '',
+    recommendations,
+    primaryRecommendation: result.primaryRecommendation || recommendations[0]?.id || ''
+  };
+}
+
 /**
  * Generate AI-powered recommendations for case resolution
  * POST /api/decision-support/recommendations
+ * 
+ * Architecture: Makes TWO separate GPT calls (one per employee) in parallel.
+ * This structurally guarantees recommendations are never combined across employees.
  */
 router.post('/recommendations', async (req: Request, res: Response) => {
   try {
@@ -111,221 +229,111 @@ router.post('/recommendations', async (req: Request, res: Response) => {
       });
     }
 
-    // Build context sections
-    let witnessContext = '';
+    // Build shared context (witness, analysis, policy, history) — included in both calls for context
+    let sharedContext = '';
+
     if (witnessStatements && witnessStatements.length > 0) {
-      witnessContext = `\n\nWITNESS ACCOUNTS:\n${witnessStatements.map(w =>
+      sharedContext += `\n\nWITNESS ACCOUNTS:\n${witnessStatements.map(w =>
         `${w.witnessName}: "${w.text}"`
       ).join('\n')}`;
     }
 
-    let analysisContext = '';
     if (analysisResult) {
-      analysisContext = `\n\nANALYSIS FINDINGS:
+      sharedContext += `\n\nANALYSIS FINDINGS:
 Key Contradictions: ${analysisResult.contradictions.slice(0, 4).join('; ')}
 Agreement Points: ${analysisResult.agreementPoints.slice(0, 4).join('; ')}
 Emotional Language Detected: ${analysisResult.emotionalLanguage?.slice(0, 3).join('; ') || 'None noted'}
 Summary: ${analysisResult.neutralSummary.substring(0, 600)}`;
     }
 
-    let policyContext = '';
     if (policyMatches && policyMatches.length > 0) {
-      policyContext = `\n\nRELEVANT POLICY SECTIONS:
+      sharedContext += `\n\nRELEVANT POLICY SECTIONS:
 ${policyMatches.slice(0, 4).map(p =>
         `- ${p.sectionTitle} (${Math.round(p.matchConfidence * 100)}% relevance): ${p.relevanceExplanation.substring(0, 200)}`
       ).join('\n')}`;
     }
 
-    let historyContext = '';
     if (priorHistory) {
       const historyItems: string[] = [];
       if (priorHistory.hasPriorComplaints) historyItems.push('Prior complaints exist between these employees');
       if (priorHistory.hasPriorCounseling) historyItems.push('Previous counseling documented');
       if (priorHistory.hasPriorWarnings) historyItems.push('Previous warnings issued');
       if (historyItems.length > 0) {
-        historyContext = `\n\nPRIOR HISTORY:\n${historyItems.join('\n')}${priorHistory.notes ? `\nNotes: ${priorHistory.notes}` : ''}`;
+        sharedContext += `\n\nPRIOR HISTORY:\n${historyItems.join('\n')}${priorHistory.notes ? `\nNotes: ${priorHistory.notes}` : ''}`;
       }
     }
 
-    const systemPrompt = `You are a senior HR Director with 25+ years of experience in employee relations, workplace investigations, and conflict resolution. You specialize in providing balanced, legally-sound recommendations that protect both employees and the organization.
+    console.log('Decision Support: Generating per-employee recommendations (2 parallel GPT calls)...');
 
-YOUR APPROACH:
-- You consider ALL evidence before making recommendations
-- You weigh the severity of the situation against proportionate response
-- You factor in prior history when relevant
-- You consider the organizational culture and relationship dynamics
-- You recommend the LEAST punitive effective action that addresses the situation
-- You always explain your reasoning in clear, professional language
+    // ─── TWO SEPARATE GPT CALLS IN PARALLEL ───
+    // This is the key architectural decision: each call only knows about
+    // one employee, making it structurally impossible to combine them.
+    const [resultA, resultB] = await Promise.all([
+      generateForOneEmployee(
+        openai,
+        complaintA.employeeName,
+        complaintA.text,
+        complaintB.employeeName,
+        complaintB.text,
+        0,
+        caseDetails,
+        sharedContext
+      ),
+      generateForOneEmployee(
+        openai,
+        complaintB.employeeName,
+        complaintB.text,
+        complaintA.employeeName,
+        complaintA.text,
+        1,
+        caseDetails,
+        sharedContext
+      )
+    ]);
 
-RECOMMENDATION OPTIONS (in order of severity):
+    console.log('Decision Support: Both employee recommendations received, combining...');
 
-1. COACHING - Informal guidance session
-   - Use when: Minor issues, first occurrence, misunderstanding, low severity
-   - Goal: Course correction through conversation
-   - Outcome: No formal documentation in employee file
+    const employeeRecommendations = [resultA, resultB];
 
-2. DOCUMENTED COUNSELING - Formal discussion with written record
-   - Use when: Moderate issues, pattern emerging, needs documented follow-up
-   - Goal: Address behavior with accountability
-   - Outcome: Documentation in employee file, improvement plan
-
-3. WRITTEN WARNING - Formal disciplinary action
-   - Use when: Serious policy violation, repeated issues despite counseling
-   - Goal: Final opportunity before termination consideration
-   - Outcome: Official warning with consequences for future violations
-
-4. ESCALATE TO HR - Refer to HR for formal investigation/action
-   - Use when: Severe allegations, potential legal implications, complex situations
-   - Goal: Ensure proper investigation procedures and organizational protection
-   - Outcome: HR takes ownership of further process
-
-CRITICAL PRINCIPLES:
-- NEVER suggest termination at this level - that's an HR decision
-- DO NOT determine guilt - provide options based on the information available
-- ALWAYS consider proportionality
-- ALWAYS use employee names, never "Party A/B"
-- Present recommendations as OPTIONS for the supervisor to choose`;
-
-    const userPrompt = `Please analyze this workplace incident and provide recommendation options for the supervisor.
-
-INCIDENT DETAILS:
-- Type: ${caseDetails.caseType}
-- Date: ${caseDetails.incidentDate}
-- Location: ${caseDetails.location}
-- Department: ${caseDetails.department}
-
-${complaintA.employeeName.toUpperCase()}'S STATEMENT:
-"${complaintA.text}"
-
-${complaintB.employeeName.toUpperCase()}'S STATEMENT:
-"${complaintB.text}"${witnessContext}${analysisContext}${policyContext}${historyContext}
-
-Please provide 3-4 recommendation options, ordered from least to most severe. The supervisor will make the final decision.
-
-IMPORTANT: For each recommendation, specify EXACTLY which employee(s) the action should be applied to based on your assessment. The employees are: "${complaintA.employeeName}" and "${complaintB.employeeName}". Be specific - if only one employee needs action, list only that one. If both need the same action, list both.
-
-Respond in JSON format:
-{
-  "recommendations": [
-    {
-      "id": "option_a",
-      "type": "coaching|counseling|warning|escalate",
-      "title": "Brief action title including employee name(s) (e.g., 'Issue Written Warning to John Smith')",
-      "description": "2-3 sentences describing what this action involves",
-      "rationale": "3-4 sentences explaining why this option is appropriate for this situation. Be specific about what in the case supports this recommendation.",
-      "riskLevel": "low|moderate|high|critical",
-      "riskExplanation": "1-2 sentences explaining the risk level - what could happen if this path is chosen",
-      "nextSteps": ["Step 1 for supervisor", "Step 2", "Step 3"],
-      "timeframe": "e.g., 'Within 48 hours' or 'Complete within 2 weeks'",
-      "confidence": 0.85,
-      "targetEmployeeNames": ["${complaintA.employeeName}"] or ["${complaintB.employeeName}"] or ["${complaintA.employeeName}", "${complaintB.employeeName}"]
+    // Build flat list for backward compatibility
+    const flatRecommendations: RecommendationOption[] = [];
+    for (const empRec of employeeRecommendations) {
+      for (const rec of empRec.recommendations) {
+        flatRecommendations.push(rec);
+      }
     }
-  ],
-  "primaryRecommendation": "option_a|option_b|option_c|option_d",
-  "supervisorGuidance": "A professional paragraph advising the supervisor on how to approach this decision. Acknowledge complexity if present. Emphasize that the supervisor knows their team best and should use their judgment. Remind them that all options are valid based on the information available."
-}
 
-QUALITY STANDARDS:
-- Confidence scores should reflect how clearly the evidence supports each option (0.5-1.0)
-- Risk levels should be realistic and proportionate
-- Next steps should be actionable and specific
-- Always include at least one lower-severity option when appropriate`;
-
-    console.log('Decision Support: Generating recommendations...');
-
-    const completion = await openai.chat.completions.create({
-      model: 'gpt-4o',
-      messages: [
-        { role: 'system', content: systemPrompt },
-        { role: 'user', content: userPrompt }
-      ],
-      max_tokens: 5000,
-      temperature: 0.4,
-      response_format: { type: 'json_object' }
-    });
-
-    const content = completion.choices[0]?.message?.content || '';
-    console.log('Decision Support: Received response, parsing...');
-
+    // Generate supervisor guidance with a lightweight call
+    let supervisorGuidance = `Each employee's situation should be assessed on its own merits. Consider ${complaintA.employeeName}'s and ${complaintB.employeeName}'s individual roles and behaviors separately when making your decisions.`;
     try {
-      const result = JSON.parse(content);
-      
-      // Employee names for inference
-      const employeeNameA = complaintA.employeeName;
-      const employeeNameB = complaintB.employeeName;
-
-      // Helper to infer target employee from text if AI didn't specify
-      const inferTargetFromText = (title: string, description: string): string[] => {
-        const text = `${title} ${description}`.toLowerCase();
-        const targets: string[] = [];
-        
-        // Check if employee A's name appears in title/description
-        if (employeeNameA && text.includes(employeeNameA.toLowerCase())) {
-          targets.push(employeeNameA);
-        }
-        
-        // Check if employee B's name appears in title/description
-        if (employeeNameB && text.includes(employeeNameB.toLowerCase())) {
-          targets.push(employeeNameB);
-        }
-        
-        return targets;
-      };
-
-      // Validate and clean up recommendations
-      const recommendations: RecommendationOption[] = (result.recommendations || [])
-        .slice(0, 4)
-        .map((r: any, index: number) => {
-          // If AI provided targetEmployeeNames, use them
-          let targetEmployeeNames: string[] = [];
-          if (Array.isArray(r.targetEmployeeNames) && r.targetEmployeeNames.length > 0) {
-            targetEmployeeNames = r.targetEmployeeNames;
-          } else {
-            // Try to infer from recommendation title/description
-            targetEmployeeNames = inferTargetFromText(r.title || '', r.description || '');
-            if (targetEmployeeNames.length > 0) {
-              console.log(`Inferred target employees from text: ${targetEmployeeNames.join(', ')}`);
-            }
-          }
-          
-          return {
-            id: r.id || `option_${String.fromCharCode(97 + index)}`,
-            type: r.type || 'coaching',
-            title: r.title || '',
-            description: r.description || '',
-            rationale: r.rationale || '',
-            riskLevel: r.riskLevel || 'moderate',
-            riskExplanation: r.riskExplanation || '',
-            nextSteps: r.nextSteps || [],
-            timeframe: r.timeframe || '',
-            confidence: Math.min(1, Math.max(0, r.confidence || 0.7)),
-            // Include target employees - inferred from title/description if not specified
-            targetEmployeeNames
-          };
-        });
-
-      return res.json({
-        success: true,
-        data: {
-          recommendations,
-          primaryRecommendation: result.primaryRecommendation || recommendations[0]?.id || '',
-          supervisorGuidance: result.supervisorGuidance || '',
-          generatedAt: new Date().toISOString(),
-          // Include employee info for client-side ID matching
-          employeeNames: {
-            complaintA: complaintA.employeeName,
-            complaintB: complaintB.employeeName
-          }
-        }
+      const guidanceCompletion = await openai.chat.completions.create({
+        model: 'gpt-4o',
+        messages: [
+          { role: 'system', content: 'You are a senior HR advisor. Write a brief professional paragraph (3-4 sentences) advising a supervisor on how to approach decisions for two employees independently in a workplace conflict. Be concise.' },
+          { role: 'user', content: `The employees are ${complaintA.employeeName} and ${complaintB.employeeName}. Incident type: ${caseDetails.caseType}. ${resultA.assessment} ${resultB.assessment}` }
+        ],
+        max_tokens: 300,
+        temperature: 0.3
       });
-
-    } catch (parseError) {
-      console.error('Decision Support: Failed to parse JSON response', parseError);
-      return res.status(500).json({
-        error: 'Failed to parse recommendations',
-        message: 'The AI returned an invalid response format'
-      });
+      supervisorGuidance = guidanceCompletion.choices[0]?.message?.content || supervisorGuidance;
+    } catch (guidanceErr) {
+      console.warn('Decision Support: Supervisor guidance generation failed, using default', guidanceErr);
     }
+
+    return res.json({
+      success: true,
+      data: {
+        employeeRecommendations,
+        recommendations: flatRecommendations,
+        primaryRecommendation: resultA.primaryRecommendation || flatRecommendations[0]?.id || '',
+        supervisorGuidance,
+        generatedAt: new Date().toISOString(),
+        employeeNames: {
+          complaintA: complaintA.employeeName,
+          complaintB: complaintB.employeeName
+        }
+      }
+    });
 
   } catch (error: any) {
     console.error('Decision Support error:', error);
