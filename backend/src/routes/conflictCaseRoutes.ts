@@ -883,6 +883,134 @@ router.post('/:id/close', async (req: Request, res: Response, next) => {
 });
 
 // ============================================================================
+// POST /api/conflict-cases/:id/reopen
+// Re-open a closed/locked case — allows editing again
+// ============================================================================
+router.post('/:id/reopen', async (req: Request, res: Response, next) => {
+  if (!isValidUUID(req.params.id)) {
+    return next();
+  }
+
+  try {
+    const { id } = req.params;
+    const { reopenedBy, reason } = req.body;
+
+    if (!reopenedBy) {
+      return res.status(400).json({
+        success: false,
+        error: 'User ID (reopenedBy) is required to reopen a case',
+      });
+    }
+
+    // Check if case exists
+    const existingCase = await prisma.conflictCase.findUnique({
+      where: { id },
+    });
+
+    if (!existingCase) {
+      return res.status(404).json({
+        success: false,
+        error: 'Case not found',
+      });
+    }
+
+    // Case must be closed/locked to reopen
+    if (existingCase.status !== 'CLOSED' && !existingCase.isLocked) {
+      return res.status(400).json({
+        success: false,
+        error: 'Case is not closed — cannot reopen',
+      });
+    }
+
+    // Verify the user exists — try by database ID first, then by Firebase UID
+    let reopeningUser = await prisma.user.findUnique({
+      where: { id: reopenedBy },
+      select: { id: true, firstName: true, lastName: true, email: true },
+    });
+
+    if (!reopeningUser) {
+      reopeningUser = await prisma.user.findUnique({
+        where: { firebaseUid: reopenedBy },
+        select: { id: true, firstName: true, lastName: true, email: true },
+      });
+    }
+
+    if (!reopeningUser) {
+      return res.status(404).json({
+        success: false,
+        error: 'User not found',
+      });
+    }
+
+    const actualUserId = reopeningUser.id;
+
+    // Re-open: set status back to AWAITING_ACTION, unlock, clear closure fields
+    const reopenedCase = await prisma.conflictCase.update({
+      where: { id },
+      data: {
+        status: 'AWAITING_ACTION',
+        isLocked: false,
+        closedAt: null,
+        closedBy: null,
+        closureReason: null,
+        closureSummary: null,
+      },
+      include: {
+        createdByUser: {
+          select: { id: true, firstName: true, lastName: true, email: true },
+        },
+        closedByUser: {
+          select: { id: true, firstName: true, lastName: true, email: true },
+        },
+        organization: {
+          select: { id: true, name: true },
+        },
+        facility: {
+          select: { id: true, name: true },
+        },
+        involvedEmployees: true,
+        documents: {
+          orderBy: { createdAt: 'desc' },
+        },
+        auditLog: {
+          orderBy: { timestamp: 'desc' },
+        },
+      },
+    });
+
+    // Create audit trail entry
+    const userName = `${reopeningUser.firstName || ''} ${reopeningUser.lastName || ''}`.trim() || 'Unknown User';
+    await prisma.conflictCaseAuditEntry.create({
+      data: {
+        caseId: id,
+        action: 'CASE_REOPENED',
+        details: encrypt(JSON.stringify({
+          reason: reason || 'Case re-opened by supervisor',
+          previousStatus: existingCase.status,
+        })),
+        userId: actualUserId,
+        userName: encrypt(userName),
+      },
+    });
+
+    const decryptedCase = decryptCaseData(reopenedCase);
+
+    res.json({
+      success: true,
+      message: 'Case re-opened successfully',
+      data: decryptedCase,
+    });
+  } catch (error: any) {
+    console.error('Error reopening conflict case:', error);
+    res.status(500).json({
+      success: false,
+      error: 'Failed to reopen conflict case',
+      details: error.message,
+    });
+  }
+});
+
+// ============================================================================
 // DELETE /api/conflict-cases/:id
 // Delete a case
 // ============================================================================
