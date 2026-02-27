@@ -76,6 +76,7 @@ function decryptCaseData(caseData: any): any {
   if (decrypted.generatedDocument) decrypted.generatedDocument = decrypt(decrypted.generatedDocument);
   if (decrypted.fullGeneratedDocumentResult) decrypted.fullGeneratedDocumentResult = decrypt(decrypted.fullGeneratedDocumentResult);
   if (decrypted.employeeGeneratedDocuments) decrypted.employeeGeneratedDocuments = decrypt(decrypted.employeeGeneratedDocuments);
+  if (decrypted.approvedEmployeeNames) decrypted.approvedEmployeeNames = decrypt(decrypted.approvedEmployeeNames);
   if (decrypted.policyMatches) decrypted.policyMatches = decrypt(decrypted.policyMatches);
   if (decrypted.policyMatchingResult) decrypted.policyMatchingResult = decrypt(decrypted.policyMatchingResult);
   if (decrypted.supervisorNotes) decrypted.supervisorNotes = decrypt(decrypted.supervisorNotes);
@@ -638,7 +639,7 @@ router.patch('/:id', async (req: Request, res: Response, next) => {
       changes.employeeGeneratedDocuments = 'updated';
     }
     if (approvedEmployeeNamesJson !== undefined) {
-      updateData.approvedEmployeeNames = JSON.stringify(approvedEmployeeNamesJson);
+      updateData.approvedEmployeeNames = encrypt(JSON.stringify(approvedEmployeeNamesJson));
       changes.approvedEmployeeNames = 'updated';
     }
     if (policyMatchesJson !== undefined) {
