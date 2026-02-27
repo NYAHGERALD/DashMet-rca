@@ -772,11 +772,19 @@ router.post('/:id/close', async (req: Request, res: Response, next) => {
       });
     }
 
-    // Verify the user exists
-    const closingUser = await prisma.user.findUnique({
+    // Verify the user exists — try by database ID first, then by Firebase UID
+    let closingUser = await prisma.user.findUnique({
       where: { id: closedBy },
       select: { id: true, firstName: true, lastName: true, email: true },
     });
+
+    if (!closingUser) {
+      // Try looking up by Firebase UID (mobile apps send Firebase UID)
+      closingUser = await prisma.user.findUnique({
+        where: { firebaseUid: closedBy },
+        select: { id: true, firstName: true, lastName: true, email: true },
+      });
+    }
 
     if (!closingUser) {
       return res.status(404).json({
@@ -785,6 +793,8 @@ router.post('/:id/close', async (req: Request, res: Response, next) => {
       });
     }
 
+    // Use the actual database user ID for storage
+    const actualUserId = closingUser.id;
     const closedAt = new Date();
     
     // Update case with closure details
@@ -795,7 +805,7 @@ router.post('/:id/close', async (req: Request, res: Response, next) => {
         closureReason: encrypt(closureReason),
         closureSummary: closureSummary ? encrypt(closureSummary) : null,
         supervisorNotes: supervisorNotes ? encrypt(supervisorNotes) : (existingCase.supervisorNotes || null),
-        closedBy,
+        closedBy: actualUserId,
         closedAt,
         isLocked: true, // Permanently lock the case
       },
@@ -836,7 +846,7 @@ router.post('/:id/close', async (req: Request, res: Response, next) => {
           documentCount: existingCase.documents.length,
           involvedEmployeesCount: existingCase.involvedEmployees.length,
         })),
-        userId: closedBy,
+        userId: actualUserId,
         userName: encrypt(userName),
       },
     });
