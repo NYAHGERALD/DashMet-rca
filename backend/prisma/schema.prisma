@@ -2582,6 +2582,8 @@ model ConflictCase {
   selectedTargetEmployeeIds       String?                     @db.Text // JSON array of employee IDs targeted by the action
   generatedDocument               String?                     @db.Text // Encrypted JSON
   fullGeneratedDocumentResult     String?                     @db.Text // Encrypted JSON - Full generated document for UI display
+  employeeGeneratedDocuments      String?                     @db.Text // Encrypted JSON - Per-employee generated documents map
+  approvedEmployeeNames           String?                     @db.Text // JSON array of employee names whose documents have been approved
   
   // Supervisor Notes (Encrypted)
   supervisorNotes       String?                     @db.Text

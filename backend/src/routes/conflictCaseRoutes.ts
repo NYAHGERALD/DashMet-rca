@@ -75,6 +75,7 @@ function decryptCaseData(caseData: any): any {
   if (decrypted.recommendationResult) decrypted.recommendationResult = decrypt(decrypted.recommendationResult);
   if (decrypted.generatedDocument) decrypted.generatedDocument = decrypt(decrypted.generatedDocument);
   if (decrypted.fullGeneratedDocumentResult) decrypted.fullGeneratedDocumentResult = decrypt(decrypted.fullGeneratedDocumentResult);
+  if (decrypted.employeeGeneratedDocuments) decrypted.employeeGeneratedDocuments = decrypt(decrypted.employeeGeneratedDocuments);
   if (decrypted.policyMatches) decrypted.policyMatches = decrypt(decrypted.policyMatches);
   if (decrypted.policyMatchingResult) decrypted.policyMatchingResult = decrypt(decrypted.policyMatchingResult);
   if (decrypted.supervisorNotes) decrypted.supervisorNotes = decrypt(decrypted.supervisorNotes);
@@ -526,6 +527,8 @@ router.patch('/:id', async (req: Request, res: Response, next) => {
       selectedTargetEmployeeIdsJson, // Target employee IDs for the selected action
       generatedActionDocJson,
       fullGeneratedDocumentResultJson, // Full generated document result for complete UI display
+      employeeGeneratedDocumentsJson, // Per-employee generated documents map
+      approvedEmployeeNamesJson, // Array of employee names whose documents have been approved
       policyMatchesJson,
       policyMatchingResultJson, // Full policy matching result for UI restoration
       supervisorNotes,
@@ -629,6 +632,14 @@ router.patch('/:id', async (req: Request, res: Response, next) => {
       updateData.selectedTargetEmployeeIds = JSON.stringify(selectedTargetEmployeeIdsJson);
       console.log('🎯 Saved as:', updateData.selectedTargetEmployeeIds);
       changes.selectedTargetEmployeeIds = 'updated';
+    }
+    if (employeeGeneratedDocumentsJson !== undefined) {
+      updateData.employeeGeneratedDocuments = encrypt(JSON.stringify(employeeGeneratedDocumentsJson));
+      changes.employeeGeneratedDocuments = 'updated';
+    }
+    if (approvedEmployeeNamesJson !== undefined) {
+      updateData.approvedEmployeeNames = JSON.stringify(approvedEmployeeNamesJson);
+      changes.approvedEmployeeNames = 'updated';
     }
     if (policyMatchesJson !== undefined) {
       updateData.policyMatches = encrypt(JSON.stringify(policyMatchesJson));
