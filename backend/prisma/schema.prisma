@@ -2585,6 +2585,9 @@ model ConflictCase {
   employeeGeneratedDocuments      String?                     @db.Text // Encrypted JSON - Per-employee generated documents map
   approvedEmployeeNames           String?                     @db.Text // JSON array of employee names whose documents have been approved
   
+  // Company Logo (Firebase Storage URL)
+  companyLogoUrl        String?                     @db.Text
+  
   // Supervisor Notes (Encrypted)
   supervisorNotes       String?                     @db.Text
   

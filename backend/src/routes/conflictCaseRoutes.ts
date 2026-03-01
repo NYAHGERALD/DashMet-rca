@@ -654,6 +654,10 @@ router.patch('/:id', async (req: Request, res: Response, next) => {
       updateData.supervisorNotes = encrypt(supervisorNotes);
       changes.supervisorNotes = 'updated';
     }
+    if (req.body.companyLogoUrl !== undefined) {
+      updateData.companyLogoUrl = req.body.companyLogoUrl;
+      changes.companyLogoUrl = 'updated';
+    }
     // Note: 'finalDecision' doesn't exist in database schema, stored locally only
 
     const updatedCase = await prisma.conflictCase.update({
