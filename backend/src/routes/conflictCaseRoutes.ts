@@ -376,7 +376,7 @@ router.post('/', async (req: Request, res: Response) => {
 // ============================================================================
 router.get('/', async (req: Request, res: Response) => {
   try {
-    const { organizationId, status, caseType, limit = 50, offset = 0 } = req.query;
+    const { organizationId, createdBy, status, caseType, limit = 50, offset = 0 } = req.query;
 
     if (!organizationId) {
       return res.status(400).json({
@@ -388,6 +388,11 @@ router.get('/', async (req: Request, res: Response) => {
     const where: Prisma.ConflictCaseWhereInput = {
       organizationId: organizationId as string,
     };
+
+    // Filter by creator — each user only sees their own cases
+    if (createdBy) {
+      where.createdBy = createdBy as string;
+    }
 
     if (status) {
       where.status = status as any;

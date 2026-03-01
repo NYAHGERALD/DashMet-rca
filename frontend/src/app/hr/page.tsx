@@ -835,7 +835,7 @@ function HRPageContent() {
     if (!orgId) return;
     setCasesLoading(true);
     try {
-      const res = await fetchCases({ organizationId: orgId, limit: 200 });
+      const res = await fetchCases({ organizationId: orgId, createdBy: user?.id, limit: 200 });
       setCases(res.data);
     } catch (err) {
       console.error('Failed to load cases:', err);

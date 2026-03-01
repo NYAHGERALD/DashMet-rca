@@ -256,6 +256,7 @@ export interface PaginatedResponse<T> {
 
 export async function fetchCases(params: {
   organizationId: string;
+  createdBy?: string;
   status?: string;
   caseType?: string;
   limit?: number;
