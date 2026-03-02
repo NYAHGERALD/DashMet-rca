@@ -44,10 +44,10 @@ router.post('/', async (req: Request, res: Response) => {
       facilityId 
     } = req.body;
 
-    if (!creatorId || !organizationId) {
+    if (!creatorId) {
       return res.status(400).json({
         success: false,
-        error: 'Missing required fields: creatorId, organizationId',
+        error: 'Missing required field: creatorId',
       });
     }
 
@@ -68,6 +68,19 @@ router.post('/', async (req: Request, res: Response) => {
       });
     }
 
+    // Resolve organizationId: use provided value, fall back to creator's org, then first org in DB
+    let resolvedOrgId = organizationId || creator.organizationId;
+    if (!resolvedOrgId) {
+      const fallbackOrg = await prisma.organization.findFirst({ select: { id: true } });
+      resolvedOrgId = fallbackOrg?.id || null;
+    }
+    if (!resolvedOrgId) {
+      return res.status(400).json({
+        success: false,
+        error: 'No organization found. Please set up an organization first.',
+      });
+    }
+
     const meeting = await prisma.meeting.create({
       data: {
         title: title?.trim() || null,
@@ -85,7 +98,7 @@ router.post('/', async (req: Request, res: Response) => {
         aiProcessingMode: aiProcessingMode || null,
         confidentialityLevel: confidentialityLevel || null,
         creatorId: creator.id,
-        organizationId,
+        organizationId: resolvedOrgId,
         facilityId: facilityId || null,
       },
       include: {
@@ -181,6 +194,9 @@ router.get('/', async (req: Request, res: Response) => {
         creator: {
           select: { id: true, firstName: true, lastName: true, email: true },
         },
+        department: {
+          select: { id: true, name: true },
+        },
         participants: {
           include: {
             user: {
@@ -236,6 +252,9 @@ router.get('/:id', async (req: Request, res: Response) => {
       include: {
         creator: {
           select: { id: true, firstName: true, lastName: true, email: true },
+        },
+        department: {
+          select: { id: true, name: true },
         },
         participants: {
           include: {
