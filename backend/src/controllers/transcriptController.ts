@@ -1337,7 +1337,7 @@ export const diarizeAudio = async (req: AuthRequest, res: Response) => {
       });
     }
 
-    const { language, numSpeakers, meetingType } = req.body;
+    const { language, numSpeakers } = req.body;
 
     const fileSizeMB = (file.size / 1024 / 1024).toFixed(2);
     console.log(`[Diarization] ====== DIARIZATION REQUEST ======`);
@@ -1351,14 +1351,26 @@ export const diarizeAudio = async (req: AuthRequest, res: Response) => {
     // Import diarization service
     const diarizationService = await import('../services/diarizationService');
 
-    // Use diarizeWithFallback for resilience
-    const result = await diarizationService.diarizeWithFallback(
+    // Check Python diarization service is reachable
+    const serviceAvailable = await diarizationService.isDiarizationServiceAvailable();
+    if (!serviceAvailable) {
+      console.error('[Diarization] ❌ Python diarization service UNREACHABLE at configured URL');
+      console.error('[Diarization] Ensure the Pyannote+Whisper service is running and DIARIZATION_SERVICE_URL is correct');
+      return res.status(503).json({
+        success: false,
+        error: 'Speaker diarization service is not available. Please ensure the diarization service is running.',
+      });
+    }
+
+    console.log('[Diarization] ✅ Python service available, using Pyannote+Whisper');
+
+    // Call the real Pyannote diarization - no fallback
+    const result = await diarizationService.diarizeFromBuffer(
       file.buffer,
       file.originalname,
       {
         language: language as string || undefined,
         numSpeakers: numSpeakers ? parseInt(numSpeakers as string, 10) : undefined,
-        meetingType: meetingType as string || 'general',
       }
     );
 
@@ -1376,7 +1388,6 @@ export const diarizeAudio = async (req: AuthRequest, res: Response) => {
     console.log(`[Diarization] Words: ${result.totalWords}`);
     console.log(`[Diarization] Duration: ${result.totalDuration}s`);
     console.log(`[Diarization] Processing: ${result.processingTimeSeconds}s`);
-    console.log(`[Diarization] Fallback used: ${result.fallbackUsed || false}`);
 
     return res.json({
       success: true,
@@ -1387,7 +1398,7 @@ export const diarizeAudio = async (req: AuthRequest, res: Response) => {
       totalWords: result.totalWords,
       language: result.language,
       processingTimeSeconds: result.processingTimeSeconds,
-      fallbackUsed: result.fallbackUsed || false,
+      qualityMetrics: result.qualityMetrics || null,
     });
   } catch (error: any) {
     console.error('[Diarization] Error:', error);

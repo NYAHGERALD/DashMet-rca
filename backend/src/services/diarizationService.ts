@@ -9,16 +9,12 @@
  *   Client → Node.js Backend → Python Diarization Service
  *                                 ├─ Pyannote (speaker diarization)
  *                                 └─ Whisper  (word-level transcription)
- * 
- * Fallback: If the Python service is unavailable, falls back to
- * the existing Whisper API + GPT-4o speaker detection pipeline.
  */
 
 import axios, { AxiosError } from 'axios';
 import FormData from 'form-data';
 import fs from 'fs';
 import path from 'path';
-import os from 'os';
 
 // ── Configuration ──────────────────────────────────────────
 
@@ -56,7 +52,6 @@ export interface DiarizationResult {
   language: string;
   processingTimeSeconds: number;
   error?: string;
-  fallbackUsed?: boolean;
   qualityMetrics?: QualityMetrics;
 }
 
@@ -240,130 +235,6 @@ export async function diarizeFromBuffer(
       language: 'en',
       processingTimeSeconds: elapsed,
       error: error.message || 'Diarization failed',
-    };
-  }
-}
-
-// ── Fallback: Whisper + GPT-4o Pipeline ───────────────────
-
-export async function diarizeWithFallback(
-  buffer: Buffer,
-  fileName: string,
-  options: {
-    language?: string;
-    numSpeakers?: number;
-    minSpeakers?: number;
-    maxSpeakers?: number;
-    clusteringThreshold?: number;
-    meetingType?: string;
-  } = {}
-): Promise<DiarizationResult> {
-  // Try the Python diarization service first
-  const serviceAvailable = await isDiarizationServiceAvailable();
-
-  if (serviceAvailable) {
-    console.log('[Diarization] Python service available, using Pyannote+Whisper');
-    const result = await diarizeFromBuffer(buffer, fileName, options);
-    if (result.success) {
-      return result;
-    }
-    console.warn('[Diarization] Python service failed, falling back to Whisper+GPT');
-  } else {
-    console.warn('[Diarization] Python service unavailable, using Whisper+GPT fallback');
-  }
-
-  // Fallback: Use existing Whisper API + GPT-4o speaker detection
-  return await fallbackDiarization(buffer, fileName, options);
-}
-
-async function fallbackDiarization(
-  buffer: Buffer,
-  fileName: string,
-  options: {
-    language?: string;
-    meetingType?: string;
-  } = {}
-): Promise<DiarizationResult> {
-  const startTime = Date.now();
-
-  try {
-    // Import existing services dynamically
-    const whisperService = await import('./whisperService');
-    const speakerDetection = await import('./speakerDetectionService');
-
-    // Step 1: Transcribe with Whisper API
-    console.log('[Diarization:Fallback] Transcribing with Whisper API…');
-    const transcription = await whisperService.transcribeFromBuffer(buffer, fileName, {
-      language: options.language,
-      meetingType: options.meetingType,
-    });
-
-    if (!transcription.success || !transcription.text) {
-      throw new Error(transcription.error || 'Whisper transcription failed');
-    }
-
-    // Step 2: Detect speakers with GPT-4o
-    console.log('[Diarization:Fallback] Detecting speakers with GPT-4o…');
-    const formattedText = await speakerDetection.detectAndFormatSpeakers(
-      transcription.text
-    );
-
-    // Step 3: Convert paragraphs to blocks (each paragraph = one speaker turn)
-    const paragraphs = formattedText
-      .split('\n\n')
-      .map(p => p.trim())
-      .filter(p => p.length > 0);
-
-    const blocks: DiarizedBlock[] = [];
-    const duration = transcription.duration || 0;
-    const timePerChar = duration / (formattedText.length || 1);
-    let charOffset = 0;
-
-    for (let i = 0; i < paragraphs.length; i++) {
-      const para = paragraphs[i];
-      const startTime = charOffset * timePerChar;
-      charOffset += para.length;
-      const endTime = charOffset * timePerChar;
-      const wordCount = para.split(/\s+/).filter(w => w.length > 0).length;
-
-      blocks.push({
-        speaker: `Speaker ${(i % 2) + 1}`, // Alternate speakers as heuristic
-        content: para,
-        startTime: Math.round(startTime),
-        endTime: Math.round(endTime),
-        confidence: 0.6, // Lower confidence for GPT-based detection
-        wordCount,
-      });
-    }
-
-    const elapsed = (Date.now() - startTime) / 1000;
-    const speakers = [...new Set(blocks.map(b => b.speaker))];
-
-    return {
-      success: true,
-      blocks,
-      speakers,
-      speakerCount: speakers.length,
-      totalDuration: duration,
-      totalWords: blocks.reduce((sum, b) => sum + b.wordCount, 0),
-      language: transcription.language || 'en',
-      processingTimeSeconds: elapsed,
-      fallbackUsed: true,
-    };
-  } catch (error: any) {
-    const elapsed = (Date.now() - startTime) / 1000;
-    console.error('[Diarization:Fallback] Error:', error.message);
-    return {
-      success: false,
-      blocks: [],
-      speakers: [],
-      speakerCount: 0,
-      totalDuration: 0,
-      totalWords: 0,
-      language: 'en',
-      processingTimeSeconds: elapsed,
-      error: error.message,
-      fallbackUsed: true,
     };
   }
 }
