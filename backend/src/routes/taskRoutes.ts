@@ -235,6 +235,7 @@ router.get('/users/organization/:organizationId', async (req: Request, res: Resp
         lastName: true,
         role: true,
         profilePicture: true,
+        phone: true,
       },
       orderBy: [
         { firstName: 'asc' },
@@ -544,10 +545,16 @@ router.get('/', async (req: Request, res: Response) => {
       ],
     });
 
+    // Add groupName for consistent grouping across web, iOS, and Android
+    const tasksWithGroupName = tasks.map((task) => ({
+      ...task,
+      groupName: task.meetingId ? 'Meeting Items' : 'Standalone Items',
+    }));
+
     return res.json({
       success: true,
-      tasks,
-      count: tasks.length,
+      tasks: tasksWithGroupName,
+      count: tasksWithGroupName.length,
     });
   } catch (error: any) {
     console.error('Get tasks error:', error);

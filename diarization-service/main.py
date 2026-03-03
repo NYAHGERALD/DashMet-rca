@@ -1,15 +1,27 @@
 """
-Enterprise Speaker Diarization Service
-=======================================
+Enterprise Speaker Diarization Service v2
+==========================================
 FastAPI microservice combining Pyannote Audio speaker diarization
 with OpenAI Whisper word-level transcription for enterprise-grade
 meeting transcript generation with per-speaker timestamps.
 
 Architecture:
   1. Pyannote Pipeline  → WHO spoke WHEN (speaker segments)
-  2. Whisper (local)     → WHAT was said with word-level timestamps
-  3. Alignment Engine    → Merge diarization + transcription into
-                           speaker-attributed, timestamped transcript blocks
+  2. Noise Filtering    → Remove short spurious segments (<300ms)
+  3. Segment Merging    → Merge adjacent same-speaker segments with small gaps
+  4. Whisper (local)    → WHAT was said with word-level timestamps
+  5. Weighted Alignment → Map words to speakers with overlap + proximity scoring
+  6. Block Smoothing    → Eliminate single-word speaker flickers
+  7. Block Assembly     → Contiguous speaker blocks with timestamps
+
+Enterprise Enhancements:
+  - Configurable clustering threshold for speaker discrimination
+  - Min/max speaker count constraints
+  - Noise segment filtering (removes <300ms artifacts)
+  - Adjacent segment merging (consolidates same-speaker gaps <500ms)
+  - Weighted word-to-speaker alignment (overlap + distance + previous-speaker bias)
+  - Post-processing smoothing (removes single-word speaker flickers)
+  - Quality metrics in response (avg confidence, diarization coverage)
 
 Author: Dashmet Meeting Intelligence
 """
@@ -21,6 +33,7 @@ import logging
 import time
 from pathlib import Path
 from typing import Optional
+from collections import Counter
 
 import numpy as np
 import torch
@@ -68,9 +81,26 @@ DEVICE = "cuda" if torch.cuda.is_available() else "cpu"
 WHISPER_MODEL_SIZE = os.getenv("WHISPER_MODEL_SIZE", "base")  # tiny|base|small|medium|large-v3
 HF_AUTH_TOKEN = os.getenv("HUGGINGFACE_TOKEN", "")
 
+# ── Enterprise Tuning Defaults ────────────────────────────
+# Clustering threshold: higher = fewer speakers (merge similar voices),
+# lower = more speakers (split aggressively). Range: 0.3 - 0.95
+DEFAULT_CLUSTERING_THRESHOLD = float(os.getenv("CLUSTERING_THRESHOLD", "0.65"))
+# Minimum segment duration in seconds — segments shorter than this
+# are likely noise / classification artifacts and will be removed
+MIN_SEGMENT_DURATION = float(os.getenv("MIN_SEGMENT_DURATION", "0.3"))
+# Maximum gap (seconds) between same-speaker segments to merge
+# into one continuous segment (prevents over-fragmentation)
+SAME_SPEAKER_MERGE_GAP = float(os.getenv("SAME_SPEAKER_MERGE_GAP", "0.5"))
+# Minimum words for a speaker block — blocks shorter than this
+# surrounded by the same speaker are absorbed (smoothing)
+MIN_BLOCK_WORDS = int(os.getenv("MIN_BLOCK_WORDS", "2"))
 
-def get_diarization_pipeline():
-    """Lazy-load Pyannote speaker diarization pipeline."""
+
+def get_diarization_pipeline(clustering_threshold: Optional[float] = None):
+    """
+    Lazy-load Pyannote speaker diarization pipeline.
+    Optionally tune the clustering threshold for speaker discrimination.
+    """
     global _diarization_pipeline
     if _diarization_pipeline is None:
         logger.info("Loading Pyannote speaker diarization pipeline…")
@@ -83,6 +113,21 @@ def get_diarization_pipeline():
         if DEVICE == "cuda":
             _diarization_pipeline.to(torch.device("cuda"))
         logger.info(f"Pyannote pipeline loaded on {DEVICE}")
+
+    # Apply clustering threshold tuning when requested
+    threshold = clustering_threshold or DEFAULT_CLUSTERING_THRESHOLD
+    try:
+        params = _diarization_pipeline.parameters(instantiated=True)
+        if hasattr(params, 'clustering') or 'clustering' in str(type(params)):
+            # Pyannote 3.x uses AgglomerativeClustering with a threshold
+            _diarization_pipeline.instantiate({
+                "clustering": {"method": "centroid", "threshold": threshold}
+            })
+            logger.info(f"Clustering threshold set to {threshold}")
+    except Exception as e:
+        # If threshold tuning fails, continue with defaults
+        logger.warning(f"Could not set clustering threshold: {e} — using pipeline defaults")
+
     return _diarization_pipeline
 
 
@@ -118,6 +163,17 @@ class TranscriptBlock(BaseModel):
     wordCount: int
 
 
+class QualityMetrics(BaseModel):
+    """Enterprise quality metrics for the diarization result."""
+    avgConfidence: float = 0.0
+    diarizationCoverage: float = 0.0  # % of audio duration covered by speech
+    segmentsBeforeFilter: int = 0
+    segmentsAfterFilter: int = 0
+    segmentsAfterMerge: int = 0
+    smoothedBlocks: int = 0  # blocks removed by smoothing
+    clusteringThreshold: float = 0.0
+
+
 class DiarizationResponse(BaseModel):
     success: bool
     blocks: list[TranscriptBlock]
@@ -128,6 +184,7 @@ class DiarizationResponse(BaseModel):
     language: str
     processingTimeSeconds: float
     error: Optional[str] = None
+    qualityMetrics: Optional[QualityMetrics] = None
 
 
 class HealthResponse(BaseModel):
@@ -136,6 +193,9 @@ class HealthResponse(BaseModel):
     whisperModel: str
     pyannoteLoaded: bool
     whisperLoaded: bool
+    clusteringThreshold: float
+    minSegmentDuration: float
+    sameSpkMergeGap: float
 
 
 # ──────────────────────────────────────────────────────────
@@ -170,31 +230,104 @@ def convert_to_wav(audio_bytes: bytes, filename: str) -> str:
     return tmp.name
 
 
-def run_diarization(wav_path: str, num_speakers: Optional[int] = None) -> list[dict]:
+def run_diarization(
+    wav_path: str,
+    num_speakers: Optional[int] = None,
+    min_speakers: Optional[int] = None,
+    max_speakers: Optional[int] = None,
+    clustering_threshold: Optional[float] = None,
+) -> tuple[list[dict], dict]:
     """
-    Run Pyannote speaker diarization.
-    Returns list of segments: [{ speaker, start, end }]
+    Run Pyannote speaker diarization with enterprise tuning.
+    Returns (segments, metrics) where segments = [{ speaker, start, end }]
+    and metrics = { segmentsBeforeFilter, segmentsAfterFilter, segmentsAfterMerge, ... }
     """
-    pipeline = get_diarization_pipeline()
+    pipeline = get_diarization_pipeline(clustering_threshold)
 
     logger.info("Running speaker diarization…")
     kwargs = {}
     if num_speakers is not None and num_speakers > 0:
         kwargs["num_speakers"] = num_speakers
+    if min_speakers is not None and min_speakers > 0:
+        kwargs["min_speakers"] = min_speakers
+    if max_speakers is not None and max_speakers > 0:
+        kwargs["max_speakers"] = max_speakers
 
     diarization_result = pipeline(wav_path, **kwargs)
 
-    segments = []
+    raw_segments = []
     for turn, _, speaker in diarization_result.itertracks(yield_label=True):
-        segments.append({
+        raw_segments.append({
             "speaker": speaker,
             "start": round(turn.start, 3),
             "end": round(turn.end, 3),
         })
 
-    logger.info(f"Diarization complete: {len(segments)} segments, "
-                f"{len(set(s['speaker'] for s in segments))} speakers")
-    return segments
+    segments_before = len(raw_segments)
+    unique_before = len(set(s['speaker'] for s in raw_segments)) if raw_segments else 0
+    logger.info(f"Raw diarization: {segments_before} segments, {unique_before} speakers")
+
+    # ── Step A: Filter noise segments (< MIN_SEGMENT_DURATION) ──
+    filtered = filter_noise_segments(raw_segments)
+    segments_after_filter = len(filtered)
+    logger.info(f"After noise filtering (<{MIN_SEGMENT_DURATION}s): "
+                f"{segments_before} → {segments_after_filter} segments "
+                f"(removed {segments_before - segments_after_filter})")
+
+    # ── Step B: Merge adjacent same-speaker segments with small gaps ──
+    merged = merge_adjacent_segments(filtered)
+    segments_after_merge = len(merged)
+    logger.info(f"After same-speaker merging (<{SAME_SPEAKER_MERGE_GAP}s gap): "
+                f"{segments_after_filter} → {segments_after_merge} segments")
+
+    unique_after = len(set(s['speaker'] for s in merged)) if merged else 0
+    logger.info(f"Diarization complete: {segments_after_merge} segments, "
+                f"{unique_after} speakers")
+
+    metrics = {
+        "segmentsBeforeFilter": segments_before,
+        "segmentsAfterFilter": segments_after_filter,
+        "segmentsAfterMerge": segments_after_merge,
+        "clusteringThreshold": clustering_threshold or DEFAULT_CLUSTERING_THRESHOLD,
+    }
+
+    return merged, metrics
+
+
+def filter_noise_segments(segments: list[dict]) -> list[dict]:
+    """
+    Remove noise segments shorter than MIN_SEGMENT_DURATION.
+    These are typically classification artifacts from brief audio events
+    (coughs, clicks, mic noise) that get wrongly labeled as speech.
+    """
+    return [
+        seg for seg in segments
+        if (seg["end"] - seg["start"]) >= MIN_SEGMENT_DURATION
+    ]
+
+
+def merge_adjacent_segments(segments: list[dict]) -> list[dict]:
+    """
+    Merge adjacent segments from the same speaker when the gap between
+    them is smaller than SAME_SPEAKER_MERGE_GAP. This prevents
+    over-fragmentation where a brief pause in speech creates two segments.
+    """
+    if not segments:
+        return []
+
+    merged = [segments[0].copy()]
+
+    for seg in segments[1:]:
+        prev = merged[-1]
+        gap = seg["start"] - prev["end"]
+
+        if seg["speaker"] == prev["speaker"] and gap <= SAME_SPEAKER_MERGE_GAP:
+            # Extend the previous segment to cover this one
+            prev["end"] = max(prev["end"], seg["end"])
+        else:
+            merged.append(seg.copy())
+
+    return merged
 
 
 def run_whisper_transcription(
@@ -250,37 +383,64 @@ def align_words_to_speakers(
     whisper_words: list[dict],
 ) -> list[TranscriptWord]:
     """
-    Map each Whisper word to the Pyannote speaker whose segment
-    overlaps most with the word's time span.
+    Enterprise word-to-speaker alignment using a weighted scoring system.
+
+    For each word, we compute a score for every diarization segment:
+      score = overlap_weight * overlap
+            + proximity_weight * (1 / (1 + distance_to_midpoint))
+            + continuity_weight * (1 if same speaker as previous word else 0)
+
+    This produces more accurate attribution than pure overlap matching,
+    especially for:
+      - Short words that fall in gaps between segments
+      - Words at speaker turn boundaries
+      - Rapid back-and-forth dialogue
     """
+    if not diarization_segments or not whisper_words:
+        return []
+
+    # Scoring weights
+    OVERLAP_WEIGHT = 0.6
+    PROXIMITY_WEIGHT = 0.25
+    CONTINUITY_WEIGHT = 0.15  # bias toward keeping same speaker (reduces flicker)
+
     attributed_words = []
+    prev_speaker = diarization_segments[0]["speaker"]
 
     for w in whisper_words:
         w_start = w["start"]
         w_end = w["end"]
         w_mid = (w_start + w_end) / 2.0
+        w_duration = max(w_end - w_start, 0.001)
 
         best_speaker = "Unknown"
-        best_overlap = 0.0
+        best_score = -1.0
 
         for seg in diarization_segments:
+            # Overlap component (normalized to word duration)
             overlap_start = max(w_start, seg["start"])
             overlap_end = min(w_end, seg["end"])
-            overlap = max(0.0, overlap_end - overlap_start)
+            overlap = max(0.0, overlap_end - overlap_start) / w_duration
 
-            if overlap > best_overlap:
-                best_overlap = overlap
+            # Proximity component (inverse distance from word midpoint to segment)
+            seg_mid = (seg["start"] + seg["end"]) / 2.0
+            distance = abs(w_mid - seg_mid)
+            proximity = 1.0 / (1.0 + distance)
+
+            # Continuity component (bias toward previous speaker)
+            continuity = 1.0 if seg["speaker"] == prev_speaker else 0.0
+
+            score = (
+                OVERLAP_WEIGHT * overlap
+                + PROXIMITY_WEIGHT * proximity
+                + CONTINUITY_WEIGHT * continuity
+            )
+
+            if score > best_score:
+                best_score = score
                 best_speaker = seg["speaker"]
 
-        # Fallback: if no overlap, find nearest segment by midpoint
-        if best_overlap == 0.0:
-            min_dist = float("inf")
-            for seg in diarization_segments:
-                seg_mid = (seg["start"] + seg["end"]) / 2.0
-                dist = abs(w_mid - seg_mid)
-                if dist < min_dist:
-                    min_dist = dist
-                    best_speaker = seg["speaker"]
+        prev_speaker = best_speaker
 
         attributed_words.append(
             TranscriptWord(
@@ -297,13 +457,16 @@ def align_words_to_speakers(
 
 def build_transcript_blocks(
     attributed_words: list[TranscriptWord],
-) -> list[TranscriptBlock]:
+) -> tuple[list[TranscriptBlock], int]:
     """
-    Merge consecutive words from the same speaker into contiguous blocks.
-    Each block = one speaker's uninterrupted speech with timestamps.
+    Merge consecutive words from the same speaker into contiguous blocks,
+    then apply smoothing to remove single-word speaker flickers.
+
+    Returns (blocks, smoothed_count) where smoothed_count is the number
+    of micro-blocks that were absorbed by smoothing.
     """
     if not attributed_words:
-        return []
+        return [], 0
 
     blocks: list[TranscriptBlock] = []
     current_speaker = attributed_words[0].speaker
@@ -322,18 +485,112 @@ def build_transcript_blocks(
     if current_words:
         blocks.append(_finalize_block(current_speaker, current_words))
 
+    blocks_before_smoothing = len(blocks)
+
+    # ── Post-processing: Smooth out single-word speaker flickers ──
+    # A "flicker" is a tiny block (< MIN_BLOCK_WORDS) sandwiched between
+    # two blocks from the same speaker. E.g.: [A A A] [B] [A A A] → [A A A A A A A]
+    # This is almost always a mis-attribution, not a real speaker change.
+    blocks = smooth_speaker_flickers(blocks)
+    smoothed_count = blocks_before_smoothing - len(blocks)
+
+    if smoothed_count > 0:
+        logger.info(f"Smoothing: absorbed {smoothed_count} micro-blocks "
+                    f"({blocks_before_smoothing} → {len(blocks)})")
+
     # Relabel speakers to friendly names (Speaker 1, Speaker 2, …)
-    speaker_map: dict[str, str] = {}
-    counter = 1
+    # Use speaking-time order: the speaker with the most total words gets Speaker 1
+    speaker_word_counts: Counter = Counter()
     for block in blocks:
-        if block.speaker not in speaker_map:
-            speaker_map[block.speaker] = f"Speaker {counter}"
-            counter += 1
-        block.speaker = speaker_map[block.speaker]
+        speaker_word_counts[block.speaker] += block.wordCount
+
+    # Sort by total word count descending → Speaker 1 = most active
+    ranked_speakers = [s for s, _ in speaker_word_counts.most_common()]
+    speaker_map: dict[str, str] = {}
+    for i, spk in enumerate(ranked_speakers, start=1):
+        speaker_map[spk] = f"Speaker {i}"
+
+    for block in blocks:
+        block.speaker = speaker_map.get(block.speaker, block.speaker)
 
     logger.info(f"Built {len(blocks)} transcript blocks from "
-                f"{len(attributed_words)} words")
-    return blocks
+                f"{len(attributed_words)} words "
+                f"({len(speaker_map)} speakers)")
+    return blocks, smoothed_count
+
+
+def smooth_speaker_flickers(
+    blocks: list[TranscriptBlock],
+) -> list[TranscriptBlock]:
+    """
+    Remove speaker flickers: tiny blocks (< MIN_BLOCK_WORDS words)
+    sandwiched between blocks from the same speaker.
+
+    E.g. [Speaker A: 30 words] [Speaker B: 1 word] [Speaker A: 25 words]
+    → The 1-word block from B is almost certainly a misattribution.
+       Absorb it into Speaker A's surrounding blocks.
+    """
+    if len(blocks) < 3:
+        return blocks
+
+    smoothed: list[TranscriptBlock] = [blocks[0]]
+
+    i = 1
+    while i < len(blocks) - 1:
+        prev = smoothed[-1]
+        curr = blocks[i]
+        next_blk = blocks[i + 1]
+
+        # Is this a flicker? Small block surrounded by same speaker
+        if (
+            curr.wordCount < MIN_BLOCK_WORDS
+            and prev.speaker == next_blk.speaker
+            and prev.speaker != curr.speaker
+        ):
+            # Absorb: extend prev block to include curr's content
+            merged_content = prev.content + " " + curr.content
+            merged_words = prev.wordCount + curr.wordCount
+            avg_conf = (
+                (prev.confidence * prev.wordCount + curr.confidence * curr.wordCount)
+                / merged_words
+            )
+            smoothed[-1] = TranscriptBlock(
+                speaker=prev.speaker,
+                content=merged_content,
+                startTime=prev.startTime,
+                endTime=curr.endTime,
+                confidence=round(avg_conf, 4),
+                wordCount=merged_words,
+            )
+            i += 1  # skip absorbed block
+        else:
+            smoothed.append(curr)
+            i += 1
+
+    # Don't forget the last block
+    if i < len(blocks):
+        # Possibly merge with the last smoothed block if same speaker
+        last = blocks[-1]
+        if smoothed and smoothed[-1].speaker == last.speaker:
+            prev = smoothed[-1]
+            merged_content = prev.content + " " + last.content
+            merged_words = prev.wordCount + last.wordCount
+            avg_conf = (
+                (prev.confidence * prev.wordCount + last.confidence * last.wordCount)
+                / merged_words
+            )
+            smoothed[-1] = TranscriptBlock(
+                speaker=prev.speaker,
+                content=merged_content,
+                startTime=prev.startTime,
+                endTime=last.endTime,
+                confidence=round(avg_conf, 4),
+                wordCount=merged_words,
+            )
+        else:
+            smoothed.append(last)
+
+    return smoothed
 
 
 def _finalize_block(speaker: str, words: list[TranscriptWord]) -> TranscriptBlock:
@@ -363,6 +620,9 @@ async def health_check():
         whisperModel=WHISPER_MODEL_SIZE,
         pyannoteLoaded=_diarization_pipeline is not None,
         whisperLoaded=_whisper_model is not None,
+        clusteringThreshold=DEFAULT_CLUSTERING_THRESHOLD,
+        minSegmentDuration=MIN_SEGMENT_DURATION,
+        sameSpkMergeGap=SAME_SPEAKER_MERGE_GAP,
     )
 
 
@@ -371,19 +631,29 @@ async def diarize_audio(
     audio: UploadFile = File(...),
     language: Optional[str] = Form(None),
     num_speakers: Optional[int] = Form(None),
+    min_speakers: Optional[int] = Form(None),
+    max_speakers: Optional[int] = Form(None),
+    clustering_threshold: Optional[float] = Form(None),
 ):
     """
-    Enterprise Speaker Diarization Endpoint
-    ─────────────────────────────────────────
+    Enterprise Speaker Diarization Endpoint v2
+    ────────────────────────────────────────────
     Upload an audio file to receive a fully diarized, timestamped
     transcript with speaker attribution.
 
     Pipeline:
       1. Audio normalization → 16kHz mono WAV
       2. Pyannote speaker diarization → who spoke when
-      3. OpenAI Whisper transcription → word-level timestamps
-      4. Temporal alignment → map each word to its speaker
-      5. Block assembly → contiguous speaker blocks with timestamps
+      3. Noise filtering → remove segments < 300ms
+      4. Same-speaker merging → consolidate gaps < 500ms
+      5. OpenAI Whisper transcription → word-level timestamps
+      6. Weighted alignment → map each word to its speaker
+      7. Block assembly + smoothing → contiguous speaker blocks
+
+    Optional parameters:
+      - num_speakers: exact number of speakers (if known)
+      - min_speakers / max_speakers: speaker count bounds
+      - clustering_threshold: 0.3-0.95 (higher = fewer speakers)
     """
     start_time = time.time()
     wav_path = None
@@ -399,8 +669,14 @@ async def diarize_audio(
         # Step 1: Convert to WAV
         wav_path = convert_to_wav(audio_bytes, audio.filename or "audio.m4a")
 
-        # Step 2: Run Pyannote diarization
-        diarization_segments = run_diarization(wav_path, num_speakers=num_speakers)
+        # Step 2+3+4: Run Pyannote diarization with filtering & merging
+        diarization_segments, diar_metrics = run_diarization(
+            wav_path,
+            num_speakers=num_speakers,
+            min_speakers=min_speakers,
+            max_speakers=max_speakers,
+            clustering_threshold=clustering_threshold,
+        )
 
         if not diarization_segments:
             raise HTTPException(
@@ -408,7 +684,7 @@ async def diarize_audio(
                 detail="No speech detected in audio"
             )
 
-        # Step 3: Run Whisper with word timestamps
+        # Step 5: Run Whisper with word timestamps
         whisper_result = run_whisper_transcription(wav_path, language=language)
 
         if not whisper_result.get("words"):
@@ -431,13 +707,13 @@ async def diarize_audio(
                     })
             whisper_result["words"] = whisper_words
 
-        # Step 4: Align words to speakers
+        # Step 6: Weighted alignment of words to speakers
         attributed_words = align_words_to_speakers(
             diarization_segments, whisper_result["words"]
         )
 
-        # Step 5: Build transcript blocks
-        blocks = build_transcript_blocks(attributed_words)
+        # Step 7: Build transcript blocks with smoothing
+        blocks, smoothed_count = build_transcript_blocks(attributed_words)
 
         # Compute stats
         all_speakers = sorted(set(b.speaker for b in blocks))
@@ -447,10 +723,32 @@ async def diarize_audio(
         total_words = sum(b.wordCount for b in blocks)
         elapsed = round(time.time() - start_time, 2)
 
+        # Compute quality metrics
+        avg_confidence = (
+            sum(b.confidence * b.wordCount for b in blocks) / total_words
+            if total_words > 0 else 0.0
+        )
+        speech_coverage = (
+            sum(seg["end"] - seg["start"] for seg in diarization_segments)
+            / total_duration * 100.0
+            if total_duration > 0 else 0.0
+        )
+
+        quality = QualityMetrics(
+            avgConfidence=round(avg_confidence, 4),
+            diarizationCoverage=round(min(speech_coverage, 100.0), 1),
+            segmentsBeforeFilter=diar_metrics["segmentsBeforeFilter"],
+            segmentsAfterFilter=diar_metrics["segmentsAfterFilter"],
+            segmentsAfterMerge=diar_metrics["segmentsAfterMerge"],
+            smoothedBlocks=smoothed_count,
+            clusteringThreshold=diar_metrics["clusteringThreshold"],
+        )
+
         logger.info(
             f"Diarization complete: {len(blocks)} blocks, "
             f"{len(all_speakers)} speakers, {total_words} words, "
-            f"{elapsed}s processing time"
+            f"{elapsed}s processing | confidence={avg_confidence:.3f} "
+            f"coverage={speech_coverage:.1f}%"
         )
 
         return DiarizationResponse(
@@ -462,6 +760,7 @@ async def diarize_audio(
             totalWords=total_words,
             language=whisper_result.get("language", "en"),
             processingTimeSeconds=elapsed,
+            qualityMetrics=quality,
         )
 
     except HTTPException:

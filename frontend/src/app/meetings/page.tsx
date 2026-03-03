@@ -5,6 +5,8 @@ import { useAuth } from '@/components/providers/AuthProvider';
 import ProtectedRoute from '@/components/auth/ProtectedRoute';
 import api from '@/lib/api';
 import Link from 'next/link';
+import { useRouter } from 'next/navigation';
+import CreateMeetingModal from '@/components/meetings/CreateMeetingModal';
 import {
   Mic,
   Calendar,
@@ -24,6 +26,9 @@ import {
   Upload,
   ArrowLeft,
   GripVertical,
+  Plus,
+  Video,
+  Trash2,
 } from 'lucide-react';
 
 interface Meeting {
@@ -85,12 +90,19 @@ const statusConfig: Record<string, { color: string; bg: string; icon: React.Reac
 
 function MeetingsContent() {
   const { user } = useAuth();
+  const router = useRouter();
   const [meetings, setMeetings] = useState<Meeting[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  const [deletingId, setDeletingId] = useState<string | null>(null);
   const [searchQuery, setSearchQuery] = useState('');
   const [statusFilter, setStatusFilter] = useState<string>('all');
   const [typeFilter, setTypeFilter] = useState<string>('all');
+
+  // FAB & Create Meeting state
+  const [showFabMenu, setShowFabMenu] = useState(false);
+  const [showCreateModal, setShowCreateModal] = useState(false);
+  const [showDownloadAppModal, setShowDownloadAppModal] = useState(false);
 
   // Pagination state
   const [currentPage, setCurrentPage] = useState(1);
@@ -461,6 +473,34 @@ function MeetingsContent() {
                   
                   <ChevronRight className="w-5 h-5 text-gray-400 group-hover:text-purple-600 dark:group-hover:text-purple-400 transition-colors" />
                 </div>
+
+                {/* Delete button */}
+                <div className="flex justify-end px-4 pb-3 -mt-1">
+                  <button
+                    onClick={(e) => {
+                      e.preventDefault();
+                      e.stopPropagation();
+                      if (deletingId) return;
+                      if (!window.confirm(`Delete "${getDisplayTitle(meeting)}"? This cannot be undone.`)) return;
+                      setDeletingId(meeting.id);
+                      api.delete(`/meetings/${meeting.id}`)
+                        .then(() => {
+                          setMeetings(prev => prev.filter(m => m.id !== meeting.id));
+                        })
+                        .catch(() => alert('Failed to delete meeting'))
+                        .finally(() => setDeletingId(null));
+                    }}
+                    disabled={deletingId === meeting.id}
+                    className="inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium text-red-600 dark:text-red-400 hover:bg-red-50 dark:hover:bg-red-900/20 rounded-lg transition-colors disabled:opacity-50"
+                  >
+                    {deletingId === meeting.id ? (
+                      <Loader2 className="w-3.5 h-3.5 animate-spin" />
+                    ) : (
+                      <Trash2 className="w-3.5 h-3.5" />
+                    )}
+                    Delete
+                  </button>
+                </div>
               </Link>
             ))}
           </div>
@@ -549,6 +589,135 @@ function MeetingsContent() {
               >
                 Last
               </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* ─── Floating Action Button (FAB) ─── */}
+      <div className="fixed bottom-8 right-8 z-50 flex flex-col items-end gap-3">
+        {/* FAB Menu */}
+        {showFabMenu && (
+          <>
+            {/* Backdrop to close menu */}
+            <div
+              className="fixed inset-0 z-40"
+              onClick={() => setShowFabMenu(false)}
+            />
+            <div className="relative z-50 bg-white dark:bg-gray-800 rounded-2xl shadow-2xl border border-gray-200 dark:border-gray-700 py-2 min-w-[210px] animate-in fade-in slide-in-from-bottom-4 duration-200">
+              <button
+                onClick={() => {
+                  setShowFabMenu(false);
+                  router.push('/meetings/upload');
+                }}
+                className="w-full flex items-center gap-3 px-5 py-3 hover:bg-gray-50 dark:hover:bg-gray-700 transition-colors"
+              >
+                <Upload className="w-5 h-5 text-purple-600 dark:text-purple-400" />
+                <span className="text-sm font-medium text-gray-900 dark:text-white">
+                  Import Recording
+                </span>
+              </button>
+              <button
+                onClick={() => {
+                  setShowFabMenu(false);
+                  setShowDownloadAppModal(true);
+                }}
+                className="w-full flex items-center gap-3 px-5 py-3 hover:bg-gray-50 dark:hover:bg-gray-700 transition-colors"
+              >
+                <Mic className="w-5 h-5 text-red-500" />
+                <span className="text-sm font-medium text-gray-900 dark:text-white">
+                  Quick Record
+                </span>
+              </button>
+              <button
+                onClick={() => {
+                  setShowFabMenu(false);
+                  setShowCreateModal(true);
+                }}
+                className="w-full flex items-center gap-3 px-5 py-3 hover:bg-gray-50 dark:hover:bg-gray-700 transition-colors"
+              >
+                <Video className="w-5 h-5 text-indigo-600 dark:text-indigo-400" />
+                <span className="text-sm font-medium text-gray-900 dark:text-white">
+                  New Meeting
+                </span>
+              </button>
+            </div>
+          </>
+        )}
+
+        {/* FAB Button */}
+        <button
+          onClick={() => setShowFabMenu(!showFabMenu)}
+          className={`w-14 h-14 rounded-full bg-gradient-to-r from-purple-600 to-indigo-600 text-white shadow-lg shadow-purple-500/30 hover:shadow-xl hover:shadow-purple-500/40 transition-all flex items-center justify-center ${
+            showFabMenu ? 'rotate-45' : ''
+          }`}
+          style={{ transition: 'transform 0.2s ease, box-shadow 0.2s ease' }}
+          title="Create new meeting"
+        >
+          <Plus className="w-7 h-7" />
+        </button>
+      </div>
+
+      {/* Create Meeting Modal */}
+      <CreateMeetingModal
+        isOpen={showCreateModal}
+        onClose={() => setShowCreateModal(false)}
+        onCreated={(meeting) => {
+          fetchMeetings();
+          router.push(`/meetings/${meeting.id}`);
+        }}
+      />
+
+      {/* Download App Modal (Quick Record) */}
+      {showDownloadAppModal && (
+        <div className="fixed inset-0 z-[60] flex items-center justify-center p-4">
+          <div
+            className="absolute inset-0 bg-black/50 backdrop-blur-sm"
+            onClick={() => setShowDownloadAppModal(false)}
+          />
+          <div className="relative w-full max-w-sm bg-white dark:bg-gray-900 rounded-2xl shadow-2xl overflow-hidden animate-in fade-in zoom-in-95 duration-200">
+            {/* Header */}
+            <div className="relative bg-gradient-to-br from-purple-600 via-indigo-600 to-blue-600 px-6 pt-8 pb-10 text-center">
+              <div className="absolute top-3 left-4 w-16 h-16 rounded-full bg-white/10" />
+              <div className="absolute top-10 right-6 w-10 h-10 rounded-full bg-white/10" />
+              <div className="absolute bottom-4 left-1/2 -translate-x-1/2 w-24 h-24 rounded-full bg-white/5" />
+              <div className="relative">
+                <div className="w-16 h-16 mx-auto mb-4 rounded-2xl bg-white/20 backdrop-blur-sm flex items-center justify-center shadow-lg">
+                  <Mic className="w-8 h-8 text-white" />
+                </div>
+                <h3 className="text-xl font-bold text-white mb-1">Record on Mobile</h3>
+                <p className="text-sm text-purple-100 leading-relaxed">
+                  Meeting recording is available on the<br />Dashmet mobile apps
+                </p>
+              </div>
+            </div>
+            {/* Body */}
+            <div className="px-6 py-6 space-y-4">
+              <p className="text-sm text-gray-600 dark:text-gray-400 text-center leading-relaxed">
+                Download <span className="font-semibold text-gray-900 dark:text-white">Dashmet</span> on your phone to record meetings with real-time transcription, AI summaries, and automatic action item extraction.
+              </p>
+              <div className="space-y-3">
+                <a href="https://apps.apple.com/app/dashmet" target="_blank" rel="noopener noreferrer" className="flex items-center gap-4 w-full px-4 py-3.5 bg-gray-900 dark:bg-gray-800 rounded-xl hover:bg-gray-800 dark:hover:bg-gray-700 transition-colors group">
+                  <div className="w-10 h-10 flex items-center justify-center">
+                    <svg viewBox="0 0 24 24" className="w-7 h-7 text-white" fill="currentColor"><path d="M18.71 19.5c-.83 1.24-1.71 2.45-3.05 2.47-1.34.03-1.77-.79-3.29-.79-1.53 0-2 .77-3.27.82-1.31.05-2.3-1.32-3.14-2.53C4.25 17 2.94 12.45 4.7 9.39c.87-1.52 2.43-2.48 4.12-2.51 1.28-.02 2.5.87 3.29.87.78 0 2.26-1.07 3.8-.91.65.03 2.47.26 3.64 1.98-.09.06-2.17 1.28-2.15 3.81.03 3.02 2.65 4.03 2.68 4.04-.03.07-.42 1.44-1.38 2.83M13 3.5c.73-.83 1.94-1.46 2.94-1.5.13 1.17-.34 2.35-1.04 3.19-.69.85-1.83 1.51-2.95 1.42-.15-1.15.41-2.35 1.05-3.11z"/></svg>
+                  </div>
+                  <div className="flex-1"><p className="text-[10px] text-gray-400 leading-none">Download on the</p><p className="text-base font-semibold text-white -mt-0.5">App Store</p></div>
+                </a>
+                <a href="https://play.google.com/store/apps/details?id=com.dashmet" target="_blank" rel="noopener noreferrer" className="flex items-center gap-4 w-full px-4 py-3.5 bg-gray-900 dark:bg-gray-800 rounded-xl hover:bg-gray-800 dark:hover:bg-gray-700 transition-colors group">
+                  <div className="w-10 h-10 flex items-center justify-center">
+                    <svg viewBox="0 0 24 24" className="w-7 h-7" fill="none"><path d="M3.18 23.08c-.44-.27-.68-.72-.68-1.22V2.14c0-.5.24-.95.68-1.22l10.48 11.08L3.18 23.08z" fill="#4285F4"/><path d="M17.15 8.51l-3.49 3.49 3.49 3.49 3.94-2.22c.45-.25.72-.7.72-1.2 0-.5-.27-.95-.72-1.2l-3.94-2.36z" fill="#FBBC04"/><path d="M3.18.92C3.35.8 3.56.73 3.78.73c.27 0 .54.08.78.24l9.1 5.18-3.49 3.49L3.18.92z" fill="#34A853"/><path d="M13.66 15.49l-3.49-3.49-6.99 7.59 9.1 5.18c.24.14.51.22.78.22.22 0 .43-.07.6-.19l-3.49-3.49.49-.49 3-3.33z" fill="#EA4335"/></svg>
+                  </div>
+                  <div className="flex-1"><p className="text-[10px] text-gray-400 leading-none">Get it on</p><p className="text-base font-semibold text-white -mt-0.5">Google Play</p></div>
+                </a>
+              </div>
+              <div className="grid grid-cols-3 gap-2 pt-2">
+                <div className="text-center p-2 bg-purple-50 dark:bg-purple-900/20 rounded-lg"><Mic className="w-4 h-4 text-purple-600 dark:text-purple-400 mx-auto mb-1" /><p className="text-[10px] text-purple-700 dark:text-purple-300 font-medium">Live Record</p></div>
+                <div className="text-center p-2 bg-indigo-50 dark:bg-indigo-900/20 rounded-lg"><Filter className="w-4 h-4 text-indigo-600 dark:text-indigo-400 mx-auto mb-1" /><p className="text-[10px] text-indigo-700 dark:text-indigo-300 font-medium">Transcription</p></div>
+                <div className="text-center p-2 bg-blue-50 dark:bg-blue-900/20 rounded-lg"><CheckCircle className="w-4 h-4 text-blue-600 dark:text-blue-400 mx-auto mb-1" /><p className="text-[10px] text-blue-700 dark:text-blue-300 font-medium">AI Actions</p></div>
+              </div>
+            </div>
+            <div className="px-6 pb-5">
+              <button onClick={() => setShowDownloadAppModal(false)} className="w-full py-2.5 text-sm font-medium text-gray-600 dark:text-gray-400 hover:text-gray-900 dark:hover:text-white bg-gray-100 dark:bg-gray-800 hover:bg-gray-200 dark:hover:bg-gray-700 rounded-xl transition-colors">Got it</button>
             </div>
           </div>
         </div>

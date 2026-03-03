@@ -942,9 +942,6 @@ model Organization {
   LswKeyResultSets          LswKeyResultSet[]           @relation("LswKeyResultSetOrganization")
   LswRcaTriggers            LswRcaTrigger[]             @relation("LswRcaTriggerOrganization")
 
-  // AI Assistant Relations
-  AiAssistantConversations  AiAssistantConversation[]  @relation("AiAssistantConversationOrg")
-
   @@index([name])
   @@index([signupCode])
 }
@@ -1393,9 +1390,6 @@ model User {
   LswKeyResultSets                                                    LswKeyResultSet[]                    @relation("LswKeyResultSetUser")
   LswPersonalGoals                                                    LswPersonalGoal[]                    @relation("LswPersonalGoalUser")
   LswRcaTriggers                                                      LswRcaTrigger[]                      @relation("LswRcaTriggerUser")
-
-  // AI Assistant Relations
-  AiAssistantConversations                                            AiAssistantConversation[]             @relation("AiAssistantConversationUser")
 
   // Microsoft Outlook Calendar Integration
   MicrosoftOAuthToken                                                 MicrosoftOAuthToken?                  @relation("MicrosoftOAuthTokenUser")
@@ -3361,43 +3355,6 @@ model LswStylePreset {
   @@unique([organizationId, name, category, context])
   @@index([organizationId])
   @@index([category])
-}
-
-// ──────────────────────────────────────────────
-// AI ASSISTANT - Conversational AI with Memory
-// ──────────────────────────────────────────────
-
-model AiAssistantConversation {
-  id             String                  @id @default(uuid())
-  userId         String
-  organizationId String?
-  title          String                  @default("New Conversation")
-  summary        String?                 // AI-generated summary for long-term memory
-  isActive       Boolean                 @default(true)
-  createdAt      DateTime                @default(now())
-  updatedAt      DateTime                @updatedAt
-
-  messages       AiAssistantMessage[]
-  user           User                    @relation("AiAssistantConversationUser", fields: [userId], references: [id], onDelete: Cascade)
-  organization   Organization?           @relation("AiAssistantConversationOrg", fields: [organizationId], references: [id], onDelete: Cascade)
-
-  @@index([userId])
-  @@index([organizationId])
-  @@index([createdAt])
-}
-
-model AiAssistantMessage {
-  id             String                  @id @default(uuid())
-  conversationId String
-  role           String                  // 'user' | 'assistant' | 'system'
-  content        String
-  metadata       Json?                   // Token usage, model info, etc.
-  createdAt      DateTime                @default(now())
-
-  conversation   AiAssistantConversation @relation(fields: [conversationId], references: [id], onDelete: Cascade)
-
-  @@index([conversationId])
-  @@index([createdAt])
 }
 
 // ─────────────────────────────────────────────────────────────────────────────

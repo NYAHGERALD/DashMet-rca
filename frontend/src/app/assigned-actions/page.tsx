@@ -54,6 +54,7 @@ interface Task {
   isAiExtracted: boolean;
   createdAt: string;
   meetingId: string;
+  groupName: string;
   meeting?: {
     id: string;
     title: string | null;
@@ -81,6 +82,10 @@ interface MeetingGroup {
   overdueCount: number;
 }
 
+// Canonical group names configured from backend
+const GROUP_MEETING_ITEMS = 'Meeting Items';
+const GROUP_STANDALONE_ITEMS = 'Standalone Items';
+
 const statusConfig: Record<string, { color: string; bg: string; label: string }> = {
   PENDING: { color: 'text-gray-600', bg: 'bg-gray-100', label: 'Pending' },
   IN_PROGRESS: { color: 'text-blue-600', bg: 'bg-blue-100', label: 'In Progress' },
@@ -94,20 +99,20 @@ const priorityConfig: Record<string, { color: string; bg: string; label: string 
   URGENT: { color: 'text-red-600', bg: 'bg-red-100', label: 'Urgent' },
 };
 
-// Group tasks by meeting
+// Group tasks using backend-provided groupName for consistency across web, iOS, and Android
 function groupTasksByMeeting(tasks: Task[]): MeetingGroup[] {
   const groups: Record<string, MeetingGroup> = {};
   
   tasks.forEach((task) => {
-    const meetingId = task.meetingId || 'unknown';
-    const isManual = task.meeting?.meetingType === 'MANUAL';
+    // Use backend-provided groupName; fallback based on meetingId if missing
+    const groupName = task.groupName || (task.meetingId ? GROUP_MEETING_ITEMS : GROUP_STANDALONE_ITEMS);
     
-    if (!groups[meetingId]) {
-      groups[meetingId] = {
-        meetingId,
-        meetingTitle: isManual ? 'Manual' : (task.meeting?.title || task.meeting?.meetingType || 'Meeting'),
-        meetingType: task.meeting?.meetingType || 'GENERAL',
-        meetingDate: task.meeting?.createdAt || task.createdAt,
+    if (!groups[groupName]) {
+      groups[groupName] = {
+        meetingId: groupName,
+        meetingTitle: groupName,
+        meetingType: groupName === GROUP_MEETING_ITEMS ? 'MEETING' : 'STANDALONE',
+        meetingDate: null,
         tasks: [],
         pendingCount: 0,
         inProgressCount: 0,
@@ -116,21 +121,21 @@ function groupTasksByMeeting(tasks: Task[]): MeetingGroup[] {
       };
     }
     
-    groups[meetingId].tasks.push(task);
+    groups[groupName].tasks.push(task);
     
-    if (task.status === 'PENDING') groups[meetingId].pendingCount++;
-    if (task.status === 'IN_PROGRESS') groups[meetingId].inProgressCount++;
-    if (task.status === 'COMPLETED') groups[meetingId].completedCount++;
+    if (task.status === 'PENDING') groups[groupName].pendingCount++;
+    if (task.status === 'IN_PROGRESS') groups[groupName].inProgressCount++;
+    if (task.status === 'COMPLETED') groups[groupName].completedCount++;
     if (task.status !== 'COMPLETED' && task.dueDate && new Date(task.dueDate) < new Date()) {
-      groups[meetingId].overdueCount++;
+      groups[groupName].overdueCount++;
     }
   });
   
-  // Sort by meeting date descending
+  // Meeting Items first, Standalone Items second
   return Object.values(groups).sort((a, b) => {
-    const dateA = a.meetingDate ? new Date(a.meetingDate).getTime() : 0;
-    const dateB = b.meetingDate ? new Date(b.meetingDate).getTime() : 0;
-    return dateB - dateA;
+    if (a.meetingTitle === GROUP_MEETING_ITEMS) return -1;
+    if (b.meetingTitle === GROUP_MEETING_ITEMS) return 1;
+    return 0;
   });
 }
 
@@ -557,17 +562,6 @@ function AssignedActionsContent() {
                         <h3 className="font-semibold text-gray-900 dark:text-white">
                           {group.meetingTitle}
                         </h3>
-                        <div className="flex items-center gap-2 text-xs text-gray-500 dark:text-gray-400 mt-0.5">
-                          <span className={group.meetingType === 'MANUAL' ? 'text-purple-600 dark:text-purple-400 font-medium' : 'capitalize'}>
-                            {group.meetingType === 'MANUAL' ? 'Manual Entry' : group.meetingType.replace(/_/g, ' ').toLowerCase()}
-                          </span>
-                          {group.meetingDate && (
-                            <>
-                              <span>•</span>
-                              <span>{formatDate(group.meetingDate)}</span>
-                            </>
-                          )}
-                        </div>
                       </div>
                     </div>
                     <div className="flex items-center gap-2">

@@ -36,6 +36,16 @@ export interface DiarizedBlock {
   wordCount: number;
 }
 
+export interface QualityMetrics {
+  avgConfidence: number;
+  diarizationCoverage: number;
+  segmentsBeforeFilter: number;
+  segmentsAfterFilter: number;
+  segmentsAfterMerge: number;
+  smoothedBlocks: number;
+  clusteringThreshold: number;
+}
+
 export interface DiarizationResult {
   success: boolean;
   blocks: DiarizedBlock[];
@@ -47,6 +57,7 @@ export interface DiarizationResult {
   processingTimeSeconds: number;
   error?: string;
   fallbackUsed?: boolean;
+  qualityMetrics?: QualityMetrics;
 }
 
 // ── Service Health Check ───────────────────────────────────
@@ -69,6 +80,9 @@ export async function diarizeFromFile(
   options: {
     language?: string;
     numSpeakers?: number;
+    minSpeakers?: number;
+    maxSpeakers?: number;
+    clusteringThreshold?: number;
   } = {}
 ): Promise<DiarizationResult> {
   const startTime = Date.now();
@@ -118,6 +132,9 @@ export async function diarizeFromBuffer(
   options: {
     language?: string;
     numSpeakers?: number;
+    minSpeakers?: number;
+    maxSpeakers?: number;
+    clusteringThreshold?: number;
   } = {}
 ): Promise<DiarizationResult> {
   const startTime = Date.now();
@@ -127,6 +144,8 @@ export async function diarizeFromBuffer(
   console.log(`[Diarization] Size: ${(buffer.length / 1024 / 1024).toFixed(2)}MB`);
   console.log(`[Diarization] Language: ${options.language || 'auto'}`);
   console.log(`[Diarization] Expected speakers: ${options.numSpeakers || 'auto'}`);
+  console.log(`[Diarization] Speaker bounds: min=${options.minSpeakers || 'auto'} max=${options.maxSpeakers || 'auto'}`);
+  console.log(`[Diarization] Clustering threshold: ${options.clusteringThreshold || 'default'}`);
 
   try {
     // Build multipart form data
@@ -140,6 +159,15 @@ export async function diarizeFromBuffer(
     }
     if (options.numSpeakers) {
       form.append('num_speakers', String(options.numSpeakers));
+    }
+    if (options.minSpeakers) {
+      form.append('min_speakers', String(options.minSpeakers));
+    }
+    if (options.maxSpeakers) {
+      form.append('max_speakers', String(options.maxSpeakers));
+    }
+    if (options.clusteringThreshold) {
+      form.append('clustering_threshold', String(options.clusteringThreshold));
     }
 
     console.log(`[Diarization] Sending to Python service at ${DIARIZATION_SERVICE_URL}/diarize`);
@@ -167,6 +195,14 @@ export async function diarizeFromBuffer(
     console.log(`[Diarization] Words: ${result.totalWords}`);
     console.log(`[Diarization] Duration: ${result.totalDuration}s`);
     console.log(`[Diarization] Processing: ${result.processingTimeSeconds}s (total: ${elapsed.toFixed(1)}s)`);
+    if (result.qualityMetrics) {
+      console.log(`[Diarization] Quality: confidence=${result.qualityMetrics.avgConfidence} ` +
+        `coverage=${result.qualityMetrics.diarizationCoverage}% ` +
+        `segments(raw=${result.qualityMetrics.segmentsBeforeFilter} ` +
+        `filtered=${result.qualityMetrics.segmentsAfterFilter} ` +
+        `merged=${result.qualityMetrics.segmentsAfterMerge}) ` +
+        `smoothed=${result.qualityMetrics.smoothedBlocks}`);
+    }
 
     return {
       ...result,
@@ -216,6 +252,9 @@ export async function diarizeWithFallback(
   options: {
     language?: string;
     numSpeakers?: number;
+    minSpeakers?: number;
+    maxSpeakers?: number;
+    clusteringThreshold?: number;
     meetingType?: string;
   } = {}
 ): Promise<DiarizationResult> {

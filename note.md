@@ -289,3 +289,6 @@ On the Leader Standard Work Page,
 design a comprehensive professional tables in the database hosted on render, that will store every single elements and attributes on that page. there will be no harded values, no fallback values, no local storage. everything will be dynamically stored in the database in including form settings options like colors font, states etc. Analyze the page thorough in order to create the correct tables, views functions triggers permissions etc and like tables properly to users, facility, and organization correctly.
 
 note that you are not allow to break existing code, program flow, schema or any other current working code or schema to avoid program failures and issue with the Application that will cause us hours to fix. you have to be veery extra careful and do this professional and thorough.
+
+chech the iOS app and see how it is being done.
+everything you need is already implemented on the iOS app, always look there if you are not sure what to do next. never asume.

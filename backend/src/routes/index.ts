@@ -42,7 +42,6 @@ import mobileAuthRoutes from './mobileAuthRoutes';
 import taskRoutes from './taskRoutes';
 import meetingRoutes from './meetingRoutes';
 import consentRoutes from './consentRoutes';
-import aiVisionRoutes from './aiVisionRoutes';
 import documentOcrRoutes from './documentOcrRoutes';
 import conflictAnalysisRoutes from './conflictAnalysisRoutes';
 import policyMatchingRoutes from './policyMatchingRoutes';
@@ -95,10 +94,6 @@ router.use('/mobile/meetings', meetingRoutes);
 // Consent & Compliance routes - PUBLIC for iOS app
 // Recording consent, policy management, audit logs
 router.use('/consent', consentRoutes);
-
-// AI Vision Assistant routes - PUBLIC for iOS app
-// Industrial equipment analysis with GPT-4 Vision and TTS
-router.use('/ai-vision', aiVisionRoutes);
 
 // Document OCR routes - PUBLIC for iOS app
 // Handwritten document scanning with GPT-4 Vision
@@ -248,10 +243,6 @@ router.use('/recordings', recordingsRoutes);
 // Leader Standard Work (LSW) routes - authenticated
 import lswRoutes from './lswRoutes';
 router.use('/lsw', lswRoutes);
-
-// AI Assistant routes - Conversational AI with memory and TTS
-import aiAssistantRoutes from './aiAssistantRoutes';
-router.use('/ai-assistant', aiAssistantRoutes);
 
 // Outlook Calendar integration routes - Connect Outlook for LSW
 import outlookRoutes from './outlookRoutes';
