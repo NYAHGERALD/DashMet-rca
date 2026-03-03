@@ -50,6 +50,33 @@ services:
       - key: ENCRYPTION_KEY
         generateValue: true # Persistent encryption key for conflict case data
 
+  # Python Diarization Service (Pyannote + Whisper)
+  - type: web
+    name: dashmet-diarization
+    runtime: docker
+    plan: standard # Needs ~2GB+ RAM for ML models
+    region: oregon
+    rootDir: diarization-service
+    dockerfilePath: ./Dockerfile
+    healthCheckPath: /health
+    envVars:
+      - key: HUGGINGFACE_TOKEN
+        sync: false # Set manually - Hugging Face access token
+      - key: WHISPER_MODEL_SIZE
+        value: base
+      - key: DIARIZATION_PORT
+        value: 8100
+      - key: PRELOAD_MODELS
+        value: "true"
+      - key: CLUSTERING_THRESHOLD
+        value: "0.65"
+      - key: MIN_SEGMENT_DURATION
+        value: "0.3"
+      - key: SAME_SPEAKER_MERGE_GAP
+        value: "0.5"
+      - key: MIN_BLOCK_WORDS
+        value: "2"
+
   # Frontend Web Service
   - type: web
     name: dashmet-web
