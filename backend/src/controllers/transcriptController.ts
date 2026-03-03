@@ -1310,3 +1310,90 @@ export const getProcessedTranscript = async (req: AuthRequest, res: Response) =>
     });
   }
 };
+
+/**
+ * Enterprise Speaker Diarization — Pyannote + Whisper
+ * POST /transcripts/diarize
+ * Body: multipart/form-data with 'audio' file
+ * Form fields: language?, numSpeakers?, meetingType?
+ * 
+ * Returns speaker-attributed transcript blocks with precise timestamps
+ * using Pyannote audio-based speaker diarization and Whisper word-level
+ * transcription. Falls back to Whisper+GPT if diarization service unavailable.
+ */
+export const diarizeAudio = async (req: AuthRequest, res: Response) => {
+  try {
+    const userId = req.user?.id;
+    
+    if (!userId) {
+      return res.status(401).json({ success: false, error: 'Unauthorized' });
+    }
+
+    const file = req.file;
+    if (!file) {
+      return res.status(400).json({
+        success: false,
+        error: 'No audio file provided. Please upload an audio file.',
+      });
+    }
+
+    const { language, numSpeakers, meetingType } = req.body;
+
+    const fileSizeMB = (file.size / 1024 / 1024).toFixed(2);
+    console.log(`[Diarization] ====== DIARIZATION REQUEST ======`);
+    console.log(`[Diarization] User: ${userId}`);
+    console.log(`[Diarization] File: ${file.originalname}`);
+    console.log(`[Diarization] Size: ${fileSizeMB}MB (${file.size} bytes)`);
+    console.log(`[Diarization] MIME: ${file.mimetype}`);
+    console.log(`[Diarization] Language: ${language || 'auto'}`);
+    console.log(`[Diarization] Expected speakers: ${numSpeakers || 'auto'}`);
+
+    // Import diarization service
+    const diarizationService = await import('../services/diarizationService');
+
+    // Use diarizeWithFallback for resilience
+    const result = await diarizationService.diarizeWithFallback(
+      file.buffer,
+      file.originalname,
+      {
+        language: language as string || undefined,
+        numSpeakers: numSpeakers ? parseInt(numSpeakers as string, 10) : undefined,
+        meetingType: meetingType as string || 'general',
+      }
+    );
+
+    if (!result.success) {
+      console.error('[Diarization] Failed:', result.error);
+      return res.status(500).json({
+        success: false,
+        error: result.error || 'Diarization failed',
+      });
+    }
+
+    console.log(`[Diarization] ====== DIARIZATION COMPLETE ======`);
+    console.log(`[Diarization] Blocks: ${result.blocks.length}`);
+    console.log(`[Diarization] Speakers: ${result.speakerCount} (${result.speakers.join(', ')})`);
+    console.log(`[Diarization] Words: ${result.totalWords}`);
+    console.log(`[Diarization] Duration: ${result.totalDuration}s`);
+    console.log(`[Diarization] Processing: ${result.processingTimeSeconds}s`);
+    console.log(`[Diarization] Fallback used: ${result.fallbackUsed || false}`);
+
+    return res.json({
+      success: true,
+      blocks: result.blocks,
+      speakers: result.speakers,
+      speakerCount: result.speakerCount,
+      totalDuration: result.totalDuration,
+      totalWords: result.totalWords,
+      language: result.language,
+      processingTimeSeconds: result.processingTimeSeconds,
+      fallbackUsed: result.fallbackUsed || false,
+    });
+  } catch (error: any) {
+    console.error('[Diarization] Error:', error);
+    return res.status(500).json({
+      success: false,
+      error: error.message || 'Failed to diarize audio',
+    });
+  }
+};

@@ -1,0 +1,28 @@
+# Enterprise Speaker Diarization Service
+# Pyannote + Whisper for high-quality speaker diarization
+
+fastapi==0.115.6
+uvicorn[standard]==0.34.0
+python-multipart==0.0.20
+pydantic==2.10.4
+
+# Core ML / Audio
+torch>=2.1.0
+torchaudio>=2.1.0
+
+# Speaker Diarization (Pyannote)
+pyannote.audio>=3.3.2
+
+# OpenAI Whisper (for word-level timestamps)
+openai-whisper>=20240930
+
+# Audio processing
+pydub>=0.25.1
+soundfile>=0.12.1
+numpy>=1.26.0
+
+# Hugging Face Hub (for model downloads)
+huggingface_hub>=0.26.0
+
+# Environment
+python-dotenv>=1.0.1
