@@ -75,6 +75,7 @@ interface MeetingGroup {
   meetingTitle: string;
   meetingType: string;
   meetingDate: string | null;
+  createdDate: string | null;
   tasks: Task[];
   pendingCount: number;
   inProgressCount: number;
@@ -113,6 +114,7 @@ function groupTasksByMeeting(tasks: Task[]): MeetingGroup[] {
         meetingTitle: groupName,
         meetingType: groupName === GROUP_MEETING_ITEMS ? 'MEETING' : 'STANDALONE',
         meetingDate: null,
+        createdDate: null,
         tasks: [],
         pendingCount: 0,
         inProgressCount: 0,
@@ -131,6 +133,18 @@ function groupTasksByMeeting(tasks: Task[]): MeetingGroup[] {
     }
   });
   
+  // Compute createdDate for each group (earliest task createdAt)
+  Object.values(groups).forEach((group) => {
+    const dates = group.tasks
+      .map(t => t.createdAt)
+      .filter(Boolean)
+      .map(d => new Date(d).getTime())
+      .filter(d => !isNaN(d));
+    if (dates.length > 0) {
+      group.createdDate = new Date(Math.min(...dates)).toISOString();
+    }
+  });
+
   // Meeting Items first, Standalone Items second
   return Object.values(groups).sort((a, b) => {
     if (a.meetingTitle === GROUP_MEETING_ITEMS) return -1;
@@ -562,6 +576,11 @@ function AssignedActionsContent() {
                         <h3 className="font-semibold text-gray-900 dark:text-white">
                           {group.meetingTitle}
                         </h3>
+                        {group.createdDate && (
+                          <p className="text-xs text-gray-500 dark:text-gray-400 mt-0.5">
+                            {new Date(group.createdDate).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric', hour: 'numeric', minute: '2-digit' })}
+                          </p>
+                        )}
                       </div>
                     </div>
                     <div className="flex items-center gap-2">
