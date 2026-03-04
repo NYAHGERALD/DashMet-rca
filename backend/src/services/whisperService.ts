@@ -59,49 +59,42 @@ function getMeetingPrompt(meetingType?: string, previousContext?: string): strin
   // Base prompt that encourages proper punctuation and professional transcription
   const basePrompt = `Professional business meeting transcription with proper punctuation, capitalization, and sentence structure. `;
   
+  // NOTE: Prompts must NOT contain descriptive phrases that Whisper might
+  // hallucinate/repeat during silence. Only use formatting instructions and
+  // vocabulary hints — never full sentences Whisper could parrot back.
   const typePrompts: Record<string, string> = {
     'standup': basePrompt + 
-      `Daily standup meeting. Common phrases: "Yesterday I worked on", "Today I will", "I'm blocked by", "No blockers". ` +
-      `Team members discuss progress, blockers, and plans.`,
+      `Vocabulary: sprint, blocker, standup, pull request, deploy, backlog, ticket.`,
     
     'planning': basePrompt + 
-      `Project planning session. Common phrases: "sprint goal", "story points", "acceptance criteria", "definition of done". ` +
-      `Discussion of milestones, tasks, resource allocation, and deadlines.`,
+      `Vocabulary: sprint goal, story points, acceptance criteria, milestone, deadline, backlog.`,
     
     'review': basePrompt + 
-      `Sprint review or retrospective meeting. Common phrases: "What went well", "What could improve", "action items", "lessons learned". ` +
-      `Team discusses completed work, feedback, and improvements.`,
+      `Vocabulary: retrospective, action items, lessons learned, demo, feedback, iteration.`,
     
     'brainstorm': basePrompt + 
-      `Brainstorming and ideation session. Creative discussion with multiple speakers contributing ideas. ` +
-      `Phrases like "What if we", "Building on that idea", "Another approach could be".`,
+      `Vocabulary: ideation, prototype, concept, iterate, pivot, user story.`,
     
     'interview': basePrompt + 
-      `Job interview or candidate assessment. Interviewer asks questions, candidate provides detailed responses. ` +
-      `Professional Q&A format with behavioral and technical questions.`,
+      `Vocabulary: candidate, role, qualifications, experience, behavioral, technical.`,
     
     'one-on-one': basePrompt + 
-      `One-on-one meeting between manager and team member. Discussion of performance, goals, career development, and feedback. ` +
-      `Supportive and constructive conversation.`,
+      `Vocabulary: performance, goals, career development, feedback, coaching, growth.`,
     
     'client': basePrompt + 
-      `Client meeting discussing project requirements, deliverables, timelines, and expectations. ` +
-      `Professional business discussion with stakeholders.`,
+      `Vocabulary: deliverables, timeline, requirements, stakeholder, scope, budget.`,
     
     'training': basePrompt + 
-      `Training or educational session. Instructor explains concepts, procedures, and best practices. ` +
-      `May include Q&A and demonstrations.`,
+      `Vocabulary: procedure, best practice, demonstration, module, assessment, certification.`,
     
     'board': basePrompt + 
-      `Board meeting or executive discussion. Formal business language discussing strategy, finances, and key decisions. ` +
-      `Professional corporate vocabulary.`,
+      `Vocabulary: strategy, quarterly, revenue, governance, resolution, shareholder.`,
     
     'sales': basePrompt + 
-      `Sales call or pitch meeting. Discussion of products, services, pricing, and value propositions. ` +
-      `Persuasive language and customer needs assessment.`,
+      `Vocabulary: pipeline, prospect, proposal, pricing, ROI, onboarding, contract.`,
     
     'general': basePrompt + 
-      `General business discussion between professionals. Clear communication with proper business terminology.`,
+      `Vocabulary: agenda, minutes, follow-up, decision, update, next steps.`,
   };
   
   let prompt = typePrompts[meetingType || 'general'] || typePrompts['general'];
@@ -258,7 +251,12 @@ async function transcribeChunk(
 function enhanceTranscription(text: string): string {
   let enhanced = text;
   
-  // Fix common transcription issues
+  // ── Step 1: Remove Whisper hallucination loops ──
+  // Whisper often repeats a phrase many times when it encounters silence.
+  // Detect any sentence/phrase repeated 3+ times consecutively and collapse to one.
+  enhanced = removeHallucinationLoops(enhanced);
+  
+  // ── Step 2: Fix common transcription issues ──
   enhanced = enhanced
     // Ensure proper spacing after punctuation
     .replace(/([.!?])([A-Z])/g, '$1 $2')
@@ -286,6 +284,50 @@ function enhanceTranscription(text: string): string {
     .trim();
   
   return enhanced;
+}
+
+/**
+ * Detect and remove Whisper hallucination loops.
+ * When Whisper encounters silence or noise it often repeats a phrase dozens of times.
+ * This function detects any phrase repeated 3+ times consecutively and keeps only one.
+ */
+function removeHallucinationLoops(text: string): string {
+  if (!text) return text;
+  
+  let cleaned = text;
+
+  // Strategy 1: Sentence-level dedup — split on sentence boundaries,
+  // collapse runs of 3+ identical sentences into one.
+  const sentences = cleaned.split(/(?<=[.!?,])\s*/);
+  if (sentences.length > 3) {
+    const deduped: string[] = [];
+    let repeatCount = 1;
+    for (let i = 0; i < sentences.length; i++) {
+      const curr = sentences[i].trim().toLowerCase();
+      const prev = i > 0 ? sentences[i - 1].trim().toLowerCase() : '';
+      if (curr === prev && curr.length > 5) {
+        repeatCount++;
+      } else {
+        repeatCount = 1;
+      }
+      // Keep the sentence only if it hasn't been repeated 3+ times
+      if (repeatCount <= 2) {
+        deduped.push(sentences[i]);
+      }
+    }
+    // If we removed anything, use the deduped version
+    if (deduped.length < sentences.length) {
+      const removed = sentences.length - deduped.length;
+      console.log(`[Whisper] Hallucination cleanup: removed ${removed} repeated sentences`);
+      cleaned = deduped.join(' ');
+    }
+  }
+
+  // Strategy 2: Regex — catch phrases repeated 3+ times with commas/spaces between
+  // e.g. "phrase, phrase, phrase, phrase" or "phrase. phrase. phrase."
+  cleaned = cleaned.replace(/(([\w']+(?:\s+[\w']+){2,8})[,.]?\s*)(\2[,.]?\s*){2,}/gi, '$1');
+
+  return cleaned.trim();
 }
 
 /**
