@@ -23,6 +23,7 @@ import {
   saveProcessedTranscript,
   getProcessedTranscript,
   diarizeAudio,
+  getDiarizeJobStatus,
 } from '../controllers/transcriptController';
 import multer from 'multer';
 
@@ -68,7 +69,8 @@ router.post('/:id/summarize', generateAISummary);            // Generate AI summ
 router.post('/transcribe', upload.single('audio'), transcribeAudio);  // Transcribe audio file
 
 // Enterprise Speaker Diarization (Pyannote + Whisper)
-router.post('/diarize', upload.single('audio'), diarizeAudio);       // Diarize + transcribe audio
+router.post('/diarize', upload.single('audio'), diarizeAudio);       // Submit diarize job
+router.get('/diarize/jobs/:jobId', getDiarizeJobStatus);             // Poll job status
 
 // AI Speaker detection and formatting
 router.post('/process-speakers', processSpeakers);           // Process transcript to detect speakers

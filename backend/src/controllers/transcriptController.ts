@@ -1317,9 +1317,8 @@ export const getProcessedTranscript = async (req: AuthRequest, res: Response) =>
  * Body: multipart/form-data with 'audio' file
  * Form fields: language?, numSpeakers?, meetingType?
  * 
- * Returns speaker-attributed transcript blocks with precise timestamps
- * using Pyannote audio-based speaker diarization and Whisper word-level
- * transcription. Falls back to Whisper+GPT if diarization service unavailable.
+ * Returns a jobId immediately. The iOS app polls GET /transcripts/diarize/jobs/:jobId
+ * for results. Processing happens asynchronously in the Python diarization service.
  */
 export const diarizeAudio = async (req: AuthRequest, res: Response) => {
   try {
@@ -1362,10 +1361,10 @@ export const diarizeAudio = async (req: AuthRequest, res: Response) => {
       });
     }
 
-    console.log('[Diarization] ✅ Python service available, using Pyannote+Whisper');
+    console.log('[Diarization] ✅ Python service available, submitting job');
 
-    // Call the real Pyannote diarization - no fallback
-    const result = await diarizationService.diarizeFromBuffer(
+    // Submit audio to Python service — returns a jobId immediately
+    const submitResult = await diarizationService.submitDiarization(
       file.buffer,
       file.originalname,
       {
@@ -1374,37 +1373,74 @@ export const diarizeAudio = async (req: AuthRequest, res: Response) => {
       }
     );
 
-    if (!result.success) {
-      console.error('[Diarization] Failed:', result.error);
+    if (!submitResult.jobId) {
+      console.error('[Diarization] Failed to submit job:', submitResult.error);
       return res.status(500).json({
         success: false,
-        error: result.error || 'Diarization failed',
+        error: submitResult.error || 'Failed to submit diarization job',
       });
     }
 
-    console.log(`[Diarization] ====== DIARIZATION COMPLETE ======`);
-    console.log(`[Diarization] Blocks: ${result.blocks.length}`);
-    console.log(`[Diarization] Speakers: ${result.speakerCount} (${result.speakers.join(', ')})`);
-    console.log(`[Diarization] Words: ${result.totalWords}`);
-    console.log(`[Diarization] Duration: ${result.totalDuration}s`);
-    console.log(`[Diarization] Processing: ${result.processingTimeSeconds}s`);
+    console.log(`[Diarization] ✅ Job submitted: ${submitResult.jobId}`);
 
     return res.json({
       success: true,
-      blocks: result.blocks,
-      speakers: result.speakers,
-      speakerCount: result.speakerCount,
-      totalDuration: result.totalDuration,
-      totalWords: result.totalWords,
-      language: result.language,
-      processingTimeSeconds: result.processingTimeSeconds,
-      qualityMetrics: result.qualityMetrics || null,
+      jobId: submitResult.jobId,
+      status: 'processing',
+      message: 'Diarization job submitted. Poll GET /api/transcripts/diarize/jobs/:jobId for results.',
     });
   } catch (error: any) {
     console.error('[Diarization] Error:', error);
     return res.status(500).json({
       success: false,
-      error: error.message || 'Failed to diarize audio',
+      error: error.message || 'Failed to submit diarization job',
+    });
+  }
+};
+
+/**
+ * Poll diarization job status
+ * GET /transcripts/diarize/jobs/:jobId
+ * Returns current status and result when complete.
+ */
+export const getDiarizeJobStatus = async (req: AuthRequest, res: Response) => {
+  try {
+    const userId = req.user?.id;
+    if (!userId) {
+      return res.status(401).json({ success: false, error: 'Unauthorized' });
+    }
+
+    const { jobId } = req.params;
+    if (!jobId) {
+      return res.status(400).json({ success: false, error: 'Missing jobId parameter' });
+    }
+
+    const diarizationService = await import('../services/diarizationService');
+    const jobStatus = await diarizationService.pollDiarizationJob(jobId);
+
+    if (!jobStatus) {
+      return res.status(404).json({ success: false, error: 'Job not found' });
+    }
+
+    console.log(`[Diarization] Job ${jobId}: status=${jobStatus.status} progress="${jobStatus.progress || ''}"`);
+
+    // If complete, log full result info
+    if (jobStatus.status === 'complete' && jobStatus.result) {
+      const result = jobStatus.result;
+      console.log(`[Diarization] ====== DIARIZATION COMPLETE ======`);
+      console.log(`[Diarization] Blocks: ${result.blocks?.length || 0}`);
+      console.log(`[Diarization] Speakers: ${result.speakerCount} (${result.speakers?.join(', ')})`);
+      console.log(`[Diarization] Words: ${result.totalWords}`);
+      console.log(`[Diarization] Duration: ${result.totalDuration}s`);
+      console.log(`[Diarization] Processing: ${result.processingTimeSeconds}s`);
+    }
+
+    return res.json(jobStatus);
+  } catch (error: any) {
+    console.error('[Diarization] Job poll error:', error);
+    return res.status(500).json({
+      success: false,
+      error: error.message || 'Failed to check job status',
     });
   }
 };

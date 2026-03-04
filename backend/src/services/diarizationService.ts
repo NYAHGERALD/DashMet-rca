@@ -20,7 +20,6 @@ import path from 'path';
 
 const DIARIZATION_SERVICE_URL = process.env.DIARIZATION_SERVICE_URL || 'http://localhost:8100';
 const DIARIZATION_TIMEOUT = parseInt(process.env.DIARIZATION_TIMEOUT || '600000', 10); // 10 min default
-const DIARIZATION_POLL_INTERVAL = parseInt(process.env.DIARIZATION_POLL_INTERVAL || '5000', 10); // 5s default
 
 // ── Types ──────────────────────────────────────────────────
 
@@ -102,7 +101,45 @@ export async function diarizeFromFile(
     const fileBuffer = fs.readFileSync(filePath);
     const fileName = path.basename(filePath);
 
-    return await diarizeFromBuffer(fileBuffer, fileName, options);
+    // Submit the job and return the submit result wrapped as a DiarizationResult
+    const submitResult = await submitDiarization(fileBuffer, fileName, options);
+    if (!submitResult.jobId) {
+      return {
+        success: false,
+        blocks: [],
+        speakers: [],
+        speakerCount: 0,
+        totalDuration: 0,
+        totalWords: 0,
+        language: 'en',
+        processingTimeSeconds: 0,
+        error: submitResult.error || 'Failed to submit diarization job',
+      };
+    }
+
+    // Poll until complete
+    const deadline = Date.now() + DIARIZATION_TIMEOUT;
+    while (Date.now() < deadline) {
+      await new Promise(resolve => setTimeout(resolve, 5000));
+      const status = await pollDiarizationJob(submitResult.jobId);
+      if (status?.status === 'complete' && status.result) {
+        return status.result;
+      }
+      if (status?.status === 'failed') {
+        return status.result || {
+          success: false, blocks: [], speakers: [], speakerCount: 0,
+          totalDuration: 0, totalWords: 0, language: 'en',
+          processingTimeSeconds: 0, error: 'Diarization failed',
+        };
+      }
+    }
+
+    return {
+      success: false, blocks: [], speakers: [], speakerCount: 0,
+      totalDuration: 0, totalWords: 0, language: 'en',
+      processingTimeSeconds: (Date.now() - startTime) / 1000,
+      error: 'Diarization timed out',
+    };
   } catch (error: any) {
     const elapsed = (Date.now() - startTime) / 1000;
     console.error('[Diarization] Error:', error.message);
@@ -120,9 +157,14 @@ export async function diarizeFromFile(
   }
 }
 
-// ── Main Diarization Function (from buffer) ───────────────
+// ── Submit Diarization Job (returns immediately with jobId) ──
 
-export async function diarizeFromBuffer(
+export interface SubmitResult {
+  jobId?: string;
+  error?: string;
+}
+
+export async function submitDiarization(
   buffer: Buffer,
   fileName: string,
   options: {
@@ -132,19 +174,12 @@ export async function diarizeFromBuffer(
     maxSpeakers?: number;
     clusteringThreshold?: number;
   } = {}
-): Promise<DiarizationResult> {
-  const startTime = Date.now();
-
-  console.log(`[Diarization] ====== diarizeFromBuffer ======`);
+): Promise<SubmitResult> {
+  console.log(`[Diarization] ====== submitDiarization ======`);
   console.log(`[Diarization] File: ${fileName}`);
   console.log(`[Diarization] Size: ${(buffer.length / 1024 / 1024).toFixed(2)}MB`);
-  console.log(`[Diarization] Language: ${options.language || 'auto'}`);
-  console.log(`[Diarization] Expected speakers: ${options.numSpeakers || 'auto'}`);
-  console.log(`[Diarization] Speaker bounds: min=${options.minSpeakers || 'auto'} max=${options.maxSpeakers || 'auto'}`);
-  console.log(`[Diarization] Clustering threshold: ${options.clusteringThreshold || 'default'}`);
 
   try {
-    // Build multipart form data
     const form = new FormData();
     form.append('audio', buffer, {
       filename: fileName,
@@ -166,137 +201,59 @@ export async function diarizeFromBuffer(
       form.append('clustering_threshold', String(options.clusteringThreshold));
     }
 
-    // ── Step 1: Submit audio → get job ID (returns instantly) ──
-    console.log(`[Diarization] Submitting to Python service at ${DIARIZATION_SERVICE_URL}/diarize`);
+    console.log(`[Diarization] Submitting to ${DIARIZATION_SERVICE_URL}/diarize`);
 
-    const submitResponse = await axios.post(
+    const response = await axios.post(
       `${DIARIZATION_SERVICE_URL}/diarize`,
       form,
       {
-        headers: {
-          ...form.getHeaders(),
-        },
-        timeout: 60000, // 60s timeout for upload only
+        headers: { ...form.getHeaders() },
+        timeout: 120000, // 2 min for upload
         maxContentLength: Infinity,
         maxBodyLength: Infinity,
       }
     );
 
-    const jobId = submitResponse.data?.jobId;
+    const jobId = response.data?.jobId;
     if (!jobId) {
-      throw new Error('Diarization service did not return a job ID');
+      return { error: 'Diarization service did not return a job ID' };
     }
 
     console.log(`[Diarization] Job submitted: ${jobId}`);
-
-    // ── Step 2: Poll for results until complete or timeout ──
-    const deadline = Date.now() + DIARIZATION_TIMEOUT;
-
-    while (Date.now() < deadline) {
-      await new Promise(resolve => setTimeout(resolve, DIARIZATION_POLL_INTERVAL));
-
-      const statusResponse = await axios.get(
-        `${DIARIZATION_SERVICE_URL}/jobs/${jobId}`,
-        { timeout: 10000 }
-      );
-
-      const jobStatus = statusResponse.data;
-      console.log(`[Diarization] Job ${jobId}: status=${jobStatus.status} progress="${jobStatus.progress || ''}"`);
-
-      if (jobStatus.status === 'complete') {
-        const result: DiarizationResult = jobStatus.result;
-        const elapsed = (Date.now() - startTime) / 1000;
-
-        console.log(`[Diarization] ====== Result ======`);
-        console.log(`[Diarization] Success: ${result.success}`);
-        console.log(`[Diarization] Blocks: ${result.blocks?.length || 0}`);
-        console.log(`[Diarization] Speakers: ${result.speakerCount} (${result.speakers?.join(', ')})`);
-        console.log(`[Diarization] Words: ${result.totalWords}`);
-        console.log(`[Diarization] Duration: ${result.totalDuration}s`);
-        console.log(`[Diarization] Processing: ${result.processingTimeSeconds}s (total: ${elapsed.toFixed(1)}s)`);
-        if (result.qualityMetrics) {
-          console.log(`[Diarization] Quality: confidence=${result.qualityMetrics.avgConfidence} ` +
-            `coverage=${result.qualityMetrics.diarizationCoverage}% ` +
-            `segments(raw=${result.qualityMetrics.segmentsBeforeFilter} ` +
-            `filtered=${result.qualityMetrics.segmentsAfterFilter} ` +
-            `merged=${result.qualityMetrics.segmentsAfterMerge}) ` +
-            `smoothed=${result.qualityMetrics.smoothedBlocks}`);
-        }
-
-        return {
-          ...result,
-          processingTimeSeconds: elapsed,
-        };
-      }
-
-      if (jobStatus.status === 'failed') {
-        const result: DiarizationResult = jobStatus.result;
-        const elapsed = (Date.now() - startTime) / 1000;
-        console.error(`[Diarization] Job failed: ${result?.error || 'Unknown error'}`);
-        return {
-          ...(result || {
-            success: false,
-            blocks: [],
-            speakers: [],
-            speakerCount: 0,
-            totalDuration: 0,
-            totalWords: 0,
-            language: 'en',
-          }),
-          success: false,
-          processingTimeSeconds: elapsed,
-          error: result?.error || 'Diarization failed',
-        };
-      }
-    }
-
-    // Timeout reached
-    const elapsed = (Date.now() - startTime) / 1000;
-    console.error(`[Diarization] Job ${jobId} timed out after ${elapsed.toFixed(0)}s`);
-    return {
-      success: false,
-      blocks: [],
-      speakers: [],
-      speakerCount: 0,
-      totalDuration: 0,
-      totalWords: 0,
-      language: 'en',
-      processingTimeSeconds: elapsed,
-      error: `Diarization timed out after ${Math.round(DIARIZATION_TIMEOUT / 1000)}s`,
-    };
+    return { jobId };
   } catch (error: any) {
-    const elapsed = (Date.now() - startTime) / 1000;
-
     if (error instanceof AxiosError) {
-      const status = error.response?.status;
       const detail = error.response?.data?.detail || error.response?.data?.error;
-      console.error(`[Diarization] HTTP ${status}: ${detail || error.message}`);
-
-      return {
-        success: false,
-        blocks: [],
-        speakers: [],
-        speakerCount: 0,
-        totalDuration: 0,
-        totalWords: 0,
-        language: 'en',
-        processingTimeSeconds: elapsed,
-        error: detail || `Diarization service error (HTTP ${status})`,
-      };
+      console.error(`[Diarization] Submit error HTTP ${error.response?.status}: ${detail || error.message}`);
+      return { error: detail || `Diarization service error (HTTP ${error.response?.status})` };
     }
+    console.error('[Diarization] Submit error:', error.message);
+    return { error: error.message || 'Failed to submit diarization' };
+  }
+}
 
-    console.error('[Diarization] Error:', error.message);
-    return {
-      success: false,
-      blocks: [],
-      speakers: [],
-      speakerCount: 0,
-      totalDuration: 0,
-      totalWords: 0,
-      language: 'en',
-      processingTimeSeconds: elapsed,
-      error: error.message || 'Diarization failed',
-    };
+// ── Poll Diarization Job Status ──
+
+export interface JobStatusResult {
+  jobId: string;
+  status: string;  // 'processing' | 'complete' | 'failed'
+  progress?: string;
+  result?: DiarizationResult;
+}
+
+export async function pollDiarizationJob(jobId: string): Promise<JobStatusResult | null> {
+  try {
+    const response = await axios.get(
+      `${DIARIZATION_SERVICE_URL}/jobs/${jobId}`,
+      { timeout: 10000 }
+    );
+    return response.data;
+  } catch (error: any) {
+    if (error instanceof AxiosError && error.response?.status === 404) {
+      return null;
+    }
+    console.error(`[Diarization] Poll error for job ${jobId}:`, error.message);
+    throw error;
   }
 }
 
