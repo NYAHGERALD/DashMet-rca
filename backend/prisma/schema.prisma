@@ -2349,6 +2349,7 @@ model MeetingSummary {
   tone            String?               // Meeting tone (e.g., "productive", "collaborative")
   objectives      Json?                 // Array of meeting objectives
   keyDiscussions  Json?                 // Array of key discussion points
+  actionItems     Json?                 // Array of action items with assignees/deadlines
   takeaways       Json?                 // Array of key takeaways
   
   // AI Audio Summary (TTS generated)

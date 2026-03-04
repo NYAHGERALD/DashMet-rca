@@ -61,6 +61,7 @@ export interface NarrativeSummary {
   briefSummary: string;        // 2-3 sentence summary
   objectives: string[];        // Meeting objectives identified
   keyDiscussions: string[];    // Main discussion points
+  actionItems: string[];       // Action items with assignees/deadlines
   takeaways: string[];         // Key takeaways
   tone: string;                // Detected meeting tone (formal, casual, urgent, etc.)
   generatedAt: string;         // ISO timestamp
@@ -98,20 +99,28 @@ export async function generateNarrativeSummary(
     }
   }
 
-  const systemPrompt = `You are an elite executive assistant with exceptional skills in meeting analysis and professional communication. Your task is to create a compelling, intelligent narrative summary of a meeting that sounds natural when read aloud.
+  const systemPrompt = `You are an elite executive assistant with exceptional skills in meeting analysis and professional communication. Your task is to create a detailed, comprehensive narrative summary of a meeting that sounds natural when read aloud.
 
-Your summary should:
+Your narrative MUST:
 1. Open with the meeting context (title, date, time, duration) woven naturally into the narrative
-2. Capture the essence and purpose of the meeting
-3. Highlight the most important discussions and insights
-4. Identify objectives, whether stated or implied
-5. Extract actionable takeaways
-6. Maintain a professional yet engaging tone
-7. Be suitable for text-to-speech narration (avoid bullet points, use flowing prose)
+2. Cover EVERY significant topic, discussion point, and idea raised during the meeting — do not omit or gloss over anything
+3. Explain each discussion topic in enough detail that someone who was NOT in the meeting can fully understand what was discussed, what positions were taken, and what conclusions were reached
+4. Capture the reasoning, context, and background behind decisions — not just the decisions themselves
+5. Include ALL action items, responsibilities, and deadlines discussed, woven naturally into the narrative (e.g., "It was agreed that John would finalize the budget report by Friday")
+6. Highlight key decisions, agreements, and any points of disagreement or unresolved matters
+7. Identify objectives, whether stated or implied
+8. Maintain a professional, formal, yet clear and approachable tone — use simple English that is easy to understand by all readers
+9. Be suitable for text-to-speech narration (avoid bullet points, use flowing prose with clear paragraph transitions)
+10. Write in a natural, human-like style — as if a skilled professional is narrating the meeting to a colleague. Avoid robotic or templated phrasing.
 
-Write as if you're briefing a busy executive who needs to understand what happened without reading the full transcript. Be insightful, not just descriptive. Draw connections and identify patterns in the discussion.
+IMPORTANT GUIDELINES:
+- Be THOROUGH. The narrative should be long enough to cover all points discussed. A 5-minute meeting might need 400-600 words; a 30-minute meeting might need 800-1500+ words. Scale the length to the content.
+- Do NOT summarize superficially. If the meeting discussed a budget issue, explain WHAT the budget issue was, WHY it matters, what numbers or figures were mentioned, and what was decided.
+- Use clear paragraph breaks for different topics to aid readability.
+- Include names of participants when mentioned in the transcript and attribute statements, decisions, or action items to specific people where possible.
+- End with a clear closing paragraph that summarises the overall outcome and next steps.
 
-The narrative should be 150-300 words, written in third person, and structured to flow naturally when spoken aloud.`;
+Write as if you are briefing someone who was absent and needs to understand everything that happened without reading the full transcript. Be insightful, not just descriptive. Draw connections and identify patterns in the discussion.`;
 
   const userPrompt = `Please analyze this meeting and create a professional narrative summary:
 
@@ -132,11 +141,12 @@ ${input.existingSummary?.keyPoints?.length ? `\n**Previously Identified Key Poin
 
 Please respond in the following JSON format:
 {
-  "narrative": "The full narrative summary suitable for text-to-speech (150-300 words, flowing prose)",
-  "briefSummary": "A concise 2-3 sentence summary of the meeting",
-  "objectives": ["objective 1", "objective 2"],
-  "keyDiscussions": ["discussion point 1", "discussion point 2", "discussion point 3"],
-  "takeaways": ["takeaway 1", "takeaway 2", "takeaway 3"],
+  "narrative": "A detailed, comprehensive narrative summary suitable for text-to-speech. Cover ALL discussion points thoroughly. Scale the length to the meeting content — typically 400-1500+ words depending on meeting length. Use clear paragraph structure with natural transitions.",
+  "briefSummary": "A concise 2-3 sentence summary of the meeting highlighting the main purpose and outcome",
+  "objectives": ["objective 1", "objective 2", "...(list ALL objectives identified)"],
+  "keyDiscussions": ["detailed discussion point 1", "detailed discussion point 2", "...(list ALL significant discussion topics, be specific and descriptive)"],
+  "actionItems": ["action item 1 with assignee and deadline if mentioned", "action item 2", "...(list ALL action items discussed)"],
+  "takeaways": ["key takeaway 1", "key takeaway 2", "...(list ALL important takeaways)"],
   "tone": "The overall tone of the meeting (e.g., collaborative, urgent, informational, strategic)"
 }`;
 
@@ -149,7 +159,7 @@ Please respond in the following JSON format:
       { role: 'user', content: userPrompt }
     ],
     temperature: 0.7,
-    max_tokens: 1500,
+    max_tokens: 4096,
     response_format: { type: 'json_object' }
   });
 
@@ -167,6 +177,7 @@ Please respond in the following JSON format:
     briefSummary: parsed.briefSummary,
     objectives: parsed.objectives || [],
     keyDiscussions: parsed.keyDiscussions || [],
+    actionItems: parsed.actionItems || [],
     takeaways: parsed.takeaways || [],
     tone: parsed.tone || 'professional',
     generatedAt: new Date().toISOString()
