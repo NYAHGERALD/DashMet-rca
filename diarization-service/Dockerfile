@@ -22,6 +22,9 @@ RUN pip install --no-cache-dir -r requirements.txt
 
 COPY . .
 
-EXPOSE 8100
+# Render injects PORT env var; default to 10000 (Render's default) if not set
+ENV PORT=10000
+EXPOSE ${PORT}
 
-CMD ["uvicorn", "main:app", "--host", "0.0.0.0", "--port", "8100", "--workers", "1"]
+# Use shell form so $PORT is expanded at runtime
+CMD uvicorn main:app --host 0.0.0.0 --port $PORT --workers 1

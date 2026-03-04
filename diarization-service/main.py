@@ -108,7 +108,7 @@ def get_diarization_pipeline(clustering_threshold: Optional[float] = None):
 
         _diarization_pipeline = Pipeline.from_pretrained(
             "pyannote/speaker-diarization-3.1",
-            use_auth_token=HF_AUTH_TOKEN,
+            token=HF_AUTH_TOKEN,
         )
         if DEVICE == "cuda":
             _diarization_pipeline.to(torch.device("cuda"))
@@ -612,6 +612,12 @@ def _finalize_block(speaker: str, words: list[TranscriptWord]) -> TranscriptBloc
 # API Endpoints
 # ──────────────────────────────────────────────────────────
 
+@app.get("/")
+async def root():
+    """Root endpoint for Render port detection."""
+    return {"status": "ok", "service": "dashmet-diarization"}
+
+
 @app.get("/health", response_model=HealthResponse)
 async def health_check():
     return HealthResponse(
@@ -814,7 +820,7 @@ async def warmup_models():
 if __name__ == "__main__":
     import uvicorn
 
-    port = int(os.getenv("DIARIZATION_PORT", "8100"))
+    port = int(os.getenv("PORT", os.getenv("DIARIZATION_PORT", "10000")))
     uvicorn.run(
         "main:app",
         host="0.0.0.0",
