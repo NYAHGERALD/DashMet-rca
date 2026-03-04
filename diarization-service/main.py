@@ -28,12 +28,15 @@ Author: Dashmet Meeting Intelligence
 
 import os
 import io
+import uuid
 import tempfile
 import logging
 import time
+import threading
 from pathlib import Path
 from typing import Optional
 from collections import Counter
+from concurrent.futures import ThreadPoolExecutor
 
 import numpy as np
 import torch
@@ -185,6 +188,39 @@ class DiarizationResponse(BaseModel):
     processingTimeSeconds: float
     error: Optional[str] = None
     qualityMetrics: Optional[QualityMetrics] = None
+
+
+class JobSubmitResponse(BaseModel):
+    jobId: str
+    status: str
+
+
+class JobStatusResponse(BaseModel):
+    jobId: str
+    status: str  # processing | complete | failed
+    progress: Optional[str] = None
+    result: Optional[DiarizationResponse] = None
+
+
+# ──────────────────────────────────────────────────────────
+# Background Job Infrastructure
+# ──────────────────────────────────────────────────────────
+_job_store: dict[str, dict] = {}  # job_id -> { status, progress, result }
+_job_lock = threading.Lock()
+_executor = ThreadPoolExecutor(max_workers=1)  # Single worker — models not thread-safe
+
+
+def _update_job(job_id: str, **kwargs):
+    """Thread-safe job store update."""
+    with _job_lock:
+        if job_id in _job_store:
+            _job_store[job_id].update(kwargs)
+
+
+def _get_job(job_id: str) -> Optional[dict]:
+    """Thread-safe job retrieval."""
+    with _job_lock:
+        return _job_store.get(job_id, {}).copy() if job_id in _job_store else None
 
 
 class HealthResponse(BaseModel):
@@ -632,7 +668,7 @@ async def health_check():
     )
 
 
-@app.post("/diarize", response_model=DiarizationResponse)
+@app.post("/diarize", response_model=JobSubmitResponse)
 async def diarize_audio(
     audio: UploadFile = File(...),
     language: Optional[str] = Form(None),
@@ -642,40 +678,76 @@ async def diarize_audio(
     clustering_threshold: Optional[float] = Form(None),
 ):
     """
-    Enterprise Speaker Diarization Endpoint v2
-    ────────────────────────────────────────────
-    Upload an audio file to receive a fully diarized, timestamped
-    transcript with speaker attribution.
+    Submit audio for background speaker diarization.
+    Returns a job ID immediately — poll GET /jobs/{jobId} for results.
+    """
+    # Read uploaded audio into memory
+    audio_bytes = await audio.read()
+    if len(audio_bytes) == 0:
+        raise HTTPException(status_code=400, detail="Empty audio file")
 
-    Pipeline:
-      1. Audio normalization → 16kHz mono WAV
-      2. Pyannote speaker diarization → who spoke when
-      3. Noise filtering → remove segments < 300ms
-      4. Same-speaker merging → consolidate gaps < 500ms
-      5. OpenAI Whisper transcription → word-level timestamps
-      6. Weighted alignment → map each word to its speaker
-      7. Block assembly + smoothing → contiguous speaker blocks
+    filename = audio.filename or "audio.m4a"
+    logger.info(f"Received audio: {filename} | {len(audio_bytes)} bytes")
 
-    Optional parameters:
-      - num_speakers: exact number of speakers (if known)
-      - min_speakers / max_speakers: speaker count bounds
-      - clustering_threshold: 0.3-0.95 (higher = fewer speakers)
+    # Create job
+    job_id = str(uuid.uuid4())
+    with _job_lock:
+        _job_store[job_id] = {
+            "status": "processing",
+            "progress": "Queued for processing",
+            "result": None,
+        }
+
+    # Submit to background thread
+    _executor.submit(
+        _process_diarization_job,
+        job_id, audio_bytes, filename,
+        language, num_speakers, min_speakers, max_speakers,
+        clustering_threshold,
+    )
+
+    return JobSubmitResponse(jobId=job_id, status="processing")
+
+
+@app.get("/jobs/{job_id}", response_model=JobStatusResponse)
+async def get_job_status(job_id: str):
+    """Poll this endpoint to check diarization job progress and retrieve results."""
+    job = _get_job(job_id)
+    if job is None:
+        raise HTTPException(status_code=404, detail="Job not found")
+    return JobStatusResponse(
+        jobId=job_id,
+        status=job["status"],
+        progress=job.get("progress"),
+        result=job.get("result"),
+    )
+
+
+def _process_diarization_job(
+    job_id: str,
+    audio_bytes: bytes,
+    filename: str,
+    language: Optional[str],
+    num_speakers: Optional[int],
+    min_speakers: Optional[int],
+    max_speakers: Optional[int],
+    clustering_threshold: Optional[float],
+):
+    """
+    Background worker: runs the full 7-stage diarization pipeline.
+    Updates job store with progress and final result.
     """
     start_time = time.time()
     wav_path = None
 
     try:
-        # Read uploaded audio
-        audio_bytes = await audio.read()
-        if len(audio_bytes) == 0:
-            raise HTTPException(status_code=400, detail="Empty audio file")
-
-        logger.info(f"Received audio: {audio.filename} | {len(audio_bytes)} bytes")
+        _update_job(job_id, progress="Converting audio to WAV")
 
         # Step 1: Convert to WAV
-        wav_path = convert_to_wav(audio_bytes, audio.filename or "audio.m4a")
+        wav_path = convert_to_wav(audio_bytes, filename)
 
         # Step 2+3+4: Run Pyannote diarization with filtering & merging
+        _update_job(job_id, progress="Running speaker diarization (Pyannote)")
         diarization_segments, diar_metrics = run_diarization(
             wav_path,
             num_speakers=num_speakers,
@@ -685,16 +757,21 @@ async def diarize_audio(
         )
 
         if not diarization_segments:
-            raise HTTPException(
-                status_code=422,
-                detail="No speech detected in audio"
-            )
+            elapsed = round(time.time() - start_time, 2)
+            _update_job(job_id, status="failed", progress="No speech detected",
+                        result=DiarizationResponse(
+                            success=False, blocks=[], speakers=[], speakerCount=0,
+                            totalDuration=0.0, totalWords=0, language="en",
+                            processingTimeSeconds=elapsed,
+                            error="No speech detected in audio",
+                        ).model_dump())
+            return
 
         # Step 5: Run Whisper with word timestamps
+        _update_job(job_id, progress="Transcribing audio (Whisper)")
         whisper_result = run_whisper_transcription(wav_path, language=language)
 
         if not whisper_result.get("words"):
-            # Fallback: use segment-level timestamps if no word timestamps
             logger.warning("No word-level timestamps from Whisper, "
                            "falling back to segment alignment")
             whisper_words = []
@@ -714,11 +791,13 @@ async def diarize_audio(
             whisper_result["words"] = whisper_words
 
         # Step 6: Weighted alignment of words to speakers
+        _update_job(job_id, progress="Aligning words to speakers")
         attributed_words = align_words_to_speakers(
             diarization_segments, whisper_result["words"]
         )
 
         # Step 7: Build transcript blocks with smoothing
+        _update_job(job_id, progress="Building transcript blocks")
         blocks, smoothed_count = build_transcript_blocks(attributed_words)
 
         # Compute stats
@@ -750,14 +829,7 @@ async def diarize_audio(
             clusteringThreshold=diar_metrics["clusteringThreshold"],
         )
 
-        logger.info(
-            f"Diarization complete: {len(blocks)} blocks, "
-            f"{len(all_speakers)} speakers, {total_words} words, "
-            f"{elapsed}s processing | confidence={avg_confidence:.3f} "
-            f"coverage={speech_coverage:.1f}%"
-        )
-
-        return DiarizationResponse(
+        result = DiarizationResponse(
             success=True,
             blocks=blocks,
             speakers=all_speakers,
@@ -769,24 +841,26 @@ async def diarize_audio(
             qualityMetrics=quality,
         )
 
-    except HTTPException:
-        raise
+        logger.info(
+            f"Diarization complete: {len(blocks)} blocks, "
+            f"{len(all_speakers)} speakers, {total_words} words, "
+            f"{elapsed}s processing | confidence={avg_confidence:.3f} "
+            f"coverage={speech_coverage:.1f}%"
+        )
+
+        _update_job(job_id, status="complete", progress="Done",
+                     result=result.model_dump())
+
     except Exception as e:
         elapsed = round(time.time() - start_time, 2)
-        logger.exception(f"Diarization failed after {elapsed}s")
-        return DiarizationResponse(
-            success=False,
-            blocks=[],
-            speakers=[],
-            speakerCount=0,
-            totalDuration=0.0,
-            totalWords=0,
-            language="en",
-            processingTimeSeconds=elapsed,
-            error=str(e),
-        )
+        logger.exception(f"Diarization job {job_id} failed after {elapsed}s")
+        _update_job(job_id, status="failed", progress=f"Error: {str(e)}",
+                     result=DiarizationResponse(
+                         success=False, blocks=[], speakers=[], speakerCount=0,
+                         totalDuration=0.0, totalWords=0, language="en",
+                         processingTimeSeconds=elapsed, error=str(e),
+                     ).model_dump())
     finally:
-        # Cleanup temp WAV
         if wav_path and os.path.exists(wav_path):
             try:
                 os.unlink(wav_path)

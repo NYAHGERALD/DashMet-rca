@@ -20,6 +20,7 @@ import path from 'path';
 
 const DIARIZATION_SERVICE_URL = process.env.DIARIZATION_SERVICE_URL || 'http://localhost:8100';
 const DIARIZATION_TIMEOUT = parseInt(process.env.DIARIZATION_TIMEOUT || '600000', 10); // 10 min default
+const DIARIZATION_POLL_INTERVAL = parseInt(process.env.DIARIZATION_POLL_INTERVAL || '5000', 10); // 5s default
 
 // ── Types ──────────────────────────────────────────────────
 
@@ -165,43 +166,103 @@ export async function diarizeFromBuffer(
       form.append('clustering_threshold', String(options.clusteringThreshold));
     }
 
-    console.log(`[Diarization] Sending to Python service at ${DIARIZATION_SERVICE_URL}/diarize`);
+    // ── Step 1: Submit audio → get job ID (returns instantly) ──
+    console.log(`[Diarization] Submitting to Python service at ${DIARIZATION_SERVICE_URL}/diarize`);
 
-    const response = await axios.post(
+    const submitResponse = await axios.post(
       `${DIARIZATION_SERVICE_URL}/diarize`,
       form,
       {
         headers: {
           ...form.getHeaders(),
         },
-        timeout: DIARIZATION_TIMEOUT,
+        timeout: 60000, // 60s timeout for upload only
         maxContentLength: Infinity,
         maxBodyLength: Infinity,
       }
     );
 
-    const result: DiarizationResult = response.data;
-    const elapsed = (Date.now() - startTime) / 1000;
-
-    console.log(`[Diarization] ====== Result ======`);
-    console.log(`[Diarization] Success: ${result.success}`);
-    console.log(`[Diarization] Blocks: ${result.blocks?.length || 0}`);
-    console.log(`[Diarization] Speakers: ${result.speakerCount} (${result.speakers?.join(', ')})`);
-    console.log(`[Diarization] Words: ${result.totalWords}`);
-    console.log(`[Diarization] Duration: ${result.totalDuration}s`);
-    console.log(`[Diarization] Processing: ${result.processingTimeSeconds}s (total: ${elapsed.toFixed(1)}s)`);
-    if (result.qualityMetrics) {
-      console.log(`[Diarization] Quality: confidence=${result.qualityMetrics.avgConfidence} ` +
-        `coverage=${result.qualityMetrics.diarizationCoverage}% ` +
-        `segments(raw=${result.qualityMetrics.segmentsBeforeFilter} ` +
-        `filtered=${result.qualityMetrics.segmentsAfterFilter} ` +
-        `merged=${result.qualityMetrics.segmentsAfterMerge}) ` +
-        `smoothed=${result.qualityMetrics.smoothedBlocks}`);
+    const jobId = submitResponse.data?.jobId;
+    if (!jobId) {
+      throw new Error('Diarization service did not return a job ID');
     }
 
+    console.log(`[Diarization] Job submitted: ${jobId}`);
+
+    // ── Step 2: Poll for results until complete or timeout ──
+    const deadline = Date.now() + DIARIZATION_TIMEOUT;
+
+    while (Date.now() < deadline) {
+      await new Promise(resolve => setTimeout(resolve, DIARIZATION_POLL_INTERVAL));
+
+      const statusResponse = await axios.get(
+        `${DIARIZATION_SERVICE_URL}/jobs/${jobId}`,
+        { timeout: 10000 }
+      );
+
+      const jobStatus = statusResponse.data;
+      console.log(`[Diarization] Job ${jobId}: status=${jobStatus.status} progress="${jobStatus.progress || ''}"`);
+
+      if (jobStatus.status === 'complete') {
+        const result: DiarizationResult = jobStatus.result;
+        const elapsed = (Date.now() - startTime) / 1000;
+
+        console.log(`[Diarization] ====== Result ======`);
+        console.log(`[Diarization] Success: ${result.success}`);
+        console.log(`[Diarization] Blocks: ${result.blocks?.length || 0}`);
+        console.log(`[Diarization] Speakers: ${result.speakerCount} (${result.speakers?.join(', ')})`);
+        console.log(`[Diarization] Words: ${result.totalWords}`);
+        console.log(`[Diarization] Duration: ${result.totalDuration}s`);
+        console.log(`[Diarization] Processing: ${result.processingTimeSeconds}s (total: ${elapsed.toFixed(1)}s)`);
+        if (result.qualityMetrics) {
+          console.log(`[Diarization] Quality: confidence=${result.qualityMetrics.avgConfidence} ` +
+            `coverage=${result.qualityMetrics.diarizationCoverage}% ` +
+            `segments(raw=${result.qualityMetrics.segmentsBeforeFilter} ` +
+            `filtered=${result.qualityMetrics.segmentsAfterFilter} ` +
+            `merged=${result.qualityMetrics.segmentsAfterMerge}) ` +
+            `smoothed=${result.qualityMetrics.smoothedBlocks}`);
+        }
+
+        return {
+          ...result,
+          processingTimeSeconds: elapsed,
+        };
+      }
+
+      if (jobStatus.status === 'failed') {
+        const result: DiarizationResult = jobStatus.result;
+        const elapsed = (Date.now() - startTime) / 1000;
+        console.error(`[Diarization] Job failed: ${result?.error || 'Unknown error'}`);
+        return {
+          ...(result || {
+            success: false,
+            blocks: [],
+            speakers: [],
+            speakerCount: 0,
+            totalDuration: 0,
+            totalWords: 0,
+            language: 'en',
+          }),
+          success: false,
+          processingTimeSeconds: elapsed,
+          error: result?.error || 'Diarization failed',
+        };
+      }
+    }
+
+    // Timeout reached
+    const elapsed = (Date.now() - startTime) / 1000;
+    console.error(`[Diarization] Job ${jobId} timed out after ${elapsed.toFixed(0)}s`);
     return {
-      ...result,
+      success: false,
+      blocks: [],
+      speakers: [],
+      speakerCount: 0,
+      totalDuration: 0,
+      totalWords: 0,
+      language: 'en',
       processingTimeSeconds: elapsed,
+      error: `Diarization timed out after ${Math.round(DIARIZATION_TIMEOUT / 1000)}s`,
     };
   } catch (error: any) {
     const elapsed = (Date.now() - startTime) / 1000;
