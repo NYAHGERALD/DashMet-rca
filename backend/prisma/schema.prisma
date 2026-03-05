@@ -331,6 +331,7 @@ model Department {
   Incident                  Incident[]
   WorkplaceSafetyAssessment WorkplaceSafetyAssessment[]
   Meeting                   Meeting[]
+  Task                      Task[]
 
   // LSW Relations
   LswBoards                 LswBoard[]                  @relation("LswBoardDepartment")
@@ -1749,6 +1750,7 @@ model Task {
   description    String?
   status         TaskStatus       @default(PENDING)
   priority       TaskPriority     @default(MEDIUM)
+  startDate      DateTime?
   dueDate        DateTime?
   completedAt    DateTime?
   completedById  String?          // Who marked this task as completed
@@ -1760,6 +1762,10 @@ model Task {
   lockedAt       DateTime?
   lockedById     String?
   lockedBy       User?            @relation("TaskLockedBy", fields: [lockedById], references: [id])
+  
+  // Department assignment
+  departmentId   String?
+  department     Department?      @relation(fields: [departmentId], references: [id])
   
   ownerId        String
   assigneeId     String?          // Legacy single assignee (kept for backwards compatibility)
@@ -1787,6 +1793,7 @@ model Task {
   @@index([meetingId])
   @@index([completedById])
   @@index([lockedById])
+  @@index([departmentId])
 }
 
 // Task Assignees - junction table for multiple assignees

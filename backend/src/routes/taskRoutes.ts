@@ -207,6 +207,12 @@ const taskInclude = {
       email: true,
     },
   },
+  department: {
+    select: {
+      id: true,
+      name: true,
+    },
+  },
   _count: {
     select: {
       comments: true,
@@ -260,13 +266,14 @@ router.get('/users/organization/:organizationId', async (req: Request, res: Resp
 // ============================================================================
 // POST /api/mobile/tasks
 // Create a new task
-// Expects: { title, description?, dueDate?, priority?, assigneeId?, ownerId, organizationId, facilityId?, meetingId?, sourceText?, isAiExtracted? }
+// Expects: { title, description?, startDate?, dueDate?, priority?, assigneeId?, ownerId, organizationId, facilityId?, meetingId?, sourceText?, isAiExtracted?, departmentId? }
 // ============================================================================
 router.post('/', async (req: Request, res: Response) => {
   try {
     const { 
       title, 
       description, 
+      startDate,
       dueDate, 
       priority, 
       assigneeId, 
@@ -275,7 +282,8 @@ router.post('/', async (req: Request, res: Response) => {
       facilityId,
       meetingId,
       sourceText,
-      isAiExtracted
+      isAiExtracted,
+      departmentId
     } = req.body;
 
     // Validate required fields
@@ -317,6 +325,7 @@ router.post('/', async (req: Request, res: Response) => {
       data: {
         title: title.trim(),
         description: description?.trim() || null,
+        startDate: startDate ? new Date(startDate) : null,
         dueDate: dueDate ? new Date(dueDate) : null,
         priority: priority || 'MEDIUM',
         ownerId,
@@ -326,6 +335,7 @@ router.post('/', async (req: Request, res: Response) => {
         meetingId: meetingId || null,
         sourceText: sourceText || null,
         isAiExtracted: isAiExtracted || false,
+        departmentId: departmentId || null,
       },
       include: taskInclude,
     });
@@ -643,12 +653,12 @@ router.get('/:id', async (req: Request, res: Response) => {
 // ============================================================================
 // PATCH /api/mobile/tasks/:id
 // Update a task (status, assignment, details, progress)
-// Expects: { title?, description?, status?, priority?, dueDate?, assigneeId?, progress?, userId? (for logging) }
+// Expects: { title?, description?, status?, priority?, startDate?, dueDate?, assigneeId?, departmentId?, progress?, userId? (for logging) }
 // ============================================================================
 router.patch('/:id', async (req: Request, res: Response) => {
   try {
     const { id } = req.params;
-    const { title, description, status, priority, dueDate, assigneeId, progress, userId, isLocked } = req.body;
+    const { title, description, status, priority, startDate, dueDate, assigneeId, departmentId, progress, userId, isLocked } = req.body;
 
     // Check task exists
     const existingTask = await prisma.task.findUnique({
@@ -697,6 +707,8 @@ router.patch('/:id', async (req: Request, res: Response) => {
     
     if (title !== undefined) updateData.title = title.trim();
     if (description !== undefined) updateData.description = description?.trim() || null;
+    if (startDate !== undefined) updateData.startDate = startDate ? new Date(startDate) : null;
+    if (departmentId !== undefined) updateData.departmentId = departmentId || null;
     
     // Handle bidirectional sync between status and progress
     // Status update triggers progress adjustment
@@ -857,6 +869,32 @@ router.patch('/:id', async (req: Request, res: Response) => {
           newValue: newDate,
         });
       }
+    }
+
+    if (startDate !== undefined) {
+      const oldDate = existingTask.startDate ? existingTask.startDate.toISOString() : null;
+      const newDate = startDate ? new Date(startDate).toISOString() : null;
+      if (oldDate !== newDate) {
+        await createActivityLog({
+          taskId: id,
+          userId: logUserId,
+          action: 'UPDATE_START_DATE',
+          field: 'startDate',
+          previousValue: oldDate,
+          newValue: newDate,
+        });
+      }
+    }
+
+    if (departmentId !== undefined && departmentId !== existingTask.departmentId) {
+      await createActivityLog({
+        taskId: id,
+        userId: logUserId,
+        action: 'UPDATE_DEPARTMENT',
+        field: 'departmentId',
+        previousValue: existingTask.departmentId,
+        newValue: departmentId || null,
+      });
     }
 
     // Log lock/unlock action
