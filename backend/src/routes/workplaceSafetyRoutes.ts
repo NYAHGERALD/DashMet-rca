@@ -3,6 +3,7 @@ import asyncHandler from 'express-async-handler';
 import { PrismaClient } from '@prisma/client';
 import { authenticate, AuthRequest } from '../middleware/auth';
 import { logAuditEvent, getClientIp } from '../services/auditService';
+import crypto from 'crypto';
 
 const router = Router();
 const prisma = new PrismaClient();
@@ -480,11 +481,13 @@ router.post(
             facilityId: sanitizedFacilityId,
             WSASection: sections ? {
               create: sections.map((section: any, sectionIndex: number) => ({
+                id: crypto.randomUUID(),
                 sectionId: section.id,
                 title: section.title,
                 sortOrder: sectionIndex,
                 WSAItem: {
                   create: section.items.map((item: any, itemIndex: number) => ({
+                    id: crypto.randomUUID(),
                     itemId: item.id,
                     description: item.description,
                     status: item.status,
@@ -537,10 +540,12 @@ router.post(
       return;
     }
 
-    console.log('📝 Creating NEW assessment... [v2-WSASection-fix]');
+    console.log('📝 Creating NEW assessment... [v3-uuid-fix]');
     // Create the assessment with sections and items
+    const assessmentId = crypto.randomUUID();
     const assessment = await prisma.workplaceSafetyAssessment.create({
       data: {
+        id: assessmentId,
         assessmentNumber,
         version: version || '3/19/25',
         date: new Date(date),
@@ -560,13 +565,16 @@ router.post(
         organizationId: userOrgId,
         facilityId: sanitizedFacilityId,
         createdById: userId,
+        updatedAt: new Date(),
         WSASection: sections ? {
           create: sections.map((section: any, sectionIndex: number) => ({
+            id: crypto.randomUUID(),
             sectionId: section.id,
             title: section.title,
             sortOrder: sectionIndex,
             WSAItem: {
               create: section.items.map((item: any, itemIndex: number) => ({
+                id: crypto.randomUUID(),
                 itemId: item.id,
                 description: item.description,
                 status: item.status,
@@ -720,11 +728,13 @@ router.put(
           facilityId: sanitizedFacilityId,
           WSASection: sections ? {
             create: sections.map((section: any, sectionIndex: number) => ({
+              id: crypto.randomUUID(),
               sectionId: section.id,
               title: section.title,
               sortOrder: sectionIndex,
               WSAItem: {
                 create: section.items.map((item: any, itemIndex: number) => ({
+                  id: crypto.randomUUID(),
                   itemId: item.id,
                   description: item.description,
                   status: item.status,
