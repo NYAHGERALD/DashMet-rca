@@ -1061,11 +1061,16 @@ router.post(
       return;
     }
 
+    // Get signature URLs and timestamps from request body
+    const { employeeSignatureUrl, teamLeaderSignatureUrl, employeeSignedAt, teamLeaderSignedAt } = req.body;
+
     const assessment = await prisma.workplaceSafetyAssessment.update({
       where: { id },
       data: {
         status: 'SUBMITTED',
         submittedAt: new Date(),
+        ...(employeeSignatureUrl && { employeeSignature: employeeSignatureUrl }),
+        ...(teamLeaderSignatureUrl && { teamLeaderSignature: teamLeaderSignatureUrl }),
       },
     });
 
@@ -1076,7 +1081,14 @@ router.post(
       entityId: id,
       userId,
       organizationId: userOrgId,
-      changes: { status: 'SUBMITTED', action: 'Assessment submitted' },
+      changes: { 
+        status: 'SUBMITTED', 
+        action: 'Assessment submitted',
+        employeeSignature: employeeSignatureUrl ? 'provided' : 'not provided',
+        teamLeaderSignature: teamLeaderSignatureUrl ? 'provided' : 'not provided',
+        employeeSignedAt: employeeSignedAt || null,
+        teamLeaderSignedAt: teamLeaderSignedAt || null,
+      },
       ipAddress: getClientIp(authReq),
       userAgent: req.headers['user-agent'] as string,
     });
@@ -1090,8 +1102,95 @@ router.post(
 );
 
 /**
+ * @route   POST /api/workplace-safety/:id/edit
+ * @desc    Revert a submitted assessment back to DRAFT for editing
+ * @access  Private (Supervisors+)
+ */
+router.post(
+  '/:id/edit',
+  authenticate,
+  asyncHandler(async (req: Request, res: Response) => {
+    const authReq = req as AuthRequest;
+    const { id } = req.params;
+    const userId = authReq.user?.id;
+    const userOrgId = authReq.user?.organizationId;
+    const userRole = authReq.user?.role;
+
+    if (!userId || !userOrgId) {
+      res.status(401).json({ error: 'Unauthorized' });
+      return;
+    }
+
+    if (!userRole || !ALLOWED_ROLES.includes(userRole)) {
+      res.status(403).json({ error: 'Access denied' });
+      return;
+    }
+
+    const existing = await prisma.workplaceSafetyAssessment.findFirst({
+      where: {
+        id,
+        organizationId: userOrgId,
+      },
+    });
+
+    if (!existing) {
+      res.status(404).json({ error: 'Assessment not found' });
+      return;
+    }
+
+    if (existing.status === 'DRAFT') {
+      res.status(400).json({
+        error: 'Already a draft',
+        details: 'Assessment is already in draft status',
+      });
+      return;
+    }
+
+    const assessment = await prisma.workplaceSafetyAssessment.update({
+      where: { id },
+      data: {
+        status: 'DRAFT',
+        submittedAt: null,
+      },
+      include: {
+        WSASection: {
+          include: {
+            WSAItem: {
+              include: {
+                WSAPhoto: true,
+              },
+            },
+          },
+        },
+        Department: true,
+        CreatedBy: {
+          select: { id: true, firstName: true, lastName: true, email: true },
+        },
+      },
+    });
+
+    await logAuditEvent({
+      action: 'UPDATE',
+      entity: 'WorkplaceSafetyAssessment',
+      entityId: id,
+      userId,
+      organizationId: userOrgId,
+      changes: { status: 'DRAFT', action: 'Assessment reverted to draft for editing' },
+      ipAddress: getClientIp(authReq),
+      userAgent: req.headers['user-agent'] as string,
+    });
+
+    res.json({
+      success: true,
+      data: { assessment: remapAssessment(assessment) },
+      message: 'Assessment reverted to draft for editing',
+    });
+  })
+);
+
+/**
  * @route   DELETE /api/workplace-safety/:id
- * @desc    Delete a draft assessment
+ * @desc    Permanently delete an assessment (requires confirmation)
  * @access  Private (Supervisors+)
  */
 router.delete(
@@ -1114,11 +1213,20 @@ router.delete(
       return;
     }
 
-    // Check if assessment exists and is a draft
+    // confirmNumber must match the assessment number to prevent accidental deletion
+    // Accept from both query params and body for flexibility
+    const confirmNumber = (req.query.confirmNumber as string) || req.body?.confirmNumber;
+
     const existing = await prisma.workplaceSafetyAssessment.findFirst({
       where: {
         id,
         organizationId: userOrgId,
+      },
+      include: {
+        WSASection: {
+          include: { WSAItem: true },
+        },
+        WSAPhoto: true,
       },
     });
 
@@ -1127,17 +1235,21 @@ router.delete(
       return;
     }
 
-    if (existing.status !== 'DRAFT') {
-      res.status(400).json({ 
-        error: 'Cannot delete',
-        details: 'Only draft assessments can be deleted',
+    // Require matching assessment number for confirmation
+    if (!confirmNumber || confirmNumber !== existing.assessmentNumber) {
+      res.status(400).json({
+        error: 'Confirmation required',
+        details: 'You must provide the correct assessment number to confirm deletion.',
       });
       return;
     }
 
+    // Cascade delete handles WSASection, WSAItem, WSAPhoto, and WorkOrder automatically
     await prisma.workplaceSafetyAssessment.delete({
       where: { id },
     });
+
+    const totalItems = existing.WSASection.reduce((sum: number, s: any) => sum + (s.WSAItem?.length || 0), 0);
 
     // Audit log
     await logAuditEvent({
@@ -1146,14 +1258,20 @@ router.delete(
       entityId: id,
       userId,
       organizationId: userOrgId,
-      changes: { assessmentNumber: existing.assessmentNumber },
+      changes: {
+        assessmentNumber: existing.assessmentNumber,
+        status: existing.status,
+        sectionCount: existing.WSASection.length,
+        itemCount: totalItems,
+        photoCount: existing.WSAPhoto.length,
+      },
       ipAddress: getClientIp(authReq),
       userAgent: req.headers['user-agent'] as string,
     });
 
     res.json({
       success: true,
-      message: 'Assessment deleted',
+      message: 'Assessment permanently deleted',
     });
   })
 );
