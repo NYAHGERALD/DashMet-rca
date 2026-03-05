@@ -347,13 +347,6 @@ function AssignedActionsContent() {
   // Group filtered tasks by meeting
   const meetingGroups = groupTasksByMeeting(filteredTasks);
 
-  // Expand all groups by default when data loads
-  useEffect(() => {
-    if (meetingGroups.length > 0 && expandedGroups.size === 0) {
-      setExpandedGroups(new Set(meetingGroups.map(g => g.meetingId)));
-    }
-  }, [meetingGroups.length]);
-
   // Toggle group expansion
   const toggleGroup = (meetingId: string) => {
     setExpandedGroups(prev => {

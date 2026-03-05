@@ -537,7 +537,7 @@ router.post(
       return;
     }
 
-    console.log('📝 Creating NEW assessment...');
+    console.log('📝 Creating NEW assessment... [v2-WSASection-fix]');
     // Create the assessment with sections and items
     const assessment = await prisma.workplaceSafetyAssessment.create({
       data: {

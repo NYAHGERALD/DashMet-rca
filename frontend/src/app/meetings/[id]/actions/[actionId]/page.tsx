@@ -602,9 +602,21 @@ function ActionItemDetailContent() {
     if (!task || !user) return;
     setSaving(true);
     try {
-      const updates: { title?: string; description?: string; userId?: string } = { userId: user.id };
+      const updates: Record<string, any> = { userId: user.id };
       if (editTitle !== task.title) updates.title = editTitle;
       if (editDescription !== task.description) updates.description = editDescription;
+
+      // Include start date changes
+      const currentStartDate = task.startDate ? new Date(task.startDate).toISOString().split('T')[0] : '';
+      if (editStartDate !== currentStartDate) {
+        updates.startDate = editStartDate ? new Date(editStartDate).toISOString() : null;
+      }
+
+      // Include due date changes
+      const currentDueDate = task.dueDate ? new Date(task.dueDate).toISOString().split('T')[0] : '';
+      if (editDueDate !== currentDueDate) {
+        updates.dueDate = editDueDate ? new Date(editDueDate).toISOString() : null;
+      }
 
       if (Object.keys(updates).length > 1) { // > 1 because userId is always present
         const response = await api.patch(`/mobile/tasks/${task.id}`, updates);
@@ -1022,6 +1034,8 @@ function ActionItemDetailContent() {
                       setIsEditing(false);
                       setEditTitle(task?.title || '');
                       setEditDescription(task?.description || '');
+                      setEditStartDate('');
+                      setEditDueDate('');
                     }}
                     className="px-4 py-2 text-sm font-medium text-gray-600 hover:text-gray-800 dark:text-gray-400 dark:hover:text-gray-200"
                   >
@@ -1063,6 +1077,8 @@ function ActionItemDetailContent() {
                     onClick={() => {
                       setEditTitle(task?.title || '');
                       setEditDescription(task?.description || '');
+                      setEditStartDate(task?.startDate ? new Date(task.startDate).toISOString().split('T')[0] : '');
+                      setEditDueDate(task?.dueDate ? new Date(task.dueDate).toISOString().split('T')[0] : '');
                       setIsEditing(true);
                     }}
                     disabled={task.isLocked === true}
@@ -1148,105 +1164,6 @@ function ActionItemDetailContent() {
                   </span>
                 </div>
               )}
-
-              {/* Due Date Field at Top */}
-              <div className="flex items-center justify-between mb-4 pb-4 border-b border-gray-200 dark:border-gray-700">
-                <div className="flex items-center gap-2 text-gray-500">
-                  <Calendar className="w-4 h-4" />
-                  <span className="text-sm font-medium">Due Date</span>
-                </div>
-                {isEditingDueDate ? (
-                  <div className="flex items-center gap-2">
-                    <input
-                      type="date"
-                      value={editDueDate}
-                      onChange={(e) => setEditDueDate(e.target.value)}
-                      className="px-3 py-1.5 text-sm border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-800 text-gray-900 dark:text-white focus:ring-2 focus:ring-purple-500 focus:border-transparent"
-                    />
-                    <button
-                      onClick={() => setIsEditingDueDate(false)}
-                      className="px-2 py-1 text-xs text-gray-500 hover:text-gray-700"
-                    >
-                      Cancel
-                    </button>
-                    <button
-                      onClick={updateDueDate}
-                      disabled={savingDueDate}
-                      className="px-3 py-1.5 text-xs bg-purple-600 text-white rounded-lg hover:bg-purple-700 disabled:opacity-50"
-                    >
-                      {savingDueDate ? 'Saving...' : 'Save'}
-                    </button>
-                  </div>
-                ) : (
-                  <div className="flex items-center gap-2">
-                    <span className={`text-sm font-medium ${task.dueDate && new Date(task.dueDate) < new Date() && task.status !== 'COMPLETED' ? 'text-red-600' : 'text-gray-900 dark:text-white'}`}>
-                      {task.dueDate ? new Date(task.dueDate).toLocaleDateString() : 'Not set'}
-                    </span>
-                    {task.isLocked !== true && (
-                      <button
-                        onClick={() => {
-                          setEditDueDate(task.dueDate ? new Date(task.dueDate).toISOString().split('T')[0] : '');
-                          setIsEditingDueDate(true);
-                        }}
-                        className="p-1 text-gray-400 hover:text-purple-600 rounded"
-                        title="Edit due date"
-                      >
-                        <Pencil className="w-3.5 h-3.5" />
-                      </button>
-                    )}
-                  </div>
-                )}
-              </div>
-
-              {/* Start Date Field */}
-              <div className="flex items-center justify-between mb-4 pb-4 border-b border-gray-200 dark:border-gray-700">
-                <div className="flex items-center gap-2 text-gray-500">
-                  <Calendar className="w-4 h-4" />
-                  <span className="text-sm font-medium">Start Date</span>
-                </div>
-                {isEditingStartDate ? (
-                  <div className="flex items-center gap-2">
-                    <input
-                      type="date"
-                      value={editStartDate}
-                      onChange={(e) => setEditStartDate(e.target.value)}
-                      title="Start date"
-                      className="px-3 py-1.5 text-sm border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-800 text-gray-900 dark:text-white focus:ring-2 focus:ring-purple-500 focus:border-transparent"
-                    />
-                    <button
-                      onClick={() => setIsEditingStartDate(false)}
-                      className="px-2 py-1 text-xs text-gray-500 hover:text-gray-700"
-                    >
-                      Cancel
-                    </button>
-                    <button
-                      onClick={updateStartDate}
-                      disabled={savingStartDate}
-                      className="px-3 py-1.5 text-xs bg-purple-600 text-white rounded-lg hover:bg-purple-700 disabled:opacity-50"
-                    >
-                      {savingStartDate ? 'Saving...' : 'Save'}
-                    </button>
-                  </div>
-                ) : (
-                  <div className="flex items-center gap-2">
-                    <span className="text-sm font-medium text-gray-900 dark:text-white">
-                      {task.startDate ? new Date(task.startDate).toLocaleDateString() : 'Not set'}
-                    </span>
-                    {task.isLocked !== true && (
-                      <button
-                        onClick={() => {
-                          setEditStartDate(task.startDate ? new Date(task.startDate).toISOString().split('T')[0] : '');
-                          setIsEditingStartDate(true);
-                        }}
-                        className="p-1 text-gray-400 hover:text-purple-600 rounded"
-                        title="Edit start date"
-                      >
-                        <Pencil className="w-3.5 h-3.5" />
-                      </button>
-                    )}
-                  </div>
-                )}
-              </div>
 
               <div className="flex flex-wrap items-center gap-3 mb-6">
                 {/* Status Dropdown */}
@@ -1386,6 +1303,52 @@ function ActionItemDetailContent() {
                   {task.description}
                 </p>
               ) : null}
+
+              {/* Start Date Field */}
+              <div className="mb-4 pb-4 border-b border-gray-200 dark:border-gray-700">
+                <div className="flex items-center gap-2 text-gray-500 mb-1">
+                  <Calendar className="w-4 h-4" />
+                  <span className="text-sm font-medium">Start Date</span>
+                </div>
+                {isEditing ? (
+                  <input
+                    type="date"
+                    value={editStartDate}
+                    onChange={(e) => setEditStartDate(e.target.value)}
+                    title="Start date"
+                    className="mt-1 px-3 py-1.5 text-sm border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-800 text-gray-900 dark:text-white focus:ring-2 focus:ring-purple-500 focus:border-transparent"
+                  />
+                ) : (
+                  <p className="text-sm font-medium text-gray-900 dark:text-white mt-1">
+                    {task.startDate
+                      ? new Date(task.startDate).toLocaleDateString('en-US', { weekday: 'long', month: 'long', day: 'numeric', year: 'numeric' })
+                      : 'Not set'}
+                  </p>
+                )}
+              </div>
+
+              {/* Due Date Field */}
+              <div className="mb-4 pb-4 border-b border-gray-200 dark:border-gray-700">
+                <div className="flex items-center gap-2 text-gray-500 mb-1">
+                  <Calendar className="w-4 h-4" />
+                  <span className="text-sm font-medium">Due Date</span>
+                </div>
+                {isEditing ? (
+                  <input
+                    type="date"
+                    value={editDueDate}
+                    onChange={(e) => setEditDueDate(e.target.value)}
+                    title="Due date"
+                    className="mt-1 px-3 py-1.5 text-sm border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-800 text-gray-900 dark:text-white focus:ring-2 focus:ring-purple-500 focus:border-transparent"
+                  />
+                ) : (
+                  <p className={`text-sm font-medium mt-1 ${task.dueDate && new Date(task.dueDate) < new Date() && task.status !== 'COMPLETED' ? 'text-red-600' : 'text-gray-900 dark:text-white'}`}>
+                    {task.dueDate
+                      ? new Date(task.dueDate).toLocaleDateString('en-US', { weekday: 'long', month: 'long', day: 'numeric', year: 'numeric' })
+                      : 'Not set'}
+                  </p>
+                )}
+              </div>
 
               {/* Overdue Indicator */}
               {isOverdue && (
@@ -2060,7 +2023,7 @@ function ActionItemDetailContent() {
                       <span className="text-sm">Due Date</span>
                     </div>
                     <span className={`text-sm font-medium ${isOverdue ? 'text-red-600' : 'text-gray-900 dark:text-white'}`}>
-                      {formatDate(task.dueDate)}
+                      {new Date(task.dueDate).toLocaleDateString('en-US', { weekday: 'long', month: 'long', day: 'numeric', year: 'numeric' })}
                     </span>
                   </div>
                 )}
@@ -2072,7 +2035,7 @@ function ActionItemDetailContent() {
                       <span className="text-sm">Start Date</span>
                     </div>
                     <span className="text-sm font-medium text-gray-900 dark:text-white">
-                      {formatDate(task.startDate)}
+                      {new Date(task.startDate).toLocaleDateString('en-US', { weekday: 'long', month: 'long', day: 'numeric', year: 'numeric' })}
                     </span>
                   </div>
                 )}
