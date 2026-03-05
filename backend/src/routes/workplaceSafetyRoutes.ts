@@ -924,6 +924,7 @@ router.post(
 
     const photo = await prisma.wSAPhoto.create({
       data: {
+        id: crypto.randomUUID(),
         assessmentId: id,
         itemId,
         sectionId,
