@@ -37,6 +37,7 @@ import {
   GripVertical,
   Lock,
   Unlock,
+  Building,
 } from 'lucide-react';
 
 interface TaskDetail {
@@ -47,6 +48,12 @@ interface TaskDetail {
   priority: string;
   progress: number;
   dueDate: string | null;
+  startDate: string | null;
+  departmentId: string | null;
+  department: {
+    id: string;
+    name: string;
+  } | null;
   completedAt: string | null;
   completedById: string | null;
   completedBy: {
@@ -210,6 +217,12 @@ function getActionDescription(log: ActivityLog): string {
       const oldDate = log.previousValue ? new Date(log.previousValue).toLocaleDateString() : 'none';
       const newDate = log.newValue ? new Date(log.newValue).toLocaleDateString() : 'none';
       return `${userName} changed due date from ${oldDate} to ${newDate}`;
+    case 'UPDATE_START_DATE':
+      const oldStartDate = log.previousValue ? new Date(log.previousValue).toLocaleDateString() : 'none';
+      const newStartDate = log.newValue ? new Date(log.newValue).toLocaleDateString() : 'none';
+      return `${userName} changed start date from ${oldStartDate} to ${newStartDate}`;
+    case 'UPDATE_DEPARTMENT':
+      return `${userName} changed department from "${log.previousValue || 'none'}" to "${log.newValue || 'none'}"`;
     case 'ADD_ASSIGNEE':
       return `${userName} assigned "${log.newValue}" to this task`;
     case 'REMOVE_ASSIGNEE':
@@ -295,6 +308,17 @@ function ActionItemDetailContent() {
   const [isEditingDueDate, setIsEditingDueDate] = useState(false);
   const [editDueDate, setEditDueDate] = useState<string>('');
   const [savingDueDate, setSavingDueDate] = useState(false);
+
+  // Start Date edit state
+  const [isEditingStartDate, setIsEditingStartDate] = useState(false);
+  const [editStartDate, setEditStartDate] = useState<string>('');
+  const [savingStartDate, setSavingStartDate] = useState(false);
+
+  // Department state
+  const [departments, setDepartments] = useState<Array<{ id: string; name: string }>>([]);
+  const [loadingDepartments, setLoadingDepartments] = useState(false);
+  const [isEditingDepartment, setIsEditingDepartment] = useState(false);
+  const [savingDepartment, setSavingDepartment] = useState(false);
 
   // Completion edit state
   const [editCompletedDate, setEditCompletedDate] = useState<string>('');
@@ -516,10 +540,25 @@ function ActionItemDetailContent() {
     }
   }, [actionId]);
 
+  const fetchDepartments = useCallback(async () => {
+    setLoadingDepartments(true);
+    try {
+      const response = await api.get('/facilities/departments');
+      if (response.data.success) {
+        setDepartments(response.data.data?.departments || []);
+      }
+    } catch (err) {
+      console.error('Error fetching departments:', err);
+    } finally {
+      setLoadingDepartments(false);
+    }
+  }, []);
+
   useEffect(() => {
     fetchTask();
     fetchActivityLogs();
-  }, [fetchTask, fetchActivityLogs]);
+    fetchDepartments();
+  }, [fetchTask, fetchActivityLogs, fetchDepartments]);
 
   useEffect(() => {
     if (showAddAssignee) {
@@ -641,6 +680,53 @@ function ActionItemDetailContent() {
       }
     } finally {
       setSavingDueDate(false);
+    }
+  };
+
+  const updateStartDate = async () => {
+    if (!task || !user) return;
+    setSavingStartDate(true);
+    try {
+      const startDate = editStartDate ? new Date(editStartDate).toISOString() : null;
+      const response = await api.patch(`/mobile/tasks/${task.id}`, { 
+        startDate, 
+        userId: user.id 
+      });
+      if (response.data.success) {
+        setTask(response.data.task);
+        fetchActivityLogs();
+        setIsEditingStartDate(false);
+      }
+    } catch (err: any) {
+      console.error('Error updating start date:', err);
+      if (err.response?.data?.error) {
+        alert(err.response.data.error);
+      }
+    } finally {
+      setSavingStartDate(false);
+    }
+  };
+
+  const updateDepartment = async (departmentId: string | null) => {
+    if (!task || !user) return;
+    setSavingDepartment(true);
+    try {
+      const response = await api.patch(`/mobile/tasks/${task.id}`, { 
+        departmentId, 
+        userId: user.id 
+      });
+      if (response.data.success) {
+        setTask(response.data.task);
+        fetchActivityLogs();
+        setIsEditingDepartment(false);
+      }
+    } catch (err: any) {
+      console.error('Error updating department:', err);
+      if (err.response?.data?.error) {
+        alert(err.response.data.error);
+      }
+    } finally {
+      setSavingDepartment(false);
     }
   };
 
@@ -1104,6 +1190,56 @@ function ActionItemDetailContent() {
                         }}
                         className="p-1 text-gray-400 hover:text-purple-600 rounded"
                         title="Edit due date"
+                      >
+                        <Pencil className="w-3.5 h-3.5" />
+                      </button>
+                    )}
+                  </div>
+                )}
+              </div>
+
+              {/* Start Date Field */}
+              <div className="flex items-center justify-between mb-4 pb-4 border-b border-gray-200 dark:border-gray-700">
+                <div className="flex items-center gap-2 text-gray-500">
+                  <Calendar className="w-4 h-4" />
+                  <span className="text-sm font-medium">Start Date</span>
+                </div>
+                {isEditingStartDate ? (
+                  <div className="flex items-center gap-2">
+                    <input
+                      type="date"
+                      value={editStartDate}
+                      onChange={(e) => setEditStartDate(e.target.value)}
+                      title="Start date"
+                      className="px-3 py-1.5 text-sm border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-800 text-gray-900 dark:text-white focus:ring-2 focus:ring-purple-500 focus:border-transparent"
+                    />
+                    <button
+                      onClick={() => setIsEditingStartDate(false)}
+                      className="px-2 py-1 text-xs text-gray-500 hover:text-gray-700"
+                    >
+                      Cancel
+                    </button>
+                    <button
+                      onClick={updateStartDate}
+                      disabled={savingStartDate}
+                      className="px-3 py-1.5 text-xs bg-purple-600 text-white rounded-lg hover:bg-purple-700 disabled:opacity-50"
+                    >
+                      {savingStartDate ? 'Saving...' : 'Save'}
+                    </button>
+                  </div>
+                ) : (
+                  <div className="flex items-center gap-2">
+                    <span className="text-sm font-medium text-gray-900 dark:text-white">
+                      {task.startDate ? new Date(task.startDate).toLocaleDateString() : 'Not set'}
+                    </span>
+                    {task.isLocked !== true && (
+                      <button
+                        onClick={() => {
+                          setEditStartDate(task.startDate ? new Date(task.startDate).toISOString().split('T')[0] : '');
+                          setIsEditingStartDate(true);
+                        }}
+                        className="p-1 text-gray-400 hover:text-purple-600 rounded"
+                        title="Edit start date"
                       >
                         <Pencil className="w-3.5 h-3.5" />
                       </button>
@@ -1824,6 +1960,71 @@ function ActionItemDetailContent() {
               )}
             </div>
 
+            {/* Responsible Department */}
+            <div className="bg-white dark:bg-gray-800 rounded-xl shadow-sm border border-gray-200 dark:border-gray-700 p-6">
+              <div className="flex items-center justify-between mb-4">
+                <div className="flex items-center gap-2">
+                  <Building className="w-5 h-5 text-indigo-500" />
+                  <h3 className="font-semibold text-gray-900 dark:text-white">Responsible Department</h3>
+                </div>
+                {task.isLocked !== true && !isEditingDepartment && (
+                  <button
+                    onClick={() => setIsEditingDepartment(true)}
+                    className="p-1 text-gray-400 hover:text-purple-600 rounded"
+                    title="Edit department"
+                  >
+                    <Pencil className="w-3.5 h-3.5" />
+                  </button>
+                )}
+              </div>
+
+              {isEditingDepartment ? (
+                <div className="space-y-3">
+                  <div className="relative">
+                    <select
+                      value={task.departmentId || ''}
+                      onChange={(e) => updateDepartment(e.target.value || null)}
+                      disabled={savingDepartment || loadingDepartments}
+                      title="Select department"
+                      className="w-full appearance-none px-3 py-2.5 pr-10 text-sm border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-800 text-gray-900 dark:text-white focus:ring-2 focus:ring-purple-500 focus:border-transparent disabled:opacity-50"
+                    >
+                      <option value="">No department</option>
+                      {departments.map((dept) => (
+                        <option key={dept.id} value={dept.id}>{dept.name}</option>
+                      ))}
+                    </select>
+                    <ChevronDown className="w-4 h-4 absolute right-3 top-1/2 -translate-y-1/2 pointer-events-none text-gray-400" />
+                  </div>
+                  {savingDepartment && (
+                    <div className="flex items-center gap-2 text-sm text-gray-500">
+                      <Loader2 className="w-4 h-4 animate-spin" />
+                      Saving...
+                    </div>
+                  )}
+                  <button
+                    onClick={() => setIsEditingDepartment(false)}
+                    className="text-xs text-gray-500 hover:text-gray-700"
+                  >
+                    Cancel
+                  </button>
+                </div>
+              ) : (
+                <div className="flex items-center gap-3 p-3 bg-gray-50 dark:bg-gray-900/50 rounded-lg">
+                  <div className="w-10 h-10 rounded-full bg-indigo-100 dark:bg-indigo-900/30 flex items-center justify-center">
+                    <Building className="w-5 h-5 text-indigo-600 dark:text-indigo-400" />
+                  </div>
+                  <div>
+                    <p className="font-medium text-gray-900 dark:text-white text-sm">
+                      {task.department?.name || 'Not assigned'}
+                    </p>
+                    {!task.department && (
+                      <p className="text-xs text-gray-400 mt-0.5">Click edit to assign a department</p>
+                    )}
+                  </div>
+                </div>
+              )}
+            </div>
+
             {/* Details */}
             <div className="bg-white dark:bg-gray-800 rounded-xl shadow-sm border border-gray-200 dark:border-gray-700 p-6">
               <div className="flex items-center gap-2 mb-4">
@@ -1860,6 +2061,30 @@ function ActionItemDetailContent() {
                     </div>
                     <span className={`text-sm font-medium ${isOverdue ? 'text-red-600' : 'text-gray-900 dark:text-white'}`}>
                       {formatDate(task.dueDate)}
+                    </span>
+                  </div>
+                )}
+
+                {task.startDate && (
+                  <div className="flex items-center justify-between">
+                    <div className="flex items-center gap-2 text-gray-500">
+                      <Calendar className="w-4 h-4" />
+                      <span className="text-sm">Start Date</span>
+                    </div>
+                    <span className="text-sm font-medium text-gray-900 dark:text-white">
+                      {formatDate(task.startDate)}
+                    </span>
+                  </div>
+                )}
+
+                {task.department && (
+                  <div className="flex items-center justify-between">
+                    <div className="flex items-center gap-2 text-gray-500">
+                      <Building className="w-4 h-4" />
+                      <span className="text-sm">Department</span>
+                    </div>
+                    <span className="text-sm font-medium text-gray-900 dark:text-white">
+                      {task.department.name}
                     </span>
                   </div>
                 )}

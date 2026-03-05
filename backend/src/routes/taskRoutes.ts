@@ -556,9 +556,12 @@ router.get('/', async (req: Request, res: Response) => {
     });
 
     // Add groupName for consistent grouping across web, iOS, and Android
-    const tasksWithGroupName = tasks.map((task) => ({
+    // Use actual meeting title so groups match what mobile apps display
+    const tasksWithGroupName = tasks.map((task: any) => ({
       ...task,
-      groupName: task.meetingId ? 'Meeting Items' : 'Standalone Items',
+      groupName: task.meetingId
+        ? (task.meeting?.title || 'Untitled Meeting')
+        : 'Standalone Items',
     }));
 
     return res.json({

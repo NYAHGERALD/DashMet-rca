@@ -83,8 +83,7 @@ interface MeetingGroup {
   overdueCount: number;
 }
 
-// Canonical group names configured from backend
-const GROUP_MEETING_ITEMS = 'Meeting Items';
+// Canonical group name for tasks without a meeting
 const GROUP_STANDALONE_ITEMS = 'Standalone Items';
 
 const statusConfig: Record<string, { color: string; bg: string; label: string }> = {
@@ -100,20 +99,23 @@ const priorityConfig: Record<string, { color: string; bg: string; label: string 
   URGENT: { color: 'text-red-600', bg: 'bg-red-100', label: 'Urgent' },
 };
 
-// Group tasks using backend-provided groupName for consistency across web, iOS, and Android
+// Group tasks by their actual meeting (matching iOS/Android logic).
+// Each meeting becomes its own group with the meeting title as the group name.
+// Tasks without a meeting go into "Standalone Items".
 function groupTasksByMeeting(tasks: Task[]): MeetingGroup[] {
   const groups: Record<string, MeetingGroup> = {};
   
   tasks.forEach((task) => {
-    // Use backend-provided groupName; fallback based on meetingId if missing
-    const groupName = task.groupName || (task.meetingId ? GROUP_MEETING_ITEMS : GROUP_STANDALONE_ITEMS);
+    // Group by actual meeting ID, or 'standalone' for tasks with no meeting
+    const groupKey = task.meetingId || 'standalone';
+    const groupTitle = task.meeting?.title || task.groupName || (task.meetingId ? 'Untitled Meeting' : GROUP_STANDALONE_ITEMS);
     
-    if (!groups[groupName]) {
-      groups[groupName] = {
-        meetingId: groupName,
-        meetingTitle: groupName,
-        meetingType: groupName === GROUP_MEETING_ITEMS ? 'MEETING' : 'STANDALONE',
-        meetingDate: null,
+    if (!groups[groupKey]) {
+      groups[groupKey] = {
+        meetingId: groupKey,
+        meetingTitle: groupTitle,
+        meetingType: task.meeting?.meetingType || (task.meetingId ? 'MEETING' : 'STANDALONE'),
+        meetingDate: task.meeting?.createdAt || null,
         createdDate: null,
         tasks: [],
         pendingCount: 0,
@@ -123,13 +125,13 @@ function groupTasksByMeeting(tasks: Task[]): MeetingGroup[] {
       };
     }
     
-    groups[groupName].tasks.push(task);
+    groups[groupKey].tasks.push(task);
     
-    if (task.status === 'PENDING') groups[groupName].pendingCount++;
-    if (task.status === 'IN_PROGRESS') groups[groupName].inProgressCount++;
-    if (task.status === 'COMPLETED') groups[groupName].completedCount++;
+    if (task.status === 'PENDING') groups[groupKey].pendingCount++;
+    if (task.status === 'IN_PROGRESS') groups[groupKey].inProgressCount++;
+    if (task.status === 'COMPLETED') groups[groupKey].completedCount++;
     if (task.status !== 'COMPLETED' && task.dueDate && new Date(task.dueDate) < new Date()) {
-      groups[groupName].overdueCount++;
+      groups[groupKey].overdueCount++;
     }
   });
   
@@ -145,11 +147,14 @@ function groupTasksByMeeting(tasks: Task[]): MeetingGroup[] {
     }
   });
 
-  // Meeting Items first, Standalone Items second
+  // Sort: meeting groups by most recent task first, standalone at the end
   return Object.values(groups).sort((a, b) => {
-    if (a.meetingTitle === GROUP_MEETING_ITEMS) return -1;
-    if (b.meetingTitle === GROUP_MEETING_ITEMS) return 1;
-    return 0;
+    if (a.meetingId === 'standalone') return 1;
+    if (b.meetingId === 'standalone') return -1;
+    // Sort by createdDate descending (most recent first)
+    const dateA = a.createdDate ? new Date(a.createdDate).getTime() : 0;
+    const dateB = b.createdDate ? new Date(b.createdDate).getTime() : 0;
+    return dateB - dateA;
   });
 }
 
