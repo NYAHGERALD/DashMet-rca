@@ -560,7 +560,7 @@ router.post(
         organizationId: userOrgId,
         facilityId: sanitizedFacilityId,
         createdById: userId,
-        Sections: sections ? {
+        WSASection: sections ? {
           create: sections.map((section: any, sectionIndex: number) => ({
             sectionId: section.id,
             title: section.title,
@@ -718,7 +718,7 @@ router.put(
           safetyManagerName,
           safetyManagerSignature,
           facilityId: sanitizedFacilityId,
-          Sections: sections ? {
+          WSASection: sections ? {
             create: sections.map((section: any, sectionIndex: number) => ({
               sectionId: section.id,
               title: section.title,
