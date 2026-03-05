@@ -7,6 +7,29 @@ import { logAuditEvent, getClientIp } from '../services/auditService';
 const router = Router();
 const prisma = new PrismaClient();
 
+// Helper to remap Prisma relation names to client-friendly names
+function remapAssessment(assessment: any): any {
+  if (!assessment) return assessment;
+  const { WSASection, WSAPhoto, User, ...rest } = assessment;
+  const result: any = { ...rest };
+  if (User !== undefined) result.CreatedBy = User;
+  if (WSAPhoto !== undefined) result.Photos = WSAPhoto;
+  if (WSASection !== undefined) {
+    result.Sections = WSASection.map((section: any) => {
+      const { WSAItem, ...sectionRest } = section;
+      return { ...sectionRest, Items: WSAItem ?? [] };
+    });
+  }
+  // Remap _count fields
+  if (result._count) {
+    const { WSASection: secCount, WSAPhoto: photoCount, ...countRest } = result._count;
+    result._count = { ...countRest };
+    if (secCount !== undefined) result._count.Sections = secCount;
+    if (photoCount !== undefined) result._count.Photos = photoCount;
+  }
+  return result;
+}
+
 // Allowed roles for workplace safety assessments
 const ALLOWED_ROLES = [
   'SUPERVISOR',
@@ -47,11 +70,11 @@ router.get(
       include: {
         Department: { select: { id: true, name: true } },
         Facility: { select: { id: true, name: true } },
-        CreatedBy: { select: { id: true, firstName: true, lastName: true, email: true } },
+        User: { select: { id: true, firstName: true, lastName: true, email: true } },
         _count: {
           select: {
-            Sections: true,
-            Photos: true,
+            WSASection: true,
+            WSAPhoto: true,
           },
         },
       },
@@ -60,7 +83,7 @@ router.get(
 
     res.json({
       success: true,
-      data: { assessments },
+      data: { assessments: assessments.map(remapAssessment) },
     });
   })
 );
@@ -100,16 +123,16 @@ router.get(
       include: {
         Department: { select: { id: true, name: true } },
         Facility: { select: { id: true, name: true } },
-        CreatedBy: { select: { id: true, firstName: true, lastName: true, email: true } },
-        Sections: {
+        User: { select: { id: true, firstName: true, lastName: true, email: true } },
+        WSASection: {
           include: {
-            Items: {
+            WSAItem: {
               orderBy: { sortOrder: 'asc' },
             },
           },
           orderBy: { sortOrder: 'asc' },
         },
-        Photos: {
+        WSAPhoto: {
           orderBy: { uploadedAt: 'desc' },
         },
       },
@@ -144,27 +167,27 @@ router.get(
     }
 
     // Calculate completion statistics
-    const allItems = assessment.Sections.flatMap(s => s.Items);
+    const allItems = assessment.WSASection.flatMap(s => s.WSAItem);
     const totalItems = allItems.length;
     const completedItems = allItems.filter(item => item.status !== null).length;
     const pendingItems = allItems.filter(item => item.status === null);
     const unacceptableItems = allItems.filter(item => item.status === 'U');
     
     // Get missing sections info
-    const incompleteSections = assessment.Sections.filter(section => 
-      section.Items.some(item => item.status === null)
+    const incompleteSections = assessment.WSASection.filter(section => 
+      section.WSAItem.some(item => item.status === null)
     ).map(section => ({
       id: section.sectionId,
       title: section.title,
-      totalItems: section.Items.length,
-      completedItems: section.Items.filter(item => item.status !== null).length,
-      pendingItemIds: section.Items.filter(item => item.status === null).map(item => item.itemId),
+      totalItems: section.WSAItem.length,
+      completedItems: section.WSAItem.filter(item => item.status !== null).length,
+      pendingItemIds: section.WSAItem.filter(item => item.status === null).map(item => item.itemId),
     }));
 
     res.json({
       success: true,
       data: { 
-        assessment,
+        assessment: remapAssessment(assessment),
         completionStats: {
           totalItems,
           completedItems,
@@ -213,16 +236,16 @@ router.get(
         Department: { select: { id: true, name: true } },
         Facility: { select: { id: true, name: true } },
         Organization: { select: { id: true, name: true } },
-        CreatedBy: { select: { id: true, firstName: true, lastName: true, email: true } },
-        Sections: {
+        User: { select: { id: true, firstName: true, lastName: true, email: true } },
+        WSASection: {
           include: {
-            Items: {
+            WSAItem: {
               orderBy: { sortOrder: 'asc' },
             },
           },
           orderBy: { sortOrder: 'asc' },
         },
-        Photos: {
+        WSAPhoto: {
           orderBy: { uploadedAt: 'desc' },
         },
       },
@@ -238,7 +261,7 @@ router.get(
 
     // Map photos to their respective items
     const photosMap = new Map<string, any[]>();
-    assessment.Photos.forEach((photo: any) => {
+    assessment.WSAPhoto.forEach((photo: any) => {
       if (photo.itemId) {
         if (!photosMap.has(photo.itemId)) {
           photosMap.set(photo.itemId, []);
@@ -248,20 +271,26 @@ router.get(
     });
 
     // Attach photos to items
-    const sectionsWithPhotos = assessment.Sections.map((section: any) => ({
-      ...section,
-      Items: section.Items.map((item: any) => ({
-        ...item,
-        Photos: photosMap.get(item.itemId) || [],
-      })),
-    }));
+    const sectionsWithPhotos = assessment.WSASection.map((section: any) => {
+      const { WSAItem, ...sectionRest } = section;
+      return {
+        ...sectionRest,
+        Items: (WSAItem ?? []).map((item: any) => ({
+          ...item,
+          Photos: photosMap.get(item.itemId) || [],
+        })),
+      };
+    });
 
+    const { WSASection: _s, WSAPhoto: _p, User: _u, ...assessmentRest } = assessment as any;
     res.json({
       success: true,
       data: { 
         assessment: {
-          ...assessment,
+          ...assessmentRest,
+          CreatedBy: _u,
           Sections: sectionsWithPhotos,
+          Photos: _p,
         },
       },
     });
@@ -301,16 +330,16 @@ router.get(
       include: {
         Department: { select: { id: true, name: true } },
         Facility: { select: { id: true, name: true } },
-        CreatedBy: { select: { id: true, firstName: true, lastName: true, email: true } },
-        Sections: {
+        User: { select: { id: true, firstName: true, lastName: true, email: true } },
+        WSASection: {
           include: {
-            Items: {
+            WSAItem: {
               orderBy: { sortOrder: 'asc' },
             },
           },
           orderBy: { sortOrder: 'asc' },
         },
-        Photos: {
+        WSAPhoto: {
           orderBy: { uploadedAt: 'desc' },
         },
       },
@@ -323,7 +352,7 @@ router.get(
 
     res.json({
       success: true,
-      data: { assessment },
+      data: { assessment: remapAssessment(assessment) },
     });
   })
 );
@@ -409,7 +438,7 @@ router.post(
     const existing = await prisma.workplaceSafetyAssessment.findUnique({
       where: { assessmentNumber },
       include: {
-        Sections: true,
+        WSASection: true,
       },
     });
 
@@ -449,12 +478,12 @@ router.post(
             safetyManagerName,
             safetyManagerSignature,
             facilityId: sanitizedFacilityId,
-            Sections: sections ? {
+            WSASection: sections ? {
               create: sections.map((section: any, sectionIndex: number) => ({
                 sectionId: section.id,
                 title: section.title,
                 sortOrder: sectionIndex,
-                Items: {
+                WSAItem: {
                   create: section.items.map((item: any, itemIndex: number) => ({
                     itemId: item.id,
                     description: item.description,
@@ -475,9 +504,9 @@ router.post(
             } : undefined,
           },
           include: {
-            Sections: {
+            WSASection: {
               include: {
-                Items: true,
+                WSAItem: true,
               },
             },
           },
@@ -501,7 +530,7 @@ router.post(
       console.log('✅ Draft assessment UPDATED:', updatedAssessment.id);
       res.json({
         success: true,
-        data: { assessment: updatedAssessment },
+        data: { assessment: remapAssessment(updatedAssessment) },
         message: 'Draft assessment updated',
         isUpdate: true,
       });
@@ -536,7 +565,7 @@ router.post(
             sectionId: section.id,
             title: section.title,
             sortOrder: sectionIndex,
-            Items: {
+            WSAItem: {
               create: section.items.map((item: any, itemIndex: number) => ({
                 itemId: item.id,
                 description: item.description,
@@ -557,9 +586,9 @@ router.post(
         } : undefined,
       },
       include: {
-        Sections: {
+        WSASection: {
           include: {
-            Items: true,
+            WSAItem: true,
           },
         },
       },
@@ -580,7 +609,7 @@ router.post(
     console.log('✅ NEW assessment CREATED:', assessment.id);
     res.status(201).json({
       success: true,
-      data: { assessment },
+      data: { assessment: remapAssessment(assessment) },
       message: 'Assessment saved as draft',
     });
   })
@@ -694,7 +723,7 @@ router.put(
               sectionId: section.id,
               title: section.title,
               sortOrder: sectionIndex,
-              Items: {
+              WSAItem: {
                 create: section.items.map((item: any, itemIndex: number) => ({
                   itemId: item.id,
                   description: item.description,
@@ -715,9 +744,9 @@ router.put(
           } : undefined,
         },
         include: {
-          Sections: {
+          WSASection: {
             include: {
-              Items: true,
+              WSAItem: true,
             },
           },
         },
@@ -740,7 +769,7 @@ router.put(
 
     res.json({
       success: true,
-      data: { assessment },
+      data: { assessment: remapAssessment(assessment) },
       message: 'Assessment updated',
     });
   })
@@ -934,7 +963,7 @@ router.delete(
       where: {
         id: photoId,
         assessmentId: id,
-        Assessment: {
+        WorkplaceSafetyAssessment: {
           organizationId: userOrgId,
         },
       },
@@ -988,9 +1017,9 @@ router.post(
         organizationId: userOrgId,
       },
       include: {
-        Sections: {
+        WSASection: {
           include: {
-            Items: true,
+            WSAItem: true,
           },
         },
       },
@@ -1010,7 +1039,7 @@ router.post(
     }
 
     // Check if all items have been assessed
-    const allItems = existing.Sections.flatMap(s => s.Items);
+    const allItems = existing.WSASection.flatMap(s => s.WSAItem);
     const pendingItems = allItems.filter(item => !item.status);
 
     if (pendingItems.length > 0) {
