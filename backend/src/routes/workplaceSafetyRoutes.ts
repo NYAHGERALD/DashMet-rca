@@ -443,6 +443,34 @@ router.post(
       },
     });
 
+    // If this is a NEW assessment (not updating an existing one), enforce one-per-month-per-user
+    if (!existing) {
+      const now = new Date();
+      const monthStart = new Date(now.getFullYear(), now.getMonth(), 1);
+      const monthEnd = new Date(now.getFullYear(), now.getMonth() + 1, 1);
+
+      const existingThisMonth = await prisma.workplaceSafetyAssessment.findFirst({
+        where: {
+          createdById: userId,
+          organizationId: userOrgId,
+          createdAt: {
+            gte: monthStart,
+            lt: monthEnd,
+          },
+        },
+        select: { id: true, assessmentNumber: true },
+      });
+
+      if (existingThisMonth) {
+        res.status(409).json({
+          error: 'Monthly assessment limit reached',
+          details: `You have already created assessment ${existingThisMonth.assessmentNumber} for this month. Only one assessment per user per month is allowed.`,
+          existingAssessmentNumber: existingThisMonth.assessmentNumber,
+        });
+        return;
+      }
+    }
+
     // If exists and is DRAFT, update it instead of creating new
     if (existing) {
       if (existing.status !== 'DRAFT') {
