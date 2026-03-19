@@ -2567,6 +2567,7 @@ model ConflictCase {
   caseNumber            String                      @unique
   type                  ConflictCaseType
   status                ConflictCaseStatus          @default(DRAFT)
+  description           String?                     @db.Text // Encrypted - Case description
   incidentDate          DateTime
   location              String                      // Encrypted
   department            String                      // Encrypted

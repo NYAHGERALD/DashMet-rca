@@ -23,23 +23,50 @@
  */
 
 import { Router, Request, Response } from 'express';
-import { PrismaClient, Prisma } from '@prisma/client';
+import { Prisma } from '@prisma/client';
+import { prisma } from '../utils/prisma';
 import crypto from 'crypto';
 
 const router = Router();
-const prisma = new PrismaClient();
 
 // ============================================================================
 // ENCRYPTION UTILITIES
 // Note: In production, use a proper key management service
 // ============================================================================
-const ENCRYPTION_KEY = process.env.ENCRYPTION_KEY || crypto.randomBytes(32).toString('hex').slice(0, 32);
+
+/**
+ * Derive a 32-byte encryption key buffer from the environment variable.
+ * AES-256-CBC requires EXACTLY 32 bytes. The env var may be any length
+ * (e.g., Render's generateValue produces 64 chars), so we normalize it.
+ */
+function getEncryptionKeyBuffer(): Buffer {
+  const raw = process.env.ENCRYPTION_KEY;
+  if (!raw) {
+    // Fallback for development — generate a deterministic 32-char key
+    return Buffer.from(crypto.randomBytes(32).toString('hex').slice(0, 32), 'utf8');
+  }
+  const buf = Buffer.from(raw, 'utf8');
+  if (buf.length === 32) {
+    return buf; // Perfect length, use as-is
+  }
+  if (buf.length > 32) {
+    // Truncate to exactly 32 bytes (safe: if key was >32 bytes before,
+    // encrypt() always threw "Invalid key length" so no data was ever encrypted)
+    return buf.slice(0, 32);
+  }
+  // Pad shorter keys to 32 bytes
+  const padded = Buffer.alloc(32, 0);
+  buf.copy(padded);
+  return padded;
+}
+
+const ENCRYPTION_KEY_BUFFER = getEncryptionKeyBuffer();
 const IV_LENGTH = 16;
 
 function encrypt(text: string): string {
   if (!text) return text;
   const iv = crypto.randomBytes(IV_LENGTH);
-  const cipher = crypto.createCipheriv('aes-256-cbc', Buffer.from(ENCRYPTION_KEY, 'utf8'), iv);
+  const cipher = crypto.createCipheriv('aes-256-cbc', ENCRYPTION_KEY_BUFFER, iv);
   let encrypted = cipher.update(text, 'utf8', 'hex');
   encrypted += cipher.final('hex');
   return iv.toString('hex') + ':' + encrypted;
@@ -51,7 +78,7 @@ function decrypt(text: string): string {
     const parts = text.split(':');
     const iv = Buffer.from(parts[0], 'hex');
     const encryptedText = parts[1];
-    const decipher = crypto.createDecipheriv('aes-256-cbc', Buffer.from(ENCRYPTION_KEY, 'utf8'), iv);
+    const decipher = crypto.createDecipheriv('aes-256-cbc', ENCRYPTION_KEY_BUFFER, iv);
     let decrypted = decipher.update(encryptedText, 'hex', 'utf8');
     decrypted += decipher.final('utf8');
     return decrypted;
@@ -229,12 +256,41 @@ router.post('/', async (req: Request, res: Response) => {
     };
     const mappedStatus = statusMap[status?.toLowerCase()] || status?.toUpperCase() || 'DRAFT';
 
+    // Validate activePolicyId FK if provided — set to null if policy doesn't exist
+    let validatedPolicyId: string | null = null;
+    if (activePolicyId) {
+      const policyExists = await prisma.workplacePolicyDoc.findUnique({
+        where: { id: activePolicyId },
+        select: { id: true },
+      });
+      if (policyExists) {
+        validatedPolicyId = activePolicyId;
+      } else {
+        console.warn(`⚠️ activePolicyId "${activePolicyId}" not found in database, setting to null`);
+      }
+    }
+
+    // Validate facilityId FK if provided
+    let validatedFacilityId: string | null = null;
+    if (facilityId) {
+      const facilityExists = await prisma.facility.findUnique({
+        where: { id: facilityId },
+        select: { id: true },
+      });
+      if (facilityExists) {
+        validatedFacilityId = facilityId;
+      } else {
+        console.warn(`⚠️ facilityId "${facilityId}" not found in database, setting to null`);
+      }
+    }
+
     // Create case with encrypted sensitive data
     const conflictCase = await prisma.conflictCase.create({
       data: {
         caseNumber,
         type: mappedType as any,
         status: mappedStatus as any,
+        description: description ? encrypt(description) : null,
         incidentDate: incidentDate ? new Date(incidentDate) : (reportedDate ? new Date(reportedDate) : new Date()),
         location: location ? encrypt(location) : encrypt('Not specified'),
         department: department ? encrypt(department) : encrypt('Not specified'),
@@ -246,10 +302,10 @@ router.post('/', async (req: Request, res: Response) => {
         fullGeneratedDocumentResult: fullGeneratedDocumentResultJson ? encrypt(JSON.stringify(fullGeneratedDocumentResultJson)) : null,
         policyMatches: (policyMatches || policyMatchesJson) ? encrypt(JSON.stringify(policyMatches || policyMatchesJson)) : null,
         supervisorNotes: supervisorNotes ? encrypt(supervisorNotes) : null,
-        activePolicyId: activePolicyId || null,
+        activePolicyId: validatedPolicyId,
         createdBy: creatorId,
         organizationId,
-        facilityId: facilityId || null,
+        facilityId: validatedFacilityId,
       },
       include: {
         createdByUser: {
@@ -567,8 +623,10 @@ router.patch('/:id', async (req: Request, res: Response, next) => {
       updateData.status = status;
       changes.status = { from: existingCase.status, to: status };
     }
-    // Note: 'description' and 'finalDecision' fields don't exist in database schema
-    // They are stored locally on iOS only
+    if (description !== undefined) {
+      updateData.description = description ? encrypt(description) : null;
+      changes.description = 'updated';
+    }
     
     // Handle involved employees update
     if (involvedEmployeesJson && Array.isArray(involvedEmployeesJson)) {
