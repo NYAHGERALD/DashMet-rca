@@ -2149,7 +2149,7 @@ router.get('/:incidentId/evidence/:evidenceId/download', async (req: Request, re
         }
         
         // Stream the file directly to avoid CORS issues
-        res.setHeader('Content-Type', evidence.mimeType || evidence.fileType || 'application/octet-stream');
+        res.setHeader('Content-Type', evidence.mimeType || (evidence as any).fileType || 'application/octet-stream');
         res.setHeader('Content-Disposition', `inline; filename="${evidence.fileName}"`);
         
         // Create a read stream and pipe to response
@@ -2179,7 +2179,7 @@ router.get('/:incidentId/evidence/:evidenceId/download', async (req: Request, re
       return;
     }
 
-    res.setHeader('Content-Type', evidence.mimeType || evidence.fileType || 'application/octet-stream');
+    res.setHeader('Content-Type', evidence.mimeType || (evidence as any).fileType || 'application/octet-stream');
     res.setHeader('Content-Disposition', `inline; filename="${evidence.fileName}"`);
     fs.createReadStream(localPath).pipe(res);
   } catch (error) {

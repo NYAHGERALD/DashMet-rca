@@ -3385,3 +3385,265 @@ model MicrosoftOAuthToken {
 
   @@index([userId])
 }
+
+// ═══════════════════════════════════════════════════════════════════════════════
+// BAKERY METRICS TABLES (migrated from Flask bakery_metrics_db)
+// ═══════════════════════════════════════════════════════════════════════════════
+
+model BakeryWeeklySheet {
+  id        String   @id @default(uuid())
+  sheetName String   @db.VarChar(100)
+  weekStart DateTime @db.Date
+  weekEnd   DateTime @db.Date
+  isActive  Boolean  @default(true)
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@map("bakery_weekly_sheets")
+}
+
+model BakeryWeekSubmission {
+  id          String   @id @default(uuid())
+  weekName    String
+  weekStart   DateTime @db.Date
+  weekEnd     DateTime @db.Date
+  dayOfWeek   String
+  submittedBy String
+  createdAt   DateTime @default(now())
+
+  firstShiftMetrics  BakeryFirstShiftMetrics?
+  secondShiftMetrics BakerySecondShiftMetrics?
+  bothShiftsMetrics  BakeryBothShiftsMetrics?
+
+  @@index([weekName])
+  @@index([dayOfWeek])
+  @@index([weekName, dayOfWeek])
+  @@map("bakery_week_submissions")
+}
+
+model BakeryFirstShiftMetrics {
+  id               Int      @id @default(autoincrement())
+  weekSubmissionId String   @unique
+  dieCut1OeePct    Decimal  @db.Decimal(10, 2)
+  dieCut2OeePct    Decimal  @db.Decimal(10, 2)
+  oeeAvgPct        Decimal? @db.Decimal(10, 2)
+  dieCut1Lbs       Decimal  @db.Decimal(12, 3)
+  dieCut2Lbs       Decimal  @db.Decimal(12, 3)
+  poundsTotal      Decimal? @db.Decimal(12, 3)
+  dieCut1WasteLb   Decimal  @db.Decimal(12, 3)
+  dieCut2WasteLb   Decimal  @db.Decimal(12, 3)
+  dieCut1WastePct  Decimal? @db.Decimal(10, 2)
+  dieCut2WastePct  Decimal? @db.Decimal(10, 2)
+  wasteAvgPct      Decimal? @db.Decimal(10, 2)
+  submittedBy      String
+  createdAt        DateTime @default(now())
+
+  weekSubmission BakeryWeekSubmission @relation(fields: [weekSubmissionId], references: [id], onDelete: Cascade)
+
+  @@index([weekSubmissionId])
+  @@map("bakery_first_shift_metrics")
+}
+
+model BakerySecondShiftMetrics {
+  id               Int      @id @default(autoincrement())
+  weekSubmissionId String   @unique
+  dieCut1OeePct    Decimal  @db.Decimal(10, 2)
+  dieCut2OeePct    Decimal  @db.Decimal(10, 2)
+  oeeAvgPct        Decimal? @db.Decimal(10, 2)
+  dieCut1Lbs       Decimal  @db.Decimal(12, 3)
+  dieCut2Lbs       Decimal  @db.Decimal(12, 3)
+  poundsTotal      Decimal? @db.Decimal(12, 3)
+  dieCut1WasteLb   Decimal  @db.Decimal(12, 3)
+  dieCut2WasteLb   Decimal  @db.Decimal(12, 3)
+  dieCut1WastePct  Decimal? @db.Decimal(10, 2)
+  dieCut2WastePct  Decimal? @db.Decimal(10, 2)
+  wasteAvgPct      Decimal? @db.Decimal(10, 2)
+  submittedBy      String
+  createdAt        DateTime @default(now())
+
+  weekSubmission BakeryWeekSubmission @relation(fields: [weekSubmissionId], references: [id], onDelete: Cascade)
+
+  @@index([weekSubmissionId])
+  @@map("bakery_second_shift_metrics")
+}
+
+model BakeryBothShiftsMetrics {
+  id               Int      @id @default(autoincrement())
+  weekSubmissionId String   @unique
+  dieCut1OeePct    Decimal? @db.Decimal(10, 2)
+  dieCut2OeePct    Decimal? @db.Decimal(10, 2)
+  oeeAvgPct        Decimal? @db.Decimal(10, 2)
+  dieCut1Lbs       Decimal? @db.Decimal(12, 3)
+  dieCut2Lbs       Decimal? @db.Decimal(12, 3)
+  poundsTotal      Decimal? @db.Decimal(12, 3)
+  dieCut1WasteLb   Decimal? @db.Decimal(12, 3)
+  dieCut2WasteLb   Decimal? @db.Decimal(12, 3)
+  dieCut1WastePct  Decimal? @db.Decimal(10, 2)
+  dieCut2WastePct  Decimal? @db.Decimal(10, 2)
+  wasteAvgPct      Decimal? @db.Decimal(10, 2)
+  submittedBy      String
+  createdAt        DateTime @default(now())
+
+  weekSubmission BakeryWeekSubmission @relation(fields: [weekSubmissionId], references: [id], onDelete: Cascade)
+
+  @@index([weekSubmissionId])
+  @@map("bakery_both_shifts_metrics")
+}
+
+model BakeryKpiTarget {
+  id             Int      @id @default(autoincrement())
+  metricType     String   @db.VarChar(50)
+  metricName     String   @db.VarChar(100)
+  targetValue    Decimal  @db.Decimal(10, 2)
+  unit           String   @default("%") @db.VarChar(20)
+  comparisonType String   @default("gte") @db.VarChar(10)
+  updatedBy      String?  @db.VarChar(255)
+  updatedAt      DateTime @default(now())
+
+  @@unique([metricType, metricName])
+  @@map("bakery_kpi_targets")
+}
+
+model BakeryKpiTargetHistory {
+  id         Int      @id @default(autoincrement())
+  metricType String   @db.VarChar(50)
+  metricName String   @db.VarChar(100)
+  oldValue   Decimal? @db.Decimal(10, 2)
+  newValue   Decimal  @db.Decimal(10, 2)
+  changedBy  String?  @db.VarChar(255)
+  changedAt  DateTime @default(now())
+
+  @@index([metricType, metricName])
+  @@map("bakery_kpi_targets_history")
+}
+
+model BakeryAutoWeekSetting {
+  id        Int      @id @default(1)
+  enabled   Boolean  @default(false)
+  enabledBy String?  @db.VarChar(255)
+  enabledAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@map("bakery_auto_week_settings")
+}
+
+model BakerySubmissionDeadline {
+  id        Int      @id @default(1)
+  deadline  String   @default("End of Day") @db.VarChar(100)
+  updatedBy String?  @db.VarChar(255)
+  updatedAt DateTime @updatedAt
+
+  @@map("bakery_submission_deadline")
+}
+
+model BakeryTipGuideline {
+  id          Int      @id @default(autoincrement())
+  title       String   @db.VarChar(100)
+  description String   @db.VarChar(500)
+  color       String   @default("blue") @db.VarChar(20)
+  icon        String   @default("info") @db.VarChar(30)
+  sortOrder   Int      @default(0)
+  isActive    Boolean  @default(true)
+  updatedBy   String?  @db.VarChar(255)
+  updatedAt   DateTime @updatedAt
+  createdAt   DateTime @default(now())
+
+  @@map("bakery_tips_guidelines")
+}
+
+model BakerySubmissionLog {
+  id             String   @id @default(uuid())
+  userId         String?
+  userName       String   @db.VarChar(255)
+  userEmail      String   @db.VarChar(255)
+  submissionType String   @db.VarChar(50)
+  message        String?
+  weekSheet      String?  @db.VarChar(100)
+  dayOfWeek      String?  @db.VarChar(10)
+  success        Boolean  @default(true)
+  createdAt      DateTime @default(now())
+
+  @@index([userId])
+  @@index([submissionType])
+  @@index([createdAt])
+  @@map("bakery_submission_logs")
+}
+
+model BakeryMissingDataResolution {
+  id         Int      @id @default(autoincrement())
+  weekName   String   @db.VarChar(100)
+  dayOfWeek  String   @db.VarChar(20)
+  reason     String   @db.VarChar(1000)
+  resolvedBy String   @db.VarChar(255)
+  resolvedAt DateTime @default(now())
+  createdAt  DateTime @default(now())
+
+  @@unique([weekName, dayOfWeek])
+  @@index([weekName])
+  @@index([resolvedAt])
+  @@map("bakery_missing_data_resolutions")
+}
+
+model BakeryTrackerActivityLog {
+  id         Int      @id @default(autoincrement())
+  action     String   @db.VarChar(50)   // RESOLVED, UNRESOLVED, FILL_NOW
+  weekName   String   @db.VarChar(100)
+  dayOfWeek  String   @db.VarChar(20)
+  performedBy String  @db.VarChar(255)
+  reason     String?  @db.VarChar(1000) // resolution reason (for RESOLVED)
+  details    String?  @db.Text          // JSON string with extra context
+  ipAddress  String?  @db.VarChar(45)
+  userAgent  String?  @db.VarChar(500)
+  createdAt  DateTime @default(now())
+
+  @@index([action])
+  @@index([performedBy])
+  @@index([weekName])
+  @@index([createdAt])
+  @@map("bakery_tracker_activity_logs")
+}
+
+// ═══════════════════════════════════════════════════════════════════════════════
+// BAKERY AI INSIGHTS CACHE & LOGS
+// ═══════════════════════════════════════════════════════════════════════════════
+
+model BakeryAiInsight {
+  id          Int      @id @default(autoincrement())
+  weekName    String   @unique @db.VarChar(100)
+  insightData Json     // Full GPT response (the data payload)
+  chartData   Json     // _chartData for frontend charts
+  metaData    Json     // _meta info (model, generatedAt, etc.)
+  aiModel     String   @db.VarChar(50)
+  generatedBy String   @db.VarChar(255) // user name who triggered
+  generatedByUserId String? @db.VarChar(255) // user UUID
+  tokenUsage  Int?     // total tokens used (if available)
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  @@index([weekName])
+  @@index([generatedByUserId])
+  @@index([createdAt])
+  @@map("bakery_ai_insights")
+}
+
+model BakeryAiInsightLog {
+  id          Int      @id @default(autoincrement())
+  weekName    String   @db.VarChar(100)
+  action      String   @db.VarChar(30) // GENERATED, REGENERATED, CACHE_HIT
+  aiModel     String?  @db.VarChar(50)
+  tokenUsage  Int?
+  userId      String?  @db.VarChar(255)
+  userName    String   @db.VarChar(255)
+  ipAddress   String?  @db.VarChar(45)
+  userAgent   String?  @db.VarChar(500)
+  durationMs  Int?     // how long the GPT call took
+  success     Boolean  @default(true)
+  errorMsg    String?  @db.Text
+  createdAt   DateTime @default(now())
+
+  @@index([weekName])
+  @@index([action])
+  @@index([userId])
+  @@index([createdAt])
+  @@map("bakery_ai_insight_logs")
+}

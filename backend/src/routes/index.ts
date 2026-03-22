@@ -149,6 +149,12 @@ router.use('/system-admin-auth', systemAdminAuthRoutes);
 // Support request routes
 router.use('/support', supportRoutes);
 
+// Bakery Metrics routes - PUBLIC, no auth required
+// MUST be defined BEFORE root-mounted routes (departmentRoutes/facilityRoutes)
+// which use router.use(authenticate) and would intercept all paths
+import bakeryMetricsRoutes from './bakeryMetricsRoutes';
+router.use('/bakery-metrics', bakeryMetricsRoutes);
+
 // Phase 2.1: Organization routes
 router.use('/organizations', organizationRoutes);
 

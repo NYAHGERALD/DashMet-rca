@@ -22,6 +22,7 @@ import {
   Inbox,
   Shield,
   Scale,
+  Wheat,
 } from 'lucide-react';
 
 export default function Sidebar() {
@@ -98,6 +99,12 @@ export default function Sidebar() {
       href: '/hr',
       icon: Scale,
       roles: ['SUPERVISOR', 'QA_FOOD_SAFETY', 'MAINTENANCE_ENGINEERING', 'CI_MANAGER', 'ADMIN', 'SYSTEM_ADMIN'],
+    },
+    {
+      name: 'Bakery Metrics',
+      href: '/bakery-metrics',
+      icon: Wheat,
+      roles: ['*'], // Available to all users
     },
   ];
 

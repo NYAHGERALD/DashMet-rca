@@ -117,3 +117,6 @@ render_backup.sql
 
 # Build outputs
 dist/
+
+# Backup data
+backend/backups/

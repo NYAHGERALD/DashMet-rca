@@ -29,6 +29,9 @@ console.log('✅ Routes loaded');
 import { websocketService } from './services/websocketService';
 console.log('✅ WebSocket service loaded');
 
+import { startAutoWeekCron } from './services/bakeryAutoWeekCron';
+console.log('✅ AutoWeek cron loaded');
+
 // Add comprehensive error handling
 process.on('uncaughtException', (error) => {
   console.error('💥 Uncaught Exception:', error);
@@ -143,6 +146,9 @@ const server = httpServer.listen(PORT, HOST, () => {
   console.log(`📡 Environment: ${process.env.NODE_ENV || 'development'}`);
   console.log(`🌍 CORS enabled for:`, corsOptions.origin);
   console.log(`🔌 WebSocket server ready`);
+
+  // Start auto-week cron job
+  startAutoWeekCron();
 });
 
 // Graceful shutdown

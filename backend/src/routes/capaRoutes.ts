@@ -1235,7 +1235,7 @@ router.post(
       const createdActions = [];
       for (const actionItem of allActions) {
         const dueDate = new Date();
-        dueDate.setDate(dueDate.getDate() + getDueDateOffset(actionItem.Category));
+        dueDate.setDate(dueDate.getDate() + getDueDateOffset(actionItem.category));
 
         // Analyze quality with AI (if available)
         let qualityAnalysis = { score: null as number | null, weaknesses: [] as string[] };
@@ -1243,7 +1243,7 @@ router.post(
           qualityAnalysis = await analyzeActionQuality(
             actionItem.action,
             actionItem.action,
-            getActionType(actionItem.Category)
+            getActionType(actionItem.category)
           );
         } catch {
           // AI analysis failed, continue without it
@@ -1265,10 +1265,10 @@ router.post(
             id: uuidv4(),
             updatedAt: new Date(),
             rcaAnalysisId: rcaId,
-            actionType: getActionType(actionItem.Category),
+            actionType: getActionType(actionItem.category),
             title: actionItem.action.substring(0, 200), // Truncate if too long
-            description: `${actionItem.Category === 'immediate' ? 'Immediate Action' : actionItem.Category === 'shortTerm' ? 'Short-Term Action' : 'Long-Term Action'}: ${actionItem.action}`,
-            priority: mapPriority(actionItem.priority, actionItem.Category),
+            description: `${actionItem.category === 'immediate' ? 'Immediate Action' : actionItem.category === 'shortTerm' ? 'Short-Term Action' : 'Long-Term Action'}: ${actionItem.action}`,
+            priority: mapPriority(actionItem.priority, actionItem.category),
             ownerId: userId!, // Default to current user
             dueDate,
             aiQualityScore: qualityAnalysis.score,
@@ -1421,9 +1421,9 @@ Write in a natural, professional tone as if advising a colleague. Be specific an
 **Related Incident Context:**
 - Incident: ${context.incidentTitle}
 - Type: ${context.incidentType}
-- Category: ${context.Category || 'General'}
-- Facility: ${context.Facility || 'Not specified'}
-- Production Line: ${context.Line || 'Not specified'}
+- Category: ${context.category || 'General'}
+- Facility: ${context.facility || 'Not specified'}
+- Production Line: ${context.line || 'Not specified'}
 - Severity: ${context.severity}
 
 **Incident Description:**
@@ -1432,7 +1432,7 @@ ${context.incidentDescription}
 **Action Details:**
 ${context.actionDescription}
 
-**Assigned Owner:** ${context.userName} (${context.userRole})
+**Assigned Owner:** ${context.ownerName} (${context.ownerRole})
 
 Please provide an implementation plan that includes:
 1. **Preparation Phase** - What needs to be gathered, reviewed, or arranged before starting

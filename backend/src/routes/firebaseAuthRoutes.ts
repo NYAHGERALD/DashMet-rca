@@ -265,7 +265,7 @@ router.post('/create-profile', authenticateFirebaseOnly, async (req: FirebaseAut
       const orgAccessCode = await prisma.organizationAccessCode.findFirst({
         where: {
           id: orgAccessCodeId,
-          organizationId: finalOrganizationId,
+          organizationId: finalOrganizationId ?? undefined,
           role: role,
           isActive: true,
         },

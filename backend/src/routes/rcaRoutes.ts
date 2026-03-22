@@ -528,8 +528,8 @@ router.post('/incidents/:incidentId/analyze-methodology', requirePrivilege('rca.
         id: e.id,
         fileName: e.fileName,
         type: e.type,
-        aiAnalysis: e.aiAnalysis,
-        extractedText: e.extractedText,
+        aiAnalysis: (e as any).aiAnalysis,
+        extractedText: (e as any).extractedText,
       })) || [],
 
       // Workplace safety context
@@ -540,12 +540,12 @@ router.post('/incidents/:incidentId/analyze-methodology', requirePrivilege('rca.
         contributingFactors: incident.contributingFactors,
         unsafeActOrCondition: incident.unsafeActOrCondition,
         environmentalConditions: incident.environmentalConditions,
-        equipmentInvolved: incident.equipmentInvolved,
-        taskPerformed: incident.taskPerformed,
+        equipmentInvolved: (incident as any).equipmentInvolved,
+        taskPerformed: (incident as any).taskPerformed,
       } : null,
 
       // Quality/food safety context
-      qualitySafety: incident.type === 'FOOD_SAFETY' || incident.type === 'QUALITY' ? {
+      qualitySafety: incident.type === 'FOOD_SAFETY' || (incident.type as string) === 'QUALITY' ? {
         productAffected: incident.productName,
         batchLot: incident.lotNumber,
         deviationType: incident.type,
@@ -575,7 +575,7 @@ router.post('/incidents/:incidentId/analyze-methodology', requirePrivilege('rca.
     });
 
     // Get AI recommendation
-    const recommendation = await getAIMethodRecommendation(incidentContext);
+    const recommendation = await getAIMethodRecommendation(incidentContext as any);
 
     // Emit WebSocket event with analysis result
     websocketService.emitToIncident(incidentId, 'rca:methodology-analysis-complete', {

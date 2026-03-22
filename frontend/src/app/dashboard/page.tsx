@@ -246,6 +246,7 @@ function DashboardContent() {
                 { href: '/fmir', icon: '⚠️', label: t('nav.fmir') || 'Foreign Material' },
                 { href: '/workplace-safety', icon: '🛡️', label: 'Safety Assessment', show: isSupervisorPlus },
                 { href: '/hr', icon: '⚖️', label: 'HR Resolution', show: isSupervisorPlus },
+                { href: '/bakery-metrics', icon: '🌾', label: 'Bakery Metrics' },
                 { href: '/lsw', icon: '📋', label: 'Leaders Standard Work' },
                 { href: '/meetings', icon: '🎤', label: 'Meeting Intelligence' },
                 { href: '/assigned-actions', icon: '📌', label: 'My Action Items' },
@@ -278,6 +279,7 @@ function DashboardContent() {
                   { href: '/admin/work-order-templates', icon: '📋', label: 'Work Order Templates' },
                   { href: '/admin/enterprise', icon: '🛡️', label: t('nav.enterprise') },
                   { href: '/admin/calendar-config', icon: '📅', label: 'Calendar Year Config' },
+                  { href: '/admin/bakery-settings', icon: '🌾', label: 'Bakery KPI Settings' },
                   { href: '/support-inbox', icon: '📬', label: 'Support Inbox' },
                 ]}
               />

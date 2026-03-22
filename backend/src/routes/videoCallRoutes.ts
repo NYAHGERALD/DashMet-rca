@@ -268,7 +268,7 @@ router.post('/get-token', authenticate, async (req: AuthRequest, res: Response) 
       });
       return res.status(response.status).json({
         success: false,
-        error: `Failed to generate meeting token: ${errorData.error || errorData.info || 'Unknown error'}`,
+        error: `Failed to generate meeting token: ${(errorData as any).error || (errorData as any).info || 'Unknown error'}`,
       });
     }
 

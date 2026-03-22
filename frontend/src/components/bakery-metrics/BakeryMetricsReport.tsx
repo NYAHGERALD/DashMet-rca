@@ -1,0 +1,857 @@
+'use client';
+
+import { useState, useEffect, useCallback, useRef } from 'react';
+import { useTheme } from '@/components/providers/ThemeProvider';
+import api from '@/lib/api';
+import {
+  BarChart3,
+  Calendar,
+  Clock,
+  RefreshCw,
+  FileText,
+  FileSpreadsheet,
+  Gauge,
+  Package,
+  Trash2,
+  Trophy,
+  X,
+  Eye,
+  EyeOff,
+  Loader2,
+  AlertTriangle,
+  AlertCircle,
+  Info,
+  TrendingUp,
+  TrendingDown,
+  Minus,
+  Zap,
+  Activity,
+  CalendarCheck,
+  ChevronDown,
+} from 'lucide-react';
+
+// ─── Types ──────────────────────────────────────────────────────────────────────
+interface KpiTargets {
+  oee: { die_cut_1: number; die_cut_2: number; total: number };
+  volume: { die_cut_1: number; die_cut_2: number; total: number };
+  waste: { die_cut_1: number; die_cut_2: number; total: number };
+}
+
+interface MetricsRecord {
+  id?: string;
+  submission_date?: string;
+  week_name?: string;
+  day_of_week?: string;
+  // First shift
+  first_shift_die_cut1_oee?: number;
+  first_shift_die_cut2_oee?: number;
+  first_shift_oee?: number;
+  first_shift_die_cut1_lbs?: number;
+  first_shift_die_cut2_lbs?: number;
+  first_shift_production?: number;
+  first_shift_die_cut1_waste_pct?: number;
+  first_shift_die_cut2_waste_pct?: number;
+  first_shift_waste_percent?: number;
+  // Second shift
+  second_shift_die_cut1_oee?: number;
+  second_shift_die_cut2_oee?: number;
+  second_shift_oee?: number;
+  second_shift_die_cut1_lbs?: number;
+  second_shift_die_cut2_lbs?: number;
+  second_shift_production?: number;
+  second_shift_die_cut1_waste_pct?: number;
+  second_shift_die_cut2_waste_pct?: number;
+  second_shift_waste_percent?: number;
+  // Both shifts
+  both_shift_die_cut1_oee?: number;
+  both_shift_die_cut2_oee?: number;
+  total_oee?: number;
+  both_shift_die_cut1_lbs?: number;
+  both_shift_die_cut2_lbs?: number;
+  total_production?: number;
+  both_shift_die_cut1_waste_pct?: number;
+  both_shift_die_cut2_waste_pct?: number;
+  total_waste_percent?: number;
+  [key: string]: any;
+}
+
+interface DashboardMetrics {
+  oeeCurrentValue?: number;
+  oeeStatus?: string;
+  oeeChange?: string;
+  oeeVsTarget?: string;
+  wasteCurrentValue?: number;
+  wasteStatus?: string;
+  wasteChange?: string;
+  wasteVsTarget?: string;
+  productionCurrentValue?: number;
+  productionStatus?: string;
+  productionChange?: string;
+  productionDailyOutput?: string;
+  efficiencyCurrentValue?: number;
+  efficiencyStatus?: string;
+  efficiencyChange?: string;
+  efficiencyPerformanceIndex?: string;
+}
+
+interface Notification {
+  id: number;
+  message: string;
+  type: 'success' | 'error' | 'warning' | 'info';
+}
+
+// ─── Helper: value color class ──────────────────────────────────────────────────
+function getValueColor(value: number | undefined | null, target: number, isReverse = false): string {
+  if (value === undefined || value === null || value === 0) return 'bg-gray-100 dark:bg-gray-700 text-gray-500 dark:text-gray-400';
+  if (isReverse) {
+    return value <= target
+      ? 'bg-green-100 dark:bg-green-900/40 text-green-800 dark:text-green-300'
+      : 'bg-red-100 dark:bg-red-900/40 text-red-800 dark:text-red-300';
+  }
+  return value >= target
+    ? 'bg-green-100 dark:bg-green-900/40 text-green-800 dark:text-green-300'
+    : 'bg-red-100 dark:bg-red-900/40 text-red-800 dark:text-red-300';
+}
+
+function getStatusText(value: number | undefined | null, target: number, type: 'oee' | 'volume' | 'waste'): { text: string; good: boolean } {
+  if (!value) return { text: '-', good: false };
+  if (type === 'waste') {
+    return value <= target ? { text: 'BELOW TARGET', good: true } : { text: 'ABOVE TARGET', good: false };
+  }
+  if (type === 'oee') {
+    return value >= target ? { text: 'TARGET MET', good: true } : { text: 'BELOW TARGET', good: false };
+  }
+  return value >= target ? { text: 'ON TARGET', good: true } : { text: 'BELOW TARGET', good: false };
+}
+
+function formatVal(value: number | undefined | null, suffix: string, isInteger = false): string {
+  if (value === undefined || value === null || value === 0) return '-';
+  if (isInteger) return Math.round(value).toLocaleString() + suffix;
+  return value.toFixed(1) + suffix;
+}
+
+// ─── Metric Value Cell ──────────────────────────────────────────────────────────
+function MetricCell({ value, suffix, target, isReverse = false, isInteger = false }: {
+  value: number | undefined | null;
+  suffix: string;
+  target: number;
+  isReverse?: boolean;
+  isInteger?: boolean;
+}) {
+  const display = formatVal(value, suffix, isInteger);
+  const color = getValueColor(value, target, isReverse);
+  return (
+    <span className={`inline-flex items-center px-2.5 py-1.5 rounded-full text-xs font-bold ${color}`}>
+      {display}
+    </span>
+  );
+}
+
+// ─── Status Badge ───────────────────────────────────────────────────────────────
+function StatusBadge({ value, target, type }: {
+  value: number | undefined | null;
+  target: number;
+  type: 'oee' | 'volume' | 'waste';
+}) {
+  const { text, good } = getStatusText(value, target, type);
+  return (
+    <span className={`inline-flex items-center px-2.5 py-1.5 rounded-full text-[10px] font-bold uppercase ${
+      text === '-'
+        ? 'bg-gray-100 dark:bg-gray-700 text-gray-500 dark:text-gray-400'
+        : good
+          ? 'bg-green-100 dark:bg-green-900/40 text-green-800 dark:text-green-300'
+          : 'bg-red-100 dark:bg-red-900/40 text-red-800 dark:text-red-300'
+    }`}>
+      {text}
+    </span>
+  );
+}
+
+// ─── Performance Card ───────────────────────────────────────────────────────────
+function PerfCard({ icon, iconBg, title, value, unit, status, statusGood, change, changeGood, subtext }: {
+  icon: React.ReactNode;
+  iconBg: string;
+  title: string;
+  value: string;
+  unit: string;
+  status: string;
+  statusGood: boolean;
+  change: string;
+  changeGood: boolean | null;
+  subtext: string;
+}) {
+  return (
+    <div className="bg-white/80 dark:bg-gray-800/80 backdrop-blur-md rounded-2xl shadow-lg border border-gray-200 dark:border-gray-700 p-4 hover:shadow-xl hover:-translate-y-0.5 transition-all duration-300">
+      <div className="flex items-start justify-between mb-4">
+        <div className={`p-3 ${iconBg} rounded-xl shadow-md`}>{icon}</div>
+        <span className={`inline-flex items-center px-2.5 py-1 rounded-full text-[10px] font-bold uppercase ${
+          statusGood
+            ? 'bg-green-100 dark:bg-green-900/40 text-green-700 dark:text-green-300'
+            : 'bg-red-100 dark:bg-red-900/40 text-red-700 dark:text-red-300'
+        }`}>
+          {status}
+        </span>
+      </div>
+      <h3 className="text-xs font-semibold text-gray-600 dark:text-gray-400 mb-2">{title}</h3>
+      <div className="flex items-baseline gap-1.5">
+        <span className="text-2xl font-black text-gray-900 dark:text-white">{value}</span>
+        <span className="text-sm font-semibold text-gray-500 dark:text-gray-400">{unit}</span>
+      </div>
+      <div className="flex items-center gap-2 mt-3">
+        <span className={`inline-flex items-center px-2 py-0.5 rounded-lg text-[10px] font-bold ${
+          changeGood === true
+            ? 'bg-emerald-100 dark:bg-emerald-900/40 text-emerald-700 dark:text-emerald-300'
+            : changeGood === false
+              ? 'bg-red-100 dark:bg-red-900/40 text-red-700 dark:text-red-300'
+              : 'bg-gray-100 dark:bg-gray-700 text-gray-600 dark:text-gray-400'
+        }`}>
+          {changeGood === true ? <TrendingUp className="w-3 h-3 mr-0.5" /> : changeGood === false ? <TrendingDown className="w-3 h-3 mr-0.5" /> : <Minus className="w-3 h-3 mr-0.5" />}
+          {change}
+        </span>
+        <span className="text-[10px] text-gray-500 dark:text-gray-400">{subtext}</span>
+      </div>
+    </div>
+  );
+}
+
+// ═══════════════════════════════════════════════════════════════════════════════
+// MAIN COMPONENT
+// ═══════════════════════════════════════════════════════════════════════════════
+interface BakeryMetricsReportProps {
+  onFilterInfo?: (info: { week: string; day: string; totalRecords: number; isWeekSummary: boolean }) => void;
+  triggerAction?: { type: 'refresh' | 'pdf' | 'excel'; ts: number };
+}
+
+export default function BakeryMetricsReport({ onFilterInfo, triggerAction }: BakeryMetricsReportProps) {
+  const { theme } = useTheme();
+
+  // ─── State ──────────────────────────────────────────────────────────────────
+  const [loading, setLoading] = useState(true);
+  const [weekFilter, setWeekFilter] = useState('');
+  const [dayFilter, setDayFilter] = useState('Monday');
+  const [weekOptions, setWeekOptions] = useState<string[]>([]);
+  const [recordOptions, setRecordOptions] = useState<{ id: string; label: string }[]>([]);
+  const [selectedRecord, setSelectedRecord] = useState('latest');
+  const [compactView, setCompactView] = useState(false);
+
+  // Custom dropdown open states
+  const [weekDropdownOpen, setWeekDropdownOpen] = useState(false);
+  const [recordDropdownOpen, setRecordDropdownOpen] = useState(false);
+  const weekDropdownRef = useRef<HTMLDivElement>(null);
+  const recordDropdownRef = useRef<HTMLDivElement>(null);
+  const [isWeekSummary, setIsWeekSummary] = useState(false);
+  const [showCongrats, setShowCongrats] = useState(false);
+
+  const [kpiTargets, setKpiTargets] = useState<KpiTargets>({
+    oee: { die_cut_1: 70, die_cut_2: 70, total: 70 },
+    volume: { die_cut_1: 6000, die_cut_2: 6000, total: 12000 },
+    waste: { die_cut_1: 3.75, die_cut_2: 3.75, total: 3.75 },
+  });
+
+  const [metricsData, setMetricsData] = useState<MetricsRecord>({});
+  const [dashMetrics, setDashMetrics] = useState<DashboardMetrics>({});
+  const [notifications, setNotifications] = useState<Notification[]>([]);
+
+  const notifId = useRef(0);
+
+  // ─── Notifications ────────────────────────────────────────────────────────
+  const showNotification = useCallback((message: string, type: Notification['type']) => {
+    const id = ++notifId.current;
+    setNotifications(prev => [...prev, { id, message, type }]);
+    setTimeout(() => setNotifications(prev => prev.filter(n => n.id !== id)), 4000);
+  }, []);
+
+  // ─── Close dropdowns on outside click ────────────────────────────────────
+  useEffect(() => {
+    const handleClickOutside = (e: MouseEvent) => {
+      if (weekDropdownRef.current && !weekDropdownRef.current.contains(e.target as Node)) {
+        setWeekDropdownOpen(false);
+      }
+      if (recordDropdownRef.current && !recordDropdownRef.current.contains(e.target as Node)) {
+        setRecordDropdownOpen(false);
+      }
+    };
+    document.addEventListener('mousedown', handleClickOutside);
+    return () => document.removeEventListener('mousedown', handleClickOutside);
+  }, []);
+
+  // ─── Load KPI Targets ────────────────────────────────────────────────────
+  const loadKpiTargets = useCallback(async () => {
+    try {
+      const res = await api.get('/bakery-metrics/kpi-targets');
+      if (res.data?.success && res.data.targets) {
+        setKpiTargets(res.data.targets);
+      }
+    } catch {
+      // use defaults
+    }
+  }, []);
+
+  // ─── Load Week Options ───────────────────────────────────────────────────
+  const loadWeekOptions = useCallback(async () => {
+    try {
+      const res = await api.get('/bakery-metrics/week-options');
+      if (res.data?.success && res.data.weeks) {
+        setWeekOptions(res.data.weeks);
+        if (res.data.weeks.length > 0 && !weekFilter) {
+          setWeekFilter(res.data.default_week || res.data.weeks[0]);
+        }
+      }
+    } catch {
+      // generate defaults
+      const now = new Date();
+      const weekNum = Math.ceil((now.getTime() - new Date(now.getFullYear(), 0, 1).getTime()) / 604800000);
+      const opts = Array.from({ length: 5 }, (_, i) => `Week ${weekNum - i} - ${now.getFullYear()}`);
+      setWeekOptions(opts);
+      if (!weekFilter) setWeekFilter(opts[0]);
+    }
+  }, [weekFilter]);
+
+  // ─── Load Available Records ──────────────────────────────────────────────
+  const loadRecords = useCallback(async () => {
+    try {
+      const res = await api.get('/bakery-metrics/records');
+      if (res.data?.success && res.data.records) {
+        setRecordOptions(res.data.records.map((r: any) => {
+          const date = new Date(r.createdAt || r.submission_date || r.created_at);
+          const dateStr = !isNaN(date.getTime()) ? date.toLocaleDateString() : r.dayOfWeek || 'Unknown';
+          const oee = r.bothShiftsMetrics?.oeeAvgPct ?? r.total_oee;
+          const oeeStr = oee != null ? `OEE: ${Number(oee).toFixed(1)}%` : (r.dayOfWeek || '');
+          return { id: r.id, label: `${dateStr} - ${oeeStr}` };
+        }));
+      }
+    } catch {
+      // empty
+    }
+  }, []);
+
+  // ─── Load Metrics Data ───────────────────────────────────────────────────
+  const loadMetricsData = useCallback(async (week?: string, day?: string) => {
+    setLoading(true);
+    try {
+      const params = new URLSearchParams();
+      if (week && week !== 'latest') params.append('week', week);
+      if (day && day !== 'All') params.append('day', day);
+
+      const res = await api.get(`/bakery-metrics/both-shifts-records?${params.toString()}`);
+      const records = res.data?.records || res.data || [];
+
+      if (Array.isArray(records) && records.length > 0) {
+        setMetricsData(records[0]);
+        checkCongrats(records[0]);
+      } else {
+        setMetricsData({});
+        setShowCongrats(false);
+        showNotification('No data found for selected filters', 'warning');
+      }
+    } catch {
+      setMetricsData({});
+      showNotification('Failed to load metrics data', 'error');
+    } finally {
+      setLoading(false);
+    }
+  }, [showNotification]);
+
+  // ─── Load Dashboard Metrics ──────────────────────────────────────────────
+  const loadDashboardMetrics = useCallback(async (week?: string, day?: string) => {
+    try {
+      const params = new URLSearchParams();
+      if (week && week !== 'latest') params.append('week', week);
+      if (day && day !== 'All') params.append('day', day);
+
+      const res = await api.get(`/bakery-metrics/report-dashboard-metrics?${params.toString()}`);
+      if (res.data?.success && res.data.data) {
+        setDashMetrics(res.data.data);
+      }
+    } catch {
+      setDashMetrics({});
+    }
+  }, []);
+
+  // ─── Congratulations check ───────────────────────────────────────────────
+  const checkCongrats = (data: MetricsRecord) => {
+    const t = kpiTargets;
+    const allMet =
+      (data.both_shift_die_cut1_oee || 0) >= t.oee.die_cut_1 &&
+      (data.both_shift_die_cut2_oee || 0) >= t.oee.die_cut_2 &&
+      (data.total_oee || 0) >= t.oee.total &&
+      (data.both_shift_die_cut1_lbs || 0) >= t.volume.die_cut_1 &&
+      (data.both_shift_die_cut2_lbs || 0) >= t.volume.die_cut_2 &&
+      (data.total_production || 0) >= t.volume.total &&
+      (data.both_shift_die_cut1_waste_pct || 0) <= t.waste.die_cut_1 &&
+      (data.both_shift_die_cut2_waste_pct || 0) <= t.waste.die_cut_2 &&
+      (data.total_waste_percent || 0) <= t.waste.total;
+    setShowCongrats(allMet);
+  };
+
+  // ─── Week Summary ────────────────────────────────────────────────────────
+  const loadWeekSummary = async () => {
+    if (!weekFilter || weekFilter === 'latest') {
+      showNotification('Select a specific week to calculate averages', 'warning');
+      return;
+    }
+    setLoading(true);
+    try {
+      const res = await api.get(`/bakery-metrics/week-average?week=${encodeURIComponent(weekFilter)}`);
+      if (res.data?.success && res.data.averages) {
+        const avg = res.data.averages;
+        setMetricsData({
+          first_shift_die_cut1_oee: avg.oee?.die_cut_1?.first_shift,
+          first_shift_die_cut2_oee: avg.oee?.die_cut_2?.first_shift,
+          first_shift_oee: avg.oee?.total?.first_shift,
+          second_shift_die_cut1_oee: avg.oee?.die_cut_1?.second_shift,
+          second_shift_die_cut2_oee: avg.oee?.die_cut_2?.second_shift,
+          second_shift_oee: avg.oee?.total?.second_shift,
+          both_shift_die_cut1_oee: avg.oee?.die_cut_1?.both_shifts,
+          both_shift_die_cut2_oee: avg.oee?.die_cut_2?.both_shifts,
+          total_oee: avg.oee?.total?.both_shifts,
+          first_shift_die_cut1_lbs: avg.volume?.die_cut_1?.first_shift,
+          first_shift_die_cut2_lbs: avg.volume?.die_cut_2?.first_shift,
+          first_shift_production: avg.volume?.total?.first_shift,
+          second_shift_die_cut1_lbs: avg.volume?.die_cut_1?.second_shift,
+          second_shift_die_cut2_lbs: avg.volume?.die_cut_2?.second_shift,
+          second_shift_production: avg.volume?.total?.second_shift,
+          both_shift_die_cut1_lbs: avg.volume?.die_cut_1?.both_shifts,
+          both_shift_die_cut2_lbs: avg.volume?.die_cut_2?.both_shifts,
+          total_production: avg.volume?.total?.both_shifts,
+          first_shift_die_cut1_waste_pct: avg.waste?.percentage?.die_cut_1?.first_shift,
+          first_shift_die_cut2_waste_pct: avg.waste?.percentage?.die_cut_2?.first_shift,
+          first_shift_waste_percent: avg.waste?.percentage?.total?.first_shift,
+          second_shift_die_cut1_waste_pct: avg.waste?.percentage?.die_cut_1?.second_shift,
+          second_shift_die_cut2_waste_pct: avg.waste?.percentage?.die_cut_2?.second_shift,
+          second_shift_waste_percent: avg.waste?.percentage?.total?.second_shift,
+          both_shift_die_cut1_waste_pct: avg.waste?.percentage?.die_cut_1?.both_shifts,
+          both_shift_die_cut2_waste_pct: avg.waste?.percentage?.die_cut_2?.both_shifts,
+          total_waste_percent: avg.waste?.percentage?.total?.both_shifts,
+        });
+        setIsWeekSummary(true);
+        showNotification(`Week summary calculated for ${res.data.period}`, 'success');
+      }
+    } catch {
+      showNotification('Failed to calculate week summary', 'error');
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  // ─── Refresh all ─────────────────────────────────────────────────────────
+  const refreshAll = async () => {
+    showNotification('Refreshing all data...', 'info');
+    setIsWeekSummary(false);
+    await Promise.all([
+      loadMetricsData(weekFilter, dayFilter),
+      loadDashboardMetrics(weekFilter, dayFilter),
+      loadRecords(),
+    ]);
+    showNotification('Data refreshed', 'success');
+  };
+
+  // ─── Filter change handler ───────────────────────────────────────────────
+  const onFilterChange = useCallback(async (week: string, day: string) => {
+    setIsWeekSummary(false);
+    await Promise.all([
+      loadMetricsData(week, day),
+      loadDashboardMetrics(week, day),
+    ]);
+  }, [loadMetricsData, loadDashboardMetrics]);
+
+  // ─── Init ────────────────────────────────────────────────────────────────
+  useEffect(() => {
+    const init = async () => {
+      await loadKpiTargets();
+      await loadWeekOptions();
+      await loadRecords();
+    };
+    init();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  // Load data when weekFilter is set
+  useEffect(() => {
+    if (weekFilter) {
+      loadMetricsData(weekFilter, dayFilter);
+      loadDashboardMetrics(weekFilter, dayFilter);
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [weekFilter]);
+
+  // Notify parent of filter state changes
+  useEffect(() => {
+    onFilterInfo?.({ week: weekFilter, day: dayFilter, totalRecords: recordOptions.length, isWeekSummary });
+  }, [weekFilter, dayFilter, recordOptions.length, isWeekSummary, onFilterInfo]);
+
+  // Handle actions triggered from parent (sticky header buttons)
+  useEffect(() => {
+    if (!triggerAction) return;
+    if (triggerAction.type === 'refresh') refreshAll();
+    else if (triggerAction.type === 'pdf') showNotification('PDF export coming soon', 'info');
+    else if (triggerAction.type === 'excel') showNotification('Excel export coming soon', 'info');
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [triggerAction]);
+
+  // ─── Computed values for cards ───────────────────────────────────────────
+  const oeeVal = dashMetrics.oeeCurrentValue ?? metricsData.total_oee ?? 0;
+  const wasteVal = dashMetrics.wasteCurrentValue ?? metricsData.total_waste_percent ?? 0;
+  const prodVal = dashMetrics.productionCurrentValue ?? metricsData.total_production ?? 0;
+  const effVal = dashMetrics.efficiencyCurrentValue ?? 0;
+
+  const d = metricsData;
+  const t = kpiTargets;
+
+  // ─── Days ─────────────────────────────────────────────────────────────────
+  const days = ['Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday'];
+
+  // ═══════════════════════════════════════════════════════════════════════════
+  // RENDER
+  // ═══════════════════════════════════════════════════════════════════════════
+  return (
+    <div className="space-y-4">
+      {/* Notifications */}
+      <div className="fixed top-4 right-4 z-50 space-y-2">
+        {notifications.map(n => (
+          <div
+            key={n.id}
+            className={`px-4 py-3 rounded-xl shadow-xl text-sm font-medium text-white animate-fade-slide-in ${
+              n.type === 'success' ? 'bg-emerald-600' : n.type === 'error' ? 'bg-red-600' : n.type === 'warning' ? 'bg-amber-500' : 'bg-blue-600'
+            }`}
+          >
+            {n.message}
+          </div>
+        ))}
+      </div>
+
+      {/* Loading Overlay */}
+      {loading && (
+        <div className="fixed inset-0 bg-white/60 dark:bg-gray-900/60 backdrop-blur-sm z-40 flex items-center justify-center">
+          <div className="bg-white dark:bg-gray-800 rounded-2xl shadow-xl p-6 text-center">
+            <Loader2 className="w-10 h-10 text-blue-600 animate-spin mx-auto mb-3" />
+            <h3 className="text-lg font-bold text-gray-900 dark:text-white mb-1">Loading Analytics</h3>
+            <p className="text-sm text-gray-600 dark:text-gray-400">Processing performance data...</p>
+          </div>
+        </div>
+      )}
+
+
+
+      {/* ═══ CONGRATULATION ═══ */}
+      {showCongrats && (
+        <div className="bg-gradient-to-r from-emerald-50 to-green-50 dark:from-emerald-900/30 dark:to-green-900/30 border-2 border-emerald-200 dark:border-emerald-700 rounded-2xl shadow-lg p-5 animate-pulse">
+          <div className="flex items-center justify-between">
+            <div className="flex items-center gap-4">
+              <div className="p-3 bg-emerald-500 rounded-xl shadow-md">
+                <Trophy className="w-8 h-8 text-white" />
+              </div>
+              <div>
+                <h3 className="text-lg font-black text-emerald-800 dark:text-emerald-200">🎉 Outstanding Performance!</h3>
+                <p className="text-sm font-bold text-emerald-700 dark:text-emerald-300">All BOTH SHIFTS metrics are meeting or exceeding targets!</p>
+              </div>
+            </div>
+            <button onClick={() => setShowCongrats(false)} title="Dismiss" className="p-2 text-emerald-600 hover:bg-emerald-100 dark:hover:bg-emerald-800/40 rounded-lg transition-colors">
+              <X className="w-5 h-5" />
+            </button>
+          </div>
+        </div>
+      )}
+
+      {/* ═══ METRICS TABLE ═══ */}
+      <div className="bg-white/80 dark:bg-gray-800/80 backdrop-blur-md rounded-2xl shadow-xl border border-gray-200 dark:border-gray-700">
+        {/* Table Controls Bar */}
+        <div className="bg-gradient-to-r from-blue-600 via-indigo-600 to-purple-600 p-4 lg:p-5 rounded-t-2xl relative z-10">
+          <div className="flex flex-wrap items-center gap-2 max-w-full">
+              {/* Week filter — custom dropdown */}
+              <div ref={weekDropdownRef} className="relative flex items-center gap-1.5 bg-white/10 backdrop-blur-sm rounded-lg px-3 py-2 border border-white/20">
+                <label className="text-xs font-semibold text-blue-100 shrink-0">Week:</label>
+                <button
+                  type="button"
+                  onClick={() => { setWeekDropdownOpen(v => !v); setRecordDropdownOpen(false); }}
+                  className="flex items-center gap-1 bg-white/20 border border-white/30 rounded-md text-white text-xs px-2 py-1 hover:bg-white/30 transition-colors max-w-[180px] sm:max-w-[220px]"
+                  title="Select week"
+                >
+                  <span className="truncate">{weekFilter || 'Select week'}</span>
+                  <ChevronDown className={`w-3 h-3 shrink-0 transition-transform ${weekDropdownOpen ? 'rotate-180' : ''}`} />
+                </button>
+                {weekDropdownOpen && (
+                  <div className="absolute top-full left-0 mt-1 z-50 bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-600 rounded-lg shadow-xl max-h-60 overflow-y-auto min-w-[200px] max-w-[260px]">
+                    {weekOptions.map(w => (
+                      <button
+                        key={w}
+                        type="button"
+                        onClick={() => { setWeekFilter(w); onFilterChange(w, dayFilter); setWeekDropdownOpen(false); }}
+                        className={`w-full text-left px-3 py-2 text-xs hover:bg-blue-50 dark:hover:bg-gray-700 transition-colors truncate ${
+                          w === weekFilter ? 'bg-blue-100 dark:bg-blue-900/40 text-blue-700 dark:text-blue-300 font-semibold' : 'text-gray-700 dark:text-gray-300'
+                        }`}
+                      >
+                        {w === weekFilter && <span className="mr-1">✓</span>}{w}
+                      </button>
+                    ))}
+                  </div>
+                )}
+              </div>
+
+              {/* Day filter — native select (few options, no scroll needed) */}
+              <div className="flex items-center gap-1.5 bg-white/10 backdrop-blur-sm rounded-lg px-3 py-2 border border-white/20">
+                <label className="text-xs font-semibold text-blue-100">Day:</label>
+                <select
+                  value={dayFilter}
+                  onChange={e => { setDayFilter(e.target.value); onFilterChange(weekFilter, e.target.value); }}
+                  className="bg-white/20 border border-white/30 rounded-md text-white text-xs px-2 py-1 focus:ring-2 focus:ring-white/50"
+                  title="Select day"
+                >
+                  {days.map(d => <option key={d} value={d} className="text-gray-900 bg-white">{d}</option>)}
+                </select>
+              </div>
+
+              {/* Record selector — custom dropdown */}
+              <div ref={recordDropdownRef} className="relative">
+                <button
+                  type="button"
+                  onClick={() => { setRecordDropdownOpen(v => !v); setWeekDropdownOpen(false); }}
+                  className="flex items-center gap-1 bg-white/20 border border-white/30 rounded-lg text-white text-xs px-3 py-2 hover:bg-white/30 transition-colors max-w-[180px] sm:max-w-[220px]"
+                  title="Select record"
+                >
+                  <span className="truncate">
+                    {selectedRecord === 'latest' ? 'Latest Record' : (recordOptions.find(r => r.id === selectedRecord)?.label || 'Select record')}
+                  </span>
+                  <ChevronDown className={`w-3 h-3 shrink-0 transition-transform ${recordDropdownOpen ? 'rotate-180' : ''}`} />
+                </button>
+                {recordDropdownOpen && (
+                  <div className="absolute top-full right-0 mt-1 z-50 bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-600 rounded-lg shadow-xl max-h-60 overflow-y-auto min-w-[200px] max-w-[280px]">
+                    <button
+                      type="button"
+                      onClick={() => { setSelectedRecord('latest'); setRecordDropdownOpen(false); }}
+                      className={`w-full text-left px-3 py-2 text-xs hover:bg-blue-50 dark:hover:bg-gray-700 transition-colors ${
+                        selectedRecord === 'latest' ? 'bg-blue-100 dark:bg-blue-900/40 text-blue-700 dark:text-blue-300 font-semibold' : 'text-gray-700 dark:text-gray-300'
+                      }`}
+                    >
+                      {selectedRecord === 'latest' && <span className="mr-1">✓</span>}Latest Record
+                    </button>
+                    {recordOptions.map(r => (
+                      <button
+                        key={r.id}
+                        type="button"
+                        onClick={() => { setSelectedRecord(r.id); setRecordDropdownOpen(false); }}
+                        className={`w-full text-left px-3 py-2 text-xs hover:bg-blue-50 dark:hover:bg-gray-700 transition-colors truncate ${
+                          r.id === selectedRecord ? 'bg-blue-100 dark:bg-blue-900/40 text-blue-700 dark:text-blue-300 font-semibold' : 'text-gray-700 dark:text-gray-300'
+                        }`}
+                      >
+                        {r.id === selectedRecord && <span className="mr-1">✓</span>}{r.label}
+                      </button>
+                    ))}
+                  </div>
+                )}
+              </div>
+
+              {/* Week Summary toggle */}
+              <button
+                onClick={() => { isWeekSummary ? (() => { setIsWeekSummary(false); loadMetricsData(weekFilter, dayFilter); })() : loadWeekSummary(); }}
+                className="px-3 py-2 text-xs bg-emerald-500/80 border border-emerald-400/50 rounded-lg text-white hover:bg-emerald-600/80 transition-colors font-semibold whitespace-nowrap active:scale-95"
+              >
+                {isWeekSummary ? <><Calendar className="w-3.5 h-3.5 inline mr-1" />Daily</> : <><CalendarCheck className="w-3.5 h-3.5 inline mr-1" />Week Summary</>}
+              </button>
+
+              {/* Compact toggle */}
+              <button
+                onClick={() => setCompactView(v => !v)}
+                className="px-3 py-2 text-xs bg-white/20 border border-white/30 rounded-lg text-white hover:bg-white/30 transition-colors whitespace-nowrap active:scale-95"
+              >
+                {compactView ? <><Eye className="w-3.5 h-3.5 inline mr-1" />Full</> : <><EyeOff className="w-3.5 h-3.5 inline mr-1" />Compact</>}
+              </button>
+
+              {/* Refresh */}
+              <button
+                onClick={() => { refreshAll(); }}
+                className="px-3 py-2 text-xs bg-white/20 border border-white/30 rounded-lg text-white hover:bg-white/30 transition-colors active:scale-95"
+              >
+                <RefreshCw className="w-3.5 h-3.5 inline mr-1" /> Refresh
+              </button>
+          </div>
+        </div>
+
+        {/* Table */}
+        <div className={`overflow-x-auto overflow-hidden rounded-b-2xl ${compactView ? 'max-h-96 overflow-y-auto' : ''}`}>
+          <table className="w-full">
+            <thead className="bg-gray-50 dark:bg-gray-700 border-b-2 border-gray-200 dark:border-gray-600">
+              <tr>
+                <th className="px-4 py-3 text-left text-[10px] font-black text-gray-800 dark:text-gray-200 uppercase tracking-wider">KPI Metric</th>
+                <th className="px-4 py-3 text-left text-[10px] font-black text-gray-800 dark:text-gray-200 uppercase tracking-wider">Target</th>
+                <th className="px-4 py-3 text-left text-[10px] font-black text-blue-800 dark:text-blue-300 uppercase tracking-wider bg-blue-50/50 dark:bg-blue-900/20">
+                  First Shift{isWeekSummary && <><br /><span className="text-[8px]">WEEK SUMMARY</span></>}
+                </th>
+                <th className="px-4 py-3 text-left text-[10px] font-black text-indigo-800 dark:text-indigo-300 uppercase tracking-wider bg-indigo-50/50 dark:bg-indigo-900/20">
+                  Second Shift{isWeekSummary && <><br /><span className="text-[8px]">WEEK SUMMARY</span></>}
+                </th>
+                <th className="px-4 py-3 text-left text-[10px] font-black text-purple-800 dark:text-purple-300 uppercase tracking-wider bg-purple-50/50 dark:bg-purple-900/20">
+                  Both Shifts{isWeekSummary && <><br /><span className="text-[8px]">WEEK SUMMARY</span></>}
+                </th>
+                <th className="px-4 py-3 text-left text-[10px] font-black text-gray-800 dark:text-gray-200 uppercase tracking-wider">Status</th>
+              </tr>
+            </thead>
+            <tbody className="divide-y divide-gray-100 dark:divide-gray-700">
+              {/* ── OEE Section ── */}
+              <tr className="hover:bg-blue-50/50 dark:hover:bg-blue-900/10">
+                <td rowSpan={3} className="px-4 py-4 border-r border-gray-200 dark:border-gray-600 align-top">
+                  <div className="flex items-center gap-3">
+                    <div className="p-2 bg-gradient-to-br from-blue-500 to-blue-600 rounded-lg shadow-md">
+                      <Gauge className="w-5 h-5 text-white" />
+                    </div>
+                    <div>
+                      <div className="text-sm font-black text-gray-900 dark:text-white">OEE</div>
+                      <div className="text-[10px] font-semibold text-gray-500 dark:text-gray-400">Overall Equipment Effectiveness</div>
+                    </div>
+                  </div>
+                </td>
+                <td className="px-4 py-2"><div className="text-xs font-semibold text-gray-900 dark:text-gray-100">Die Cut 1</div><div className="text-[10px] text-gray-500">≥ {t.oee.die_cut_1}%</div></td>
+                <td className="px-4 py-2 bg-blue-50/30 dark:bg-blue-900/10"><MetricCell value={d.first_shift_die_cut1_oee} suffix="%" target={t.oee.die_cut_1} /></td>
+                <td className="px-4 py-2 bg-indigo-50/30 dark:bg-indigo-900/10"><MetricCell value={d.second_shift_die_cut1_oee} suffix="%" target={t.oee.die_cut_1} /></td>
+                <td className="px-4 py-2 bg-purple-50/30 dark:bg-purple-900/10"><MetricCell value={d.both_shift_die_cut1_oee} suffix="%" target={t.oee.die_cut_1} /></td>
+                <td className="px-4 py-2"><StatusBadge value={d.both_shift_die_cut1_oee} target={t.oee.die_cut_1} type="oee" /></td>
+              </tr>
+              <tr className="hover:bg-blue-50/50 dark:hover:bg-blue-900/10">
+                <td className="px-4 py-2"><div className="text-xs font-semibold text-gray-900 dark:text-gray-100">Die Cut 2</div><div className="text-[10px] text-gray-500">≥ {t.oee.die_cut_2}%</div></td>
+                <td className="px-4 py-2 bg-blue-50/30 dark:bg-blue-900/10"><MetricCell value={d.first_shift_die_cut2_oee} suffix="%" target={t.oee.die_cut_2} /></td>
+                <td className="px-4 py-2 bg-indigo-50/30 dark:bg-indigo-900/10"><MetricCell value={d.second_shift_die_cut2_oee} suffix="%" target={t.oee.die_cut_2} /></td>
+                <td className="px-4 py-2 bg-purple-50/30 dark:bg-purple-900/10"><MetricCell value={d.both_shift_die_cut2_oee} suffix="%" target={t.oee.die_cut_2} /></td>
+                <td className="px-4 py-2"><StatusBadge value={d.both_shift_die_cut2_oee} target={t.oee.die_cut_2} type="oee" /></td>
+              </tr>
+              <tr className="hover:bg-blue-50/50 dark:hover:bg-blue-900/10 border-b-4 border-gray-200 dark:border-gray-600">
+                <td className="px-4 py-2"><div className="text-xs font-black text-gray-900 dark:text-gray-100">Total</div><div className="text-[10px] text-gray-500">≥ {t.oee.total}%</div></td>
+                <td className="px-4 py-2 bg-blue-50/30 dark:bg-blue-900/10"><MetricCell value={d.first_shift_oee} suffix="%" target={t.oee.total} /></td>
+                <td className="px-4 py-2 bg-indigo-50/30 dark:bg-indigo-900/10"><MetricCell value={d.second_shift_oee} suffix="%" target={t.oee.total} /></td>
+                <td className="px-4 py-2 bg-purple-50/30 dark:bg-purple-900/10"><MetricCell value={d.total_oee} suffix="%" target={t.oee.total} /></td>
+                <td className="px-4 py-2"><StatusBadge value={d.total_oee} target={t.oee.total} type="oee" /></td>
+              </tr>
+
+              {/* ── VOLUME Section ── */}
+              <tr className="hover:bg-emerald-50/50 dark:hover:bg-emerald-900/10">
+                <td rowSpan={3} className="px-4 py-4 border-r border-gray-200 dark:border-gray-600 align-top">
+                  <div className="flex items-center gap-3">
+                    <div className="p-2 bg-gradient-to-br from-emerald-500 to-emerald-600 rounded-lg shadow-md">
+                      <Package className="w-5 h-5 text-white" />
+                    </div>
+                    <div>
+                      <div className="text-sm font-black text-gray-900 dark:text-white">VOLUME</div>
+                      <div className="text-[10px] font-semibold text-gray-500 dark:text-gray-400">Production Output (lbs)</div>
+                    </div>
+                  </div>
+                </td>
+                <td className="px-4 py-2"><div className="text-xs font-semibold text-gray-900 dark:text-gray-100">Die Cut 1</div><div className="text-[10px] text-gray-500">≥ {t.volume.die_cut_1.toLocaleString()} lbs</div></td>
+                <td className="px-4 py-2 bg-blue-50/30 dark:bg-blue-900/10"><MetricCell value={d.first_shift_die_cut1_lbs} suffix=" lbs" target={t.volume.die_cut_1 / 2} isInteger /></td>
+                <td className="px-4 py-2 bg-indigo-50/30 dark:bg-indigo-900/10"><MetricCell value={d.second_shift_die_cut1_lbs} suffix=" lbs" target={t.volume.die_cut_1 / 2} isInteger /></td>
+                <td className="px-4 py-2 bg-purple-50/30 dark:bg-purple-900/10"><MetricCell value={d.both_shift_die_cut1_lbs} suffix=" lbs" target={t.volume.die_cut_1} isInteger /></td>
+                <td className="px-4 py-2"><StatusBadge value={d.both_shift_die_cut1_lbs} target={t.volume.die_cut_1} type="volume" /></td>
+              </tr>
+              <tr className="hover:bg-emerald-50/50 dark:hover:bg-emerald-900/10">
+                <td className="px-4 py-2"><div className="text-xs font-semibold text-gray-900 dark:text-gray-100">Die Cut 2</div><div className="text-[10px] text-gray-500">≥ {t.volume.die_cut_2.toLocaleString()} lbs</div></td>
+                <td className="px-4 py-2 bg-blue-50/30 dark:bg-blue-900/10"><MetricCell value={d.first_shift_die_cut2_lbs} suffix=" lbs" target={t.volume.die_cut_2 / 2} isInteger /></td>
+                <td className="px-4 py-2 bg-indigo-50/30 dark:bg-indigo-900/10"><MetricCell value={d.second_shift_die_cut2_lbs} suffix=" lbs" target={t.volume.die_cut_2 / 2} isInteger /></td>
+                <td className="px-4 py-2 bg-purple-50/30 dark:bg-purple-900/10"><MetricCell value={d.both_shift_die_cut2_lbs} suffix=" lbs" target={t.volume.die_cut_2} isInteger /></td>
+                <td className="px-4 py-2"><StatusBadge value={d.both_shift_die_cut2_lbs} target={t.volume.die_cut_2} type="volume" /></td>
+              </tr>
+              <tr className="hover:bg-emerald-50/50 dark:hover:bg-emerald-900/10 border-b-4 border-gray-200 dark:border-gray-600">
+                <td className="px-4 py-2"><div className="text-xs font-black text-gray-900 dark:text-gray-100">Total</div><div className="text-[10px] text-gray-500">≥ {t.volume.total.toLocaleString()} lbs</div></td>
+                <td className="px-4 py-2 bg-blue-50/30 dark:bg-blue-900/10"><MetricCell value={d.first_shift_production} suffix=" lbs" target={t.volume.total / 2} isInteger /></td>
+                <td className="px-4 py-2 bg-indigo-50/30 dark:bg-indigo-900/10"><MetricCell value={d.second_shift_production} suffix=" lbs" target={t.volume.total / 2} isInteger /></td>
+                <td className="px-4 py-2 bg-purple-50/30 dark:bg-purple-900/10"><MetricCell value={d.total_production} suffix=" lbs" target={t.volume.total} isInteger /></td>
+                <td className="px-4 py-2"><StatusBadge value={d.total_production} target={t.volume.total} type="volume" /></td>
+              </tr>
+
+              {/* ── WASTE Section ── */}
+              <tr className="hover:bg-red-50/50 dark:hover:bg-red-900/10">
+                <td rowSpan={3} className="px-4 py-4 border-r border-gray-200 dark:border-gray-600 align-top">
+                  <div className="flex items-center gap-3">
+                    <div className="p-2 bg-gradient-to-br from-red-500 to-red-600 rounded-lg shadow-md">
+                      <Trash2 className="w-5 h-5 text-white" />
+                    </div>
+                    <div>
+                      <div className="text-sm font-black text-gray-900 dark:text-white">WASTE</div>
+                      <div className="text-[10px] font-semibold text-gray-500 dark:text-gray-400">Material Waste Percentage</div>
+                    </div>
+                  </div>
+                </td>
+                <td className="px-4 py-2"><div className="text-xs font-semibold text-gray-900 dark:text-gray-100">Die Cut 1</div><div className="text-[10px] text-gray-500">≤ {t.waste.die_cut_1}%</div></td>
+                <td className="px-4 py-2 bg-blue-50/30 dark:bg-blue-900/10"><MetricCell value={d.first_shift_die_cut1_waste_pct} suffix="%" target={t.waste.die_cut_1} isReverse /></td>
+                <td className="px-4 py-2 bg-indigo-50/30 dark:bg-indigo-900/10"><MetricCell value={d.second_shift_die_cut1_waste_pct} suffix="%" target={t.waste.die_cut_1} isReverse /></td>
+                <td className="px-4 py-2 bg-purple-50/30 dark:bg-purple-900/10"><MetricCell value={d.both_shift_die_cut1_waste_pct} suffix="%" target={t.waste.die_cut_1} isReverse /></td>
+                <td className="px-4 py-2"><StatusBadge value={d.both_shift_die_cut1_waste_pct} target={t.waste.die_cut_1} type="waste" /></td>
+              </tr>
+              <tr className="hover:bg-red-50/50 dark:hover:bg-red-900/10">
+                <td className="px-4 py-2"><div className="text-xs font-semibold text-gray-900 dark:text-gray-100">Die Cut 2</div><div className="text-[10px] text-gray-500">≤ {t.waste.die_cut_2}%</div></td>
+                <td className="px-4 py-2 bg-blue-50/30 dark:bg-blue-900/10"><MetricCell value={d.first_shift_die_cut2_waste_pct} suffix="%" target={t.waste.die_cut_2} isReverse /></td>
+                <td className="px-4 py-2 bg-indigo-50/30 dark:bg-indigo-900/10"><MetricCell value={d.second_shift_die_cut2_waste_pct} suffix="%" target={t.waste.die_cut_2} isReverse /></td>
+                <td className="px-4 py-2 bg-purple-50/30 dark:bg-purple-900/10"><MetricCell value={d.both_shift_die_cut2_waste_pct} suffix="%" target={t.waste.die_cut_2} isReverse /></td>
+                <td className="px-4 py-2"><StatusBadge value={d.both_shift_die_cut2_waste_pct} target={t.waste.die_cut_2} type="waste" /></td>
+              </tr>
+              <tr className="hover:bg-red-50/50 dark:hover:bg-red-900/10">
+                <td className="px-4 py-2"><div className="text-xs font-black text-gray-900 dark:text-gray-100">Total</div><div className="text-[10px] text-gray-500">≤ {t.waste.total}%</div></td>
+                <td className="px-4 py-2 bg-blue-50/30 dark:bg-blue-900/10"><MetricCell value={d.first_shift_waste_percent} suffix="%" target={t.waste.total} isReverse /></td>
+                <td className="px-4 py-2 bg-indigo-50/30 dark:bg-indigo-900/10"><MetricCell value={d.second_shift_waste_percent} suffix="%" target={t.waste.total} isReverse /></td>
+                <td className="px-4 py-2 bg-purple-50/30 dark:bg-purple-900/10"><MetricCell value={d.total_waste_percent} suffix="%" target={t.waste.total} isReverse /></td>
+                <td className="px-4 py-2"><StatusBadge value={d.total_waste_percent} target={t.waste.total} type="waste" /></td>
+              </tr>
+            </tbody>
+          </table>
+        </div>
+      </div>
+
+      {/* ═══ PERFORMANCE SUMMARY CARDS ═══ */}
+      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
+        <PerfCard
+          icon={<Gauge className="w-6 h-6 text-white" />}
+          iconBg="bg-gradient-to-br from-blue-500 to-blue-600"
+          title="Overall Equipment Effectiveness"
+          value={oeeVal.toFixed(1)}
+          unit="%"
+          status={dashMetrics.oeeStatus || (oeeVal >= t.oee.total ? 'Target Met' : 'Below Target')}
+          statusGood={oeeVal >= t.oee.total}
+          change={dashMetrics.oeeChange || `${oeeVal >= t.oee.total ? '+' : ''}${(oeeVal - t.oee.total).toFixed(1)}%`}
+          changeGood={oeeVal >= t.oee.total}
+          subtext={dashMetrics.oeeVsTarget || `vs target (${t.oee.total}%)`}
+        />
+        <PerfCard
+          icon={<Trash2 className="w-6 h-6 text-white" />}
+          iconBg="bg-gradient-to-br from-red-500 to-red-600"
+          title="Waste Percentage"
+          value={wasteVal.toFixed(2)}
+          unit="%"
+          status={dashMetrics.wasteStatus || (wasteVal <= t.waste.total ? 'Below Target' : 'Above Target')}
+          statusGood={wasteVal <= t.waste.total}
+          change={dashMetrics.wasteChange || `${wasteVal <= t.waste.total ? '-' : '+'}${Math.abs(wasteVal - t.waste.total).toFixed(2)}%`}
+          changeGood={wasteVal <= t.waste.total}
+          subtext={dashMetrics.wasteVsTarget || `vs target (${t.waste.total}%)`}
+        />
+        <PerfCard
+          icon={<Package className="w-6 h-6 text-white" />}
+          iconBg="bg-gradient-to-br from-emerald-500 to-emerald-600"
+          title="Production Volume"
+          value={prodVal.toLocaleString()}
+          unit="lbs"
+          status={dashMetrics.productionStatus || (prodVal >= t.volume.total ? 'Above Target' : 'Below Target')}
+          statusGood={prodVal >= t.volume.total}
+          change={dashMetrics.productionChange || `${prodVal >= t.volume.total ? '+' : '-'}${Math.abs(prodVal - t.volume.total).toLocaleString()} lbs`}
+          changeGood={prodVal >= t.volume.total}
+          subtext={dashMetrics.productionDailyOutput || 'daily output'}
+        />
+        <PerfCard
+          icon={<Zap className="w-6 h-6 text-white" />}
+          iconBg="bg-gradient-to-br from-amber-500 to-amber-600"
+          title="Efficiency Score"
+          value={effVal.toFixed(1)}
+          unit="/10"
+          status={dashMetrics.efficiencyStatus || (effVal >= 7 ? 'Good' : 'Fair')}
+          statusGood={effVal >= 7}
+          change={dashMetrics.efficiencyChange || 'Stable'}
+          changeGood={null}
+          subtext={dashMetrics.efficiencyPerformanceIndex || 'performance index'}
+        />
+      </div>
+
+      <style jsx>{`
+        @keyframes fadeSlideIn {
+          from { opacity: 0; transform: translateY(8px); }
+          to { opacity: 1; transform: translateY(0); }
+        }
+        .animate-fade-slide-in { animation: fadeSlideIn 0.25s ease-out; }
+      `}</style>
+    </div>
+  );
+}

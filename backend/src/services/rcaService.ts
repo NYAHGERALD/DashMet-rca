@@ -181,7 +181,7 @@ function buildRCAIncidentContext(incident: {
     evidence: incident.Evidence?.map(e => ({
       fileName: e.fileName,
       type: e.type,
-      transcription: e.transcription,
+      transcription: (e as any).transcription,
     })),
     
     // Historical context
@@ -360,10 +360,10 @@ export async function createRCAAnalysis(
   }
 
   // Build rich incident context for AI method recommendation
-  const incidentContext = buildRCAIncidentContext(incident);
+  const incidentContext = buildRCAIncidentContext(incident as any);
 
   // Get AI-powered recommendation using full context
-  const recommendation = await getAIMethodRecommendation(incidentContext);
+  const recommendation = await getAIMethodRecommendation(incidentContext as any);
 
   // Create the RCA analysis
   const rcaAnalysis = await prisma.rCAAnalysis.create({
@@ -752,7 +752,7 @@ export async function getMethodRecommendation(incident: {
   } else {
     // Medium complexity - check what worked for similar incidents
     const methodCounts = similarIncidents.reduce((acc, inc) => {
-      inc.rcaAnalyses.forEach((rca) => {
+      (inc as any).rcaAnalyses?.forEach((rca: any) => {
         acc[rca.method] = (acc[rca.method] || 0) + 1;
       });
       return acc;
@@ -1176,7 +1176,7 @@ export async function convertFishboneToText(rcaId: string): Promise<string> {
   const rca = await prisma.rCAAnalysis.findUnique({
     where: { id: rcaId },
     include: {
-      incident: true,
+      Incident: true,
     },
   });
 
