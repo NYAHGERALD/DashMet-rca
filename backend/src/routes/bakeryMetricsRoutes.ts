@@ -493,11 +493,102 @@ router.get('/check-existing', async (req: Request, res: Response) => {
 
 // ─────────────────────────────────────────────────────────────────────────────
 // POST /api/bakery-metrics/submit
-// Submit new bakery metrics
+// Submit new bakery metrics (accepts flat form fields from frontend)
+// Frontend sends: week_name, day_of_week, submitted_by, shift_type?,
+//   first_die_cut1_oee_pct, first_die_cut2_oee_pct, first_die_cut1_pounds,
+//   first_die_cut2_pounds, first_die_cut1_waste_lbs, first_die_cut2_waste_lbs,
+//   (same with second_ prefix)
 // ─────────────────────────────────────────────────────────────────────────────
 router.post('/submit', async (req: Request, res: Response) => {
   try {
-    const submission = await bakeryMetricsService.submitMetrics(req.body);
+    const body = req.body;
+    console.log('[POST /bakery-metrics/submit] Raw body:', JSON.stringify(body));
+
+    // --- Parse week_name into weekStart / weekEnd ---
+    // week_name format: "03-16-2026_03-20-2026"
+    const weekName: string = body.week_name || body.weekName || '';
+    let weekStart = '';
+    let weekEnd = '';
+    if (weekName.includes('_')) {
+      const [startStr, endStr] = weekName.split('_');
+      // Convert MM-DD-YYYY to YYYY-MM-DD for Date parsing
+      const toISO = (s: string) => {
+        const [m, d, y] = s.split('-');
+        return `${y}-${m}-${d}`;
+      };
+      weekStart = toISO(startStr);
+      weekEnd = toISO(endStr);
+    } else {
+      // Fallback: use today
+      const today = new Date().toISOString().slice(0, 10);
+      weekStart = body.weekStart || today;
+      weekEnd = body.weekEnd || today;
+    }
+
+    const dayOfWeek: string = body.day_of_week || body.dayOfWeek || '';
+    const submittedBy: string = body.submitted_by || body.submittedBy || '';
+    const shiftType: string | undefined = body.shift_type; // 'first', 'second', or undefined (both)
+
+    // --- Build shift objects from flat fields ---
+    const buildShift = (prefix: string) => {
+      const oee1 = parseFloat(body[`${prefix}_die_cut1_oee_pct`]);
+      const oee2 = parseFloat(body[`${prefix}_die_cut2_oee_pct`]);
+      const lbs1 = parseFloat(body[`${prefix}_die_cut1_pounds`]);
+      const lbs2 = parseFloat(body[`${prefix}_die_cut2_pounds`]);
+      const waste1 = parseFloat(body[`${prefix}_die_cut1_waste_lbs`]);
+      const waste2 = parseFloat(body[`${prefix}_die_cut2_waste_lbs`]);
+
+      // If all values are NaN, shift was not filled in
+      if ([oee1, oee2, lbs1, lbs2, waste1, waste2].every(v => isNaN(v))) {
+        return undefined;
+      }
+
+      return {
+        dieCut1OeePct: oee1 || 0,
+        dieCut2OeePct: oee2 || 0,
+        dieCut1Lbs: lbs1 || 0,
+        dieCut2Lbs: lbs2 || 0,
+        dieCut1WasteLb: waste1 || 0,
+        dieCut2WasteLb: waste2 || 0,
+        submittedBy,
+      };
+    };
+
+    let firstShift = undefined;
+    let secondShift = undefined;
+
+    if (shiftType === 'first') {
+      firstShift = buildShift('first');
+    } else if (shiftType === 'second') {
+      secondShift = buildShift('second');
+    } else {
+      // Both shifts
+      firstShift = buildShift('first');
+      secondShift = buildShift('second');
+    }
+
+    // Also support pre-structured payloads (if body already has firstShift/secondShift objects)
+    if (body.firstShift && typeof body.firstShift === 'object') firstShift = body.firstShift;
+    if (body.secondShift && typeof body.secondShift === 'object') secondShift = body.secondShift;
+
+    if (!firstShift && !secondShift) {
+      res.status(400).json({ success: false, error: 'No shift data provided. Please fill in at least one shift.' });
+      return;
+    }
+
+    console.log('[POST /bakery-metrics/submit] Parsed → weekName=%s, day=%s, shiftType=%s, hasFirst=%s, hasSecond=%s',
+      weekName, dayOfWeek, shiftType || 'both', !!firstShift, !!secondShift);
+
+    const submission = await bakeryMetricsService.submitMetrics({
+      weekName,
+      weekStart,
+      weekEnd,
+      dayOfWeek,
+      submittedBy,
+      firstShift,
+      secondShift,
+    });
+
     res.status(201).json({ success: true, submission });
   } catch (error: any) {
     console.error('Error submitting metrics:', error);

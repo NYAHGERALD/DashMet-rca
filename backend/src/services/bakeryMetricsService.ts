@@ -423,7 +423,7 @@ const bakeryMetricsService = {
     weekEnd: string;
     dayOfWeek: string;
     submittedBy: string;
-    firstShift: ShiftMetricsInput;
+    firstShift?: ShiftMetricsInput;
     secondShift?: ShiftMetricsInput;
   }) {
     // Create week submission + shift metrics in a transaction
@@ -439,25 +439,27 @@ const bakeryMetricsService = {
         },
       });
 
-      // First shift metrics
-      const fs = data.firstShift;
-      await tx.bakeryFirstShiftMetrics.create({
-        data: {
-          weekSubmissionId: submission.id,
-          dieCut1OeePct: fs.dieCut1OeePct,
-          dieCut2OeePct: fs.dieCut2OeePct,
-          oeeAvgPct: fs.oeeAvgPct ?? (fs.dieCut1OeePct + fs.dieCut2OeePct) / 2,
-          dieCut1Lbs: fs.dieCut1Lbs,
-          dieCut2Lbs: fs.dieCut2Lbs,
-          poundsTotal: fs.poundsTotal ?? fs.dieCut1Lbs + fs.dieCut2Lbs,
-          dieCut1WasteLb: fs.dieCut1WasteLb,
-          dieCut2WasteLb: fs.dieCut2WasteLb,
-          dieCut1WastePct: fs.dieCut1WastePct ?? (fs.dieCut1Lbs > 0 ? (fs.dieCut1WasteLb / fs.dieCut1Lbs) * 100 : 0),
-          dieCut2WastePct: fs.dieCut2WastePct ?? (fs.dieCut2Lbs > 0 ? (fs.dieCut2WasteLb / fs.dieCut2Lbs) * 100 : 0),
-          wasteAvgPct: fs.wasteAvgPct,
-          submittedBy: data.submittedBy,
-        },
-      });
+      // First shift metrics (if provided)
+      if (data.firstShift) {
+        const fs = data.firstShift;
+        await tx.bakeryFirstShiftMetrics.create({
+          data: {
+            weekSubmissionId: submission.id,
+            dieCut1OeePct: fs.dieCut1OeePct,
+            dieCut2OeePct: fs.dieCut2OeePct,
+            oeeAvgPct: fs.oeeAvgPct ?? (fs.dieCut1OeePct + fs.dieCut2OeePct) / 2,
+            dieCut1Lbs: fs.dieCut1Lbs,
+            dieCut2Lbs: fs.dieCut2Lbs,
+            poundsTotal: fs.poundsTotal ?? fs.dieCut1Lbs + fs.dieCut2Lbs,
+            dieCut1WasteLb: fs.dieCut1WasteLb,
+            dieCut2WasteLb: fs.dieCut2WasteLb,
+            dieCut1WastePct: fs.dieCut1WastePct ?? (fs.dieCut1Lbs > 0 ? (fs.dieCut1WasteLb / fs.dieCut1Lbs) * 100 : 0),
+            dieCut2WastePct: fs.dieCut2WastePct ?? (fs.dieCut2Lbs > 0 ? (fs.dieCut2WasteLb / fs.dieCut2Lbs) * 100 : 0),
+            wasteAvgPct: fs.wasteAvgPct,
+            submittedBy: data.submittedBy,
+          },
+        });
+      }
 
       // Second shift metrics (if provided)
       if (data.secondShift) {
@@ -479,8 +481,12 @@ const bakeryMetricsService = {
             submittedBy: data.submittedBy,
           },
         });
+      }
 
-        // Calculate both-shifts combined
+      // Both-shifts combined (only when BOTH shifts are provided)
+      if (data.firstShift && data.secondShift) {
+        const fs = data.firstShift;
+        const ss = data.secondShift;
         const bothOee1 = (fs.dieCut1OeePct + ss.dieCut1OeePct) / 2;
         const bothOee2 = (fs.dieCut2OeePct + ss.dieCut2OeePct) / 2;
         const bothLbs1 = fs.dieCut1Lbs + ss.dieCut1Lbs;
