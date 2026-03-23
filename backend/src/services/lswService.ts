@@ -644,6 +644,50 @@ export async function updateWorkDaysPerWeek(userId: string, workDaysPerWeek: num
   });
 }
 
+// ─────────────────────────────────────────────────────────────────────────────
+// Early Completion Logs
+// ─────────────────────────────────────────────────────────────────────────────
+export async function createEarlyCompletionLog(data: {
+  userId: string;
+  organizationId: string;
+  dailyTaskId: string;
+  taskName: string;
+  taskTime: string;
+  dayKey: string;
+  dayLabel: string;
+  weekNumber: number;
+  year: number;
+  scheduledDate: string; // ISO date string
+}) {
+  return prisma.lswEarlyCompletionLog.create({
+    data: {
+      userId: data.userId,
+      organizationId: data.organizationId,
+      dailyTaskId: data.dailyTaskId,
+      taskName: data.taskName,
+      taskTime: data.taskTime,
+      dayKey: data.dayKey,
+      dayLabel: data.dayLabel,
+      weekNumber: data.weekNumber,
+      year: data.year,
+      scheduledDate: new Date(data.scheduledDate),
+    },
+  });
+}
+
+export async function getEarlyCompletionLogs(userId: string, weekNumber?: number, year?: number) {
+  const where: any = { userId };
+  if (weekNumber !== undefined && year !== undefined) {
+    where.weekNumber = weekNumber;
+    where.year = year;
+  }
+  return prisma.lswEarlyCompletionLog.findMany({
+    where,
+    orderBy: { completedAt: 'desc' },
+    take: 500,
+  });
+}
+
 export default {
   getOrCreateBoard, updateBoard,
   getDepartments,
@@ -661,4 +705,5 @@ export default {
   getStylePresets, upsertStylePreset,
   getFullLswData,
   updateWorkDaysPerWeek,
+  createEarlyCompletionLog, getEarlyCompletionLogs,
 };

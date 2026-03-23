@@ -1170,6 +1170,27 @@ If you believe you have found a security vulnerability, please contact support t
   console.log('Workplace Safety: Physical Injury Hazards (12), Ergonomic & Musculoskeletal (8), Machine & Equipment Safety (10),');
   console.log('  Chemical & Hazardous Materials (9), Environmental & Exposure Hazards (8), Fire & Emergency Safety (9),');
   console.log('  Material Handling & Traffic (7), PPE (8), Facility & Infrastructure (7), Behavioral/Training/Compliance (9), Health & Medical (7)');
+
+  // ─────────────────────────────────────────────────────────────────────────
+  // Vacation Settings – seed default row if none exists
+  // ─────────────────────────────────────────────────────────────────────────
+  const existingVacSettings = await prisma.vacationSettings.findFirst();
+  if (!existingVacSettings) {
+    await prisma.vacationSettings.create({
+      data: {
+        standardAllocationDays: 25,
+        minimumNoticeDays: 14,
+        maxConsecutiveDays: 15,
+        minTeamCoveragePercent: 60,
+        maxSimultaneousAbsences: 3,
+        criticalRoleCoverageRequired: true,
+        organizationId: org1.id,
+      },
+    });
+    console.log('✅ Seeded default Vacation Settings');
+  } else {
+    console.log('ℹ️  Vacation Settings already exist, skipping');
+  }
 }
 
 main()

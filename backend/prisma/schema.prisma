@@ -943,6 +943,14 @@ model Organization {
   LswKeyResultSets          LswKeyResultSet[]           @relation("LswKeyResultSetOrganization")
   LswRcaTriggers            LswRcaTrigger[]             @relation("LswRcaTriggerOrganization")
 
+  // Vacation Management Relations
+  VacationEmployees          VacationEmployee[]
+  Vacations                  Vacation[]
+  VacationSettings           VacationSettings[]
+  VacationBlackoutPeriods    VacationBlackoutPeriod[]
+  VacationActivityLogs       VacationActivityLog[]
+  VacationNotifications      VacationNotification[]
+
   @@index([name])
   @@index([signupCode])
 }
@@ -1391,9 +1399,16 @@ model User {
   LswKeyResultSets                                                    LswKeyResultSet[]                    @relation("LswKeyResultSetUser")
   LswPersonalGoals                                                    LswPersonalGoal[]                    @relation("LswPersonalGoalUser")
   LswRcaTriggers                                                      LswRcaTrigger[]                      @relation("LswRcaTriggerUser")
+  LswEarlyCompletionLogs                                              LswEarlyCompletionLog[]               @relation("LswEarlyCompletionLogUser")
 
   // Microsoft Outlook Calendar Integration
   MicrosoftOAuthToken                                                 MicrosoftOAuthToken?                  @relation("MicrosoftOAuthTokenUser")
+
+  // Vacation Management Relations
+  VacationEmployees                                                   VacationEmployee[]
+  VacationsRequested                                                  Vacation[]                            @relation("VacationRequestedBy")
+  VacationsApproved                                                   Vacation[]                            @relation("VacationApprovedBy")
+  VacationBlackoutPeriods                                             VacationBlackoutPeriod[]
 
   @@index([email])
   @@index([isOnline])
@@ -2934,6 +2949,7 @@ model LswDailyTask {
 
   // Per-week completions
   completions     LswDailyTaskCompletion[]
+  earlyCompletionLogs LswEarlyCompletionLog[]
   
   @@index([userId])
   @@index([facilityId])
@@ -2972,6 +2988,42 @@ model LswDailyTaskCompletion {
   @@unique([dailyTaskId, weekNumber, year])
   @@index([dailyTaskId])
   @@index([weekNumber, year])
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// LswEarlyCompletionLog: Tracks tasks marked as "Early Completed"
+// When a user marks a future task as completed early, this logs the event
+// ─────────────────────────────────────────────────────────────────────────────
+model LswEarlyCompletionLog {
+  id              String        @id @default(uuid())
+
+  // Who completed it
+  userId          String
+  user            User          @relation("LswEarlyCompletionLogUser", fields: [userId], references: [id], onDelete: Cascade)
+  organizationId  String
+
+  // Which task
+  dailyTaskId     String
+  dailyTask       LswDailyTask  @relation(fields: [dailyTaskId], references: [id], onDelete: Cascade)
+
+  // Context
+  taskName        String        // Snapshot of task name at time of early completion
+  taskTime        String        // Scheduled time (HH:MM)
+  dayKey          String        // Day key: M, T, W, H, F, S1, S2
+  dayLabel        String        // Human-readable: Mon, Tue, Wed, etc.
+  weekNumber      Int
+  year            Int
+  scheduledDate   DateTime      // The actual date the task was scheduled for
+
+  // Timestamps
+  completedAt     DateTime      @default(now())
+  createdAt       DateTime      @default(now())
+
+  @@index([userId])
+  @@index([organizationId])
+  @@index([dailyTaskId])
+  @@index([weekNumber, year])
+  @@map("lsw_early_completion_logs")
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -3646,4 +3698,171 @@ model BakeryAiInsightLog {
   @@index([userId])
   @@index([createdAt])
   @@map("bakery_ai_insight_logs")
+}
+
+// ==================== VACATION MANAGEMENT ====================
+
+model VacationEmployee {
+  id                     Int                     @id @default(autoincrement())
+  firstName              String
+  lastName               String
+  email                  String?
+  phone                  String?
+  employeeCode           String?
+  role                   String?
+  department             String?
+  shift                  String?
+  workline               String?
+  workarea               String?
+  dateOfEmployment       DateTime?               @db.Date
+  allocatedVacationHours Float?                  @default(0)
+  annualAllocation       Float?                  @default(25)
+  maxAccumulatedHours    Float?                  @default(0)
+  yearsOfEmployment      Int?                    @default(0)
+  monthsOfEmployment     Int?                    @default(0)
+  vacationScheduleYears  Int[]                   @default([])
+  vacationScheduleHours  Float[]                 @default([])
+  supervisorId           String?
+  userId                 String?
+  organizationId         String?
+  createdAt              DateTime                @default(now())
+  updatedAt              DateTime                @updatedAt
+
+  User                   User?                   @relation(fields: [userId], references: [id], onDelete: SetNull)
+  Organization           Organization?           @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  Vacations              Vacation[]
+  VacationNotifications  VacationNotification[]
+  VacationActivityLogs   VacationActivityLog[]
+
+  @@index([userId])
+  @@index([organizationId])
+  @@index([email])
+  @@index([employeeCode])
+  @@map("vacation_employees")
+}
+
+model Vacation {
+  id                  Int                     @id @default(autoincrement())
+  employeeId          Int
+  requestedByUserId   String?
+  leaveType           String                  @default("vacation")
+  startDate           DateTime                @db.Date
+  endDate             DateTime                @db.Date
+  durationDays        Int                     @default(1)
+  returnToWork        DateTime?               @db.Date
+  reason              String
+  coveragePlan        String?
+  emergencyPhone      String?
+  emergencyEmail      String?
+  autoApprove         Boolean                 @default(false)
+  status              String                  @default("pending")
+  departmentSnapshot  String?
+  roleSnapshot        String?
+  shiftSnapshot       String?
+  worklineSnapshot    String?
+  workareaSnapshot    String?
+  statusHistory       Json?
+  approvedByUserId    String?
+  decidedAt           DateTime?
+  decisionReason      String?
+  organizationId      String?
+  createdAt           DateTime                @default(now())
+  updatedAt           DateTime                @updatedAt
+
+  Employee            VacationEmployee        @relation(fields: [employeeId], references: [id], onDelete: Cascade)
+  RequestedByUser     User?                   @relation("VacationRequestedBy", fields: [requestedByUserId], references: [id], onDelete: SetNull)
+  ApprovedByUser      User?                   @relation("VacationApprovedBy", fields: [approvedByUserId], references: [id], onDelete: SetNull)
+  Organization        Organization?           @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  Notifications       VacationNotification[]
+  ActivityLogs        VacationActivityLog[]
+
+  @@index([employeeId])
+  @@index([status])
+  @@index([startDate])
+  @@index([organizationId])
+  @@map("vacations")
+}
+
+model VacationSettings {
+  id                          Int       @id @default(autoincrement())
+  standardAllocationDays      Int       @default(0)
+  minimumNoticeDays           Int       @default(0)
+  maxConsecutiveDays          Int       @default(0)
+  minTeamCoveragePercent      Int       @default(0)
+  maxSimultaneousAbsences     Int       @default(0)
+  criticalRoleCoverageRequired Boolean  @default(false)
+  organizationId              String?
+  createdAt                   DateTime  @default(now())
+  updatedAt                   DateTime  @updatedAt
+
+  Organization                Organization? @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+
+  @@index([organizationId])
+  @@map("vacation_settings")
+}
+
+model VacationBlackoutPeriod {
+  id               Int       @id @default(autoincrement())
+  name             String
+  startDate        DateTime  @db.Date
+  endDate          DateTime  @db.Date
+  description      String?
+  isActive         Boolean   @default(true)
+  createdByUserId  String?
+  organizationId   String?
+  createdAt        DateTime  @default(now())
+  updatedAt        DateTime  @updatedAt
+
+  CreatedByUser    User?         @relation(fields: [createdByUserId], references: [id], onDelete: SetNull)
+  Organization     Organization? @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+
+  @@index([organizationId])
+  @@index([startDate])
+  @@map("vacation_blackout_periods")
+}
+
+model VacationActivityLog {
+  id            Int       @id @default(autoincrement())
+  vacationId    Int
+  employeeId    Int
+  activityType  String
+  startDate     DateTime? @db.Date
+  endDate       DateTime? @db.Date
+  durationDays  Int?
+  leaveType     String?
+  status        String?
+  organizationId String?
+  createdAt     DateTime  @default(now())
+
+  Vacation      Vacation          @relation(fields: [vacationId], references: [id], onDelete: Cascade)
+  Employee      VacationEmployee  @relation(fields: [employeeId], references: [id], onDelete: Cascade)
+  Organization  Organization?     @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+
+  @@index([vacationId])
+  @@index([employeeId])
+  @@index([organizationId])
+  @@map("vacation_activity_logs")
+}
+
+model VacationNotification {
+  id                 Int       @id @default(autoincrement())
+  employeeId         Int
+  notificationType   String
+  title              String
+  message            String
+  relatedVacationId  Int?
+  isRead             Boolean   @default(false)
+  readAt             DateTime?
+  organizationId     String?
+  createdAt          DateTime  @default(now())
+
+  Employee           VacationEmployee  @relation(fields: [employeeId], references: [id], onDelete: Cascade)
+  RelatedVacation    Vacation?         @relation(fields: [relatedVacationId], references: [id], onDelete: SetNull)
+  Organization       Organization?     @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+
+  @@index([employeeId])
+  @@index([relatedVacationId])
+  @@index([organizationId])
+  @@index([isRead])
+  @@map("vacation_notifications")
 }

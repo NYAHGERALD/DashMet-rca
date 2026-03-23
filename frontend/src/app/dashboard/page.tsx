@@ -248,6 +248,7 @@ function DashboardContent() {
                 { href: '/hr', icon: '⚖️', label: 'HR Resolution', show: isSupervisorPlus },
                 { href: '/bakery-metrics', icon: '🌾', label: 'Bakery Metrics' },
                 { href: '/lsw', icon: '📋', label: 'Leaders Standard Work' },
+                { href: '/vacation', icon: '🏖️', label: 'Vacation Hub' },
                 { href: '/meetings', icon: '🎤', label: 'Meeting Intelligence' },
                 { href: '/assigned-actions', icon: '📌', label: 'My Action Items' },
                 { href: '/settings', icon: '⚙️', label: t('nav.settings') },

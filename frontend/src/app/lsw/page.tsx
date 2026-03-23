@@ -4,7 +4,6 @@ import { useState, useEffect, useRef, useCallback } from 'react';
 import { useAuth } from '@/components/providers/AuthProvider';
 import ProtectedRoute from '@/components/auth/ProtectedRoute';
 import Link from 'next/link';
-import { useSearchParams } from 'next/navigation';
 import {
   fetchLswData, updateLswBoard,
   createLswDailyTask, updateLswDailyTask, deleteLswDailyTask, updateLswDailyTaskCompletion,
@@ -17,12 +16,12 @@ import {
   createLswPersonalGoal, updateLswPersonalGoal, deleteLswPersonalGoal,
   createLswRcaTrigger, updateLswRcaTrigger, deleteLswRcaTrigger,
   updateLswWorkDaysPerWeek,
-  getOutlookStatus, getOutlookAuthUrl, disconnectOutlook, fetchOutlookCalendar,
-  type LswDailyTask, type LswTodoItem, type LswFrequencyTask,
+  createLswEarlyCompletionLog, getLswEarlyCompletionLogs,
+  type LswDailyTask, type LswTodoItem, type LswFrequencyTask, type LswEarlyCompletionLog,
   type LswProject, type LswProjectUpdate, type LswMeetingRail,
   type LswFollowUp, type LswKeyResultSet, type LswKeyResult,
   type LswPersonalGoal, type LswRcaTrigger, type LswDepartment,
-  type LswCalendarConfig, type OutlookMeeting, type OutlookStatus,
+  type LswCalendarConfig,
 } from '@/lib/lswApi';
 
 // Types (mapped from DB models for UI convenience)
@@ -313,6 +312,21 @@ function LSWContent() {
   const [editingWeek, setEditingWeek] = useState(false);
   const [weekInputValue, setWeekInputValue] = useState('');
   const weekInputRef = useRef<HTMLInputElement>(null);
+  const [showOverdueModal, setShowOverdueModal] = useState(false);
+  const [showFutureBlockModal, setShowFutureBlockModal] = useState(false);
+  const [futureBlockContext, setFutureBlockContext] = useState<{ taskId: string; taskName: string; taskTime: string; day: keyof DailyTask['days']; dayLabel: string; scheduledDate: string } | null>(null);
+  const [earlyCompletionLogs, setEarlyCompletionLogs] = useState<LswEarlyCompletionLog[]>([]);
+  const [showUncheckModal, setShowUncheckModal] = useState(false);
+  const [uncheckContext, setUncheckContext] = useState<{ taskId: string; taskName: string; day: keyof DailyTask['days']; dayLabel: string; isEarlyCompleted: boolean } | null>(null);
+  const [showEarlyLogModal, setShowEarlyLogModal] = useState(false);
+  // Early Log modal filter/sort state
+  const [earlyLogFilters, setEarlyLogFilters] = useState<{ field: string; value: string }[]>([]);
+  const [earlyLogSort, setEarlyLogSort] = useState<{ field: string; dir: 'asc' | 'desc' }>({ field: 'completedAt', dir: 'desc' });
+  const [earlyLogContextMenu, setEarlyLogContextMenu] = useState<{ x: number; y: number; field: string; value?: string } | null>(null);
+  const [earlyLogShowFilterRow, setEarlyLogShowFilterRow] = useState(false);
+  const [earlyLogNewFilter, setEarlyLogNewFilter] = useState<{ field: string; value: string }>({ field: 'taskName', value: '' });
+  const [earlyLogFilterPanelOpen, setEarlyLogFilterPanelOpen] = useState(false);
+  const [earlyLogDuplicateMsg, setEarlyLogDuplicateMsg] = useState<string | null>(null);
   const today = getDayOfWeek();
   
   // Data loading state
@@ -628,13 +642,6 @@ function LSWContent() {
   const [personalGoals, setPersonalGoals] = useState<PersonalGoal[]>([]);
   const [rcaTriggers, setRcaTriggers] = useState<RCATrigger[]>([]);
 
-  // ─── Outlook Calendar Integration ──────────────────────────────────────────
-  const [outlookStatus, setOutlookStatus] = useState<OutlookStatus>({ connected: false });
-  const [outlookMeetings, setOutlookMeetings] = useState<OutlookMeeting[]>([]);
-  const [outlookLoading, setOutlookLoading] = useState(false);
-  const [outlookError, setOutlookError] = useState<string | null>(null);
-  const searchParams = useSearchParams();
-
   // ─── Data Loading ──────────────────────────────────────────────────────────
   const initialLoad = useRef(true);
   const loadLswData = useCallback(async () => {
@@ -679,6 +686,14 @@ function LSWContent() {
       setKeyResultGroups(data.keyResultSets.map(mapKeyResultSetFromDb));
       setPersonalGoals(data.personalGoals.map(mapGoalFromDb));
       setRcaTriggers(data.rcaTriggers.map(mapTriggerFromDb));
+
+      // Load ALL early completion logs (filtering is done in the UI)
+      try {
+        const logs = await getLswEarlyCompletionLogs();
+        setEarlyCompletionLogs(logs);
+      } catch (logErr) {
+        console.error('Failed to load early completion logs:', logErr);
+      }
     } catch (err: any) {
       console.error('Failed to load LSW data:', err);
       setLoadError(err.message || 'Failed to load data');
@@ -690,8 +705,6 @@ function LSWContent() {
   useEffect(() => {
     if (user) {
       loadLswData();
-      // Check Outlook connection status
-      getOutlookStatus().then(setOutlookStatus).catch(() => {});
     }
   }, [user, loadLswData]);
 
@@ -715,69 +728,6 @@ function LSWContent() {
       rails.map(r => r.id === id ? { ...r, completed: newCompleted } : r)
     );
     try { await updateLswMeetingRail(id, { completed: newCompleted } as any); } catch (e) { console.error('Failed to toggle meeting rail:', e); }
-  };
-
-  // ─── Outlook Calendar Sync ─────────────────────────────────────────────────
-  const DB_DAY_TO_KEY: Record<string, keyof DailyTask['days']> = {
-    monday: 'M', tuesday: 'T', wednesday: 'W', thursday: 'H', friday: 'F', saturday: 'S1', sunday: 'S2',
-  };
-
-  const loadOutlookMeetings = useCallback(async () => {
-    if (!outlookStatus.connected) return;
-    setOutlookLoading(true);
-    setOutlookError(null);
-    try {
-      const result = await fetchOutlookCalendar(currentWeek, currentYear);
-      setOutlookMeetings(result.events);
-    } catch (err: any) {
-      console.error('Failed to fetch Outlook calendar:', err);
-      if (err?.response?.status === 401) {
-        setOutlookStatus({ connected: false });
-        setOutlookError('Outlook session expired. Please reconnect.');
-      } else {
-        setOutlookError(err?.response?.data?.error || 'Failed to load Outlook meetings');
-      }
-    } finally {
-      setOutlookLoading(false);
-    }
-  }, [outlookStatus.connected, currentWeek, currentYear]);
-
-  // Fetch Outlook meetings when connected and week changes
-  useEffect(() => {
-    if (outlookStatus.connected) {
-      loadOutlookMeetings();
-    }
-  }, [outlookStatus.connected, loadOutlookMeetings]);
-
-  // Handle ?outlookConnected=true redirect from callback page
-  useEffect(() => {
-    if (searchParams.get('outlookConnected') === 'true') {
-      getOutlookStatus().then((status) => {
-        setOutlookStatus(status);
-      }).catch(() => {});
-      // Clean URL
-      window.history.replaceState({}, '', '/lsw');
-    }
-  }, [searchParams]);
-
-  const handleConnectOutlook = async () => {
-    try {
-      const { url } = await getOutlookAuthUrl();
-      window.location.href = url;
-    } catch (err) {
-      console.error('Failed to get Outlook auth URL:', err);
-      setOutlookError('Failed to start Outlook connection. Please try again.');
-    }
-  };
-
-  const handleDisconnectOutlook = async () => {
-    try {
-      await disconnectOutlook();
-      setOutlookStatus({ connected: false });
-      setOutlookMeetings([]);
-    } catch (err) {
-      console.error('Failed to disconnect Outlook:', err);
-    }
   };
 
   // Get the visible days based on workDaysPerWeek setting
@@ -836,6 +786,139 @@ function LSWContent() {
     });
 
     return { totalCount, tasks };
+  };
+
+  // Helper: get the actual Date for a given day key in the current week
+  const getDateForDayKey = (dayKey: keyof DailyTask['days']): Date => {
+    const dayOrder: Array<keyof DailyTask['days']> = ['M', 'T', 'W', 'H', 'F', 'S1', 'S2'];
+    const dayOffset = dayOrder.indexOf(dayKey);
+    const d = new Date(weekDates.start);
+    d.setDate(d.getDate() + dayOffset);
+    return d;
+  };
+
+  // Check if a day+time is in the future (cannot be checked off)
+  const isDayInFuture = (dayKey: keyof DailyTask['days'], taskTime: string): boolean => {
+    const now = new Date();
+    const visibleDays = getVisibleDays();
+    const todayIndex = visibleDays.indexOf(today as keyof DailyTask['days']);
+    const dayIndex = visibleDays.indexOf(dayKey);
+
+    // If viewing a past week, nothing is in the future
+    const currentWeekNum = getWeekNumber(now, calendarConfig);
+    const currentYearNum = calendarConfig ? getOrgYear(now, calendarConfig) : now.getFullYear();
+    if (currentYear < currentYearNum || (currentYear === currentYearNum && currentWeek < currentWeekNum)) {
+      return false;
+    }
+    // If viewing a future week, everything is in the future
+    if (currentYear > currentYearNum || (currentYear === currentYearNum && currentWeek > currentWeekNum)) {
+      return true;
+    }
+
+    // Same week: compare day index and time
+    if (dayIndex > todayIndex) return true; // Future day
+    if (dayIndex < todayIndex) return false; // Past day
+    // Same day: check time
+    const [h, m] = taskTime.split(':').map(Number);
+    const taskMinutes = h * 60 + (m || 0);
+    const currentMinutes = now.getHours() * 60 + now.getMinutes();
+    return taskMinutes > currentMinutes;
+  };
+
+  // Check if a task+day is early-completed
+  const isEarlyCompleted = (taskId: string, dayKey: string): boolean => {
+    return earlyCompletionLogs.some(log => log.dailyTaskId === taskId && log.dayKey === dayKey && log.weekNumber === currentWeek && log.year === currentYear);
+  };
+
+  // Handle checkbox click with future detection
+  const handleDayCheckboxClick = (task: DailyTask, day: keyof DailyTask['days']) => {
+    const isChecked = task.days[day];
+    const earlyDone = isEarlyCompleted(task.id, day as string);
+
+    // If unchecking (already checked or early-completed), show confirmation modal
+    if (isChecked || earlyDone) {
+      const fullDayNames: Record<string, string> = { M: 'Monday', T: 'Tuesday', W: 'Wednesday', H: 'Thursday', F: 'Friday', S1: 'Saturday', S2: 'Sunday' };
+      setUncheckContext({
+        taskId: task.id,
+        taskName: task.task,
+        day,
+        dayLabel: fullDayNames[day] || day,
+        isEarlyCompleted: earlyDone,
+      });
+      setShowUncheckModal(true);
+      return;
+    }
+
+    // If checking and day is in the future, block it
+    if (isDayInFuture(day, task.time)) {
+      const scheduledDate = getDateForDayKey(day);
+      setFutureBlockContext({
+        taskId: task.id,
+        taskName: task.task,
+        taskTime: task.time,
+        day,
+        dayLabel: dayLabelMap[day],
+        scheduledDate: scheduledDate.toISOString(),
+      });
+      setShowFutureBlockModal(true);
+      return;
+    }
+
+    // Normal check
+    setDailyTasks(tasks =>
+      tasks.map(t => t.id === task.id ? { ...t, days: { ...t.days, [day]: true } } : t)
+    );
+    updateLswDailyTaskCompletion(task.id, currentWeek, currentYear, DAY_KEY_TO_DB[day], true)
+      .catch(e => console.error('Failed to update day completion:', e));
+  };
+
+  // Handle confirmed uncheck
+  const handleConfirmUncheck = () => {
+    if (!uncheckContext) return;
+    const { taskId, day, isEarlyCompleted: wasEarly } = uncheckContext;
+    setDailyTasks(tasks =>
+      tasks.map(t => t.id === taskId ? { ...t, days: { ...t.days, [day]: false } } : t)
+    );
+    updateLswDailyTaskCompletion(taskId, currentWeek, currentYear, DAY_KEY_TO_DB[day], false)
+      .catch(e => console.error('Failed to update day completion:', e));
+    // If it was early completed, remove from local logs
+    if (wasEarly) {
+      setEarlyCompletionLogs(prev => prev.filter(log => !(log.dailyTaskId === taskId && log.dayKey === day && log.weekNumber === currentWeek && log.year === currentYear)));
+    }
+    setShowUncheckModal(false);
+    setUncheckContext(null);
+  };
+
+  // Handle early completion
+  const handleEarlyComplete = async () => {
+    if (!futureBlockContext) return;
+    const { taskId, taskName, taskTime, day, dayLabel, scheduledDate } = futureBlockContext;
+    // Save to database FIRST — only proceed if successful
+    try {
+      const log = await createLswEarlyCompletionLog({
+        dailyTaskId: taskId,
+        taskName,
+        taskTime,
+        dayKey: day,
+        dayLabel,
+        weekNumber: currentWeek,
+        year: currentYear,
+        scheduledDate,
+      });
+      // DB save succeeded — now check the box and update local state
+      setDailyTasks(tasks =>
+        tasks.map(t => t.id === taskId ? { ...t, days: { ...t.days, [day]: true } } : t)
+      );
+      updateLswDailyTaskCompletion(taskId, currentWeek, currentYear, DAY_KEY_TO_DB[day], true)
+        .catch(e => console.error('Failed to update day completion:', e));
+      setEarlyCompletionLogs(prev => [log, ...prev]);
+    } catch (e) {
+      console.error('Failed to log early completion:', e);
+      alert('Failed to save early completion. Please check your connection and try again.');
+      // Do NOT check the box — nothing was saved
+    }
+    setShowFutureBlockModal(false);
+    setFutureBlockContext(null);
   };
 
   // Calculate todo completion
@@ -947,6 +1030,44 @@ function LSWContent() {
                 </svg>
                 Print Report
               </button>
+
+              {/* Early Completion Log Button */}
+              <button
+                onClick={() => setShowEarlyLogModal(true)}
+                className="relative flex items-center gap-1.5 px-3 py-2 rounded-lg hover:bg-gray-100 dark:hover:bg-gray-800 transition-colors"
+                title={earlyCompletionLogs.length > 0 ? `${earlyCompletionLogs.length} early completion(s)` : 'Early Completion Log'}
+              >
+                <svg className="w-5 h-5 text-amber-500 dark:text-amber-400" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M13 10V3L4 14h7v7l9-11h-7z" />
+                </svg>
+                <span className="text-xs font-semibold text-gray-700 dark:text-gray-300">Early Completion Log</span>
+                {earlyCompletionLogs.length > 0 && (
+                  <span className="min-w-[18px] h-[18px] flex items-center justify-center px-1 text-[10px] font-bold text-white bg-amber-500 rounded-full shadow-sm">
+                    {earlyCompletionLogs.length}
+                  </span>
+                )}
+              </button>
+
+              {/* Notification Bell */}
+              {(() => {
+                const overdue = getOverdueTasks();
+                return (
+                  <button
+                    onClick={() => setShowOverdueModal(true)}
+                    className="relative p-2 rounded-lg hover:bg-gray-100 dark:hover:bg-gray-800 transition-colors"
+                    title={overdue.totalCount > 0 ? `${overdue.totalCount} overdue task(s)` : 'No overdue tasks'}
+                  >
+                    <svg className="w-5 h-5 text-gray-600 dark:text-gray-300" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 17h5l-1.405-1.405A2.032 2.032 0 0118 14.158V11a6.002 6.002 0 00-4-5.659V5a2 2 0 10-4 0v.341C7.67 6.165 6 8.388 6 11v3.159c0 .538-.214 1.055-.595 1.436L4 17h5m6 0v1a3 3 0 11-6 0v-1m6 0H9" />
+                    </svg>
+                    {overdue.totalCount > 0 && (
+                      <span className="absolute -top-0.5 -right-0.5 min-w-[18px] h-[18px] flex items-center justify-center px-1 text-[10px] font-bold text-white bg-red-500 rounded-full shadow-sm animate-pulse">
+                        {overdue.totalCount}
+                      </span>
+                    )}
+                  </button>
+                );
+              })()}
             </div>
             
             {/* Week Selection with Dates */}
@@ -1070,112 +1191,10 @@ function LSWContent() {
 
       {/* Main Content */}
       <main className="p-4 lg:p-6">
-        {/* Progress Overview Cards */}
-        <div className="grid grid-cols-2 md:grid-cols-4 gap-4 mb-6">
-          {/* Daily Progress */}
-          <div className="bg-white/70 dark:bg-gray-800/70 backdrop-blur-sm rounded-2xl p-4 border border-white/50 dark:border-gray-700/50 shadow-lg">
-            <div className="flex items-center justify-between mb-2">
-              <span className="text-xs font-medium text-gray-500 dark:text-gray-400 uppercase tracking-wide">Daily Tasks</span>
-              <span className="text-2xl">📋</span>
-            </div>
-            <div className="flex items-end gap-2">
-              <span className="text-3xl font-bold text-emerald-600 dark:text-emerald-400">{getDailyCompletion()}%</span>
-              <span className="text-xs text-gray-500 dark:text-gray-400 mb-1">complete</span>
-            </div>
-            <div className="mt-2 h-2 bg-gray-200 dark:bg-gray-700 rounded-full overflow-hidden">
-              <div
-                className="h-full bg-gradient-to-r from-emerald-500 to-teal-500 rounded-full transition-all duration-500"
-                style={{ width: `${getDailyCompletion()}%` }}
-              />
-            </div>
-          </div>
-
-          {/* To-Do Progress */}
-          <div className="bg-white/70 dark:bg-gray-800/70 backdrop-blur-sm rounded-2xl p-4 border border-white/50 dark:border-gray-700/50 shadow-lg">
-            <div className="flex items-center justify-between mb-2">
-              <span className="text-xs font-medium text-gray-500 dark:text-gray-400 uppercase tracking-wide">To-Do Items</span>
-              <span className="text-2xl">✅</span>
-            </div>
-            <div className="flex items-end gap-2">
-              <span className="text-3xl font-bold text-blue-600 dark:text-blue-400">{getTodoCompletion()}%</span>
-              <span className="text-xs text-gray-500 dark:text-gray-400 mb-1">done</span>
-            </div>
-            <div className="mt-2 h-2 bg-gray-200 dark:bg-gray-700 rounded-full overflow-hidden">
-              <div
-                className="h-full bg-gradient-to-r from-blue-500 to-indigo-500 rounded-full transition-all duration-500"
-                style={{ width: `${getTodoCompletion()}%` }}
-              />
-            </div>
-          </div>
-
-          {/* Meeting Rails */}
-          <div className="bg-white/70 dark:bg-gray-800/70 backdrop-blur-sm rounded-2xl p-4 border border-white/50 dark:border-gray-700/50 shadow-lg">
-            <div className="flex items-center justify-between mb-2">
-              <span className="text-xs font-medium text-gray-500 dark:text-gray-400 uppercase tracking-wide">Meeting Rails</span>
-              <span className="text-2xl">🚂</span>
-            </div>
-            <div className="flex items-end gap-2">
-              <span className="text-3xl font-bold text-purple-600 dark:text-purple-400">
-                {meetingRails.filter(r => r.completed).length}/{meetingRails.length}
-              </span>
-              <span className="text-xs text-gray-500 dark:text-gray-400 mb-1">rails</span>
-            </div>
-            <div className="mt-2 h-2 bg-gray-200 dark:bg-gray-700 rounded-full overflow-hidden">
-              <div
-                className="h-full bg-gradient-to-r from-purple-500 to-pink-500 rounded-full transition-all duration-500"
-                style={{ width: `${(meetingRails.filter(r => r.completed).length / meetingRails.length) * 100}%` }}
-              />
-            </div>
-          </div>
-
-          {/* Follow Ups */}
-          <div className="bg-white/70 dark:bg-gray-800/70 backdrop-blur-sm rounded-2xl p-4 border border-white/50 dark:border-gray-700/50 shadow-lg">
-            <div className="flex items-center justify-between mb-2">
-              <span className="text-xs font-medium text-gray-500 dark:text-gray-400 uppercase tracking-wide">Follow Ups</span>
-              <span className="text-2xl">🔔</span>
-            </div>
-            <div className="flex items-end gap-2">
-              <span className="text-3xl font-bold text-amber-600 dark:text-amber-400">{followUps.length}</span>
-              <span className="text-xs text-gray-500 dark:text-gray-400 mb-1">pending</span>
-            </div>
-            <div className="mt-2 flex gap-1">
-              {followUps.slice(0, 5).map((_, i) => (
-                <div key={i} className="flex-1 h-2 bg-gradient-to-r from-amber-400 to-orange-500 rounded-full" />
-              ))}
-            </div>
-          </div>
-        </div>
-
         {/* Main Grid Layout */}
         <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
           {/* Left Column */}
           <div className="lg:col-span-2 space-y-6">
-            {/* Overdue Tasks Reminder Banner */}
-            {(() => {
-              const overdue = getOverdueTasks();
-              if (overdue.totalCount === 0) return null;
-              return (
-                <div className="bg-amber-50 dark:bg-amber-900/20 border border-amber-300 dark:border-amber-700 rounded-2xl p-4 flex items-start gap-3 shadow-sm">
-                  <span className="text-2xl flex-shrink-0 mt-0.5">⚠️</span>
-                  <div>
-                    <p className="font-semibold text-amber-800 dark:text-amber-200 text-sm">
-                      You have {overdue.totalCount} unchecked task/meeting{overdue.totalCount !== 1 ? 's' : ''} past their scheduled time
-                    </p>
-                    <p className="text-amber-700 dark:text-amber-300 text-xs mt-1">
-                      Please check your tasks/meetings if they were already completed. If not, try to complete all your tasks and attend your meetings on time.
-                    </p>
-                    <div className="mt-2 flex flex-wrap gap-2">
-                      {overdue.tasks.map(task => (
-                        <span key={task.taskId} className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full bg-amber-100 dark:bg-amber-800/40 text-amber-800 dark:text-amber-200 text-xs font-medium">
-                          🕐 {task.time} — {task.task} ({task.overdueDays.join(', ')})
-                        </span>
-                      ))}
-                    </div>
-                  </div>
-                </div>
-              );
-            })()}
-
             {/* Daily & Weekly Standard Tasks */}
             <div className="bg-white/80 dark:bg-gray-800/80 backdrop-blur-sm rounded-2xl border border-white/50 dark:border-gray-700/50 shadow-lg overflow-hidden">
               <div className="px-5 py-4 bg-gradient-to-r from-emerald-500/10 to-teal-500/10 dark:from-emerald-500/20 dark:to-teal-500/20 border-b border-gray-200/50 dark:border-gray-700/50 flex items-center justify-between">
@@ -1184,43 +1203,6 @@ function LSWContent() {
                   Daily & Weekly Standard Tasks/Meetings
                 </h2>
                 <div className="flex items-center gap-2">
-                  {/* Outlook Calendar Integration */}
-                  {outlookStatus.connected ? (
-                    <div className="flex items-center gap-1.5">
-                      <span className="text-xs text-green-600 dark:text-green-400 flex items-center gap-1">
-                        <svg className="w-3.5 h-3.5" viewBox="0 0 24 24" fill="currentColor"><path d="M22 6c0-1.1-.9-2-2-2H4c-1.1 0-2 .9-2 2v12c0 1.1.9 2 2 2h16c1.1 0 2-.9 2-2V6m-2 0-8 5-8-5h16m0 12H4V8l8 5 8-5v10Z"/></svg>
-                        {outlookStatus.email ? outlookStatus.email.split('@')[0] : 'Outlook'}
-                      </span>
-                      <button
-                        onClick={loadOutlookMeetings}
-                        className="p-1 text-blue-500 hover:text-blue-700 dark:text-blue-400 dark:hover:text-blue-300 transition-colors"
-                        title="Refresh Outlook meetings"
-                      >
-                        <svg className={`w-3.5 h-3.5 ${outlookLoading ? 'animate-spin' : ''}`} fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15" />
-                        </svg>
-                      </button>
-                      <button
-                        onClick={handleDisconnectOutlook}
-                        className="p-1 text-gray-400 hover:text-red-500 transition-colors"
-                        title="Disconnect Outlook"
-                      >
-                        <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
-                        </svg>
-                      </button>
-                    </div>
-                  ) : (
-                    <button
-                      onClick={handleConnectOutlook}
-                      className="text-xs px-3 py-1.5 rounded-lg bg-blue-600 hover:bg-blue-700 text-white font-medium transition-colors flex items-center gap-1.5 shadow-sm"
-                      title="Connect your Outlook calendar to auto-populate meetings"
-                    >
-                      <svg className="w-3.5 h-3.5" viewBox="0 0 24 24" fill="currentColor"><path d="M22 6c0-1.1-.9-2-2-2H4c-1.1 0-2 .9-2 2v12c0 1.1.9 2 2 2h16c1.1 0 2-.9 2-2V6m-2 0-8 5-8-5h16m0 12H4V8l8 5 8-5v10Z"/></svg>
-                      Connect Outlook
-                    </button>
-                  )}
-                  <span className="text-gray-300 dark:text-gray-600">|</span>
                   <span className="text-xs text-gray-500 dark:text-gray-400">Days/week:</span>
                   <select
                     value={workDaysPerWeek}
@@ -1265,27 +1247,49 @@ function LSWContent() {
                         <td className="px-4 py-3 text-sm text-gray-600 dark:text-gray-300">{task.minutes}</td>
                         <td className="px-4 py-3 text-sm font-medium text-gray-800 dark:text-white">{task.task}</td>
                         <td className="px-4 py-3 text-sm text-center text-gray-600 dark:text-gray-300">{task.time}</td>
-                        {getVisibleDays().map((day) => (
-                          <td key={day} className="px-2 py-3 text-center">
-                            <input
-                              type="checkbox"
-                              checked={task.days[day]}
-                              onChange={() => {
-                                const newVal = !task.days[day];
-                                setDailyTasks(tasks =>
-                                  tasks.map(t =>
-                                    t.id === task.id
-                                      ? { ...t, days: { ...t.days, [day]: newVal } }
-                                      : t
-                                  )
-                                );
-                                updateLswDailyTaskCompletion(task.id, currentWeek, currentYear, DAY_KEY_TO_DB[day], newVal)
-                                  .catch(e => console.error('Failed to update day completion:', e));
-                              }}
-                              className="w-5 h-5 rounded border-gray-300 text-emerald-600 focus:ring-emerald-500 dark:border-gray-600 dark:bg-gray-700 cursor-pointer"
-                            />
-                          </td>
-                        ))}
+                        {getVisibleDays().map((day) => {
+                          const earlyDone = isEarlyCompleted(task.id, day);
+                          return (
+                            <td key={day} className="px-2 py-3 text-center">
+                              <div className="relative inline-flex items-center justify-center group/check">
+                                {earlyDone ? (
+                                  /* Custom yellow checkbox for early-completed tasks */
+                                  <button
+                                    type="button"
+                                    onClick={() => handleDayCheckboxClick(task, day)}
+                                    className="w-5 h-5 rounded border-2 border-yellow-400 bg-yellow-400 dark:border-yellow-500 dark:bg-yellow-500 flex items-center justify-center cursor-pointer focus:outline-none focus:ring-2 focus:ring-yellow-300 transition-colors"
+                                  >
+                                    <svg className="w-3.5 h-3.5 text-white" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={3}>
+                                      <path strokeLinecap="round" strokeLinejoin="round" d="M5 13l4 4L19 7" />
+                                    </svg>
+                                  </button>
+                                ) : (
+                                  /* Standard checkbox for normal tasks */
+                                  <input
+                                    type="checkbox"
+                                    checked={task.days[day]}
+                                    onChange={() => handleDayCheckboxClick(task, day)}
+                                    className="w-5 h-5 rounded border-gray-300 text-emerald-600 focus:ring-emerald-500 dark:border-gray-600 dark:bg-gray-700 cursor-pointer"
+                                  />
+                                )}
+                                {earlyDone && (
+                                  <>
+                                    {/* Blinking green dot */}
+                                    <span className="absolute -top-1 -right-1 flex h-2.5 w-2.5">
+                                      <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-green-400 opacity-75"></span>
+                                      <span className="relative inline-flex rounded-full h-2.5 w-2.5 bg-green-500"></span>
+                                    </span>
+                                    {/* Hover tooltip */}
+                                    <div className="absolute bottom-full left-1/2 -translate-x-1/2 mb-2 px-2 py-1 text-xs font-medium text-white bg-gray-900 dark:bg-gray-700 rounded shadow-lg whitespace-nowrap opacity-0 group-hover/check:opacity-100 transition-opacity pointer-events-none z-50">
+                                      Early Completed
+                                      <div className="absolute top-full left-1/2 -translate-x-1/2 -mt-px border-4 border-transparent border-t-gray-900 dark:border-t-gray-700"></div>
+                                    </div>
+                                  </>
+                                )}
+                              </div>
+                            </td>
+                          );
+                        })}
                         <td className="px-2 py-3 text-center">
                           <button
                             onClick={() => { setDailyTasks(tasks => tasks.filter(t => t.id !== task.id)); deleteLswDailyTask(task.id).catch(e => console.error('Failed to delete task:', e)); }}
@@ -1300,81 +1304,6 @@ function LSWContent() {
                       </tr>
                     ))}
 
-                    {/* Outlook Calendar Meetings */}
-                    {outlookStatus?.connected && outlookMeetings.length > 0 && (
-                      <>
-                        <tr className="bg-blue-50/50 dark:bg-blue-900/20 border-t-2 border-blue-200 dark:border-blue-700">
-                          <td colSpan={2} className="px-3 py-2">
-                            <div className="flex items-center gap-2">
-                              <svg className="w-4 h-4 text-blue-500" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M8 7V3m8 4V3m-9 8h10M5 21h14a2 2 0 002-2V7a2 2 0 00-2-2H5a2 2 0 00-2 2v12a2 2 0 002 2z" />
-                              </svg>
-                              <span className="text-xs font-semibold text-blue-600 dark:text-blue-400 uppercase tracking-wider">Outlook Calendar</span>
-                            </div>
-                          </td>
-                          <td colSpan={8} className="px-3 py-2"></td>
-                        </tr>
-                        {outlookMeetings.map((meeting) => {
-                          const dayKey = DB_DAY_TO_KEY[meeting.dayOfWeek.toLowerCase() as keyof typeof DB_DAY_TO_KEY];
-                          return (
-                            <tr key={meeting.outlookEventId} className="border-b border-gray-100 dark:border-gray-700/50 bg-blue-50/30 dark:bg-blue-900/10 hover:bg-blue-50/60 dark:hover:bg-blue-900/20 transition-colors">
-                              <td className="px-3 py-2 text-sm text-gray-600 dark:text-gray-400 w-16 text-center">
-                                <span className="text-xs bg-blue-100 dark:bg-blue-900/40 text-blue-600 dark:text-blue-400 px-1.5 py-0.5 rounded">
-                                  {meeting.durationMinutes}m
-                                </span>
-                              </td>
-                              <td className="px-3 py-2">
-                                <div className="flex items-center gap-2">
-                                  <svg className="w-3.5 h-3.5 text-blue-400 flex-shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M3 8l7.89 5.26a2 2 0 002.22 0L21 8M5 19h14a2 2 0 002-2V7a2 2 0 00-2-2H5a2 2 0 00-2 2v10a2 2 0 002 2z" />
-                                  </svg>
-                                  <span className="text-sm text-gray-700 dark:text-gray-300">{meeting.subject}</span>
-                                  <span className="text-xs text-gray-400 dark:text-gray-500">
-                                    {new Date(meeting.startTime).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
-                                  </span>
-                                </div>
-                              </td>
-                              {['M', 'T', 'W', 'Th', 'F', 'Sa', 'Su'].map((day) => (
-                                <td key={day} className="px-2 py-3 text-center">
-                                  {dayKey === day && (
-                                    <svg className="w-5 h-5 text-blue-500 mx-auto" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 13l4 4L19 7" />
-                                    </svg>
-                                  )}
-                                </td>
-                              ))}
-                              <td className="px-2 py-3 text-center">
-                                <span className="text-xs text-blue-400" title="Synced from Outlook">📅</span>
-                              </td>
-                            </tr>
-                          );
-                        })}
-                      </>
-                    )}
-
-                    {/* Outlook Loading */}
-                    {outlookLoading && (
-                      <tr className="border-b border-gray-100 dark:border-gray-700/50">
-                        <td colSpan={10} className="px-3 py-3 text-center">
-                          <div className="flex items-center justify-center gap-2 text-sm text-blue-500">
-                            <svg className="w-4 h-4 animate-spin" fill="none" viewBox="0 0 24 24">
-                              <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"></circle>
-                              <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z"></path>
-                            </svg>
-                            Loading Outlook meetings...
-                          </div>
-                        </td>
-                      </tr>
-                    )}
-
-                    {/* Outlook Error */}
-                    {outlookError && (
-                      <tr className="border-b border-gray-100 dark:border-gray-700/50">
-                        <td colSpan={10} className="px-3 py-2 text-center">
-                          <span className="text-xs text-red-500">{outlookError}</span>
-                        </td>
-                      </tr>
-                    )}
                   </tbody>
                 </table>
               </div>
@@ -2289,73 +2218,6 @@ function LSWContent() {
                   </div>
                 </div>
 
-                {/* Days Selection */}
-                <div>
-                  <label className="block text-sm font-semibold text-gray-700 dark:text-gray-300 mb-3">
-                    Recurring Days
-                  </label>
-                  <div className="flex gap-2">
-                    {[
-                      { key: 'M', label: 'Mon' },
-                      { key: 'T', label: 'Tue' },
-                      { key: 'W', label: 'Wed' },
-                      { key: 'H', label: 'Thu' },
-                      { key: 'F', label: 'Fri' },
-                      { key: 'S1', label: 'Sat' },
-                      { key: 'S2', label: 'Sun' },
-                    ].map((day) => (
-                      <button
-                        key={day.key}
-                        type="button"
-                        onClick={() => setNewTask(prev => ({
-                          ...prev,
-                          days: { ...prev.days, [day.key]: !prev.days[day.key as keyof typeof prev.days] }
-                        }))}
-                        className={`flex-1 py-3 px-1 rounded-xl text-xs font-semibold transition-all ${
-                          newTask.days[day.key as keyof typeof newTask.days]
-                            ? 'bg-emerald-500 text-white shadow-lg shadow-emerald-500/30'
-                            : 'bg-gray-100 dark:bg-gray-700 text-gray-500 dark:text-gray-400 hover:bg-gray-200 dark:hover:bg-gray-600'
-                        }`}
-                      >
-                        {day.label}
-                      </button>
-                    ))}
-                  </div>
-                  <div className="flex gap-2 mt-3">
-                    <button
-                      type="button"
-                      onClick={() => setNewTask(prev => ({
-                        ...prev,
-                        days: { M: true, T: true, W: true, H: true, F: true, S1: false, S2: false }
-                      }))}
-                      className="text-xs text-emerald-600 dark:text-emerald-400 hover:underline"
-                    >
-                      Weekdays
-                    </button>
-                    <span className="text-gray-300 dark:text-gray-600">|</span>
-                    <button
-                      type="button"
-                      onClick={() => setNewTask(prev => ({
-                        ...prev,
-                        days: { M: true, T: true, W: true, H: true, F: true, S1: true, S2: true }
-                      }))}
-                      className="text-xs text-emerald-600 dark:text-emerald-400 hover:underline"
-                    >
-                      Every day
-                    </button>
-                    <span className="text-gray-300 dark:text-gray-600">|</span>
-                    <button
-                      type="button"
-                      onClick={() => setNewTask(prev => ({
-                        ...prev,
-                        days: { M: false, T: false, W: false, H: false, F: false, S1: false, S2: false }
-                      }))}
-                      className="text-xs text-gray-500 dark:text-gray-400 hover:underline"
-                    >
-                      Clear all
-                    </button>
-                  </div>
-                </div>
               </div>
               
               {/* Footer */}
@@ -3862,6 +3724,631 @@ function LSWContent() {
                   Add Goal
                 </button>
               </div>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* ──── Early Completion Log Modal ──── */}
+      {showEarlyLogModal && (() => {
+        const EARLY_LOG_FIELDS: { key: string; label: string; align: string }[] = [
+          { key: 'taskName', label: 'Task', align: 'left' },
+          { key: 'taskTime', label: 'Time', align: 'center' },
+          { key: 'dayLabel', label: 'Day', align: 'center' },
+          { key: 'scheduledDate', label: 'Scheduled Date', align: 'center' },
+          { key: 'completedAt', label: 'Completed At', align: 'center' },
+        ];
+
+        // Apply filters
+        let filtered = [...earlyCompletionLogs];
+        for (const f of earlyLogFilters) {
+          filtered = filtered.filter(log => {
+            const val = f.field === 'scheduledDate'
+              ? (log.scheduledDate ? new Date(log.scheduledDate).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' }) : '')
+              : f.field === 'completedAt'
+              ? new Date(log.completedAt).toLocaleString('en-US', { month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit', hour12: true })
+              : (log as any)[f.field] || '';
+            return String(val).toLowerCase().includes(f.value.toLowerCase());
+          });
+        }
+
+        // Apply sort
+        filtered.sort((a, b) => {
+          const field = earlyLogSort.field;
+          let aVal: any, bVal: any;
+          if (field === 'scheduledDate' || field === 'completedAt') {
+            aVal = new Date((a as any)[field]).getTime();
+            bVal = new Date((b as any)[field]).getTime();
+          } else {
+            aVal = ((a as any)[field] || '').toLowerCase();
+            bVal = ((b as any)[field] || '').toLowerCase();
+          }
+          if (aVal < bVal) return earlyLogSort.dir === 'asc' ? -1 : 1;
+          if (aVal > bVal) return earlyLogSort.dir === 'asc' ? 1 : -1;
+          return 0;
+        });
+
+        const toggleSort = (field: string) => {
+          setEarlyLogSort(prev => prev.field === field
+            ? { field, dir: prev.dir === 'asc' ? 'desc' : 'asc' }
+            : { field, dir: 'asc' }
+          );
+        };
+
+        const handleColumnContextMenu = (e: React.MouseEvent, field: string, value?: string) => {
+          e.preventDefault();
+          setEarlyLogContextMenu({ x: e.clientX, y: e.clientY, field, value });
+        };
+
+        const getCellDisplayValue = (log: LswEarlyCompletionLog, field: string): string => {
+          if (field === 'scheduledDate') return log.scheduledDate ? new Date(log.scheduledDate).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' }) : '';
+          if (field === 'completedAt') return new Date(log.completedAt).toLocaleString('en-US', { month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit', hour12: true });
+          return (log as any)[field] || '';
+        };
+
+        const tryAddFilter = (field: string, value?: string) => {
+          // Check for duplicate
+          const alreadyExists = earlyLogFilters.some(f => f.field === field);
+          if (alreadyExists) {
+            const label = EARLY_LOG_FIELDS.find(c => c.key === field)?.label || field;
+            setEarlyLogDuplicateMsg(`A filter for "${label}" already exists.`);
+            setTimeout(() => setEarlyLogDuplicateMsg(null), 30000);
+            return;
+          }
+          setEarlyLogDuplicateMsg(null);
+          setEarlyLogFilters(prev => [...prev, { field, value: value || '' }]);
+          if (!earlyLogFilterPanelOpen) setEarlyLogFilterPanelOpen(true);
+          setEarlyLogContextMenu(null);
+        };
+
+        const removeFilter = (idx: number) => {
+          setEarlyLogFilters(prev => {
+            const next = prev.filter((_, i) => i !== idx);
+            if (next.length === 0) setEarlyLogFilterPanelOpen(false);
+            return next;
+          });
+        };
+
+        const clearAllFilters = () => {
+          setEarlyLogFilters([]);
+          setEarlyLogFilterPanelOpen(false);
+          setEarlyLogDuplicateMsg(null);
+        };
+
+        const updateFilter = (idx: number, key: 'field' | 'value', val: string) => {
+          if (key === 'field') {
+            // Check if changing to a field that already exists
+            const alreadyExists = earlyLogFilters.some((f, i) => i !== idx && f.field === val);
+            if (alreadyExists) {
+              const label = EARLY_LOG_FIELDS.find(c => c.key === val)?.label || val;
+              setEarlyLogDuplicateMsg(`A filter for "${label}" already exists.`);
+              setTimeout(() => setEarlyLogDuplicateMsg(null), 30000);
+              return;
+            }
+            setEarlyLogDuplicateMsg(null);
+          }
+          setEarlyLogFilters(prev => prev.map((f, i) => i === idx ? { ...f, [key]: val } : f));
+        };
+
+        const panelOpen = earlyLogFilterPanelOpen;
+
+        return (
+        <div className="fixed inset-0 z-50 flex items-center justify-center" onClick={() => setEarlyLogContextMenu(null)}>
+          {/* Backdrop */}
+          <div className="absolute inset-0 bg-black/40 backdrop-blur-sm" onClick={() => { setShowEarlyLogModal(false); setEarlyLogContextMenu(null); clearAllFilters(); }} />
+
+          {/* Container: Side Panel + Modal */}
+          <div className="relative flex items-stretch max-h-[85vh]">
+
+            {/* ─── Side Filter Panel ─── */}
+            <div
+              className={`bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-700 border-r-0 rounded-l-2xl shadow-2xl flex flex-col overflow-hidden transition-all duration-300 ease-in-out ${
+                panelOpen ? 'w-72 opacity-100 translate-x-0' : 'w-0 opacity-0 -translate-x-4 pointer-events-none'
+              }`}
+            >
+              {/* Panel Header */}
+              <div className="flex items-center justify-between px-4 py-4 bg-gradient-to-b from-gray-50 to-white dark:from-gray-750 dark:to-gray-800 border-b border-gray-200 dark:border-gray-700 flex-shrink-0">
+                <div className="flex items-center gap-2">
+                  <svg className="w-4 h-4 text-amber-600 dark:text-amber-400" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M3 4a1 1 0 011-1h16a1 1 0 011 1v2.586a1 1 0 01-.293.707l-6.414 6.414a1 1 0 00-.293.707V17l-4 4v-6.586a1 1 0 00-.293-.707L3.293 7.293A1 1 0 013 6.586V4z" />
+                  </svg>
+                  <h4 className="text-sm font-bold text-gray-800 dark:text-gray-200">Filters</h4>
+                  {earlyLogFilters.length > 0 && (
+                    <span className="text-[10px] font-bold px-1.5 py-0.5 rounded-full bg-amber-100 dark:bg-amber-900/40 text-amber-700 dark:text-amber-300">
+                      {earlyLogFilters.length}
+                    </span>
+                  )}
+                </div>
+                <button
+                  onClick={() => setEarlyLogFilterPanelOpen(false)}
+                  className="p-1 rounded-lg hover:bg-gray-200 dark:hover:bg-gray-700 transition-colors"
+                  title="Close filter panel"
+                >
+                  <svg className="w-3.5 h-3.5 text-gray-500 dark:text-gray-400" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 19l-7-7 7-7" />
+                  </svg>
+                </button>
+              </div>
+
+              {/* Duplicate Warning */}
+              {earlyLogDuplicateMsg && (
+                <div className="mx-3 mt-3 px-3 py-2 bg-red-50 dark:bg-red-900/20 border border-red-200 dark:border-red-700/50 rounded-lg flex items-start gap-2 animate-fade-in">
+                  <svg className="w-4 h-4 text-red-500 flex-shrink-0 mt-0.5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-2.5L13.732 4c-.77-.833-1.964-.833-2.732 0L4.082 16.5c-.77.833.192 2.5 1.732 2.5z" />
+                  </svg>
+                  <div className="flex-1">
+                    <p className="text-xs font-medium text-red-700 dark:text-red-300">{earlyLogDuplicateMsg}</p>
+                    <button onClick={() => setEarlyLogDuplicateMsg(null)} className="text-[10px] text-red-500 hover:text-red-700 mt-0.5 underline">Dismiss</button>
+                  </div>
+                </div>
+              )}
+
+              {/* Filter List */}
+              <div className="flex-1 overflow-y-auto px-3 py-3 space-y-3">
+                {earlyLogFilters.map((f, idx) => (
+                  <div key={idx} className="bg-gray-50 dark:bg-gray-750 rounded-xl p-3 border border-gray-200 dark:border-gray-600 space-y-2 animate-fade-in">
+                    <div className="flex items-center justify-between">
+                      <span className="text-[10px] font-bold text-gray-400 uppercase tracking-wider">Filter {idx + 1}</span>
+                      <button
+                        onClick={() => removeFilter(idx)}
+                        className="p-0.5 hover:bg-red-100 dark:hover:bg-red-900/30 rounded transition-colors"
+                        title="Remove filter"
+                      >
+                        <svg className="w-3.5 h-3.5 text-gray-400 hover:text-red-500" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
+                        </svg>
+                      </button>
+                    </div>
+                    <select
+                      value={f.field}
+                      onChange={(e) => updateFilter(idx, 'field', e.target.value)}
+                      className="w-full text-xs py-1.5 px-2 bg-white dark:bg-gray-700 border border-gray-200 dark:border-gray-600 rounded-lg focus:ring-1 focus:ring-amber-400 text-gray-700 dark:text-gray-300 font-medium cursor-pointer"
+                    >
+                      {EARLY_LOG_FIELDS.map(col => (
+                        <option key={col.key} value={col.key}>{col.label}</option>
+                      ))}
+                    </select>
+                    <div className="flex items-center gap-1">
+                      <span className="text-[10px] text-gray-400 font-medium">contains</span>
+                    </div>
+                    <input
+                      type="text"
+                      value={f.value}
+                      onChange={(e) => updateFilter(idx, 'value', e.target.value)}
+                      placeholder="type to filter..."
+                      className="w-full text-xs py-1.5 px-2 bg-white dark:bg-gray-700 border border-gray-200 dark:border-gray-600 rounded-lg focus:ring-1 focus:ring-amber-400 text-gray-700 dark:text-gray-300 placeholder-gray-400"
+                      autoFocus={idx === earlyLogFilters.length - 1}
+                    />
+                  </div>
+                ))}
+
+                {earlyLogFilters.length === 0 && (
+                  <div className="text-center py-6">
+                    <svg className="w-8 h-8 mx-auto text-gray-300 dark:text-gray-600 mb-2" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M3 4a1 1 0 011-1h16a1 1 0 011 1v2.586a1 1 0 01-.293.707l-6.414 6.414a1 1 0 00-.293.707V17l-4 4v-6.586a1 1 0 00-.293-.707L3.293 7.293A1 1 0 013 6.586V4z" />
+                    </svg>
+                    <p className="text-xs text-gray-400 dark:text-gray-500">No active filters</p>
+                  </div>
+                )}
+              </div>
+
+              {/* Panel Footer */}
+              <div className="px-3 py-3 border-t border-gray-200 dark:border-gray-700 flex-shrink-0 space-y-2">
+                <button
+                  onClick={() => tryAddFilter('taskName')}
+                  className="w-full flex items-center justify-center gap-1.5 px-3 py-2 text-xs font-medium text-amber-700 dark:text-amber-300 bg-amber-50 dark:bg-amber-900/20 hover:bg-amber-100 dark:hover:bg-amber-900/40 rounded-lg transition-colors border border-amber-200 dark:border-amber-700/50"
+                  title="Add a new filter"
+                >
+                  <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 4v16m8-8H4" />
+                  </svg>
+                  Add Filter
+                </button>
+                {earlyLogFilters.length > 0 && (
+                  <button
+                    onClick={clearAllFilters}
+                    className="w-full flex items-center justify-center gap-1.5 px-3 py-2 text-xs font-medium text-red-600 dark:text-red-400 hover:bg-red-50 dark:hover:bg-red-900/20 rounded-lg transition-colors border border-red-200 dark:border-red-700/30"
+                    title="Clear all filters"
+                  >
+                    <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" />
+                    </svg>
+                    Clear All
+                  </button>
+                )}
+              </div>
+            </div>
+
+            {/* ─── Main Modal ─── */}
+            <div className={`relative w-[90vw] max-w-5xl bg-white dark:bg-gray-800 shadow-2xl border border-gray-200 dark:border-gray-700 overflow-hidden animate-fade-in max-h-[85vh] flex flex-col ${
+              panelOpen ? 'rounded-r-2xl' : 'rounded-2xl'
+            }`}>
+              {/* Header */}
+              <div className="flex items-center justify-between px-6 py-4 bg-gradient-to-r from-amber-50 to-yellow-50 dark:from-amber-900/30 dark:to-yellow-900/30 border-b border-amber-200 dark:border-amber-700/50 flex-shrink-0">
+                <div className="flex items-center gap-2">
+                  {/* Toggle Filter Panel Button */}
+                  <button
+                    onClick={() => {
+                      if (panelOpen) {
+                        setEarlyLogFilterPanelOpen(false);
+                      } else {
+                        setEarlyLogFilterPanelOpen(true);
+                      }
+                    }}
+                    className={`p-1.5 rounded-lg transition-all duration-200 ${
+                      panelOpen
+                        ? 'bg-amber-200 dark:bg-amber-700/50 text-amber-800 dark:text-amber-200'
+                        : 'hover:bg-amber-200/50 dark:hover:bg-amber-800/50 text-amber-600 dark:text-amber-400'
+                    }`}
+                    title={panelOpen ? 'Close filter panel' : 'Open filter panel'}
+                  >
+                    <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M3 4a1 1 0 011-1h16a1 1 0 011 1v2.586a1 1 0 01-.293.707l-6.414 6.414a1 1 0 00-.293.707V17l-4 4v-6.586a1 1 0 00-.293-.707L3.293 7.293A1 1 0 013 6.586V4z" />
+                    </svg>
+                  </button>
+                  <span className="text-xl">⚡</span>
+                  <h3 className="text-base font-bold text-amber-800 dark:text-amber-200">Early Completion Log</h3>
+                  {earlyCompletionLogs.length > 0 && (
+                    <span className="text-xs font-normal px-2 py-0.5 rounded-full bg-amber-100 dark:bg-amber-900/40 text-amber-700 dark:text-amber-300">
+                      {filtered.length}{filtered.length !== earlyCompletionLogs.length ? ` / ${earlyCompletionLogs.length}` : ''}
+                    </span>
+                  )}
+                  {earlyLogFilters.length > 0 && (
+                    <span className="text-[10px] font-bold px-1.5 py-0.5 rounded-full bg-blue-100 dark:bg-blue-900/40 text-blue-600 dark:text-blue-300">
+                      {earlyLogFilters.length} filter{earlyLogFilters.length !== 1 ? 's' : ''}
+                    </span>
+                  )}
+                </div>
+                <button
+                  onClick={() => { setShowEarlyLogModal(false); setEarlyLogContextMenu(null); clearAllFilters(); }}
+                  className="p-1.5 rounded-lg hover:bg-amber-200/50 dark:hover:bg-amber-800/50 transition-colors"
+                  title="Close"
+                >
+                  <svg className="w-4 h-4 text-amber-700 dark:text-amber-300" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
+                  </svg>
+                </button>
+              </div>
+
+              {/* Body */}
+              <div className="overflow-auto flex-1">
+                {earlyCompletionLogs.length > 0 ? (
+                  <table className="w-full">
+                    <thead>
+                      <tr className="bg-amber-50 dark:bg-amber-900/20 sticky top-0 z-10">
+                        {EARLY_LOG_FIELDS.map(col => (
+                          <th
+                            key={col.key}
+                            className={`px-4 py-3 text-xs font-bold text-gray-600 dark:text-gray-300 uppercase tracking-wide cursor-pointer select-none hover:bg-amber-100 dark:hover:bg-amber-800/30 transition-colors ${col.align === 'left' ? 'text-left' : 'text-center'} ${col.key === 'taskName' ? '' : col.key === 'completedAt' || col.key === 'scheduledDate' ? 'w-44' : 'w-24'}`}
+                            onClick={() => toggleSort(col.key)}
+                            onContextMenu={(e) => handleColumnContextMenu(e, col.key)}
+                          >
+                            <div className={`flex items-center gap-1 ${col.align === 'center' ? 'justify-center' : ''}`}>
+                              {col.label}
+                              {earlyLogSort.field === col.key && (
+                                <svg className="w-3 h-3 text-amber-600 dark:text-amber-400 flex-shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                                  {earlyLogSort.dir === 'asc'
+                                    ? <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 15l7-7 7 7" />
+                                    : <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 9l-7 7-7-7" />
+                                  }
+                                </svg>
+                              )}
+                            </div>
+                          </th>
+                        ))}
+                      </tr>
+                    </thead>
+                    <tbody className="divide-y divide-gray-200 dark:divide-gray-700">
+                      {filtered.length > 0 ? filtered.map((log) => (
+                        <tr key={log.id} className="hover:bg-amber-50/50 dark:hover:bg-amber-900/10 transition-colors">
+                          <td className="px-4 py-3 text-sm font-medium text-gray-800 dark:text-white cursor-context-menu" onContextMenu={(e) => handleColumnContextMenu(e, 'taskName', log.taskName)}>{log.taskName}</td>
+                          <td className="px-4 py-3 text-sm text-center text-gray-600 dark:text-gray-300 cursor-context-menu" onContextMenu={(e) => handleColumnContextMenu(e, 'taskTime', log.taskTime || '')}>{log.taskTime || '—'}</td>
+                          <td className="px-4 py-3 text-center cursor-context-menu" onContextMenu={(e) => handleColumnContextMenu(e, 'dayLabel', log.dayLabel)}>
+                            <span className="inline-flex items-center px-2 py-0.5 rounded-full text-xs font-semibold bg-amber-100 dark:bg-amber-900/40 text-amber-700 dark:text-amber-300">
+                              {log.dayLabel}
+                            </span>
+                          </td>
+                          <td className="px-4 py-3 text-sm text-center text-gray-600 dark:text-gray-300 cursor-context-menu" onContextMenu={(e) => handleColumnContextMenu(e, 'scheduledDate', getCellDisplayValue(log, 'scheduledDate'))}>
+                            {log.scheduledDate ? new Date(log.scheduledDate).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' }) : '—'}
+                          </td>
+                          <td className="px-4 py-3 text-sm text-center text-gray-500 dark:text-gray-400 cursor-context-menu" onContextMenu={(e) => handleColumnContextMenu(e, 'completedAt', getCellDisplayValue(log, 'completedAt'))}>
+                            {new Date(log.completedAt).toLocaleString('en-US', { month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit', hour12: true })}
+                          </td>
+                        </tr>
+                      )) : (
+                        <tr>
+                          <td colSpan={5} className="px-4 py-8 text-center text-sm text-gray-500 dark:text-gray-400">
+                            No results match your filters
+                          </td>
+                        </tr>
+                      )}
+                    </tbody>
+                  </table>
+                ) : (
+                  <div className="px-5 py-10 text-center">
+                    <span className="text-4xl block mb-3">📋</span>
+                    <p className="text-sm font-semibold text-gray-700 dark:text-gray-300">No early completions this week</p>
+                    <p className="text-xs text-gray-500 dark:text-gray-400 mt-1">Tasks marked as early completed will appear here</p>
+                  </div>
+                )}
+              </div>
+
+              {/* Footer */}
+              {filtered.length > 0 && (
+                <div className="px-6 py-2.5 bg-gray-50 dark:bg-gray-750 border-t border-gray-200 dark:border-gray-700 flex-shrink-0">
+                  <p className="text-xs text-gray-500 dark:text-gray-400">
+                    Showing {filtered.length} of {earlyCompletionLogs.length} entries
+                    {earlyLogSort.field && (
+                      <> · Sorted by <span className="font-medium">{EARLY_LOG_FIELDS.find(c => c.key === earlyLogSort.field)?.label}</span> ({earlyLogSort.dir === 'asc' ? '↑ Ascending' : '↓ Descending'})</>
+                    )}
+                  </p>
+                </div>
+              )}
+            </div>
+          </div>
+
+          {/* Right-click Context Menu */}
+          {earlyLogContextMenu && (
+            <div
+              className="fixed z-[60] bg-white dark:bg-gray-800 rounded-xl shadow-2xl border border-gray-200 dark:border-gray-700 py-1.5 w-48 animate-fade-in"
+              style={{ top: earlyLogContextMenu.y, left: earlyLogContextMenu.x }}
+              onClick={(e) => e.stopPropagation()}
+            >
+              <button
+                onClick={() => { setEarlyLogSort({ field: earlyLogContextMenu.field, dir: 'asc' }); setEarlyLogContextMenu(null); }}
+                className="w-full px-4 py-2 text-left text-sm text-gray-700 dark:text-gray-300 hover:bg-gray-100 dark:hover:bg-gray-700 flex items-center gap-2.5 transition-colors"
+              >
+                <svg className="w-4 h-4 text-gray-400" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 15l7-7 7 7" />
+                </svg>
+                Sort Ascending
+              </button>
+              <button
+                onClick={() => { setEarlyLogSort({ field: earlyLogContextMenu.field, dir: 'desc' }); setEarlyLogContextMenu(null); }}
+                className="w-full px-4 py-2 text-left text-sm text-gray-700 dark:text-gray-300 hover:bg-gray-100 dark:hover:bg-gray-700 flex items-center gap-2.5 transition-colors"
+              >
+                <svg className="w-4 h-4 text-gray-400" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 9l-7 7-7-7" />
+                </svg>
+                Sort Descending
+              </button>
+              <div className="mx-3 my-1 border-t border-gray-200 dark:border-gray-700" />
+              {earlyLogContextMenu.value ? (
+                <button
+                  onClick={() => {
+                    const field = earlyLogContextMenu.field;
+                    const value = earlyLogContextMenu.value || '';
+                    // Replace existing filter for this field, or add new
+                    const existingIdx = earlyLogFilters.findIndex(f => f.field === field);
+                    if (existingIdx >= 0) {
+                      setEarlyLogFilters(prev => prev.map((f, i) => i === existingIdx ? { ...f, value } : f));
+                    } else {
+                      setEarlyLogFilters(prev => [...prev, { field, value }]);
+                    }
+                    if (!earlyLogFilterPanelOpen) setEarlyLogFilterPanelOpen(true);
+                    setEarlyLogContextMenu(null);
+                  }}
+                  className="w-full px-4 py-2 text-left text-sm text-gray-700 dark:text-gray-300 hover:bg-gray-100 dark:hover:bg-gray-700 flex items-center gap-2.5 transition-colors"
+                >
+                  <svg className="w-4 h-4 text-amber-500" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M3 4a1 1 0 011-1h16a1 1 0 011 1v2.586a1 1 0 01-.293.707l-6.414 6.414a1 1 0 00-.293.707V17l-4 4v-6.586a1 1 0 00-.293-.707L3.293 7.293A1 1 0 013 6.586V4z" />
+                  </svg>
+                  <span className="truncate">Filter: <strong className="text-amber-600 dark:text-amber-400">{earlyLogContextMenu.value.length > 20 ? earlyLogContextMenu.value.slice(0, 20) + '…' : earlyLogContextMenu.value}</strong></span>
+                </button>
+              ) : (
+                <>
+                  <button
+                    onClick={() => tryAddFilter(earlyLogContextMenu.field)}
+                    className="w-full px-4 py-2 text-left text-sm text-gray-700 dark:text-gray-300 hover:bg-gray-100 dark:hover:bg-gray-700 flex items-center gap-2.5 transition-colors"
+                  >
+                    <svg className="w-4 h-4 text-gray-400" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M3 4a1 1 0 011-1h16a1 1 0 011 1v2.586a1 1 0 01-.293.707l-6.414 6.414a1 1 0 00-.293.707V17l-4 4v-6.586a1 1 0 00-.293-.707L3.293 7.293A1 1 0 013 6.586V4z" />
+                    </svg>
+                    Filter This Column
+                  </button>
+                  <button
+                    onClick={() => tryAddFilter(earlyLogContextMenu.field)}
+                    className="w-full px-4 py-2 text-left text-sm text-gray-700 dark:text-gray-300 hover:bg-gray-100 dark:hover:bg-gray-700 flex items-center gap-2.5 transition-colors"
+                  >
+                    <svg className="w-4 h-4 text-gray-400" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 4v16m8-8H4" />
+                    </svg>
+                    Add to Filters
+                  </button>
+                </>
+              )}
+            </div>
+          )}
+        </div>
+        );
+      })()}
+
+      {/* ──── Uncheck Confirmation Modal ──── */}
+      {showUncheckModal && uncheckContext && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center">
+          {/* Backdrop */}
+          <div className="absolute inset-0 bg-black/40 backdrop-blur-sm" onClick={() => { setShowUncheckModal(false); setUncheckContext(null); }} />
+          {/* Modal */}
+          <div className="relative w-full max-w-sm mx-4 bg-white dark:bg-gray-800 rounded-2xl shadow-2xl border border-gray-200 dark:border-gray-700 overflow-hidden animate-fade-in">
+            {/* Header */}
+            <div className={`flex items-center justify-between px-5 py-4 border-b ${
+              uncheckContext.isEarlyCompleted
+                ? 'bg-gradient-to-r from-yellow-50 to-amber-50 dark:from-yellow-900/30 dark:to-amber-900/30 border-yellow-200 dark:border-yellow-700/50'
+                : 'bg-gradient-to-r from-gray-50 to-slate-50 dark:from-gray-700/50 dark:to-slate-700/50 border-gray-200 dark:border-gray-600/50'
+            }`}>
+              <div className="flex items-center gap-2">
+                <span className="text-xl">{uncheckContext.isEarlyCompleted ? '⚡' : '☑️'}</span>
+                <h3 className="text-sm font-bold text-gray-800 dark:text-gray-200">Confirm Uncheck</h3>
+              </div>
+              <button
+                onClick={() => { setShowUncheckModal(false); setUncheckContext(null); }}
+                className="p-1.5 rounded-lg hover:bg-gray-200/50 dark:hover:bg-gray-600/50 transition-colors"
+              >
+                <svg className="w-4 h-4 text-gray-500 dark:text-gray-400" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
+                </svg>
+              </button>
+            </div>
+            {/* Body */}
+            <div className="px-5 py-4">
+              <p className="text-sm text-gray-700 dark:text-gray-300 leading-relaxed">
+                Are you sure you want to uncheck{' '}
+                <span className="font-semibold text-gray-900 dark:text-white">{uncheckContext.taskName}</span>{' '}
+                on <span className="font-bold text-black dark:text-white">{uncheckContext.dayLabel}</span>{' '}
+                as {uncheckContext.isEarlyCompleted ? 'early completed' : 'completed'}?
+              </p>
+              {/* Actions */}
+              <div className="flex items-center gap-3 mt-5">
+                <button
+                  onClick={() => { setShowUncheckModal(false); setUncheckContext(null); }}
+                  className="flex-1 px-4 py-2.5 text-sm font-medium text-gray-700 dark:text-gray-300 bg-gray-100 dark:bg-gray-700 hover:bg-gray-200 dark:hover:bg-gray-600 rounded-xl transition-colors"
+                >
+                  Cancel
+                </button>
+                <button
+                  onClick={handleConfirmUncheck}
+                  className="flex-1 px-4 py-2.5 text-sm font-medium text-white bg-red-500 hover:bg-red-600 rounded-xl shadow-md hover:shadow-lg transition-all"
+                >
+                  OK, Uncheck
+                </button>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* ──── Future Task Block Modal ──── */}
+      {showFutureBlockModal && futureBlockContext && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center">
+          {/* Backdrop */}
+          <div className="absolute inset-0 bg-black/40 backdrop-blur-sm" onClick={() => setShowFutureBlockModal(false)} />
+          {/* Modal */}
+          <div className="relative w-full max-w-md mx-4 bg-white dark:bg-gray-800 rounded-2xl shadow-2xl border border-gray-200 dark:border-gray-700 overflow-hidden animate-fade-in">
+            {/* Header */}
+            <div className="flex items-center justify-between px-5 py-4 bg-gradient-to-r from-red-50 to-orange-50 dark:from-red-900/30 dark:to-orange-900/30 border-b border-red-200 dark:border-red-700/50">
+              <div className="flex items-center gap-2">
+                <span className="text-xl">🚫</span>
+                <h3 className="text-sm font-bold text-red-800 dark:text-red-200">Future Task</h3>
+              </div>
+              <button
+                onClick={() => setShowFutureBlockModal(false)}
+                className="p-1.5 rounded-lg hover:bg-red-200/50 dark:hover:bg-red-800/50 transition-colors"
+              >
+                <svg className="w-4 h-4 text-red-700 dark:text-red-300" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
+                </svg>
+              </button>
+            </div>
+            {/* Body */}
+            <div className="px-5 py-4">
+              <div className="bg-red-50 dark:bg-red-900/20 border border-red-200 dark:border-red-700/50 rounded-xl p-4 mb-4">
+                <p className="text-sm text-red-800 dark:text-red-200 leading-relaxed">
+                  Sorry, you cannot check off this task as completed because it is still in the future. You are allowed to check off your task if you forget to do so, but not a task or meeting that is yet to be completed.
+                </p>
+                <p className="text-sm text-red-800 dark:text-red-200 leading-relaxed mt-3">
+                  If you think this task or meeting was completed at an earlier time prior, please click the <strong>Early Completed</strong> button.
+                </p>
+              </div>
+              <div className="bg-amber-50 dark:bg-amber-900/20 border border-amber-200 dark:border-amber-700/50 rounded-lg p-3 mb-4">
+                <div className="flex items-center gap-2">
+                  <span className="text-sm">⚠️</span>
+                  <p className="text-xs text-amber-700 dark:text-amber-300 font-medium">
+                    Note: This task will be marked as early complete and logged for audit purposes.
+                  </p>
+                </div>
+              </div>
+              {/* Task details */}
+              <div className="flex items-center gap-2 text-xs text-gray-500 dark:text-gray-400 mb-5">
+                <span className="font-semibold text-gray-700 dark:text-gray-300">{futureBlockContext.taskName}</span>
+                <span>•</span>
+                <span>{futureBlockContext.taskTime}</span>
+                <span>•</span>
+                <span>{dayLabelMap[futureBlockContext.day as keyof typeof dayLabelMap] || futureBlockContext.day}</span>
+              </div>
+              {/* Actions */}
+              <div className="flex items-center gap-3">
+                <button
+                  onClick={() => setShowFutureBlockModal(false)}
+                  className="flex-1 px-4 py-2.5 text-sm font-medium text-gray-700 dark:text-gray-300 bg-gray-100 dark:bg-gray-700 hover:bg-gray-200 dark:hover:bg-gray-600 rounded-xl transition-colors"
+                >
+                  Cancel
+                </button>
+                <button
+                  onClick={handleEarlyComplete}
+                  className="flex-1 px-4 py-2.5 text-sm font-medium text-white bg-gradient-to-r from-amber-500 to-orange-500 hover:from-amber-600 hover:to-orange-600 rounded-xl shadow-md hover:shadow-lg transition-all"
+                >
+                  ⚡ Early Completed
+                </button>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* ──── Overdue Tasks Notification Modal ──── */}
+      {showOverdueModal && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center">
+          {/* Backdrop */}
+          <div className="absolute inset-0 bg-black/40 backdrop-blur-sm" onClick={() => setShowOverdueModal(false)} />
+          {/* Modal */}
+          <div className="relative w-full max-w-lg mx-4 bg-white dark:bg-gray-800 rounded-2xl shadow-2xl border border-gray-200 dark:border-gray-700 overflow-hidden animate-fade-in">
+            {/* Header */}
+            <div className="flex items-center justify-between px-5 py-4 bg-gradient-to-r from-amber-50 to-orange-50 dark:from-amber-900/30 dark:to-orange-900/30 border-b border-amber-200 dark:border-amber-700/50">
+              <div className="flex items-center gap-2">
+                <span className="text-xl">🔔</span>
+                <h3 className="text-sm font-bold text-amber-800 dark:text-amber-200">Task Notifications</h3>
+              </div>
+              <button
+                onClick={() => setShowOverdueModal(false)}
+                className="p-1.5 rounded-lg hover:bg-amber-200/50 dark:hover:bg-amber-800/50 transition-colors"
+              >
+                <svg className="w-4 h-4 text-amber-700 dark:text-amber-300" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
+                </svg>
+              </button>
+            </div>
+            {/* Body */}
+            <div className="px-5 py-4 max-h-[60vh] overflow-y-auto">
+              {(() => {
+                const overdue = getOverdueTasks();
+                if (overdue.totalCount === 0) {
+                  return (
+                    <div className="text-center py-8">
+                      <span className="text-4xl block mb-3">✅</span>
+                      <p className="text-sm font-semibold text-gray-700 dark:text-gray-300">All caught up!</p>
+                      <p className="text-xs text-gray-500 dark:text-gray-400 mt-1">No overdue tasks or meetings.</p>
+                    </div>
+                  );
+                }
+                return (
+                  <>
+                    <div className="bg-amber-50 dark:bg-amber-900/20 border border-amber-200 dark:border-amber-700/50 rounded-xl p-3 mb-4">
+                      <p className="text-xs font-semibold text-amber-800 dark:text-amber-200">
+                        ⚠️ You have {overdue.totalCount} unchecked task/meeting{overdue.totalCount !== 1 ? 's' : ''} past their scheduled time
+                      </p>
+                      <p className="text-[11px] text-amber-700 dark:text-amber-300 mt-1">
+                        Please check your tasks/meetings if they were already completed. If not, try to complete all your tasks and attend your meetings on time.
+                      </p>
+                    </div>
+                    <div className="space-y-2">
+                      {overdue.tasks.map(task => (
+                        <div key={task.taskId} className="flex items-start gap-3 p-3 rounded-xl bg-gray-50 dark:bg-gray-700/50 border border-gray-100 dark:border-gray-600/50">
+                          <span className="text-lg flex-shrink-0">🕐</span>
+                          <div className="min-w-0">
+                            <p className="text-sm font-semibold text-gray-800 dark:text-gray-200 truncate">{task.task}</p>
+                            <div className="flex items-center gap-2 mt-1">
+                              <span className="text-xs text-gray-500 dark:text-gray-400">Scheduled: {task.time}</span>
+                              <span className="text-[10px] px-2 py-0.5 rounded-full bg-red-100 dark:bg-red-900/30 text-red-700 dark:text-red-300 font-medium">
+                                {task.overdueDays.join(', ')}
+                              </span>
+                            </div>
+                          </div>
+                        </div>
+                      ))}
+                    </div>
+                  </>
+                );
+              })()}
             </div>
           </div>
         </div>

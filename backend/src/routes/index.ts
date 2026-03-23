@@ -250,9 +250,9 @@ router.use('/recordings', recordingsRoutes);
 import lswRoutes from './lswRoutes';
 router.use('/lsw', lswRoutes);
 
-// Outlook Calendar integration routes - Connect Outlook for LSW
-import outlookRoutes from './outlookRoutes';
-router.use('/outlook', outlookRoutes);
+// Vacation Hub routes - authenticated
+import vacationRoutes from './vacationRoutes';
+router.use('/vacation', vacationRoutes);
 
 // Get transcripts for a specific incident (nested under incidents for convenience)
 router.get('/incidents/:incidentId/transcripts', authenticate, getIncidentTranscripts);

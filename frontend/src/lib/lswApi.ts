@@ -420,45 +420,39 @@ export async function upsertLswStylePreset(data: { name: string; category: strin
   return res.data.data as LswStylePreset;
 }
 
-// ─── Outlook Calendar Integration ─────────────────────────────────────────────
-
-export interface OutlookStatus {
-  connected: boolean;
-  email?: string;
-  lastSynced?: string;
+// ─── Early Completion Logs ──────────────────────────────────────────────────
+export interface LswEarlyCompletionLog {
+  id: string;
+  dailyTaskId: string;
+  taskName: string;
+  taskTime: string;
+  dayKey: string;
+  dayLabel: string;
+  weekNumber: number;
+  year: number;
+  scheduledDate: string;
+  completedAt: string;
+  createdAt: string;
 }
 
-export interface OutlookMeeting {
-  outlookEventId: string;
-  subject: string;
-  startTime: string;   // HH:MM
-  endTime: string;      // HH:MM
-  durationMinutes: number;
-  dayOfWeek: string;    // 'monday' | 'tuesday' | ... | 'sunday'
-  date: string;         // YYYY-MM-DD
-  isAllDay: boolean;
-}
-
-export async function getOutlookStatus(): Promise<OutlookStatus> {
-  const res = await api.get('/outlook/status');
+export async function createLswEarlyCompletionLog(data: {
+  dailyTaskId: string;
+  taskName: string;
+  taskTime: string;
+  dayKey: string;
+  dayLabel: string;
+  weekNumber: number;
+  year: number;
+  scheduledDate: string;
+}): Promise<LswEarlyCompletionLog> {
+  const res = await api.post('/lsw/early-completion-logs', data);
   return res.data.data;
 }
 
-export async function getOutlookAuthUrl(): Promise<{ url: string; state: string }> {
-  const res = await api.get('/outlook/auth-url');
-  return res.data.data;
-}
-
-export async function exchangeOutlookCode(code: string, state: string): Promise<{ connected: boolean; email?: string }> {
-  const res = await api.post('/outlook/callback', { code, state });
-  return res.data.data;
-}
-
-export async function disconnectOutlook(): Promise<void> {
-  await api.delete('/outlook/disconnect');
-}
-
-export async function fetchOutlookCalendar(weekNumber: number, year: number): Promise<{ events: OutlookMeeting[]; weekRange: { startDate: string; endDate: string } }> {
-  const res = await api.get(`/outlook/calendar?weekNumber=${weekNumber}&year=${year}`);
+export async function getLswEarlyCompletionLogs(weekNumber?: number, year?: number): Promise<LswEarlyCompletionLog[]> {
+  const params = new URLSearchParams();
+  if (weekNumber !== undefined) params.append('weekNumber', String(weekNumber));
+  if (year !== undefined) params.append('year', String(year));
+  const res = await api.get(`/lsw/early-completion-logs?${params.toString()}`);
   return res.data.data;
 }

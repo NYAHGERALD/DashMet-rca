@@ -543,4 +543,34 @@ router.post('/style-presets', async (req: AuthRequest, res: Response) => {
   }
 });
 
+// ─────────────────────────────────────────────────────────────────────────────
+// Early Completion Logs
+// ─────────────────────────────────────────────────────────────────────────────
+router.post('/early-completion-logs', async (req: AuthRequest, res: Response) => {
+  try {
+    const log = await lswService.createEarlyCompletionLog({
+      ...req.body,
+      userId: req.user!.id,
+      organizationId: req.user!.organizationId,
+    });
+    res.json({ success: true, data: log });
+  } catch (error: any) {
+    res.status(500).json({ success: false, error: error.message });
+  }
+});
+
+router.get('/early-completion-logs', async (req: AuthRequest, res: Response) => {
+  try {
+    const { weekNumber, year } = req.query;
+    const logs = await lswService.getEarlyCompletionLogs(
+      req.user!.id,
+      weekNumber ? Number(weekNumber) : undefined,
+      year ? Number(year) : undefined,
+    );
+    res.json({ success: true, data: logs });
+  } catch (error: any) {
+    res.status(500).json({ success: false, error: error.message });
+  }
+});
+
 export default router;
