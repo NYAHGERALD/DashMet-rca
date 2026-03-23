@@ -1,6 +1,6 @@
 'use client';
 
-import { useState, useEffect, useCallback, useRef } from 'react';
+import { useState, useEffect, useLayoutEffect, useCallback, useRef } from 'react';
 import { useTheme } from '@/components/providers/ThemeProvider';
 import api from '@/lib/api';
 import {
@@ -273,6 +273,16 @@ export default function BakeryMetricsReport({ onFilterInfo, triggerAction }: Bak
   const [resolveReason, setResolveReason] = useState('');
   const [savingResolve, setSavingResolve] = useState(false);
 
+  // ─── Overlay positioning refs ──────────────────────────────────────────
+  const tableWrapperRef = useRef<HTMLDivElement>(null);
+  const firstShiftThRef = useRef<HTMLTableCellElement>(null);
+  const secondShiftThRef = useRef<HTMLTableCellElement>(null);
+  const tbodyRef = useRef<HTMLTableSectionElement>(null);
+  const [overlayPositions, setOverlayPositions] = useState<{
+    first?: { left: number; width: number; top: number; height: number };
+    second?: { left: number; width: number; top: number; height: number };
+  }>({});
+
   const notifId = useRef(0);
 
   // ─── Notifications ────────────────────────────────────────────────────────
@@ -331,6 +341,28 @@ export default function BakeryMetricsReport({ onFilterInfo, triggerAction }: Bak
     return dayIndex < todayDayIdx;
   }, [dayFilter, weekFilter, isWeekSummary]);
 
+  // ─── Format week range for display ────────────────────────────────────────
+  const formatWeekRange = (wf: string): string => {
+    if (!wf) return '';
+    const parts = wf.split('_');
+    if (parts.length !== 2) return wf;
+    const months = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
+    const parse = (s: string) => {
+      const [m, d, y] = s.split('-').map(Number);
+      return { month: months[m - 1], day: d, year: y };
+    };
+    const start = parse(parts[0]);
+    const end = parse(parts[1]);
+    if (!start.month || !end.month) return wf;
+    if (start.year === end.year && start.month === end.month) {
+      return `${start.month} ${start.day} – ${end.day}, ${start.year}`;
+    }
+    if (start.year === end.year) {
+      return `${start.month} ${start.day} – ${end.month} ${end.day}, ${start.year}`;
+    }
+    return `${start.month} ${start.day}, ${start.year} – ${end.month} ${end.day}, ${end.year}`;
+  };
+
   // ─── Submit shift resolution ─────────────────────────────────────────────
   const handleResolveSubmit = async () => {
     if (!resolveModal || !resolveReason.trim()) return;
@@ -357,6 +389,69 @@ export default function BakeryMetricsReport({ onFilterInfo, triggerAction }: Bak
       setSavingResolve(false);
     }
   };
+
+  // ─── Quick resolve (direct preset submission) ─────────────────────────────
+  const handleQuickResolve = async (shift: 'first' | 'second', reason: string) => {
+    try {
+      setSavingResolve(true);
+      await api.post('/bakery-metrics/resolutions', {
+        week_name: weekFilter,
+        day_of_week: dayFilter,
+        reason,
+        resolved_by: 'Current User',
+        shift_type: shift,
+      });
+      showNotification(`Resolution saved: ${reason}`, 'success');
+      await loadShiftResolutions();
+    } catch {
+      showNotification('Failed to save resolution', 'error');
+    } finally {
+      setSavingResolve(false);
+    }
+  };
+
+  // ─── Measure overlay column positions ──────────────────────────────────────
+  useLayoutEffect(() => {
+    const wrapper = tableWrapperRef.current;
+    const tbody = tbodyRef.current;
+    if (!wrapper || !tbody) return;
+
+    const measure = () => {
+      const wrapperRect = wrapper.getBoundingClientRect();
+      const tbodyRect = tbody.getBoundingClientRect();
+      const newPos: typeof overlayPositions = {};
+
+      if (showFirstOverlay && firstShiftThRef.current) {
+        const thRect = firstShiftThRef.current.getBoundingClientRect();
+        newPos.first = {
+          left: thRect.left - wrapperRect.left + wrapper.scrollLeft,
+          width: thRect.width,
+          top: tbodyRect.top - wrapperRect.top + wrapper.scrollTop,
+          height: tbodyRect.height,
+        };
+      }
+      if (showSecondOverlay && secondShiftThRef.current) {
+        const thRect = secondShiftThRef.current.getBoundingClientRect();
+        newPos.second = {
+          left: thRect.left - wrapperRect.left + wrapper.scrollLeft,
+          width: thRect.width,
+          top: tbodyRect.top - wrapperRect.top + wrapper.scrollTop,
+          height: tbodyRect.height,
+        };
+      }
+      setOverlayPositions(newPos);
+    };
+
+    measure();
+    const observer = new ResizeObserver(measure);
+    observer.observe(wrapper);
+    window.addEventListener('resize', measure);
+    return () => {
+      observer.disconnect();
+      window.removeEventListener('resize', measure);
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [showFirstOverlay, showSecondOverlay, metricsData, compactView, loading]);
 
   // ─── Close dropdowns on outside click ────────────────────────────────────
   useEffect(() => {
@@ -774,25 +869,25 @@ export default function BakeryMetricsReport({ onFilterInfo, triggerAction }: Bak
         </div>
 
         {/* Table */}
-        <div className={`overflow-x-auto overflow-hidden rounded-b-2xl ${compactView ? 'max-h-96 overflow-y-auto' : ''}`}>
+        <div ref={tableWrapperRef} className={`overflow-x-auto overflow-hidden rounded-b-2xl relative ${compactView ? 'max-h-96 overflow-y-auto' : ''}`}>
           <table className="w-full">
             <thead className="bg-gray-50 dark:bg-gray-700 border-b-2 border-gray-200 dark:border-gray-600">
               <tr>
                 <th className="px-4 py-3 text-left text-[10px] font-black text-gray-800 dark:text-gray-200 uppercase tracking-wider">KPI Metric</th>
                 <th className="px-4 py-3 text-left text-[10px] font-black text-gray-800 dark:text-gray-200 uppercase tracking-wider">Target</th>
-                <th className="px-4 py-3 text-left text-[10px] font-black text-blue-800 dark:text-blue-300 uppercase tracking-wider bg-blue-50/50 dark:bg-blue-900/20">
+                <th ref={firstShiftThRef} className="px-4 py-3 text-left text-[10px] font-black text-blue-800 dark:text-blue-300 uppercase tracking-wider bg-blue-50/50 dark:bg-blue-900/20 min-w-[140px]">
                   First Shift{isWeekSummary && <><br /><span className="text-[8px]">WEEK SUMMARY</span></>}
                 </th>
-                <th className="px-4 py-3 text-left text-[10px] font-black text-indigo-800 dark:text-indigo-300 uppercase tracking-wider bg-indigo-50/50 dark:bg-indigo-900/20">
+                <th ref={secondShiftThRef} className="px-4 py-3 text-left text-[10px] font-black text-indigo-800 dark:text-indigo-300 uppercase tracking-wider bg-indigo-50/50 dark:bg-indigo-900/20 min-w-[140px]">
                   Second Shift{isWeekSummary && <><br /><span className="text-[8px]">WEEK SUMMARY</span></>}
                 </th>
-                <th className="px-4 py-3 text-left text-[10px] font-black text-purple-800 dark:text-purple-300 uppercase tracking-wider bg-purple-50/50 dark:bg-purple-900/20">
+                <th className="px-4 py-3 text-left text-[10px] font-black text-purple-800 dark:text-purple-300 uppercase tracking-wider bg-purple-50/50 dark:bg-purple-900/20 min-w-[140px]">
                   Both Shifts{isWeekSummary && <><br /><span className="text-[8px]">WEEK SUMMARY</span></>}
                 </th>
                 <th className="px-4 py-3 text-left text-[10px] font-black text-gray-800 dark:text-gray-200 uppercase tracking-wider">Status</th>
               </tr>
             </thead>
-            <tbody className="divide-y divide-gray-100 dark:divide-gray-700">
+            <tbody ref={tbodyRef} className="divide-y divide-gray-100 dark:divide-gray-700">
               {/* ── OEE Section ── */}
               <tr className="hover:bg-blue-50/50 dark:hover:bg-blue-900/10">
                 <td rowSpan={3} className="px-4 py-4 border-r border-gray-200 dark:border-gray-600 align-top">
@@ -807,106 +902,22 @@ export default function BakeryMetricsReport({ onFilterInfo, triggerAction }: Bak
                   </div>
                 </td>
                 <td className="px-4 py-2"><div className="text-xs font-semibold text-gray-900 dark:text-gray-100">Die Cut 1</div><div className="text-[10px] text-gray-500">≥ {t.oee.die_cut_1}%</div></td>
-                {/* ── FIRST SHIFT overlay or cell ── */}
-                {showFirstOverlay ? (
-                  <td rowSpan={9} className="relative bg-gradient-to-b from-blue-50/60 via-gray-50/60 to-gray-50/60 dark:from-blue-900/10 dark:via-gray-800/40 dark:to-gray-800/40 border-x border-gray-200 dark:border-gray-600 align-middle">
-                    <div className="flex flex-col items-center justify-center p-3 text-center min-h-[280px]">
-                      <div className="p-3 bg-gray-200 dark:bg-gray-600 rounded-full mb-3">
-                        <ClipboardX className="w-7 h-7 text-gray-400 dark:text-gray-300" />
-                      </div>
-                      <p className="text-sm font-bold text-gray-600 dark:text-gray-300 mb-1">No record submitted Yet</p>
-                      <p className="text-[10px] text-gray-400 dark:text-gray-500">First Shift data is missing</p>
-                      {dayPassed && !firstRes && (
-                        <>
-                          <div className="mt-4 px-3 py-2 bg-amber-100 dark:bg-amber-900/30 rounded-xl border border-amber-300 dark:border-amber-700">
-                            <div className="flex items-center gap-1.5 justify-center">
-                              <AlertTriangle className="w-4 h-4 text-amber-600 dark:text-amber-400" />
-                              <p className="text-xs font-bold text-amber-700 dark:text-amber-300">Did you Forget Something?</p>
-                            </div>
-                          </div>
-                          <button
-                            onClick={() => setResolveModal({ shift: 'first' })}
-                            className="mt-3 px-5 py-2 bg-gradient-to-r from-blue-600 to-indigo-600 text-white rounded-xl text-xs font-bold hover:from-blue-700 hover:to-indigo-700 transition-all active:scale-95 shadow-md hover:shadow-lg"
-                          >
-                            Resolve
-                          </button>
-                        </>
-                      )}
-                      {firstRes && (
-                        <div className="mt-4 p-3 bg-green-50 dark:bg-green-900/20 rounded-xl border border-green-200 dark:border-green-700 max-w-[200px]">
-                          <div className="flex items-center gap-1.5 mb-1.5">
-                            <div className="w-2 h-2 rounded-full bg-green-500" />
-                            <p className="text-[10px] font-bold text-green-700 dark:text-green-300">Resolved</p>
-                          </div>
-                          <div className="flex items-start gap-1.5">
-                            <MessageSquare className="w-3 h-3 text-green-500 flex-shrink-0 mt-0.5" />
-                            <p className="text-[10px] text-green-600 dark:text-green-400 leading-relaxed">{firstRes.reason}</p>
-                          </div>
-                          <p className="text-[8px] text-green-400 mt-1.5">by {firstRes.resolvedBy}</p>
-                        </div>
-                      )}
-                    </div>
-                  </td>
-                ) : (
-                  <td className="px-4 py-2 bg-blue-50/30 dark:bg-blue-900/10"><MetricCell value={d.first_shift_die_cut1_oee} suffix="%" target={t.oee.die_cut_1} /></td>
-                )}
-                {/* ── SECOND SHIFT overlay or cell ── */}
-                {showSecondOverlay ? (
-                  <td rowSpan={9} className="relative bg-gradient-to-b from-indigo-50/60 via-gray-50/60 to-gray-50/60 dark:from-indigo-900/10 dark:via-gray-800/40 dark:to-gray-800/40 border-x border-gray-200 dark:border-gray-600 align-middle">
-                    <div className="flex flex-col items-center justify-center p-3 text-center min-h-[280px]">
-                      <div className="p-3 bg-gray-200 dark:bg-gray-600 rounded-full mb-3">
-                        <ClipboardX className="w-7 h-7 text-gray-400 dark:text-gray-300" />
-                      </div>
-                      <p className="text-sm font-bold text-gray-600 dark:text-gray-300 mb-1">No record submitted Yet</p>
-                      <p className="text-[10px] text-gray-400 dark:text-gray-500">Second Shift data is missing</p>
-                      {dayPassed && !secondRes && (
-                        <>
-                          <div className="mt-4 px-3 py-2 bg-amber-100 dark:bg-amber-900/30 rounded-xl border border-amber-300 dark:border-amber-700">
-                            <div className="flex items-center gap-1.5 justify-center">
-                              <AlertTriangle className="w-4 h-4 text-amber-600 dark:text-amber-400" />
-                              <p className="text-xs font-bold text-amber-700 dark:text-amber-300">Did you Forget Something?</p>
-                            </div>
-                          </div>
-                          <button
-                            onClick={() => setResolveModal({ shift: 'second' })}
-                            className="mt-3 px-5 py-2 bg-gradient-to-r from-indigo-600 to-purple-600 text-white rounded-xl text-xs font-bold hover:from-indigo-700 hover:to-purple-700 transition-all active:scale-95 shadow-md hover:shadow-lg"
-                          >
-                            Resolve
-                          </button>
-                        </>
-                      )}
-                      {secondRes && (
-                        <div className="mt-4 p-3 bg-green-50 dark:bg-green-900/20 rounded-xl border border-green-200 dark:border-green-700 max-w-[200px]">
-                          <div className="flex items-center gap-1.5 mb-1.5">
-                            <div className="w-2 h-2 rounded-full bg-green-500" />
-                            <p className="text-[10px] font-bold text-green-700 dark:text-green-300">Resolved</p>
-                          </div>
-                          <div className="flex items-start gap-1.5">
-                            <MessageSquare className="w-3 h-3 text-green-500 flex-shrink-0 mt-0.5" />
-                            <p className="text-[10px] text-green-600 dark:text-green-400 leading-relaxed">{secondRes.reason}</p>
-                          </div>
-                          <p className="text-[8px] text-green-400 mt-1.5">by {secondRes.resolvedBy}</p>
-                        </div>
-                      )}
-                    </div>
-                  </td>
-                ) : (
-                  <td className="px-4 py-2 bg-indigo-50/30 dark:bg-indigo-900/10"><MetricCell value={d.second_shift_die_cut1_oee} suffix="%" target={t.oee.die_cut_1} /></td>
-                )}
+                <td className="px-4 py-2 bg-blue-50/30 dark:bg-blue-900/10"><MetricCell value={d.first_shift_die_cut1_oee} suffix="%" target={t.oee.die_cut_1} /></td>
+                <td className="px-4 py-2 bg-indigo-50/30 dark:bg-indigo-900/10"><MetricCell value={d.second_shift_die_cut1_oee} suffix="%" target={t.oee.die_cut_1} /></td>
                 <td className="px-4 py-2 bg-purple-50/30 dark:bg-purple-900/10"><MetricCell value={d.both_shift_die_cut1_oee} suffix="%" target={t.oee.die_cut_1} /></td>
                 <td className="px-4 py-2"><StatusBadge value={d.both_shift_die_cut1_oee} target={t.oee.die_cut_1} type="oee" /></td>
               </tr>
               <tr className="hover:bg-blue-50/50 dark:hover:bg-blue-900/10">
                 <td className="px-4 py-2"><div className="text-xs font-semibold text-gray-900 dark:text-gray-100">Die Cut 2</div><div className="text-[10px] text-gray-500">≥ {t.oee.die_cut_2}%</div></td>
-                {!showFirstOverlay && <td className="px-4 py-2 bg-blue-50/30 dark:bg-blue-900/10"><MetricCell value={d.first_shift_die_cut2_oee} suffix="%" target={t.oee.die_cut_2} /></td>}
-                {!showSecondOverlay && <td className="px-4 py-2 bg-indigo-50/30 dark:bg-indigo-900/10"><MetricCell value={d.second_shift_die_cut2_oee} suffix="%" target={t.oee.die_cut_2} /></td>}
+                <td className="px-4 py-2 bg-blue-50/30 dark:bg-blue-900/10"><MetricCell value={d.first_shift_die_cut2_oee} suffix="%" target={t.oee.die_cut_2} /></td>
+                <td className="px-4 py-2 bg-indigo-50/30 dark:bg-indigo-900/10"><MetricCell value={d.second_shift_die_cut2_oee} suffix="%" target={t.oee.die_cut_2} /></td>
                 <td className="px-4 py-2 bg-purple-50/30 dark:bg-purple-900/10"><MetricCell value={d.both_shift_die_cut2_oee} suffix="%" target={t.oee.die_cut_2} /></td>
                 <td className="px-4 py-2"><StatusBadge value={d.both_shift_die_cut2_oee} target={t.oee.die_cut_2} type="oee" /></td>
               </tr>
               <tr className="hover:bg-blue-50/50 dark:hover:bg-blue-900/10 border-b-4 border-gray-200 dark:border-gray-600">
                 <td className="px-4 py-2"><div className="text-xs font-black text-gray-900 dark:text-gray-100">Total</div><div className="text-[10px] text-gray-500">≥ {t.oee.total}%</div></td>
-                {!showFirstOverlay && <td className="px-4 py-2 bg-blue-50/30 dark:bg-blue-900/10"><MetricCell value={d.first_shift_oee} suffix="%" target={t.oee.total} /></td>}
-                {!showSecondOverlay && <td className="px-4 py-2 bg-indigo-50/30 dark:bg-indigo-900/10"><MetricCell value={d.second_shift_oee} suffix="%" target={t.oee.total} /></td>}
+                <td className="px-4 py-2 bg-blue-50/30 dark:bg-blue-900/10"><MetricCell value={d.first_shift_oee} suffix="%" target={t.oee.total} /></td>
+                <td className="px-4 py-2 bg-indigo-50/30 dark:bg-indigo-900/10"><MetricCell value={d.second_shift_oee} suffix="%" target={t.oee.total} /></td>
                 <td className="px-4 py-2 bg-purple-50/30 dark:bg-purple-900/10"><MetricCell value={d.total_oee} suffix="%" target={t.oee.total} /></td>
                 <td className="px-4 py-2"><StatusBadge value={d.total_oee} target={t.oee.total} type="oee" /></td>
               </tr>
@@ -925,22 +936,22 @@ export default function BakeryMetricsReport({ onFilterInfo, triggerAction }: Bak
                   </div>
                 </td>
                 <td className="px-4 py-2"><div className="text-xs font-semibold text-gray-900 dark:text-gray-100">Die Cut 1</div><div className="text-[10px] text-gray-500">≥ {t.volume.die_cut_1.toLocaleString()} lbs</div></td>
-                {!showFirstOverlay && <td className="px-4 py-2 bg-blue-50/30 dark:bg-blue-900/10"><MetricCell value={d.first_shift_die_cut1_lbs} suffix=" lbs" target={t.volume.die_cut_1 / 2} isInteger /></td>}
-                {!showSecondOverlay && <td className="px-4 py-2 bg-indigo-50/30 dark:bg-indigo-900/10"><MetricCell value={d.second_shift_die_cut1_lbs} suffix=" lbs" target={t.volume.die_cut_1 / 2} isInteger /></td>}
+                <td className="px-4 py-2 bg-blue-50/30 dark:bg-blue-900/10"><MetricCell value={d.first_shift_die_cut1_lbs} suffix=" lbs" target={t.volume.die_cut_1 / 2} isInteger /></td>
+                <td className="px-4 py-2 bg-indigo-50/30 dark:bg-indigo-900/10"><MetricCell value={d.second_shift_die_cut1_lbs} suffix=" lbs" target={t.volume.die_cut_1 / 2} isInteger /></td>
                 <td className="px-4 py-2 bg-purple-50/30 dark:bg-purple-900/10"><MetricCell value={d.both_shift_die_cut1_lbs} suffix=" lbs" target={t.volume.die_cut_1} isInteger /></td>
                 <td className="px-4 py-2"><StatusBadge value={d.both_shift_die_cut1_lbs} target={t.volume.die_cut_1} type="volume" /></td>
               </tr>
               <tr className="hover:bg-emerald-50/50 dark:hover:bg-emerald-900/10">
                 <td className="px-4 py-2"><div className="text-xs font-semibold text-gray-900 dark:text-gray-100">Die Cut 2</div><div className="text-[10px] text-gray-500">≥ {t.volume.die_cut_2.toLocaleString()} lbs</div></td>
-                {!showFirstOverlay && <td className="px-4 py-2 bg-blue-50/30 dark:bg-blue-900/10"><MetricCell value={d.first_shift_die_cut2_lbs} suffix=" lbs" target={t.volume.die_cut_2 / 2} isInteger /></td>}
-                {!showSecondOverlay && <td className="px-4 py-2 bg-indigo-50/30 dark:bg-indigo-900/10"><MetricCell value={d.second_shift_die_cut2_lbs} suffix=" lbs" target={t.volume.die_cut_2 / 2} isInteger /></td>}
+                <td className="px-4 py-2 bg-blue-50/30 dark:bg-blue-900/10"><MetricCell value={d.first_shift_die_cut2_lbs} suffix=" lbs" target={t.volume.die_cut_2 / 2} isInteger /></td>
+                <td className="px-4 py-2 bg-indigo-50/30 dark:bg-indigo-900/10"><MetricCell value={d.second_shift_die_cut2_lbs} suffix=" lbs" target={t.volume.die_cut_2 / 2} isInteger /></td>
                 <td className="px-4 py-2 bg-purple-50/30 dark:bg-purple-900/10"><MetricCell value={d.both_shift_die_cut2_lbs} suffix=" lbs" target={t.volume.die_cut_2} isInteger /></td>
                 <td className="px-4 py-2"><StatusBadge value={d.both_shift_die_cut2_lbs} target={t.volume.die_cut_2} type="volume" /></td>
               </tr>
               <tr className="hover:bg-emerald-50/50 dark:hover:bg-emerald-900/10 border-b-4 border-gray-200 dark:border-gray-600">
                 <td className="px-4 py-2"><div className="text-xs font-black text-gray-900 dark:text-gray-100">Total</div><div className="text-[10px] text-gray-500">≥ {t.volume.total.toLocaleString()} lbs</div></td>
-                {!showFirstOverlay && <td className="px-4 py-2 bg-blue-50/30 dark:bg-blue-900/10"><MetricCell value={d.first_shift_production} suffix=" lbs" target={t.volume.total / 2} isInteger /></td>}
-                {!showSecondOverlay && <td className="px-4 py-2 bg-indigo-50/30 dark:bg-indigo-900/10"><MetricCell value={d.second_shift_production} suffix=" lbs" target={t.volume.total / 2} isInteger /></td>}
+                <td className="px-4 py-2 bg-blue-50/30 dark:bg-blue-900/10"><MetricCell value={d.first_shift_production} suffix=" lbs" target={t.volume.total / 2} isInteger /></td>
+                <td className="px-4 py-2 bg-indigo-50/30 dark:bg-indigo-900/10"><MetricCell value={d.second_shift_production} suffix=" lbs" target={t.volume.total / 2} isInteger /></td>
                 <td className="px-4 py-2 bg-purple-50/30 dark:bg-purple-900/10"><MetricCell value={d.total_production} suffix=" lbs" target={t.volume.total} isInteger /></td>
                 <td className="px-4 py-2"><StatusBadge value={d.total_production} target={t.volume.total} type="volume" /></td>
               </tr>
@@ -959,27 +970,158 @@ export default function BakeryMetricsReport({ onFilterInfo, triggerAction }: Bak
                   </div>
                 </td>
                 <td className="px-4 py-2"><div className="text-xs font-semibold text-gray-900 dark:text-gray-100">Die Cut 1</div><div className="text-[10px] text-gray-500">≤ {t.waste.die_cut_1}%</div></td>
-                {!showFirstOverlay && <td className="px-4 py-2 bg-blue-50/30 dark:bg-blue-900/10"><MetricCell value={d.first_shift_die_cut1_waste_pct} suffix="%" target={t.waste.die_cut_1} isReverse /></td>}
-                {!showSecondOverlay && <td className="px-4 py-2 bg-indigo-50/30 dark:bg-indigo-900/10"><MetricCell value={d.second_shift_die_cut1_waste_pct} suffix="%" target={t.waste.die_cut_1} isReverse /></td>}
+                <td className="px-4 py-2 bg-blue-50/30 dark:bg-blue-900/10"><MetricCell value={d.first_shift_die_cut1_waste_pct} suffix="%" target={t.waste.die_cut_1} isReverse /></td>
+                <td className="px-4 py-2 bg-indigo-50/30 dark:bg-indigo-900/10"><MetricCell value={d.second_shift_die_cut1_waste_pct} suffix="%" target={t.waste.die_cut_1} isReverse /></td>
                 <td className="px-4 py-2 bg-purple-50/30 dark:bg-purple-900/10"><MetricCell value={d.both_shift_die_cut1_waste_pct} suffix="%" target={t.waste.die_cut_1} isReverse /></td>
                 <td className="px-4 py-2"><StatusBadge value={d.both_shift_die_cut1_waste_pct} target={t.waste.die_cut_1} type="waste" /></td>
               </tr>
               <tr className="hover:bg-red-50/50 dark:hover:bg-red-900/10">
                 <td className="px-4 py-2"><div className="text-xs font-semibold text-gray-900 dark:text-gray-100">Die Cut 2</div><div className="text-[10px] text-gray-500">≤ {t.waste.die_cut_2}%</div></td>
-                {!showFirstOverlay && <td className="px-4 py-2 bg-blue-50/30 dark:bg-blue-900/10"><MetricCell value={d.first_shift_die_cut2_waste_pct} suffix="%" target={t.waste.die_cut_2} isReverse /></td>}
-                {!showSecondOverlay && <td className="px-4 py-2 bg-indigo-50/30 dark:bg-indigo-900/10"><MetricCell value={d.second_shift_die_cut2_waste_pct} suffix="%" target={t.waste.die_cut_2} isReverse /></td>}
+                <td className="px-4 py-2 bg-blue-50/30 dark:bg-blue-900/10"><MetricCell value={d.first_shift_die_cut2_waste_pct} suffix="%" target={t.waste.die_cut_2} isReverse /></td>
+                <td className="px-4 py-2 bg-indigo-50/30 dark:bg-indigo-900/10"><MetricCell value={d.second_shift_die_cut2_waste_pct} suffix="%" target={t.waste.die_cut_2} isReverse /></td>
                 <td className="px-4 py-2 bg-purple-50/30 dark:bg-purple-900/10"><MetricCell value={d.both_shift_die_cut2_waste_pct} suffix="%" target={t.waste.die_cut_2} isReverse /></td>
                 <td className="px-4 py-2"><StatusBadge value={d.both_shift_die_cut2_waste_pct} target={t.waste.die_cut_2} type="waste" /></td>
               </tr>
               <tr className="hover:bg-red-50/50 dark:hover:bg-red-900/10">
                 <td className="px-4 py-2"><div className="text-xs font-black text-gray-900 dark:text-gray-100">Total</div><div className="text-[10px] text-gray-500">≤ {t.waste.total}%</div></td>
-                {!showFirstOverlay && <td className="px-4 py-2 bg-blue-50/30 dark:bg-blue-900/10"><MetricCell value={d.first_shift_waste_percent} suffix="%" target={t.waste.total} isReverse /></td>}
-                {!showSecondOverlay && <td className="px-4 py-2 bg-indigo-50/30 dark:bg-indigo-900/10"><MetricCell value={d.second_shift_waste_percent} suffix="%" target={t.waste.total} isReverse /></td>}
+                <td className="px-4 py-2 bg-blue-50/30 dark:bg-blue-900/10"><MetricCell value={d.first_shift_waste_percent} suffix="%" target={t.waste.total} isReverse /></td>
+                <td className="px-4 py-2 bg-indigo-50/30 dark:bg-indigo-900/10"><MetricCell value={d.second_shift_waste_percent} suffix="%" target={t.waste.total} isReverse /></td>
                 <td className="px-4 py-2 bg-purple-50/30 dark:bg-purple-900/10"><MetricCell value={d.total_waste_percent} suffix="%" target={t.waste.total} isReverse /></td>
                 <td className="px-4 py-2"><StatusBadge value={d.total_waste_percent} target={t.waste.total} type="waste" /></td>
               </tr>
             </tbody>
           </table>
+
+          {/* ─── Frosted Glass Column Overlays ─── */}
+          {showFirstOverlay && overlayPositions.first && (
+            <div
+              className="absolute z-20 pointer-events-none"
+              style={{
+                left: overlayPositions.first.left,
+                top: overlayPositions.first.top,
+                width: overlayPositions.first.width,
+                height: overlayPositions.first.height,
+              }}
+            >
+              {/* Glass blur layer */}
+              <div className="absolute inset-0 backdrop-blur-[3px] bg-blue-50/50 dark:bg-gray-800/55 border-x border-gray-200/50 dark:border-gray-600/50" />
+              {/* Content */}
+              <div className="relative z-10 flex flex-col items-center justify-center h-full p-4 text-center pointer-events-auto animate-overlay-fade-in">
+                <div className="p-3 bg-white/80 dark:bg-gray-700/80 rounded-full mb-3 shadow-lg animate-gentle-float">
+                  <ClipboardX className="w-7 h-7 text-gray-400 dark:text-gray-300" />
+                </div>
+                <p className="text-sm font-bold text-gray-700 dark:text-gray-200 mb-0.5 drop-shadow-sm">No record submitted Yet</p>
+                <p className="text-[10px] text-gray-500 dark:text-gray-400 mb-1">First Shift data is missing</p>
+                <p className="text-[10px] font-medium text-gray-400 dark:text-gray-500">{dayFilter} · {formatWeekRange(weekFilter)}</p>
+                {dayPassed && !firstRes && (
+                  <div className="mt-4 space-y-2.5 w-full max-w-[200px]">
+                    <div className="px-3 py-2 bg-amber-100/90 dark:bg-amber-900/40 rounded-xl border border-amber-300 dark:border-amber-700 animate-subtle-pulse">
+                      <div className="flex items-center gap-1.5 justify-center">
+                        <AlertTriangle className="w-4 h-4 text-amber-600 dark:text-amber-400" />
+                        <p className="text-xs font-bold text-amber-700 dark:text-amber-300">Did you Forget Something?</p>
+                      </div>
+                    </div>
+                    <div className="space-y-1.5">
+                      {['Production canceled', 'Plant Shutdown', 'Not Scheduled to Run'].map(reason => (
+                        <button
+                          key={reason}
+                          onClick={() => handleQuickResolve('first', reason)}
+                          disabled={savingResolve}
+                          className="w-full px-3 py-2 text-[11px] font-semibold rounded-lg border transition-all duration-200 bg-white/90 dark:bg-gray-700/90 border-gray-200 dark:border-gray-600 text-gray-700 dark:text-gray-200 hover:bg-blue-50 dark:hover:bg-blue-900/30 hover:border-blue-300 dark:hover:border-blue-600 hover:text-blue-700 dark:hover:text-blue-300 active:scale-[0.97] shadow-sm disabled:opacity-50"
+                        >
+                          {reason}
+                        </button>
+                      ))}
+                      <button
+                        onClick={() => setResolveModal({ shift: 'first' })}
+                        className="w-full px-3 py-2 text-[11px] font-bold rounded-lg bg-gradient-to-r from-blue-600 to-indigo-600 text-white hover:shadow-md transition-all active:scale-[0.97] mt-1"
+                      >
+                        Other Reason...
+                      </button>
+                    </div>
+                  </div>
+                )}
+                {firstRes && (
+                  <div className="mt-4 p-3 bg-green-50/90 dark:bg-green-900/30 rounded-xl border border-green-200 dark:border-green-700 max-w-[200px] w-full">
+                    <div className="flex items-center gap-1.5 mb-1.5">
+                      <div className="w-2 h-2 rounded-full bg-green-500 animate-subtle-pulse" />
+                      <p className="text-[10px] font-bold text-green-700 dark:text-green-300">Resolved</p>
+                    </div>
+                    <div className="flex items-start gap-1.5">
+                      <MessageSquare className="w-3 h-3 text-green-500 flex-shrink-0 mt-0.5" />
+                      <p className="text-[10px] text-green-600 dark:text-green-400 leading-relaxed">{firstRes.reason}</p>
+                    </div>
+                    <p className="text-[8px] text-green-400 mt-1.5">by {firstRes.resolvedBy}</p>
+                  </div>
+                )}
+              </div>
+            </div>
+          )}
+
+          {showSecondOverlay && overlayPositions.second && (
+            <div
+              className="absolute z-20 pointer-events-none"
+              style={{
+                left: overlayPositions.second.left,
+                top: overlayPositions.second.top,
+                width: overlayPositions.second.width,
+                height: overlayPositions.second.height,
+              }}
+            >
+              {/* Glass blur layer */}
+              <div className="absolute inset-0 backdrop-blur-[3px] bg-indigo-50/50 dark:bg-gray-800/55 border-x border-gray-200/50 dark:border-gray-600/50" />
+              {/* Content */}
+              <div className="relative z-10 flex flex-col items-center justify-center h-full p-4 text-center pointer-events-auto animate-overlay-fade-in">
+                <div className="p-3 bg-white/80 dark:bg-gray-700/80 rounded-full mb-3 shadow-lg animate-gentle-float">
+                  <ClipboardX className="w-7 h-7 text-gray-400 dark:text-gray-300" />
+                </div>
+                <p className="text-sm font-bold text-gray-700 dark:text-gray-200 mb-0.5 drop-shadow-sm">No record submitted Yet</p>
+                <p className="text-[10px] text-gray-500 dark:text-gray-400 mb-1">Second Shift data is missing</p>
+                <p className="text-[10px] font-medium text-gray-400 dark:text-gray-500">{dayFilter} · {formatWeekRange(weekFilter)}</p>
+                {dayPassed && !secondRes && (
+                  <div className="mt-4 space-y-2.5 w-full max-w-[200px]">
+                    <div className="px-3 py-2 bg-amber-100/90 dark:bg-amber-900/40 rounded-xl border border-amber-300 dark:border-amber-700 animate-subtle-pulse">
+                      <div className="flex items-center gap-1.5 justify-center">
+                        <AlertTriangle className="w-4 h-4 text-amber-600 dark:text-amber-400" />
+                        <p className="text-xs font-bold text-amber-700 dark:text-amber-300">Did you Forget Something?</p>
+                      </div>
+                    </div>
+                    <div className="space-y-1.5">
+                      {['Production canceled', 'Plant Shutdown', 'Not Scheduled to Run'].map(reason => (
+                        <button
+                          key={reason}
+                          onClick={() => handleQuickResolve('second', reason)}
+                          disabled={savingResolve}
+                          className="w-full px-3 py-2 text-[11px] font-semibold rounded-lg border transition-all duration-200 bg-white/90 dark:bg-gray-700/90 border-gray-200 dark:border-gray-600 text-gray-700 dark:text-gray-200 hover:bg-indigo-50 dark:hover:bg-indigo-900/30 hover:border-indigo-300 dark:hover:border-indigo-600 hover:text-indigo-700 dark:hover:text-indigo-300 active:scale-[0.97] shadow-sm disabled:opacity-50"
+                        >
+                          {reason}
+                        </button>
+                      ))}
+                      <button
+                        onClick={() => setResolveModal({ shift: 'second' })}
+                        className="w-full px-3 py-2 text-[11px] font-bold rounded-lg bg-gradient-to-r from-indigo-600 to-purple-600 text-white hover:shadow-md transition-all active:scale-[0.97] mt-1"
+                      >
+                        Other Reason...
+                      </button>
+                    </div>
+                  </div>
+                )}
+                {secondRes && (
+                  <div className="mt-4 p-3 bg-green-50/90 dark:bg-green-900/30 rounded-xl border border-green-200 dark:border-green-700 max-w-[200px] w-full">
+                    <div className="flex items-center gap-1.5 mb-1.5">
+                      <div className="w-2 h-2 rounded-full bg-green-500 animate-subtle-pulse" />
+                      <p className="text-[10px] font-bold text-green-700 dark:text-green-300">Resolved</p>
+                    </div>
+                    <div className="flex items-start gap-1.5">
+                      <MessageSquare className="w-3 h-3 text-green-500 flex-shrink-0 mt-0.5" />
+                      <p className="text-[10px] text-green-600 dark:text-green-400 leading-relaxed">{secondRes.reason}</p>
+                    </div>
+                    <p className="text-[8px] text-green-400 mt-1.5">by {secondRes.resolvedBy}</p>
+                  </div>
+                )}
+              </div>
+            </div>
+          )}
         </div>
       </div>
 
@@ -1049,7 +1191,7 @@ export default function BakeryMetricsReport({ onFilterInfo, triggerAction }: Bak
                   <div>
                     <h3 className="text-base font-bold text-white">Resolve Missing Data</h3>
                     <p className="text-xs text-white/80 mt-0.5">
-                      {resolveModal.shift === 'first' ? 'First' : 'Second'} Shift — {dayFilter}, {weekFilter}
+                      {resolveModal.shift === 'first' ? 'First' : 'Second'} Shift — {dayFilter}, {formatWeekRange(weekFilter)}
                     </p>
                   </div>
                 </div>
@@ -1064,6 +1206,23 @@ export default function BakeryMetricsReport({ onFilterInfo, triggerAction }: Bak
                 <label className="block text-xs font-bold text-gray-700 dark:text-gray-300 mb-2">
                   Why is {resolveModal.shift === 'first' ? 'First' : 'Second'} Shift data missing?
                 </label>
+                {/* Quick Respond presets */}
+                <div className="flex flex-wrap gap-2 mb-3">
+                  {['Production canceled', 'Plant Shutdown', 'Not Scheduled to Run'].map(preset => (
+                    <button
+                      key={preset}
+                      type="button"
+                      onClick={() => setResolveReason(preset)}
+                      className={`px-3 py-1.5 text-[11px] font-semibold rounded-lg border transition-all duration-200 ${
+                        resolveReason === preset
+                          ? 'bg-blue-100 dark:bg-blue-900/40 border-blue-400 dark:border-blue-500 text-blue-700 dark:text-blue-300 shadow-sm scale-[1.02]'
+                          : 'bg-gray-50 dark:bg-gray-700 border-gray-200 dark:border-gray-600 text-gray-600 dark:text-gray-300 hover:bg-gray-100 dark:hover:bg-gray-600 hover:border-gray-300 dark:hover:border-gray-500'
+                      }`}
+                    >
+                      {preset}
+                    </button>
+                  ))}
+                </div>
                 <textarea
                   value={resolveReason}
                   onChange={e => setResolveReason(e.target.value)}
@@ -1103,6 +1262,24 @@ export default function BakeryMetricsReport({ onFilterInfo, triggerAction }: Bak
           to { opacity: 1; transform: translateY(0); }
         }
         .animate-fade-slide-in { animation: fadeSlideIn 0.25s ease-out; }
+
+        @keyframes overlayFadeIn {
+          from { opacity: 0; transform: translateY(12px) scale(0.97); }
+          to { opacity: 1; transform: translateY(0) scale(1); }
+        }
+        .animate-overlay-fade-in { animation: overlayFadeIn 0.5s cubic-bezier(0.22, 1, 0.36, 1); }
+
+        @keyframes gentleFloat {
+          0%, 100% { transform: translateY(0); }
+          50% { transform: translateY(-5px); }
+        }
+        .animate-gentle-float { animation: gentleFloat 3s ease-in-out infinite; }
+
+        @keyframes subtlePulse {
+          0%, 100% { opacity: 1; transform: scale(1); }
+          50% { opacity: 0.82; transform: scale(1.03); }
+        }
+        .animate-subtle-pulse { animation: subtlePulse 2.5s ease-in-out infinite; }
       `}</style>
     </div>
   );
