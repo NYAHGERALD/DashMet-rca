@@ -84,11 +84,57 @@ const bakeryMetricsService = {
       orderBy: { createdAt: 'desc' },
     });
 
+    // Helper: compute total waste % from lbs when wasteAvgPct is null
+    const computeWasteAvg = (shift: any): number | null => {
+      if (!shift) return null;
+      const avg = Number(shift.wasteAvgPct);
+      if (avg && avg !== 0) return avg;
+      // Derive from die-cut waste lbs / total lbs
+      const totalLbs = Number(shift.dieCut1Lbs || 0) + Number(shift.dieCut2Lbs || 0);
+      const totalWaste = Number(shift.dieCut1WasteLb || 0) + Number(shift.dieCut2WasteLb || 0);
+      if (totalLbs > 0) return (totalWaste / totalLbs) * 100;
+      return null;
+    };
+
     // Flatten to the shape the frontend expects
     return submissions.map(s => {
       const fs = s.firstShiftMetrics;
       const ss = s.secondShiftMetrics;
       const bs = s.bothShiftsMetrics;
+
+      // --- First shift values ---
+      const fsOee1 = fs ? Number(fs.dieCut1OeePct) : null;
+      const fsOee2 = fs ? Number(fs.dieCut2OeePct) : null;
+      const fsOeeAvg = fs ? Number(fs.oeeAvgPct) : null;
+      const fsLbs1 = fs ? Number(fs.dieCut1Lbs) : null;
+      const fsLbs2 = fs ? Number(fs.dieCut2Lbs) : null;
+      const fsProd = fs ? Number(fs.poundsTotal) : null;
+      const fsWaste1 = fs ? Number(fs.dieCut1WastePct) : null;
+      const fsWaste2 = fs ? Number(fs.dieCut2WastePct) : null;
+      const fsWasteAvg = fs ? computeWasteAvg(fs) : null;
+
+      // --- Second shift values ---
+      const ssOee1 = ss ? Number(ss.dieCut1OeePct) : null;
+      const ssOee2 = ss ? Number(ss.dieCut2OeePct) : null;
+      const ssOeeAvg = ss ? Number(ss.oeeAvgPct) : null;
+      const ssLbs1 = ss ? Number(ss.dieCut1Lbs) : null;
+      const ssLbs2 = ss ? Number(ss.dieCut2Lbs) : null;
+      const ssProd = ss ? Number(ss.poundsTotal) : null;
+      const ssWaste1 = ss ? Number(ss.dieCut1WastePct) : null;
+      const ssWaste2 = ss ? Number(ss.dieCut2WastePct) : null;
+      const ssWasteAvg = ss ? computeWasteAvg(ss) : null;
+
+      // --- Both shifts: use actual record if present, else fallback to whichever shift exists ---
+      // When only one shift is submitted, show that shift's data in the "Both" column
+      const bsOee1 = bs ? Number(bs.dieCut1OeePct) : (fsOee1 ?? ssOee1);
+      const bsOee2 = bs ? Number(bs.dieCut2OeePct) : (fsOee2 ?? ssOee2);
+      const bsOeeAvg = bs ? Number(bs.oeeAvgPct) : (fsOeeAvg ?? ssOeeAvg);
+      const bsLbs1 = bs ? Number(bs.dieCut1Lbs) : (fsLbs1 ?? ssLbs1);
+      const bsLbs2 = bs ? Number(bs.dieCut2Lbs) : (fsLbs2 ?? ssLbs2);
+      const bsProd = bs ? Number(bs.poundsTotal) : (fsProd ?? ssProd);
+      const bsWaste1 = bs ? Number(bs.dieCut1WastePct) : (fsWaste1 ?? ssWaste1);
+      const bsWaste2 = bs ? Number(bs.dieCut2WastePct) : (fsWaste2 ?? ssWaste2);
+      const bsWasteAvg = bs ? computeWasteAvg(bs) : (fsWasteAvg ?? ssWasteAvg);
 
       return {
         id: s.id,
@@ -98,37 +144,37 @@ const bakeryMetricsService = {
         submitted_by: s.submittedBy,
 
         // First shift
-        first_shift_die_cut1_oee: fs ? Number(fs.dieCut1OeePct) : null,
-        first_shift_die_cut2_oee: fs ? Number(fs.dieCut2OeePct) : null,
-        first_shift_oee: fs ? Number(fs.oeeAvgPct) : null,
-        first_shift_die_cut1_lbs: fs ? Number(fs.dieCut1Lbs) : null,
-        first_shift_die_cut2_lbs: fs ? Number(fs.dieCut2Lbs) : null,
-        first_shift_production: fs ? Number(fs.poundsTotal) : null,
-        first_shift_die_cut1_waste_pct: fs ? Number(fs.dieCut1WastePct) : null,
-        first_shift_die_cut2_waste_pct: fs ? Number(fs.dieCut2WastePct) : null,
-        first_shift_waste_percent: fs ? Number(fs.wasteAvgPct) : null,
+        first_shift_die_cut1_oee: fsOee1,
+        first_shift_die_cut2_oee: fsOee2,
+        first_shift_oee: fsOeeAvg,
+        first_shift_die_cut1_lbs: fsLbs1,
+        first_shift_die_cut2_lbs: fsLbs2,
+        first_shift_production: fsProd,
+        first_shift_die_cut1_waste_pct: fsWaste1,
+        first_shift_die_cut2_waste_pct: fsWaste2,
+        first_shift_waste_percent: fsWasteAvg,
 
         // Second shift
-        second_shift_die_cut1_oee: ss ? Number(ss.dieCut1OeePct) : null,
-        second_shift_die_cut2_oee: ss ? Number(ss.dieCut2OeePct) : null,
-        second_shift_oee: ss ? Number(ss.oeeAvgPct) : null,
-        second_shift_die_cut1_lbs: ss ? Number(ss.dieCut1Lbs) : null,
-        second_shift_die_cut2_lbs: ss ? Number(ss.dieCut2Lbs) : null,
-        second_shift_production: ss ? Number(ss.poundsTotal) : null,
-        second_shift_die_cut1_waste_pct: ss ? Number(ss.dieCut1WastePct) : null,
-        second_shift_die_cut2_waste_pct: ss ? Number(ss.dieCut2WastePct) : null,
-        second_shift_waste_percent: ss ? Number(ss.wasteAvgPct) : null,
+        second_shift_die_cut1_oee: ssOee1,
+        second_shift_die_cut2_oee: ssOee2,
+        second_shift_oee: ssOeeAvg,
+        second_shift_die_cut1_lbs: ssLbs1,
+        second_shift_die_cut2_lbs: ssLbs2,
+        second_shift_production: ssProd,
+        second_shift_die_cut1_waste_pct: ssWaste1,
+        second_shift_die_cut2_waste_pct: ssWaste2,
+        second_shift_waste_percent: ssWasteAvg,
 
-        // Both shifts
-        both_shift_die_cut1_oee: bs ? Number(bs.dieCut1OeePct) : null,
-        both_shift_die_cut2_oee: bs ? Number(bs.dieCut2OeePct) : null,
-        total_oee: bs ? Number(bs.oeeAvgPct) : null,
-        both_shift_die_cut1_lbs: bs ? Number(bs.dieCut1Lbs) : null,
-        both_shift_die_cut2_lbs: bs ? Number(bs.dieCut2Lbs) : null,
-        total_production: bs ? Number(bs.poundsTotal) : null,
-        both_shift_die_cut1_waste_pct: bs ? Number(bs.dieCut1WastePct) : null,
-        both_shift_die_cut2_waste_pct: bs ? Number(bs.dieCut2WastePct) : null,
-        total_waste_percent: bs ? Number(bs.wasteAvgPct) : null,
+        // Both shifts (with fallback to available shift)
+        both_shift_die_cut1_oee: bsOee1,
+        both_shift_die_cut2_oee: bsOee2,
+        total_oee: bsOeeAvg,
+        both_shift_die_cut1_lbs: bsLbs1,
+        both_shift_die_cut2_lbs: bsLbs2,
+        total_production: bsProd,
+        both_shift_die_cut1_waste_pct: bsWaste1,
+        both_shift_die_cut2_waste_pct: bsWaste2,
+        total_waste_percent: bsWasteAvg,
       };
     });
   },
@@ -455,7 +501,7 @@ const bakeryMetricsService = {
             dieCut2WasteLb: fs.dieCut2WasteLb,
             dieCut1WastePct: fs.dieCut1WastePct ?? (fs.dieCut1Lbs > 0 ? (fs.dieCut1WasteLb / fs.dieCut1Lbs) * 100 : 0),
             dieCut2WastePct: fs.dieCut2WastePct ?? (fs.dieCut2Lbs > 0 ? (fs.dieCut2WasteLb / fs.dieCut2Lbs) * 100 : 0),
-            wasteAvgPct: fs.wasteAvgPct,
+            wasteAvgPct: fs.wasteAvgPct ?? ((fs.dieCut1Lbs + fs.dieCut2Lbs) > 0 ? ((fs.dieCut1WasteLb + fs.dieCut2WasteLb) / (fs.dieCut1Lbs + fs.dieCut2Lbs)) * 100 : 0),
             submittedBy: data.submittedBy,
           },
         });
@@ -477,7 +523,7 @@ const bakeryMetricsService = {
             dieCut2WasteLb: ss.dieCut2WasteLb,
             dieCut1WastePct: ss.dieCut1WastePct ?? (ss.dieCut1Lbs > 0 ? (ss.dieCut1WasteLb / ss.dieCut1Lbs) * 100 : 0),
             dieCut2WastePct: ss.dieCut2WastePct ?? (ss.dieCut2Lbs > 0 ? (ss.dieCut2WasteLb / ss.dieCut2Lbs) * 100 : 0),
-            wasteAvgPct: ss.wasteAvgPct,
+            wasteAvgPct: ss.wasteAvgPct ?? ((ss.dieCut1Lbs + ss.dieCut2Lbs) > 0 ? ((ss.dieCut1WasteLb + ss.dieCut2WasteLb) / (ss.dieCut1Lbs + ss.dieCut2Lbs)) * 100 : 0),
             submittedBy: data.submittedBy,
           },
         });

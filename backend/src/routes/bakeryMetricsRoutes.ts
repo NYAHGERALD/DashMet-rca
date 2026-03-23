@@ -543,13 +543,22 @@ router.post('/submit', async (req: Request, res: Response) => {
         return undefined;
       }
 
+      const safeLbs1 = lbs1 || 0;
+      const safeLbs2 = lbs2 || 0;
+      const safeWaste1 = waste1 || 0;
+      const safeWaste2 = waste2 || 0;
+      const totalLbs = safeLbs1 + safeLbs2;
+      const totalWasteLbs = safeWaste1 + safeWaste2;
+      const wasteAvgPct = totalLbs > 0 ? (totalWasteLbs / totalLbs) * 100 : 0;
+
       return {
         dieCut1OeePct: oee1 || 0,
         dieCut2OeePct: oee2 || 0,
-        dieCut1Lbs: lbs1 || 0,
-        dieCut2Lbs: lbs2 || 0,
-        dieCut1WasteLb: waste1 || 0,
-        dieCut2WasteLb: waste2 || 0,
+        dieCut1Lbs: safeLbs1,
+        dieCut2Lbs: safeLbs2,
+        dieCut1WasteLb: safeWaste1,
+        dieCut2WasteLb: safeWaste2,
+        wasteAvgPct,
         submittedBy,
       };
     };

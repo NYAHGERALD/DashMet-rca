@@ -207,6 +207,20 @@ export default function BakeryMetricsForm({ onStepChange, openRecentSubmissions 
   });
   const [shiftReminder, setShiftReminder] = useState(false);
 
+  // ─── Success Modal state ───────────────────────────────────────────────
+  const [successModal, setSuccessModal] = useState<{
+    show: boolean;
+    submittedBy: string;
+    weekName: string;
+    dayOfWeek: string;
+    shiftType: string;
+    timestamp: string;
+    metrics: { label: string; value: string }[];
+  }>({ show: false, submittedBy: '', weekName: '', dayOfWeek: '', shiftType: '', timestamp: '', metrics: [] });
+
+  // ─── Reset Confirm Modal state ────────────────────────────────────────
+  const [resetConfirm, setResetConfirm] = useState(false);
+
   // ─── Quick Stats: real KPI targets + deadline from DB ─────────────────────
   const [quickStats, setQuickStats] = useState({ oeeTarget: '≥ 70%', wasteTarget: '≤ 3.75%', deadline: 'End of Day' });
 
@@ -706,7 +720,11 @@ export default function BakeryMetricsForm({ onStepChange, openRecentSubmissions 
   };
 
   const handleReset = () => {
-    if (!confirm('Are you sure you want to reset the form? All entered data will be lost.')) return;
+    setResetConfirm(true);
+  };
+
+  const executeReset = () => {
+    setResetConfirm(false);
     setFormData({
       week_name: weekOptions.length > 0 ? weekOptions[0].sheet_name : getCurrentWeekName(),
       day_of_week: getCurrentDayName(),
@@ -810,13 +828,45 @@ export default function BakeryMetricsForm({ onStepChange, openRecentSubmissions 
       setSubmitProgress(100);
 
       if (res.data?.success) {
-        showNotification('Metrics submitted successfully! 🎉', 'success');
         localStorage.removeItem('bakeryFormDraft');
-        // Reset after success
-        setTimeout(() => {
-          handleReset();
-          loadRecentSubmissions();
-        }, 2000);
+
+        // Build metrics summary for the success modal
+        const submittedMetrics: { label: string; value: string }[] = [];
+        const activeShift = shiftSubmitReady ? shiftTab : 'both';
+        if (activeShift === 'first' || activeShift === 'both') {
+          submittedMetrics.push(
+            { label: 'OEE Die Cut 1', value: `${formData.first_die_cut1_oee_pct}%` },
+            { label: 'OEE Die Cut 2', value: `${formData.first_die_cut2_oee_pct}%` },
+            { label: 'Pounds Die Cut 1', value: `${parseFloat(formData.first_die_cut1_pounds).toLocaleString()} lbs` },
+            { label: 'Pounds Die Cut 2', value: `${parseFloat(formData.first_die_cut2_pounds).toLocaleString()} lbs` },
+            { label: 'Waste Die Cut 1', value: `${parseFloat(formData.first_die_cut1_waste_lbs).toLocaleString()} lbs` },
+            { label: 'Waste Die Cut 2', value: `${parseFloat(formData.first_die_cut2_waste_lbs).toLocaleString()} lbs` },
+          );
+        }
+        if (activeShift === 'second' || activeShift === 'both') {
+          const prefix = activeShift === 'both' ? '(2nd) ' : '';
+          submittedMetrics.push(
+            { label: `${prefix}OEE Die Cut 1`, value: `${formData.second_die_cut1_oee_pct}%` },
+            { label: `${prefix}OEE Die Cut 2`, value: `${formData.second_die_cut2_oee_pct}%` },
+            { label: `${prefix}Pounds Die Cut 1`, value: `${parseFloat(formData.second_die_cut1_pounds).toLocaleString()} lbs` },
+            { label: `${prefix}Pounds Die Cut 2`, value: `${parseFloat(formData.second_die_cut2_pounds).toLocaleString()} lbs` },
+            { label: `${prefix}Waste Die Cut 1`, value: `${parseFloat(formData.second_die_cut1_waste_lbs).toLocaleString()} lbs` },
+            { label: `${prefix}Waste Die Cut 2`, value: `${parseFloat(formData.second_die_cut2_waste_lbs).toLocaleString()} lbs` },
+          );
+        }
+
+        const now = new Date();
+        setSuccessModal({
+          show: true,
+          submittedBy: formData.submitted_by,
+          weekName: formData.week_name,
+          dayOfWeek: formData.day_of_week,
+          shiftType: activeShift === 'first' ? 'First Shift' : activeShift === 'second' ? 'Second Shift' : 'Both Shifts',
+          timestamp: now.toLocaleDateString('en-US', { weekday: 'long', year: 'numeric', month: 'long', day: 'numeric' }) + ' at ' + now.toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit', second: '2-digit' }),
+          metrics: submittedMetrics,
+        });
+
+        loadRecentSubmissions();
       } else {
         throw new Error(res.data?.message || 'Submission failed');
       }
@@ -2330,6 +2380,143 @@ export default function BakeryMetricsForm({ onStepChange, openRecentSubmissions 
                   </div>
                 )}
               </div>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* ═══ Success Modal ═══ */}
+      {successModal.show && (
+        <div className="fixed inset-0 z-[70] flex items-center justify-center bg-black/40 backdrop-blur-sm" onClick={() => { setSuccessModal(prev => ({ ...prev, show: false })); }}>
+          <div
+            className="bg-white dark:bg-gray-800 rounded-2xl shadow-2xl max-w-md w-full mx-4 overflow-hidden animate-in fade-in zoom-in duration-300"
+            onClick={e => e.stopPropagation()}
+          >
+            {/* Green header banner */}
+            <div className="bg-gradient-to-r from-emerald-500 to-green-600 px-6 py-5 text-center relative overflow-hidden">
+              <div className="absolute inset-0 opacity-10">
+                <div className="absolute -top-4 -right-4 w-24 h-24 bg-white rounded-full" />
+                <div className="absolute -bottom-6 -left-6 w-32 h-32 bg-white rounded-full" />
+              </div>
+              <div className="relative">
+                <div className="w-14 h-14 mx-auto mb-3 bg-white/20 rounded-full flex items-center justify-center ring-4 ring-white/30">
+                  <CheckCircle className="w-8 h-8 text-white" />
+                </div>
+                <h3 className="text-lg font-bold text-white">Submission Successful!</h3>
+                <p className="text-emerald-100 text-xs mt-1">Your bakery metrics have been recorded</p>
+              </div>
+            </div>
+
+            {/* Details body */}
+            <div className="px-6 py-4 space-y-4">
+              {/* Submitted by + timestamp */}
+              <div className="flex items-center justify-between bg-gray-50 dark:bg-gray-700/50 rounded-xl px-4 py-3">
+                <div className="flex items-center gap-2.5">
+                  <div className="w-9 h-9 bg-blue-100 dark:bg-blue-900/40 rounded-full flex items-center justify-center">
+                    <User className="w-4 h-4 text-blue-600 dark:text-blue-400" />
+                  </div>
+                  <div>
+                    <p className="text-sm font-bold text-gray-900 dark:text-white">{successModal.submittedBy}</p>
+                    <p className="text-[10px] text-gray-500 dark:text-gray-400">Submitted by</p>
+                  </div>
+                </div>
+                <div className="text-right">
+                  <div className="flex items-center gap-1 text-gray-500 dark:text-gray-400">
+                    <Clock className="w-3 h-3" />
+                    <span className="text-[10px] font-medium">{successModal.timestamp}</span>
+                  </div>
+                </div>
+              </div>
+
+              {/* Submission info cards */}
+              <div className="grid grid-cols-3 gap-2">
+                <div className="bg-blue-50 dark:bg-blue-900/20 rounded-lg px-3 py-2 text-center border border-blue-200 dark:border-blue-700">
+                  <Calendar className="w-3.5 h-3.5 mx-auto text-blue-500 mb-1" />
+                  <p className="text-[10px] text-blue-600 dark:text-blue-400 font-medium">Week</p>
+                  <p className="text-[10px] font-bold text-gray-900 dark:text-white mt-0.5">{formatWeekReadable(successModal.weekName)}</p>
+                </div>
+                <div className="bg-purple-50 dark:bg-purple-900/20 rounded-lg px-3 py-2 text-center border border-purple-200 dark:border-purple-700">
+                  <CalendarDays className="w-3.5 h-3.5 mx-auto text-purple-500 mb-1" />
+                  <p className="text-[10px] text-purple-600 dark:text-purple-400 font-medium">Day</p>
+                  <p className="text-[10px] font-bold text-gray-900 dark:text-white mt-0.5">{successModal.dayOfWeek}</p>
+                </div>
+                <div className="bg-amber-50 dark:bg-amber-900/20 rounded-lg px-3 py-2 text-center border border-amber-200 dark:border-amber-700">
+                  <Sun className="w-3.5 h-3.5 mx-auto text-amber-500 mb-1" />
+                  <p className="text-[10px] text-amber-600 dark:text-amber-400 font-medium">Shift</p>
+                  <p className="text-[10px] font-bold text-gray-900 dark:text-white mt-0.5">{successModal.shiftType}</p>
+                </div>
+              </div>
+
+              {/* Metrics summary */}
+              <div>
+                <p className="text-xs font-semibold text-gray-500 dark:text-gray-400 mb-2 flex items-center gap-1">
+                  <BarChart3 className="w-3 h-3" /> Submitted Metrics
+                </p>
+                <div className="bg-gray-50 dark:bg-gray-700/40 rounded-xl p-3 max-h-44 overflow-y-auto scrollbar-thin scrollbar-thumb-gray-300 dark:scrollbar-thumb-gray-600">
+                  <div className="grid grid-cols-2 gap-x-4 gap-y-1.5">
+                    {successModal.metrics.map((m, i) => (
+                      <div key={i} className="flex justify-between items-center py-0.5">
+                        <span className="text-[11px] text-gray-500 dark:text-gray-400">{m.label}</span>
+                        <span className="text-[11px] font-bold text-gray-900 dark:text-white">{m.value}</span>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              </div>
+            </div>
+
+            {/* Footer */}
+            <div className="px-6 pb-5 flex gap-2">
+              <button
+                onClick={() => {
+                  setSuccessModal(prev => ({ ...prev, show: false }));
+                  loadRecentSubmissions();
+                }}
+                className="flex-1 px-4 py-2.5 border border-gray-300 dark:border-gray-600 text-gray-700 dark:text-gray-300 text-sm font-semibold rounded-xl hover:bg-gray-50 dark:hover:bg-gray-700 transition-colors"
+              >
+                Close
+              </button>
+              <button
+                onClick={() => {
+                  setSuccessModal(prev => ({ ...prev, show: false }));
+                  executeReset();
+                }}
+                className="flex-1 px-4 py-2.5 bg-gradient-to-r from-emerald-500 to-green-600 text-white text-sm font-semibold rounded-xl hover:from-emerald-600 hover:to-green-700 transition-all shadow-sm hover:shadow-md"
+              >
+                Submit New Entry
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* ═══ Reset Confirm Modal ═══ */}
+      {resetConfirm && (
+        <div className="fixed inset-0 z-[70] flex items-center justify-center bg-black/40 backdrop-blur-sm" onClick={() => setResetConfirm(false)}>
+          <div
+            className="bg-white dark:bg-gray-800 rounded-2xl shadow-2xl max-w-sm w-full mx-4 overflow-hidden animate-in fade-in zoom-in duration-300"
+            onClick={e => e.stopPropagation()}
+          >
+            <div className="px-6 pt-6 pb-4 text-center">
+              <div className="w-14 h-14 mx-auto mb-4 bg-red-100 dark:bg-red-900/30 rounded-full flex items-center justify-center">
+                <Trash2 className="w-7 h-7 text-red-500" />
+              </div>
+              <h3 className="text-lg font-bold text-gray-900 dark:text-white">Reset Form?</h3>
+              <p className="text-sm text-gray-500 dark:text-gray-400 mt-2">All entered data will be cleared. This action cannot be undone.</p>
+            </div>
+            <div className="px-6 pb-5 flex gap-2">
+              <button
+                onClick={() => setResetConfirm(false)}
+                className="flex-1 px-4 py-2.5 border border-gray-300 dark:border-gray-600 text-gray-700 dark:text-gray-300 text-sm font-semibold rounded-xl hover:bg-gray-50 dark:hover:bg-gray-700 transition-colors"
+              >
+                Cancel
+              </button>
+              <button
+                onClick={executeReset}
+                className="flex-1 px-4 py-2.5 bg-red-500 text-white text-sm font-semibold rounded-xl hover:bg-red-600 transition-colors shadow-sm"
+              >
+                Yes, Reset
+              </button>
             </div>
           </div>
         </div>
