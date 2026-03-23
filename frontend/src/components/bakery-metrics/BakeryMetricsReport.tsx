@@ -1009,7 +1009,33 @@ export default function BakeryMetricsReport({ onFilterInfo, triggerAction }: Bak
               {/* Glass blur layer */}
               <div className="absolute inset-0 backdrop-blur-[3px] bg-blue-50/50 dark:bg-gray-800/55 border-x border-gray-200/50 dark:border-gray-600/50" />
               {/* Content */}
-              <div className="relative z-10 flex flex-col items-center justify-center h-full p-4 text-center pointer-events-auto animate-overlay-fade-in">
+              <div className="relative z-10 flex flex-col items-center justify-center h-full p-4 text-center pointer-events-auto animate-overlay-fade-in group">
+                {/* Hover hint tooltip */}
+                <div className="absolute top-3 right-3 z-30">
+                  <div className="relative">
+                    <div className="p-1.5 rounded-full bg-white/70 dark:bg-gray-700/70 shadow-sm cursor-help hover:bg-blue-100 dark:hover:bg-blue-900/40 transition-colors peer">
+                      <Info className="w-3.5 h-3.5 text-blue-500 dark:text-blue-400" />
+                    </div>
+                    <div className="absolute right-0 top-full mt-2 w-56 opacity-0 invisible peer-hover:opacity-100 peer-hover:visible transition-all duration-300 ease-out transform translate-y-1 peer-hover:translate-y-0 z-40">
+                      <div className="bg-white dark:bg-gray-800 rounded-xl shadow-2xl border border-gray-200 dark:border-gray-600 p-3.5 text-left">
+                        <div className="absolute -top-1.5 right-3 w-3 h-3 bg-white dark:bg-gray-800 border-l border-t border-gray-200 dark:border-gray-600 rotate-45" />
+                        <p className="text-xs font-bold text-gray-800 dark:text-gray-100 mb-2">First Shift — Missing Data</p>
+                        <div className="space-y-1.5 text-[10px] text-gray-600 dark:text-gray-300 leading-relaxed">
+                          <p><span className="font-semibold text-gray-700 dark:text-gray-200">Day:</span> {dayFilter}</p>
+                          <p><span className="font-semibold text-gray-700 dark:text-gray-200">Week:</span> {formatWeekRange(weekFilter)}</p>
+                          <p><span className="font-semibold text-gray-700 dark:text-gray-200">Status:</span> {firstRes ? '✅ Resolved' : dayPassed ? '⚠️ Past due — action needed' : '🕐 Awaiting submission'}</p>
+                          {firstRes && <p><span className="font-semibold text-gray-700 dark:text-gray-200">Reason:</span> {firstRes.reason}</p>}
+                          {firstRes && <p><span className="font-semibold text-gray-700 dark:text-gray-200">Resolved by:</span> {firstRes.resolvedBy}</p>}
+                          {!firstRes && dayPassed && <p className="text-amber-600 dark:text-amber-400 font-medium mt-1">Use the quick options below or click Other Reason to explain why this shift has no data.</p>}
+                          {!firstRes && !dayPassed && <p className="text-blue-600 dark:text-blue-400 font-medium mt-1">Data can still be submitted for this shift. No action required yet.</p>}
+                        </div>
+                        <div className="mt-2 pt-2 border-t border-gray-100 dark:border-gray-700">
+                          <p className="text-[9px] text-gray-400 dark:text-gray-500 italic">Hover over this icon anytime for details</p>
+                        </div>
+                      </div>
+                    </div>
+                  </div>
+                </div>
                 <div className="p-3 bg-white/80 dark:bg-gray-700/80 rounded-full mb-3 shadow-lg animate-gentle-float">
                   <ClipboardX className="w-7 h-7 text-gray-400 dark:text-gray-300" />
                 </div>
@@ -1074,7 +1100,33 @@ export default function BakeryMetricsReport({ onFilterInfo, triggerAction }: Bak
               {/* Glass blur layer */}
               <div className="absolute inset-0 backdrop-blur-[3px] bg-indigo-50/50 dark:bg-gray-800/55 border-x border-gray-200/50 dark:border-gray-600/50" />
               {/* Content */}
-              <div className="relative z-10 flex flex-col items-center justify-center h-full p-4 text-center pointer-events-auto animate-overlay-fade-in">
+              <div className="relative z-10 flex flex-col items-center justify-center h-full p-4 text-center pointer-events-auto animate-overlay-fade-in group">
+                {/* Hover hint tooltip */}
+                <div className="absolute top-3 right-3 z-30">
+                  <div className="relative">
+                    <div className="p-1.5 rounded-full bg-white/70 dark:bg-gray-700/70 shadow-sm cursor-help hover:bg-indigo-100 dark:hover:bg-indigo-900/40 transition-colors peer">
+                      <Info className="w-3.5 h-3.5 text-indigo-500 dark:text-indigo-400" />
+                    </div>
+                    <div className="absolute right-0 top-full mt-2 w-56 opacity-0 invisible peer-hover:opacity-100 peer-hover:visible transition-all duration-300 ease-out transform translate-y-1 peer-hover:translate-y-0 z-40">
+                      <div className="bg-white dark:bg-gray-800 rounded-xl shadow-2xl border border-gray-200 dark:border-gray-600 p-3.5 text-left">
+                        <div className="absolute -top-1.5 right-3 w-3 h-3 bg-white dark:bg-gray-800 border-l border-t border-gray-200 dark:border-gray-600 rotate-45" />
+                        <p className="text-xs font-bold text-gray-800 dark:text-gray-100 mb-2">Second Shift — Missing Data</p>
+                        <div className="space-y-1.5 text-[10px] text-gray-600 dark:text-gray-300 leading-relaxed">
+                          <p><span className="font-semibold text-gray-700 dark:text-gray-200">Day:</span> {dayFilter}</p>
+                          <p><span className="font-semibold text-gray-700 dark:text-gray-200">Week:</span> {formatWeekRange(weekFilter)}</p>
+                          <p><span className="font-semibold text-gray-700 dark:text-gray-200">Status:</span> {secondRes ? '✅ Resolved' : dayPassed ? '⚠️ Past due — action needed' : '🕐 Awaiting submission'}</p>
+                          {secondRes && <p><span className="font-semibold text-gray-700 dark:text-gray-200">Reason:</span> {secondRes.reason}</p>}
+                          {secondRes && <p><span className="font-semibold text-gray-700 dark:text-gray-200">Resolved by:</span> {secondRes.resolvedBy}</p>}
+                          {!secondRes && dayPassed && <p className="text-amber-600 dark:text-amber-400 font-medium mt-1">Use the quick options below or click Other Reason to explain why this shift has no data.</p>}
+                          {!secondRes && !dayPassed && <p className="text-blue-600 dark:text-blue-400 font-medium mt-1">Data can still be submitted for this shift. No action required yet.</p>}
+                        </div>
+                        <div className="mt-2 pt-2 border-t border-gray-100 dark:border-gray-700">
+                          <p className="text-[9px] text-gray-400 dark:text-gray-500 italic">Hover over this icon anytime for details</p>
+                        </div>
+                      </div>
+                    </div>
+                  </div>
+                </div>
                 <div className="p-3 bg-white/80 dark:bg-gray-700/80 rounded-full mb-3 shadow-lg animate-gentle-float">
                   <ClipboardX className="w-7 h-7 text-gray-400 dark:text-gray-300" />
                 </div>
