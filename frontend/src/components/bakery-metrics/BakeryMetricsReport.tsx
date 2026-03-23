@@ -28,6 +28,9 @@ import {
   Activity,
   CalendarCheck,
   ChevronDown,
+  MessageSquare,
+  ClipboardX,
+  Send,
 } from 'lucide-react';
 
 // ─── Types ──────────────────────────────────────────────────────────────────────
@@ -72,7 +75,19 @@ interface MetricsRecord {
   both_shift_die_cut1_waste_pct?: number;
   both_shift_die_cut2_waste_pct?: number;
   total_waste_percent?: number;
+  has_first_shift?: boolean;
+  has_second_shift?: boolean;
   [key: string]: any;
+}
+
+interface ShiftResolution {
+  id: number;
+  weekName: string;
+  dayOfWeek: string;
+  shiftType: string;
+  reason: string;
+  resolvedBy: string;
+  resolvedAt: string;
 }
 
 interface DashboardMetrics {
@@ -252,6 +267,12 @@ export default function BakeryMetricsReport({ onFilterInfo, triggerAction }: Bak
   const [dashMetrics, setDashMetrics] = useState<DashboardMetrics>({});
   const [notifications, setNotifications] = useState<Notification[]>([]);
 
+  // ─── Shift Resolution state ───────────────────────────────────────────
+  const [shiftResolutions, setShiftResolutions] = useState<ShiftResolution[]>([]);
+  const [resolveModal, setResolveModal] = useState<{ shift: 'first' | 'second' } | null>(null);
+  const [resolveReason, setResolveReason] = useState('');
+  const [savingResolve, setSavingResolve] = useState(false);
+
   const notifId = useRef(0);
 
   // ─── Notifications ────────────────────────────────────────────────────────
@@ -260,6 +281,82 @@ export default function BakeryMetricsReport({ onFilterInfo, triggerAction }: Bak
     setNotifications(prev => [...prev, { id, message, type }]);
     setTimeout(() => setNotifications(prev => prev.filter(n => n.id !== id)), 4000);
   }, []);
+
+  // ─── Load shift resolutions ──────────────────────────────────────────────
+  const loadShiftResolutions = useCallback(async () => {
+    try {
+      const res = await api.get('/bakery-metrics/resolutions');
+      if (res.data?.success) {
+        setShiftResolutions(res.data.resolutions || []);
+      }
+    } catch { /* ignore */ }
+  }, []);
+
+  // ─── Get resolution for a specific shift ─────────────────────────────────
+  const getShiftResolution = useCallback((shift: 'first' | 'second'): ShiftResolution | undefined => {
+    const week = metricsData.week_name || weekFilter;
+    const day = metricsData.day_of_week || dayFilter;
+    return shiftResolutions.find(
+      r => r.weekName === week && r.dayOfWeek === day && r.shiftType === shift
+    );
+  }, [shiftResolutions, metricsData, weekFilter, dayFilter]);
+
+  // ─── Check if the selected day has passed ────────────────────────────────
+  const isDayPassed = useCallback((): boolean => {
+    // Only applicable if we're looking at a specific day (not week summary)
+    if (isWeekSummary) return false;
+    const weekDays = ['Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday'];
+    const dayIndex = weekDays.indexOf(dayFilter); // 0=Mon..4=Fri
+    if (dayIndex < 0) return false;
+    const now = new Date();
+    // Parse the week from weekFilter to get the actual dates
+    // weekFilter format: "MM-DD-YYYY_MM-DD-YYYY"
+    if (weekFilter) {
+      const parts = weekFilter.split('_');
+      if (parts.length === 2) {
+        const [startStr] = parts;
+        const [m, dd, y] = startStr.split('-').map(Number);
+        if (m && dd && y) {
+          const weekStart = new Date(y, m - 1, dd); // Monday of that week
+          const dayDate = new Date(weekStart);
+          dayDate.setDate(dayDate.getDate() + dayIndex);
+          // Day has passed if the day's date is before today (midnight)
+          const todayStart = new Date(now.getFullYear(), now.getMonth(), now.getDate());
+          return dayDate < todayStart;
+        }
+      }
+    }
+    // Fallback: simple day-of-week comparison for current week
+    const todayDayIdx = now.getDay() === 0 ? -1 : now.getDay() - 1; // Sun=-1, Mon=0, Tue=1...
+    return dayIndex < todayDayIdx;
+  }, [dayFilter, weekFilter, isWeekSummary]);
+
+  // ─── Submit shift resolution ─────────────────────────────────────────────
+  const handleResolveSubmit = async () => {
+    if (!resolveModal || !resolveReason.trim()) return;
+    setSavingResolve(true);
+    try {
+      const week = metricsData.week_name || weekFilter;
+      const day = metricsData.day_of_week || dayFilter;
+      const { data } = await api.post('/bakery-metrics/resolutions', {
+        week_name: week,
+        day_of_week: day,
+        shift_type: resolveModal.shift,
+        reason: resolveReason.trim(),
+        resolved_by: metricsData.submitted_by || 'Report User',
+      });
+      if (data.success) {
+        setShiftResolutions(prev => [...prev, data.resolution]);
+        setResolveModal(null);
+        setResolveReason('');
+        showNotification(`${resolveModal.shift === 'first' ? 'First' : 'Second'} shift resolution saved`, 'success');
+      }
+    } catch {
+      showNotification('Failed to save resolution', 'error');
+    } finally {
+      setSavingResolve(false);
+    }
+  };
 
   // ─── Close dropdowns on outside click ────────────────────────────────────
   useEffect(() => {
@@ -442,6 +539,7 @@ export default function BakeryMetricsReport({ onFilterInfo, triggerAction }: Bak
       loadMetricsData(weekFilter, dayFilter),
       loadDashboardMetrics(weekFilter, dayFilter),
       loadRecords(),
+      loadShiftResolutions(),
     ]);
     showNotification('Data refreshed', 'success');
   };
@@ -461,6 +559,7 @@ export default function BakeryMetricsReport({ onFilterInfo, triggerAction }: Bak
       await loadKpiTargets();
       await loadWeekOptions();
       await loadRecords();
+      await loadShiftResolutions();
     };
     init();
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -500,6 +599,13 @@ export default function BakeryMetricsReport({ onFilterInfo, triggerAction }: Bak
 
   // ─── Days ─────────────────────────────────────────────────────────────────
   const days = ['Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday'];
+
+  // ─── Shift data detection (for overlays) ──────────────────────────────────
+  const showFirstOverlay = !isWeekSummary && !d.has_first_shift;
+  const showSecondOverlay = !isWeekSummary && !d.has_second_shift;
+  const dayPassed = isDayPassed();
+  const firstRes = getShiftResolution('first');
+  const secondRes = getShiftResolution('second');
 
   // ═══════════════════════════════════════════════════════════════════════════
   // RENDER
@@ -701,22 +807,106 @@ export default function BakeryMetricsReport({ onFilterInfo, triggerAction }: Bak
                   </div>
                 </td>
                 <td className="px-4 py-2"><div className="text-xs font-semibold text-gray-900 dark:text-gray-100">Die Cut 1</div><div className="text-[10px] text-gray-500">≥ {t.oee.die_cut_1}%</div></td>
-                <td className="px-4 py-2 bg-blue-50/30 dark:bg-blue-900/10"><MetricCell value={d.first_shift_die_cut1_oee} suffix="%" target={t.oee.die_cut_1} /></td>
-                <td className="px-4 py-2 bg-indigo-50/30 dark:bg-indigo-900/10"><MetricCell value={d.second_shift_die_cut1_oee} suffix="%" target={t.oee.die_cut_1} /></td>
+                {/* ── FIRST SHIFT overlay or cell ── */}
+                {showFirstOverlay ? (
+                  <td rowSpan={9} className="relative bg-gradient-to-b from-blue-50/60 via-gray-50/60 to-gray-50/60 dark:from-blue-900/10 dark:via-gray-800/40 dark:to-gray-800/40 border-x border-gray-200 dark:border-gray-600 align-middle">
+                    <div className="flex flex-col items-center justify-center p-3 text-center min-h-[280px]">
+                      <div className="p-3 bg-gray-200 dark:bg-gray-600 rounded-full mb-3">
+                        <ClipboardX className="w-7 h-7 text-gray-400 dark:text-gray-300" />
+                      </div>
+                      <p className="text-sm font-bold text-gray-600 dark:text-gray-300 mb-1">No record submitted Yet</p>
+                      <p className="text-[10px] text-gray-400 dark:text-gray-500">First Shift data is missing</p>
+                      {dayPassed && !firstRes && (
+                        <>
+                          <div className="mt-4 px-3 py-2 bg-amber-100 dark:bg-amber-900/30 rounded-xl border border-amber-300 dark:border-amber-700">
+                            <div className="flex items-center gap-1.5 justify-center">
+                              <AlertTriangle className="w-4 h-4 text-amber-600 dark:text-amber-400" />
+                              <p className="text-xs font-bold text-amber-700 dark:text-amber-300">Did you Forget Something?</p>
+                            </div>
+                          </div>
+                          <button
+                            onClick={() => setResolveModal({ shift: 'first' })}
+                            className="mt-3 px-5 py-2 bg-gradient-to-r from-blue-600 to-indigo-600 text-white rounded-xl text-xs font-bold hover:from-blue-700 hover:to-indigo-700 transition-all active:scale-95 shadow-md hover:shadow-lg"
+                          >
+                            Resolve
+                          </button>
+                        </>
+                      )}
+                      {firstRes && (
+                        <div className="mt-4 p-3 bg-green-50 dark:bg-green-900/20 rounded-xl border border-green-200 dark:border-green-700 max-w-[200px]">
+                          <div className="flex items-center gap-1.5 mb-1.5">
+                            <div className="w-2 h-2 rounded-full bg-green-500" />
+                            <p className="text-[10px] font-bold text-green-700 dark:text-green-300">Resolved</p>
+                          </div>
+                          <div className="flex items-start gap-1.5">
+                            <MessageSquare className="w-3 h-3 text-green-500 flex-shrink-0 mt-0.5" />
+                            <p className="text-[10px] text-green-600 dark:text-green-400 leading-relaxed">{firstRes.reason}</p>
+                          </div>
+                          <p className="text-[8px] text-green-400 mt-1.5">by {firstRes.resolvedBy}</p>
+                        </div>
+                      )}
+                    </div>
+                  </td>
+                ) : (
+                  <td className="px-4 py-2 bg-blue-50/30 dark:bg-blue-900/10"><MetricCell value={d.first_shift_die_cut1_oee} suffix="%" target={t.oee.die_cut_1} /></td>
+                )}
+                {/* ── SECOND SHIFT overlay or cell ── */}
+                {showSecondOverlay ? (
+                  <td rowSpan={9} className="relative bg-gradient-to-b from-indigo-50/60 via-gray-50/60 to-gray-50/60 dark:from-indigo-900/10 dark:via-gray-800/40 dark:to-gray-800/40 border-x border-gray-200 dark:border-gray-600 align-middle">
+                    <div className="flex flex-col items-center justify-center p-3 text-center min-h-[280px]">
+                      <div className="p-3 bg-gray-200 dark:bg-gray-600 rounded-full mb-3">
+                        <ClipboardX className="w-7 h-7 text-gray-400 dark:text-gray-300" />
+                      </div>
+                      <p className="text-sm font-bold text-gray-600 dark:text-gray-300 mb-1">No record submitted Yet</p>
+                      <p className="text-[10px] text-gray-400 dark:text-gray-500">Second Shift data is missing</p>
+                      {dayPassed && !secondRes && (
+                        <>
+                          <div className="mt-4 px-3 py-2 bg-amber-100 dark:bg-amber-900/30 rounded-xl border border-amber-300 dark:border-amber-700">
+                            <div className="flex items-center gap-1.5 justify-center">
+                              <AlertTriangle className="w-4 h-4 text-amber-600 dark:text-amber-400" />
+                              <p className="text-xs font-bold text-amber-700 dark:text-amber-300">Did you Forget Something?</p>
+                            </div>
+                          </div>
+                          <button
+                            onClick={() => setResolveModal({ shift: 'second' })}
+                            className="mt-3 px-5 py-2 bg-gradient-to-r from-indigo-600 to-purple-600 text-white rounded-xl text-xs font-bold hover:from-indigo-700 hover:to-purple-700 transition-all active:scale-95 shadow-md hover:shadow-lg"
+                          >
+                            Resolve
+                          </button>
+                        </>
+                      )}
+                      {secondRes && (
+                        <div className="mt-4 p-3 bg-green-50 dark:bg-green-900/20 rounded-xl border border-green-200 dark:border-green-700 max-w-[200px]">
+                          <div className="flex items-center gap-1.5 mb-1.5">
+                            <div className="w-2 h-2 rounded-full bg-green-500" />
+                            <p className="text-[10px] font-bold text-green-700 dark:text-green-300">Resolved</p>
+                          </div>
+                          <div className="flex items-start gap-1.5">
+                            <MessageSquare className="w-3 h-3 text-green-500 flex-shrink-0 mt-0.5" />
+                            <p className="text-[10px] text-green-600 dark:text-green-400 leading-relaxed">{secondRes.reason}</p>
+                          </div>
+                          <p className="text-[8px] text-green-400 mt-1.5">by {secondRes.resolvedBy}</p>
+                        </div>
+                      )}
+                    </div>
+                  </td>
+                ) : (
+                  <td className="px-4 py-2 bg-indigo-50/30 dark:bg-indigo-900/10"><MetricCell value={d.second_shift_die_cut1_oee} suffix="%" target={t.oee.die_cut_1} /></td>
+                )}
                 <td className="px-4 py-2 bg-purple-50/30 dark:bg-purple-900/10"><MetricCell value={d.both_shift_die_cut1_oee} suffix="%" target={t.oee.die_cut_1} /></td>
                 <td className="px-4 py-2"><StatusBadge value={d.both_shift_die_cut1_oee} target={t.oee.die_cut_1} type="oee" /></td>
               </tr>
               <tr className="hover:bg-blue-50/50 dark:hover:bg-blue-900/10">
                 <td className="px-4 py-2"><div className="text-xs font-semibold text-gray-900 dark:text-gray-100">Die Cut 2</div><div className="text-[10px] text-gray-500">≥ {t.oee.die_cut_2}%</div></td>
-                <td className="px-4 py-2 bg-blue-50/30 dark:bg-blue-900/10"><MetricCell value={d.first_shift_die_cut2_oee} suffix="%" target={t.oee.die_cut_2} /></td>
-                <td className="px-4 py-2 bg-indigo-50/30 dark:bg-indigo-900/10"><MetricCell value={d.second_shift_die_cut2_oee} suffix="%" target={t.oee.die_cut_2} /></td>
+                {!showFirstOverlay && <td className="px-4 py-2 bg-blue-50/30 dark:bg-blue-900/10"><MetricCell value={d.first_shift_die_cut2_oee} suffix="%" target={t.oee.die_cut_2} /></td>}
+                {!showSecondOverlay && <td className="px-4 py-2 bg-indigo-50/30 dark:bg-indigo-900/10"><MetricCell value={d.second_shift_die_cut2_oee} suffix="%" target={t.oee.die_cut_2} /></td>}
                 <td className="px-4 py-2 bg-purple-50/30 dark:bg-purple-900/10"><MetricCell value={d.both_shift_die_cut2_oee} suffix="%" target={t.oee.die_cut_2} /></td>
                 <td className="px-4 py-2"><StatusBadge value={d.both_shift_die_cut2_oee} target={t.oee.die_cut_2} type="oee" /></td>
               </tr>
               <tr className="hover:bg-blue-50/50 dark:hover:bg-blue-900/10 border-b-4 border-gray-200 dark:border-gray-600">
                 <td className="px-4 py-2"><div className="text-xs font-black text-gray-900 dark:text-gray-100">Total</div><div className="text-[10px] text-gray-500">≥ {t.oee.total}%</div></td>
-                <td className="px-4 py-2 bg-blue-50/30 dark:bg-blue-900/10"><MetricCell value={d.first_shift_oee} suffix="%" target={t.oee.total} /></td>
-                <td className="px-4 py-2 bg-indigo-50/30 dark:bg-indigo-900/10"><MetricCell value={d.second_shift_oee} suffix="%" target={t.oee.total} /></td>
+                {!showFirstOverlay && <td className="px-4 py-2 bg-blue-50/30 dark:bg-blue-900/10"><MetricCell value={d.first_shift_oee} suffix="%" target={t.oee.total} /></td>}
+                {!showSecondOverlay && <td className="px-4 py-2 bg-indigo-50/30 dark:bg-indigo-900/10"><MetricCell value={d.second_shift_oee} suffix="%" target={t.oee.total} /></td>}
                 <td className="px-4 py-2 bg-purple-50/30 dark:bg-purple-900/10"><MetricCell value={d.total_oee} suffix="%" target={t.oee.total} /></td>
                 <td className="px-4 py-2"><StatusBadge value={d.total_oee} target={t.oee.total} type="oee" /></td>
               </tr>
@@ -735,22 +925,22 @@ export default function BakeryMetricsReport({ onFilterInfo, triggerAction }: Bak
                   </div>
                 </td>
                 <td className="px-4 py-2"><div className="text-xs font-semibold text-gray-900 dark:text-gray-100">Die Cut 1</div><div className="text-[10px] text-gray-500">≥ {t.volume.die_cut_1.toLocaleString()} lbs</div></td>
-                <td className="px-4 py-2 bg-blue-50/30 dark:bg-blue-900/10"><MetricCell value={d.first_shift_die_cut1_lbs} suffix=" lbs" target={t.volume.die_cut_1 / 2} isInteger /></td>
-                <td className="px-4 py-2 bg-indigo-50/30 dark:bg-indigo-900/10"><MetricCell value={d.second_shift_die_cut1_lbs} suffix=" lbs" target={t.volume.die_cut_1 / 2} isInteger /></td>
+                {!showFirstOverlay && <td className="px-4 py-2 bg-blue-50/30 dark:bg-blue-900/10"><MetricCell value={d.first_shift_die_cut1_lbs} suffix=" lbs" target={t.volume.die_cut_1 / 2} isInteger /></td>}
+                {!showSecondOverlay && <td className="px-4 py-2 bg-indigo-50/30 dark:bg-indigo-900/10"><MetricCell value={d.second_shift_die_cut1_lbs} suffix=" lbs" target={t.volume.die_cut_1 / 2} isInteger /></td>}
                 <td className="px-4 py-2 bg-purple-50/30 dark:bg-purple-900/10"><MetricCell value={d.both_shift_die_cut1_lbs} suffix=" lbs" target={t.volume.die_cut_1} isInteger /></td>
                 <td className="px-4 py-2"><StatusBadge value={d.both_shift_die_cut1_lbs} target={t.volume.die_cut_1} type="volume" /></td>
               </tr>
               <tr className="hover:bg-emerald-50/50 dark:hover:bg-emerald-900/10">
                 <td className="px-4 py-2"><div className="text-xs font-semibold text-gray-900 dark:text-gray-100">Die Cut 2</div><div className="text-[10px] text-gray-500">≥ {t.volume.die_cut_2.toLocaleString()} lbs</div></td>
-                <td className="px-4 py-2 bg-blue-50/30 dark:bg-blue-900/10"><MetricCell value={d.first_shift_die_cut2_lbs} suffix=" lbs" target={t.volume.die_cut_2 / 2} isInteger /></td>
-                <td className="px-4 py-2 bg-indigo-50/30 dark:bg-indigo-900/10"><MetricCell value={d.second_shift_die_cut2_lbs} suffix=" lbs" target={t.volume.die_cut_2 / 2} isInteger /></td>
+                {!showFirstOverlay && <td className="px-4 py-2 bg-blue-50/30 dark:bg-blue-900/10"><MetricCell value={d.first_shift_die_cut2_lbs} suffix=" lbs" target={t.volume.die_cut_2 / 2} isInteger /></td>}
+                {!showSecondOverlay && <td className="px-4 py-2 bg-indigo-50/30 dark:bg-indigo-900/10"><MetricCell value={d.second_shift_die_cut2_lbs} suffix=" lbs" target={t.volume.die_cut_2 / 2} isInteger /></td>}
                 <td className="px-4 py-2 bg-purple-50/30 dark:bg-purple-900/10"><MetricCell value={d.both_shift_die_cut2_lbs} suffix=" lbs" target={t.volume.die_cut_2} isInteger /></td>
                 <td className="px-4 py-2"><StatusBadge value={d.both_shift_die_cut2_lbs} target={t.volume.die_cut_2} type="volume" /></td>
               </tr>
               <tr className="hover:bg-emerald-50/50 dark:hover:bg-emerald-900/10 border-b-4 border-gray-200 dark:border-gray-600">
                 <td className="px-4 py-2"><div className="text-xs font-black text-gray-900 dark:text-gray-100">Total</div><div className="text-[10px] text-gray-500">≥ {t.volume.total.toLocaleString()} lbs</div></td>
-                <td className="px-4 py-2 bg-blue-50/30 dark:bg-blue-900/10"><MetricCell value={d.first_shift_production} suffix=" lbs" target={t.volume.total / 2} isInteger /></td>
-                <td className="px-4 py-2 bg-indigo-50/30 dark:bg-indigo-900/10"><MetricCell value={d.second_shift_production} suffix=" lbs" target={t.volume.total / 2} isInteger /></td>
+                {!showFirstOverlay && <td className="px-4 py-2 bg-blue-50/30 dark:bg-blue-900/10"><MetricCell value={d.first_shift_production} suffix=" lbs" target={t.volume.total / 2} isInteger /></td>}
+                {!showSecondOverlay && <td className="px-4 py-2 bg-indigo-50/30 dark:bg-indigo-900/10"><MetricCell value={d.second_shift_production} suffix=" lbs" target={t.volume.total / 2} isInteger /></td>}
                 <td className="px-4 py-2 bg-purple-50/30 dark:bg-purple-900/10"><MetricCell value={d.total_production} suffix=" lbs" target={t.volume.total} isInteger /></td>
                 <td className="px-4 py-2"><StatusBadge value={d.total_production} target={t.volume.total} type="volume" /></td>
               </tr>
@@ -769,22 +959,22 @@ export default function BakeryMetricsReport({ onFilterInfo, triggerAction }: Bak
                   </div>
                 </td>
                 <td className="px-4 py-2"><div className="text-xs font-semibold text-gray-900 dark:text-gray-100">Die Cut 1</div><div className="text-[10px] text-gray-500">≤ {t.waste.die_cut_1}%</div></td>
-                <td className="px-4 py-2 bg-blue-50/30 dark:bg-blue-900/10"><MetricCell value={d.first_shift_die_cut1_waste_pct} suffix="%" target={t.waste.die_cut_1} isReverse /></td>
-                <td className="px-4 py-2 bg-indigo-50/30 dark:bg-indigo-900/10"><MetricCell value={d.second_shift_die_cut1_waste_pct} suffix="%" target={t.waste.die_cut_1} isReverse /></td>
+                {!showFirstOverlay && <td className="px-4 py-2 bg-blue-50/30 dark:bg-blue-900/10"><MetricCell value={d.first_shift_die_cut1_waste_pct} suffix="%" target={t.waste.die_cut_1} isReverse /></td>}
+                {!showSecondOverlay && <td className="px-4 py-2 bg-indigo-50/30 dark:bg-indigo-900/10"><MetricCell value={d.second_shift_die_cut1_waste_pct} suffix="%" target={t.waste.die_cut_1} isReverse /></td>}
                 <td className="px-4 py-2 bg-purple-50/30 dark:bg-purple-900/10"><MetricCell value={d.both_shift_die_cut1_waste_pct} suffix="%" target={t.waste.die_cut_1} isReverse /></td>
                 <td className="px-4 py-2"><StatusBadge value={d.both_shift_die_cut1_waste_pct} target={t.waste.die_cut_1} type="waste" /></td>
               </tr>
               <tr className="hover:bg-red-50/50 dark:hover:bg-red-900/10">
                 <td className="px-4 py-2"><div className="text-xs font-semibold text-gray-900 dark:text-gray-100">Die Cut 2</div><div className="text-[10px] text-gray-500">≤ {t.waste.die_cut_2}%</div></td>
-                <td className="px-4 py-2 bg-blue-50/30 dark:bg-blue-900/10"><MetricCell value={d.first_shift_die_cut2_waste_pct} suffix="%" target={t.waste.die_cut_2} isReverse /></td>
-                <td className="px-4 py-2 bg-indigo-50/30 dark:bg-indigo-900/10"><MetricCell value={d.second_shift_die_cut2_waste_pct} suffix="%" target={t.waste.die_cut_2} isReverse /></td>
+                {!showFirstOverlay && <td className="px-4 py-2 bg-blue-50/30 dark:bg-blue-900/10"><MetricCell value={d.first_shift_die_cut2_waste_pct} suffix="%" target={t.waste.die_cut_2} isReverse /></td>}
+                {!showSecondOverlay && <td className="px-4 py-2 bg-indigo-50/30 dark:bg-indigo-900/10"><MetricCell value={d.second_shift_die_cut2_waste_pct} suffix="%" target={t.waste.die_cut_2} isReverse /></td>}
                 <td className="px-4 py-2 bg-purple-50/30 dark:bg-purple-900/10"><MetricCell value={d.both_shift_die_cut2_waste_pct} suffix="%" target={t.waste.die_cut_2} isReverse /></td>
                 <td className="px-4 py-2"><StatusBadge value={d.both_shift_die_cut2_waste_pct} target={t.waste.die_cut_2} type="waste" /></td>
               </tr>
               <tr className="hover:bg-red-50/50 dark:hover:bg-red-900/10">
                 <td className="px-4 py-2"><div className="text-xs font-black text-gray-900 dark:text-gray-100">Total</div><div className="text-[10px] text-gray-500">≤ {t.waste.total}%</div></td>
-                <td className="px-4 py-2 bg-blue-50/30 dark:bg-blue-900/10"><MetricCell value={d.first_shift_waste_percent} suffix="%" target={t.waste.total} isReverse /></td>
-                <td className="px-4 py-2 bg-indigo-50/30 dark:bg-indigo-900/10"><MetricCell value={d.second_shift_waste_percent} suffix="%" target={t.waste.total} isReverse /></td>
+                {!showFirstOverlay && <td className="px-4 py-2 bg-blue-50/30 dark:bg-blue-900/10"><MetricCell value={d.first_shift_waste_percent} suffix="%" target={t.waste.total} isReverse /></td>}
+                {!showSecondOverlay && <td className="px-4 py-2 bg-indigo-50/30 dark:bg-indigo-900/10"><MetricCell value={d.second_shift_waste_percent} suffix="%" target={t.waste.total} isReverse /></td>}
                 <td className="px-4 py-2 bg-purple-50/30 dark:bg-purple-900/10"><MetricCell value={d.total_waste_percent} suffix="%" target={t.waste.total} isReverse /></td>
                 <td className="px-4 py-2"><StatusBadge value={d.total_waste_percent} target={t.waste.total} type="waste" /></td>
               </tr>
@@ -844,6 +1034,68 @@ export default function BakeryMetricsReport({ onFilterInfo, triggerAction }: Bak
           subtext={dashMetrics.efficiencyPerformanceIndex || 'performance index'}
         />
       </div>
+
+      {/* ═══ RESOLVE MODAL ═══ */}
+      {resolveModal && (
+        <div className="fixed inset-0 bg-black/50 backdrop-blur-sm z-50 flex items-center justify-center p-4" onClick={() => { setResolveModal(null); setResolveReason(''); }}>
+          <div className="bg-white dark:bg-gray-800 rounded-2xl shadow-2xl w-full max-w-md border border-gray-200 dark:border-gray-700 animate-fade-slide-in" onClick={e => e.stopPropagation()}>
+            {/* Header */}
+            <div className={`p-5 rounded-t-2xl ${resolveModal.shift === 'first' ? 'bg-gradient-to-r from-blue-600 to-indigo-600' : 'bg-gradient-to-r from-indigo-600 to-purple-600'}`}>
+              <div className="flex items-center justify-between">
+                <div className="flex items-center gap-3">
+                  <div className="p-2 bg-white/20 rounded-xl">
+                    <AlertTriangle className="w-5 h-5 text-white" />
+                  </div>
+                  <div>
+                    <h3 className="text-base font-bold text-white">Resolve Missing Data</h3>
+                    <p className="text-xs text-white/80 mt-0.5">
+                      {resolveModal.shift === 'first' ? 'First' : 'Second'} Shift — {dayFilter}, {weekFilter}
+                    </p>
+                  </div>
+                </div>
+                <button onClick={() => { setResolveModal(null); setResolveReason(''); }} title="Close" className="p-1.5 hover:bg-white/20 rounded-lg transition-colors">
+                  <X className="w-5 h-5 text-white" />
+                </button>
+              </div>
+            </div>
+            {/* Body */}
+            <div className="p-5 space-y-4">
+              <div>
+                <label className="block text-xs font-bold text-gray-700 dark:text-gray-300 mb-2">
+                  Why is {resolveModal.shift === 'first' ? 'First' : 'Second'} Shift data missing?
+                </label>
+                <textarea
+                  value={resolveReason}
+                  onChange={e => setResolveReason(e.target.value)}
+                  placeholder="e.g., Machine was down for maintenance, Shift was cancelled, Data entry delayed..."
+                  rows={4}
+                  className="w-full px-4 py-3 border-2 border-gray-200 dark:border-gray-600 rounded-xl text-sm text-gray-900 dark:text-white bg-gray-50 dark:bg-gray-700 placeholder-gray-400 focus:ring-2 focus:ring-blue-500 focus:border-blue-500 transition-colors resize-none"
+                  autoFocus
+                />
+                <p className="text-[10px] text-gray-400 dark:text-gray-500 mt-1.5">
+                  This reason will appear in the report and Data Completeness Tracker.
+                </p>
+              </div>
+              <div className="flex items-center justify-end gap-3 pt-2">
+                <button
+                  onClick={() => { setResolveModal(null); setResolveReason(''); }}
+                  className="px-4 py-2 text-xs font-bold text-gray-600 dark:text-gray-300 bg-gray-100 dark:bg-gray-700 hover:bg-gray-200 dark:hover:bg-gray-600 rounded-xl transition-colors"
+                >
+                  Cancel
+                </button>
+                <button
+                  onClick={handleResolveSubmit}
+                  disabled={!resolveReason.trim() || savingResolve}
+                  className="px-5 py-2 text-xs font-bold text-white bg-gradient-to-r from-blue-600 to-indigo-600 hover:from-blue-700 hover:to-indigo-700 rounded-xl transition-all disabled:opacity-50 disabled:cursor-not-allowed active:scale-95 shadow-md flex items-center gap-1.5"
+                >
+                  {savingResolve ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Send className="w-3.5 h-3.5" />}
+                  {savingResolve ? 'Saving...' : 'Submit Resolution'}
+                </button>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
 
       <style jsx>{`
         @keyframes fadeSlideIn {

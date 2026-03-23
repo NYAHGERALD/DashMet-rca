@@ -175,6 +175,10 @@ const bakeryMetricsService = {
         both_shift_die_cut1_waste_pct: bsWaste1,
         both_shift_die_cut2_waste_pct: bsWaste2,
         total_waste_percent: bsWasteAvg,
+
+        // Flags so frontend knows which shifts have submitted data
+        has_first_shift: !!fs,
+        has_second_shift: !!ss,
       };
     });
   },
@@ -761,18 +765,18 @@ const bakeryMetricsService = {
     });
   },
 
-  async saveResolution(weekName: string, dayOfWeek: string, reason: string, resolvedBy: string) {
+  async saveResolution(weekName: string, dayOfWeek: string, reason: string, resolvedBy: string, shiftType: string = 'day') {
     return prisma.bakeryMissingDataResolution.upsert({
-      where: { weekName_dayOfWeek: { weekName, dayOfWeek } },
+      where: { weekName_dayOfWeek_shiftType: { weekName, dayOfWeek, shiftType } },
       update: { reason, resolvedBy, resolvedAt: new Date() },
-      create: { weekName, dayOfWeek, reason, resolvedBy },
+      create: { weekName, dayOfWeek, shiftType, reason, resolvedBy },
     });
   },
 
-  async deleteResolution(weekName: string, dayOfWeek: string) {
-    return prisma.bakeryMissingDataResolution.deleteMany({
-      where: { weekName, dayOfWeek },
-    });
+  async deleteResolution(weekName: string, dayOfWeek: string, shiftType?: string) {
+    const where: any = { weekName, dayOfWeek };
+    if (shiftType) where.shiftType = shiftType;
+    return prisma.bakeryMissingDataResolution.deleteMany({ where });
   },
 
   // ─── Activity Log ───────────────────────────────────────────────────────

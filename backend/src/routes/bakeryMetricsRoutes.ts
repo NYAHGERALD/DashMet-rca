@@ -151,11 +151,11 @@ router.get('/resolutions', async (req: Request, res: Response) => {
 // ─────────────────────────────────────────────────────────────────────────────
 router.post('/resolutions', async (req: Request, res: Response) => {
   try {
-    const { week_name, day_of_week, reason, resolved_by } = req.body;
+    const { week_name, day_of_week, reason, resolved_by, shift_type } = req.body;
     if (!week_name || !day_of_week || !reason || !resolved_by) {
       return res.status(400).json({ success: false, error: 'week_name, day_of_week, reason, and resolved_by are required' });
     }
-    const resolution = await bakeryMetricsService.saveResolution(week_name, day_of_week, reason, resolved_by);
+    const resolution = await bakeryMetricsService.saveResolution(week_name, day_of_week, reason, resolved_by, shift_type || 'day');
     // Log activity
     await bakeryMetricsService.logActivity({
       action: 'RESOLVED',
@@ -163,7 +163,7 @@ router.post('/resolutions', async (req: Request, res: Response) => {
       dayOfWeek: day_of_week,
       performedBy: resolved_by,
       reason,
-      details: { resolution_id: resolution.id },
+      details: { resolution_id: resolution.id, shiftType: shift_type || 'day' },
       ipAddress: (req.headers['x-forwarded-for'] as string) || req.socket.remoteAddress || undefined,
       userAgent: req.headers['user-agent'] || undefined,
     }).catch(err => console.error('Failed to log resolve activity:', err));
@@ -180,11 +180,11 @@ router.post('/resolutions', async (req: Request, res: Response) => {
 // ─────────────────────────────────────────────────────────────────────────────
 router.delete('/resolutions', async (req: Request, res: Response) => {
   try {
-    const { week_name, day_of_week, performed_by } = req.body;
+    const { week_name, day_of_week, performed_by, shift_type } = req.body;
     if (!week_name || !day_of_week) {
       return res.status(400).json({ success: false, error: 'week_name and day_of_week are required' });
     }
-    await bakeryMetricsService.deleteResolution(week_name, day_of_week);
+    await bakeryMetricsService.deleteResolution(week_name, day_of_week, shift_type);
     // Log activity
     await bakeryMetricsService.logActivity({
       action: 'UNRESOLVED',

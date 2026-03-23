@@ -242,7 +242,7 @@ export default function BakeryMetricsForm({ onStepChange, openRecentSubmissions 
   const [resolveModal, setResolveModal] = useState<{ weekName: string; dayOfWeek: string } | null>(null);
   const [resolveReason, setResolveReason] = useState('');
   const [savingResolve, setSavingResolve] = useState(false);
-  const [unresolveConfirm, setUnresolveConfirm] = useState<{ weekName: string; dayOfWeek: string } | null>(null);
+  const [unresolveConfirm, setUnresolveConfirm] = useState<{ weekName: string; dayOfWeek: string; shiftType?: string } | null>(null);
   const [unresolving, setUnresolving] = useState(false);
 
   // ─── Activity Log state ───────────────────────────────────────────────────
@@ -425,8 +425,8 @@ export default function BakeryMetricsForm({ onStepChange, openRecentSubmissions 
     if (!unresolveConfirm) return;
     setUnresolving(true);
     try {
-      await api.delete('/bakery-metrics/resolutions', { data: { week_name: unresolveConfirm.weekName, day_of_week: unresolveConfirm.dayOfWeek, performed_by: formData.submitted_by || user?.firstName || 'Unknown' } });
-      setResolutions(prev => prev.filter(r => !(r.weekName === unresolveConfirm.weekName && r.dayOfWeek === unresolveConfirm.dayOfWeek)));
+      await api.delete('/bakery-metrics/resolutions', { data: { week_name: unresolveConfirm.weekName, day_of_week: unresolveConfirm.dayOfWeek, shift_type: unresolveConfirm.shiftType, performed_by: formData.submitted_by || user?.firstName || 'Unknown' } });
+      setResolutions(prev => prev.filter(r => !(r.weekName === unresolveConfirm.weekName && r.dayOfWeek === unresolveConfirm.dayOfWeek && (r.shiftType || 'day') === (unresolveConfirm.shiftType || 'day'))));
       setUnresolveConfirm(null);
       showNotification('Record moved back to Outstanding', 'info');
       if (trackerTab === 'activity') loadActivityLogs();
@@ -1713,14 +1713,20 @@ export default function BakeryMetricsForm({ onStepChange, openRecentSubmissions 
               <div className="divide-y divide-gray-100 dark:divide-gray-700">
                 {resolutions.map((res: any) => {
                   const weekFormatted = formatWeekReadable(res.weekName);
+                  const shiftLabel = res.shiftType === 'first' ? '1st Shift' : res.shiftType === 'second' ? '2nd Shift' : null;
                   return (
-                    <div key={`${res.weekName}-${res.dayOfWeek}`} className="px-4 sm:px-5 py-3 hover:bg-gray-50 dark:hover:bg-gray-700/40 transition-colors">
+                    <div key={`${res.weekName}-${res.dayOfWeek}-${res.shiftType || 'day'}`} className="px-4 sm:px-5 py-3 hover:bg-gray-50 dark:hover:bg-gray-700/40 transition-colors">
                       <div className="flex items-start justify-between gap-3">
                         <div className="flex items-start gap-3 min-w-0 flex-1">
                           <div className="w-2.5 h-2.5 rounded-full bg-green-500 mt-1.5 flex-shrink-0" />
                           <div className="min-w-0">
                             <p className="text-xs font-bold text-gray-900 dark:text-gray-100">
                               {res.dayOfWeek} — {weekFormatted}
+                              {shiftLabel && (
+                                <span className="ml-1.5 text-[9px] px-1.5 py-0.5 rounded bg-blue-100 dark:bg-blue-900/30 text-blue-700 dark:text-blue-300 font-bold">
+                                  {shiftLabel}
+                                </span>
+                              )}
                             </p>
                             <div className="flex items-start gap-1.5 mt-1">
                               <MessageSquare className="w-3 h-3 text-gray-400 flex-shrink-0 mt-0.5" />
@@ -1733,7 +1739,7 @@ export default function BakeryMetricsForm({ onStepChange, openRecentSubmissions 
                         </div>
                         <div className="flex items-center gap-2 flex-shrink-0">
                           <button
-                            onClick={() => setUnresolveConfirm({ weekName: res.weekName, dayOfWeek: res.dayOfWeek })}
+                            onClick={() => setUnresolveConfirm({ weekName: res.weekName, dayOfWeek: res.dayOfWeek, shiftType: res.shiftType })}
                             className="inline-flex items-center gap-1 px-2 py-1 bg-gray-100 dark:bg-gray-700 hover:bg-red-50 dark:hover:bg-red-900/20 text-gray-500 hover:text-red-600 dark:text-gray-400 dark:hover:text-red-400 border border-gray-200 dark:border-gray-600 hover:border-red-300 dark:hover:border-red-700 rounded-md text-[9px] font-bold transition-all active:scale-95"
                             title="Move back to Outstanding"
                           >
