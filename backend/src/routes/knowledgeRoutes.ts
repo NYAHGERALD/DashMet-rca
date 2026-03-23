@@ -117,14 +117,14 @@ router.get('/articles/:id', async (req: AuthRequest, res: Response) => {
       include: {
         Category: { select: { name: true } },
         Facility: { select: { name: true } },
-        rcaAnalyses: {
+        RCAAnalysis: {
           select: {
             id: true,
             method: true,
             rootCauseStatement: true,
             fishboneData: true,
             fiveWhysData: true,
-            capActions: {
+            CAPAction: {
               select: {
                 title: true,
                 description: true,
@@ -240,10 +240,10 @@ router.post('/articles/generate/:incidentId', requireRoles('CI_MANAGER', 'QA_FOO
         Category: { select: { name: true } },
         Facility: { select: { name: true } },
         Department: { select: { name: true } },
-        rcaAnalyses: {
+        RCAAnalysis: {
           where: { isValidated: true },
           include: {
-            capActions: {
+            CAPAction: {
               where: { status: { in: ['COMPLETED', 'VERIFIED'] } },
               select: {
                 title: true,
@@ -274,7 +274,7 @@ router.post('/articles/generate/:incidentId', requireRoles('CI_MANAGER', 'QA_FOO
       });
     }
 
-    if (!incident.rcaAnalyses || incident.rcaAnalyses.length === 0) {
+    if (!incident.RCAAnalysis || incident.RCAAnalysis.length === 0) {
       return res.status(400).json({
         success: false,
         error: 'No validated RCA found for this incident',
@@ -294,16 +294,16 @@ router.post('/articles/generate/:incidentId', requireRoles('CI_MANAGER', 'QA_FOO
       });
     }
 
-    const rca = incident.rcaAnalyses[0];
+    const rca = incident.RCAAnalysis[0];
 
     // Generate article content
     const title = generateArticleTitle(incident);
     const summary = generateArticleSummary(incident, rca);
-    const successfulActions = rca.capActions
+    const successfulActions = rca.CAPAction
       .filter((a: any) => a.isEffective !== false)
       .map((a: any) => a.title);
     const keywords = extractKeywords(incident, rca);
-    const categoryNames = incident.category ? [incident.category.name] : [];
+    const categoryNames = incident.Category ? [incident.Category.name] : [];
 
     const article = await prisma.knowledgeArticle.create({
       data: {
@@ -484,7 +484,7 @@ router.post('/search/similar', async (req: AuthRequest, res: Response) => {
       include: {
         Category: { select: { name: true } },
         Facility: { select: { name: true } },
-        rcaAnalyses: {
+        RCAAnalysis: {
           where: { isValidated: true },
           select: {
             id: true,
@@ -566,7 +566,7 @@ router.get('/search/related/:incidentId', async (req: AuthRequest, res: Response
       include: {
         Category: { select: { name: true } },
         Facility: { select: { name: true } },
-        rcaAnalyses: {
+        RCAAnalysis: {
           where: { isValidated: true },
           select: {
             rootCauseStatement: true,
@@ -690,7 +690,7 @@ router.post('/coach/suggestions', async (req: AuthRequest, res: Response) => {
       select: {
         rootCauseStatement: true,
         method: true,
-        capActions: {
+        CAPAction: {
           where: { isEffective: true },
           select: {
             title: true,
@@ -756,7 +756,7 @@ router.get('/coach/tips/:method', async (req: AuthRequest, res: Response) => {
 // ============================================================================
 
 function generateArticleTitle(incident: any): string {
-  const categoryName = incident.category?.name || incident.type;
+  const categoryName = incident.Category?.name || incident.type;
   const facilityName = incident.facility?.name || 'Facility';
   return `${categoryName} - Root Cause Analysis at ${facilityName}`;
 }
@@ -766,16 +766,16 @@ function generateArticleSummary(incident: any, rca: any): string {
   
   parts.push(`This knowledge article documents the root cause analysis for a ${incident.type.toLowerCase().replace('_', ' ')} incident.`);
   
-  if (incident.category?.name) {
-    parts.push(`Category: ${incident.category.name}.`);
+  if (incident.Category?.name) {
+    parts.push(`Category: ${incident.Category.name}.`);
   }
   
   if (rca.rootCauseStatement) {
     parts.push(`Root Cause: ${rca.rootCauseStatement}`);
   }
   
-  if (rca.capActions && rca.capActions.length > 0) {
-    const effectiveCount = rca.capActions.filter((a: any) => a.isEffective !== false).length;
+  if (rca.CAPAction && rca.CAPAction.length > 0) {
+    const effectiveCount = rca.CAPAction.filter((a: any) => a.isEffective !== false).length;
     parts.push(`${effectiveCount} corrective actions were implemented.`);
   }
   
@@ -786,8 +786,8 @@ function extractKeywords(incident: any, rca: any): string[] {
   const keywords: string[] = [];
   
   // Add category
-  if (incident.category?.name) {
-    keywords.push(incident.category.name.toLowerCase());
+  if (incident.Category?.name) {
+    keywords.push(incident.Category.name.toLowerCase());
   }
   
   // Add type
@@ -835,9 +835,9 @@ function calculateSimilarityScore(query: string, incident: any, keywords: string
     }
   });
 
-  if (incident.rcaAnalyses && incident.rcaAnalyses.length > 0) {
+  if (incident.RCAAnalysis && incident.RCAAnalysis.length > 0) {
     score += 20;
-    if (incident.rcaAnalyses[0].rootCauseStatement) {
+    if (incident.RCAAnalysis[0].rootCauseStatement) {
       score += 10;
     }
   }
@@ -969,7 +969,7 @@ function analyzeCommonActions(rcas: any[]): any[] {
   const actions: Record<string, number> = {};
   
   rcas.forEach(rca => {
-    rca.capActions?.forEach((action: any) => {
+    rca.CAPAction?.forEach((action: any) => {
       const actionType = action.actionType;
       actions[actionType] = (actions[actionType] || 0) + 1;
     });

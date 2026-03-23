@@ -870,8 +870,8 @@ router.get('/regulatory-tracking', requireRoles('ADMIN', 'QA_FOOD_SAFETY'), asyn
       },
       include: {
         Facility: { select: { id: true, name: true } },
-        CreatedByUser: { select: { firstName: true, lastName: true } },
-        Snapshots: {
+        User: { select: { firstName: true, lastName: true } },
+        RegulatorySnapshot: {
           orderBy: { periodStart: 'desc' },
           take: 12, // Last 12 months
         },
@@ -1122,7 +1122,7 @@ router.post('/regulatory-tracking/reset', requireRoles('ADMIN', 'QA_FOOD_SAFETY'
       },
       include: {
         Facility: { select: { id: true, name: true } },
-        Snapshots: {
+        RegulatorySnapshot: {
           orderBy: { periodStart: 'desc' },
           take: 12,
         },
@@ -1130,7 +1130,7 @@ router.post('/regulatory-tracking/reset', requireRoles('ADMIN', 'QA_FOOD_SAFETY'
     });
 
     // Log the action
-    await auditService.log({
+    await auditService.logAuditEvent({
       action: 'UPDATE',
       entity: 'RegulatoryTracking',
       entityId: tracking.id,
@@ -1258,7 +1258,7 @@ router.post('/regulatory-tracking/stop', requireRoles('ADMIN', 'QA_FOOD_SAFETY')
     });
 
     // Log the action
-    await auditService.log({
+    await auditService.logAuditEvent({
       action: 'UPDATE',
       entity: 'RegulatoryTracking',
       entityId: tracking.id,

@@ -2,6 +2,7 @@
 
 import { useState, useEffect, useLayoutEffect, useCallback, useRef } from 'react';
 import { useTheme } from '@/components/providers/ThemeProvider';
+import { useAuth } from '@/components/providers/AuthProvider';
 import api from '@/lib/api';
 import {
   BarChart3,
@@ -239,6 +240,8 @@ interface BakeryMetricsReportProps {
 
 export default function BakeryMetricsReport({ onFilterInfo, triggerAction }: BakeryMetricsReportProps) {
   const { theme } = useTheme();
+  const { user } = useAuth();
+  const currentUserName = user ? `${user.firstName} ${user.lastName}`.trim() : 'Unknown User';
 
   // ─── State ──────────────────────────────────────────────────────────────────
   const [loading, setLoading] = useState(true);
@@ -375,7 +378,7 @@ export default function BakeryMetricsReport({ onFilterInfo, triggerAction }: Bak
         day_of_week: day,
         shift_type: resolveModal.shift,
         reason: resolveReason.trim(),
-        resolved_by: metricsData.submitted_by || 'Report User',
+        resolved_by: currentUserName,
       });
       if (data.success) {
         setShiftResolutions(prev => [...prev, data.resolution]);
@@ -398,7 +401,7 @@ export default function BakeryMetricsReport({ onFilterInfo, triggerAction }: Bak
         week_name: weekFilter,
         day_of_week: dayFilter,
         reason,
-        resolved_by: 'Current User',
+        resolved_by: currentUserName,
         shift_type: shift,
       });
       showNotification(`Resolution saved: ${reason}`, 'success');
@@ -409,49 +412,6 @@ export default function BakeryMetricsReport({ onFilterInfo, triggerAction }: Bak
       setSavingResolve(false);
     }
   };
-
-  // ─── Measure overlay column positions ──────────────────────────────────────
-  useLayoutEffect(() => {
-    const wrapper = tableWrapperRef.current;
-    const tbody = tbodyRef.current;
-    if (!wrapper || !tbody) return;
-
-    const measure = () => {
-      const wrapperRect = wrapper.getBoundingClientRect();
-      const tbodyRect = tbody.getBoundingClientRect();
-      const newPos: typeof overlayPositions = {};
-
-      if (showFirstOverlay && firstShiftThRef.current) {
-        const thRect = firstShiftThRef.current.getBoundingClientRect();
-        newPos.first = {
-          left: thRect.left - wrapperRect.left + wrapper.scrollLeft,
-          width: thRect.width,
-          top: tbodyRect.top - wrapperRect.top + wrapper.scrollTop,
-          height: tbodyRect.height,
-        };
-      }
-      if (showSecondOverlay && secondShiftThRef.current) {
-        const thRect = secondShiftThRef.current.getBoundingClientRect();
-        newPos.second = {
-          left: thRect.left - wrapperRect.left + wrapper.scrollLeft,
-          width: thRect.width,
-          top: tbodyRect.top - wrapperRect.top + wrapper.scrollTop,
-          height: tbodyRect.height,
-        };
-      }
-      setOverlayPositions(newPos);
-    };
-
-    measure();
-    const observer = new ResizeObserver(measure);
-    observer.observe(wrapper);
-    window.addEventListener('resize', measure);
-    return () => {
-      observer.disconnect();
-      window.removeEventListener('resize', measure);
-    };
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [showFirstOverlay, showSecondOverlay, metricsData, compactView, loading]);
 
   // ─── Close dropdowns on outside click ────────────────────────────────────
   useEffect(() => {
@@ -701,6 +661,49 @@ export default function BakeryMetricsReport({ onFilterInfo, triggerAction }: Bak
   const dayPassed = isDayPassed();
   const firstRes = getShiftResolution('first');
   const secondRes = getShiftResolution('second');
+
+  // ─── Measure overlay column positions ──────────────────────────────────────
+  useLayoutEffect(() => {
+    const wrapper = tableWrapperRef.current;
+    const tbody = tbodyRef.current;
+    if (!wrapper || !tbody) return;
+
+    const measure = () => {
+      const wrapperRect = wrapper.getBoundingClientRect();
+      const tbodyRect = tbody.getBoundingClientRect();
+      const newPos: typeof overlayPositions = {};
+
+      if (showFirstOverlay && firstShiftThRef.current) {
+        const thRect = firstShiftThRef.current.getBoundingClientRect();
+        newPos.first = {
+          left: thRect.left - wrapperRect.left + wrapper.scrollLeft,
+          width: thRect.width,
+          top: tbodyRect.top - wrapperRect.top + wrapper.scrollTop,
+          height: tbodyRect.height,
+        };
+      }
+      if (showSecondOverlay && secondShiftThRef.current) {
+        const thRect = secondShiftThRef.current.getBoundingClientRect();
+        newPos.second = {
+          left: thRect.left - wrapperRect.left + wrapper.scrollLeft,
+          width: thRect.width,
+          top: tbodyRect.top - wrapperRect.top + wrapper.scrollTop,
+          height: tbodyRect.height,
+        };
+      }
+      setOverlayPositions(newPos);
+    };
+
+    measure();
+    const observer = new ResizeObserver(measure);
+    observer.observe(wrapper);
+    window.addEventListener('resize', measure);
+    return () => {
+      observer.disconnect();
+      window.removeEventListener('resize', measure);
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [showFirstOverlay, showSecondOverlay, metricsData, compactView, loading]);
 
   // ═══════════════════════════════════════════════════════════════════════════
   // RENDER
@@ -1042,16 +1045,16 @@ export default function BakeryMetricsReport({ onFilterInfo, triggerAction }: Bak
                   </div>
                 )}
                 {firstRes && (
-                  <div className="mt-4 p-3 bg-green-50/90 dark:bg-green-900/30 rounded-xl border border-green-200 dark:border-green-700 max-w-[200px] w-full">
+                  <div className="mt-4 p-3 bg-green-50/90 dark:bg-green-900/30 rounded-xl border border-green-200 dark:border-green-700 max-w-[200px] w-full animate-ripple-glow">
                     <div className="flex items-center gap-1.5 mb-1.5">
-                      <div className="w-2 h-2 rounded-full bg-green-500 animate-subtle-pulse" />
+                      <div className="w-2.5 h-2.5 rounded-full bg-green-500 animate-subtle-pulse" />
                       <p className="text-[10px] font-bold text-green-700 dark:text-green-300">Resolved</p>
                     </div>
                     <div className="flex items-start gap-1.5">
                       <MessageSquare className="w-3 h-3 text-green-500 flex-shrink-0 mt-0.5" />
                       <p className="text-[10px] text-green-600 dark:text-green-400 leading-relaxed">{firstRes.reason}</p>
                     </div>
-                    <p className="text-[8px] text-green-400 mt-1.5">by {firstRes.resolvedBy}</p>
+                    <p className="text-xs font-semibold text-green-500 dark:text-green-400 mt-2 animate-shimmer-text">by {firstRes.resolvedBy}</p>
                   </div>
                 )}
               </div>
@@ -1107,16 +1110,16 @@ export default function BakeryMetricsReport({ onFilterInfo, triggerAction }: Bak
                   </div>
                 )}
                 {secondRes && (
-                  <div className="mt-4 p-3 bg-green-50/90 dark:bg-green-900/30 rounded-xl border border-green-200 dark:border-green-700 max-w-[200px] w-full">
+                  <div className="mt-4 p-3 bg-green-50/90 dark:bg-green-900/30 rounded-xl border border-green-200 dark:border-green-700 max-w-[200px] w-full animate-ripple-glow">
                     <div className="flex items-center gap-1.5 mb-1.5">
-                      <div className="w-2 h-2 rounded-full bg-green-500 animate-subtle-pulse" />
+                      <div className="w-2.5 h-2.5 rounded-full bg-green-500 animate-subtle-pulse" />
                       <p className="text-[10px] font-bold text-green-700 dark:text-green-300">Resolved</p>
                     </div>
                     <div className="flex items-start gap-1.5">
                       <MessageSquare className="w-3 h-3 text-green-500 flex-shrink-0 mt-0.5" />
                       <p className="text-[10px] text-green-600 dark:text-green-400 leading-relaxed">{secondRes.reason}</p>
                     </div>
-                    <p className="text-[8px] text-green-400 mt-1.5">by {secondRes.resolvedBy}</p>
+                    <p className="text-xs font-semibold text-green-500 dark:text-green-400 mt-2 animate-shimmer-text">by {secondRes.resolvedBy}</p>
                   </div>
                 )}
               </div>
@@ -1280,6 +1283,26 @@ export default function BakeryMetricsReport({ onFilterInfo, triggerAction }: Bak
           50% { opacity: 0.82; transform: scale(1.03); }
         }
         .animate-subtle-pulse { animation: subtlePulse 2.5s ease-in-out infinite; }
+
+        @keyframes shimmerText {
+          0% { background-position: -200% center; }
+          100% { background-position: 200% center; }
+        }
+        .animate-shimmer-text {
+          background: linear-gradient(90deg, #22c55e 0%, #86efac 25%, #bbf7d0 50%, #86efac 75%, #22c55e 100%);
+          background-size: 200% auto;
+          -webkit-background-clip: text;
+          -webkit-text-fill-color: transparent;
+          background-clip: text;
+          animation: shimmerText 3s linear infinite;
+        }
+
+        @keyframes rippleGlow {
+          0% { box-shadow: 0 0 0 0 rgba(34, 197, 94, 0.4); }
+          50% { box-shadow: 0 0 12px 4px rgba(34, 197, 94, 0.15); }
+          100% { box-shadow: 0 0 0 0 rgba(34, 197, 94, 0); }
+        }
+        .animate-ripple-glow { animation: rippleGlow 2s ease-in-out infinite; }
       `}</style>
     </div>
   );
