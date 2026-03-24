@@ -693,6 +693,7 @@ export default function VacationHubPage() {
         <select
           value={empDeptFilter}
           onChange={(e) => setEmpDeptFilter(e.target.value)}
+          title="Filter by department"
           className="px-3 py-2 text-sm border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-800 text-gray-900 dark:text-white"
         >
           <option value="all">All Roles</option>
@@ -701,6 +702,7 @@ export default function VacationHubPage() {
         <select
           value={empStatusFilter}
           onChange={(e) => setEmpStatusFilter(e.target.value)}
+          title="Filter by status"
           className="px-3 py-2 text-sm border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-800 text-gray-900 dark:text-white"
         >
           <option value="all">All Statuses</option>
@@ -854,10 +856,12 @@ export default function VacationHubPage() {
 
   const createRequestModalJSX = !showCreateModal ? null : (
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 backdrop-blur-sm">
-      <div className="bg-white dark:bg-gray-800 rounded-xl shadow-xl w-full max-w-2xl mx-4 p-6 max-h-[90vh] overflow-y-auto">
-        <div className="flex items-center justify-between mb-6">
+      <div className="modal-fixed-layout bg-white dark:bg-gray-800 rounded-xl shadow-xl w-full max-w-2xl mx-4">
+        {/* ── Fixed Header ── */}
+        <div className="modal-fixed-header flex items-center justify-between px-6 py-4 border-b border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-800 rounded-t-xl">
           <h3 className="text-lg font-semibold text-gray-900 dark:text-white">New Vacation Request</h3>
           <button
+            type="button"
             onClick={() => setShowCreateModal(false)}
             title="Close"
             className="p-1.5 rounded-lg hover:bg-gray-100 dark:hover:bg-gray-700 transition-colors text-gray-500 dark:text-gray-400"
@@ -865,7 +869,9 @@ export default function VacationHubPage() {
             <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" /></svg>
           </button>
         </div>
-        <form onSubmit={handleCreateRequest} className="space-y-5">
+        {/* ── Scrollable Body ── */}
+        <div className="modal-fixed-body px-6 py-4">
+        <form id="vacation-create-form" onSubmit={handleCreateRequest} className="space-y-5">
           {/* ── Employee Information ── */}
           <div className="border border-gray-200 dark:border-gray-700 rounded-lg p-4 space-y-4 bg-gray-50/50 dark:bg-gray-700/20">
             <h4 className="text-sm font-semibold text-gray-800 dark:text-gray-200">👤 Employee Information</h4>
@@ -1033,6 +1039,7 @@ export default function VacationHubPage() {
                 minDate={new Date()}
                 placeholderText="Select start date"
                 dateFormat="MM/dd/yyyy"
+                portalId="datepicker-portal"
                 className="w-full px-3 py-2 text-sm border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-700 text-gray-900 dark:text-white"
                 required
               />
@@ -1053,6 +1060,7 @@ export default function VacationHubPage() {
                 maxDate={maxEndDate}
                 placeholderText="Select end date"
                 dateFormat="MM/dd/yyyy"
+                portalId="datepicker-portal"
                 className="w-full px-3 py-2 text-sm border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-700 text-gray-900 dark:text-white"
                 required
               />
@@ -1155,6 +1163,11 @@ export default function VacationHubPage() {
               className="w-full px-3 py-2 text-sm border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-700 text-gray-900 dark:text-white resize-none"
             />
           </div>
+          </div>
+
+          {/* ── Coverage & Emergency ── */}
+          <div className="border border-gray-200 dark:border-gray-700 rounded-lg p-4 space-y-4 bg-gray-50/50 dark:bg-gray-700/20">
+            <h4 className="text-sm font-semibold text-gray-800 dark:text-gray-200">📞 Coverage & Emergency</h4>
 
           {/* Coverage Plan */}
           <div>
@@ -1204,24 +1217,29 @@ export default function VacationHubPage() {
             </div>
           </div>
           </div>
-
-          <div className="flex gap-3 pt-2">
-            <button
-              type="button"
-              onClick={() => setShowCreateModal(false)}
-              className="flex-1 py-2.5 border border-gray-300 dark:border-gray-600 text-gray-700 dark:text-gray-300 rounded-lg font-medium hover:bg-gray-50 dark:hover:bg-gray-700 transition-colors"
-            >
-              Cancel
-            </button>
-            <button
-              type="submit"
-              disabled={submitting}
-              className="flex-1 py-2.5 bg-blue-600 text-white rounded-lg font-medium hover:bg-blue-700 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
-            >
-              {submitting ? 'Submitting...' : 'Submit Request'}
-            </button>
-          </div>
         </form>
+        </div>
+
+        {/* ── Fixed Footer ── */}
+        <div
+          className="modal-fixed-footer flex gap-3 px-6 py-4 border-t border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-800 rounded-b-xl"
+        >
+          <button
+            type="button"
+            onClick={() => setShowCreateModal(false)}
+            className="flex-1 py-2.5 border border-gray-300 dark:border-gray-600 text-gray-700 dark:text-gray-300 rounded-lg font-medium hover:bg-gray-50 dark:hover:bg-gray-700 transition-colors"
+          >
+            Cancel
+          </button>
+          <button
+            type="submit"
+            form="vacation-create-form"
+            disabled={submitting}
+            className="flex-1 py-2.5 bg-blue-600 text-white rounded-lg font-medium hover:bg-blue-700 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
+          >
+            {submitting ? 'Submitting...' : 'Submit Request'}
+          </button>
+        </div>
       </div>
     </div>
   );
@@ -1496,6 +1514,7 @@ export default function VacationHubPage() {
         <ApproveModal />
         <DenyModal />
         {createRequestModalJSX}
+        <div id="datepicker-portal" />
 
         {/* Vacation Constraint Settings Modal */}
         {showConstraintsModal && (

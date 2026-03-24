@@ -2,6 +2,35 @@
 @tailwind components;
 @tailwind utilities;
 
+/* ── Modal with fixed header/footer ── */
+.modal-fixed-layout {
+  display: flex !important;
+  flex-direction: column !important;
+  max-height: 90vh !important;
+  overflow: hidden !important;
+}
+.modal-fixed-header {
+  flex-shrink: 0 !important;
+}
+.modal-fixed-body {
+  flex: 1 1 auto !important;
+  overflow-y: auto !important;
+  min-height: 0 !important;
+}
+.modal-fixed-footer {
+  flex-shrink: 0 !important;
+}
+
+/* ── DatePicker portal for modal contexts ── */
+#datepicker-portal {
+  position: relative;
+  z-index: 9999;
+}
+
+#datepicker-portal .react-datepicker-popper {
+  z-index: 9999 !important;
+}
+
 @layer base {
   :root {
     --background: 0 0% 100%;

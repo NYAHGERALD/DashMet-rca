@@ -138,6 +138,44 @@ function OverviewTab({ caseData, onUpdate, userId }: {
   const [empIsComplainant, setEmpIsComplainant] = useState(false);
   const [saving, setSaving] = useState(false);
 
+  // Editable case fields
+  const [isEditing, setIsEditing] = useState(false);
+  const [editType, setEditType] = useState(caseData.type || 'conflict');
+  const [editIncidentDate, setEditIncidentDate] = useState(caseData.incidentDate ? caseData.incidentDate.split('T')[0] : '');
+  const [editLocation, setEditLocation] = useState(caseData.location || '');
+  const [editDepartment, setEditDepartment] = useState(caseData.department || '');
+  const [editShift, setEditShift] = useState(caseData.shift || '');
+  const [editDescription, setEditDescription] = useState(caseData.description || '');
+  const [savingCase, setSavingCase] = useState(false);
+
+  const handleSaveCaseDetails = async () => {
+    setSavingCase(true);
+    try {
+      await updateCase(caseData.id, {
+        caseType: editType,
+        incidentDate: editIncidentDate ? new Date(editIncidentDate).toISOString() : undefined,
+        location: editLocation || undefined,
+        department: editDepartment || undefined,
+        shift: editShift || undefined,
+        description: editDescription || undefined,
+        userId,
+      });
+      onUpdate();
+      setIsEditing(false);
+    } catch (err) { console.error(err); }
+    finally { setSavingCase(false); }
+  };
+
+  const handleCancelEdit = () => {
+    setIsEditing(false);
+    setEditType(caseData.type || 'conflict');
+    setEditIncidentDate(caseData.incidentDate ? caseData.incidentDate.split('T')[0] : '');
+    setEditLocation(caseData.location || '');
+    setEditDepartment(caseData.department || '');
+    setEditShift(caseData.shift || '');
+    setEditDescription(caseData.description || '');
+  };
+
   const handleAddEmployee = async () => {
     if (!empName.trim()) return;
     setSaving(true);
@@ -165,60 +203,129 @@ function OverviewTab({ caseData, onUpdate, userId }: {
     } catch (err) { console.error(err); }
   };
 
-  const complainants = caseData.involvedEmployees?.filter(e => e.isComplainant) || [];
-  const others = caseData.involvedEmployees?.filter(e => !e.isComplainant) || [];
+  // Deduplicate employees by employeeFileNo (or name+role+department fallback)
+  const deduplicateEmployees = (employees: any[]) => {
+    const seen = new Set<string>();
+    return employees.filter(e => {
+      const key = e.employeeFileNo || `${e.name}-${e.role}-${e.department}`;
+      if (seen.has(key)) return false;
+      seen.add(key);
+      return true;
+    });
+  };
+  const uniqueEmployees = deduplicateEmployees(caseData.involvedEmployees || []);
+  const complainants = uniqueEmployees.filter(e => e.isComplainant);
+  const witnesses = uniqueEmployees.filter(e => !e.isComplainant);
 
   return (
     <div className="space-y-6">
       {/* Case Info */}
-      <SectionCard title="Case Information" icon={FileText}>
-        <div className="grid md:grid-cols-2 lg:grid-cols-3 gap-6">
-          <div>
-            <p className="text-xs font-medium text-gray-500 dark:text-gray-400 uppercase tracking-wide mb-1">Case Number</p>
-            <p className="text-sm font-semibold text-gray-900 dark:text-white">{caseData.caseNumber}</p>
-          </div>
-          <div>
-            <p className="text-xs font-medium text-gray-500 dark:text-gray-400 uppercase tracking-wide mb-1">Type</p>
-            <Badge className={getCaseTypeColor(caseData.type)}>{getCaseTypeLabel(caseData.type)}</Badge>
-          </div>
-          <div>
-            <p className="text-xs font-medium text-gray-500 dark:text-gray-400 uppercase tracking-wide mb-1">Status</p>
-            <Badge className={getStatusColor(caseData.status)}>{getStatusLabel(caseData.status)}</Badge>
-          </div>
-          <div>
-            <p className="text-xs font-medium text-gray-500 dark:text-gray-400 uppercase tracking-wide mb-1">Incident Date</p>
-            <p className="text-sm text-gray-900 dark:text-white flex items-center gap-1.5"><Calendar className="w-3.5 h-3.5 text-gray-400" /> {formatDate(caseData.incidentDate)}</p>
-          </div>
-          <div>
-            <p className="text-xs font-medium text-gray-500 dark:text-gray-400 uppercase tracking-wide mb-1">Location</p>
-            <p className="text-sm text-gray-900 dark:text-white flex items-center gap-1.5"><MapPin className="w-3.5 h-3.5 text-gray-400" /> {caseData.location || '—'}</p>
-          </div>
-          <div>
-            <p className="text-xs font-medium text-gray-500 dark:text-gray-400 uppercase tracking-wide mb-1">Department</p>
-            <p className="text-sm text-gray-900 dark:text-white flex items-center gap-1.5"><Building2 className="w-3.5 h-3.5 text-gray-400" /> {caseData.department || '—'}</p>
-          </div>
-          {caseData.shift && (
-            <div>
-              <p className="text-xs font-medium text-gray-500 dark:text-gray-400 uppercase tracking-wide mb-1">Shift</p>
-              <p className="text-sm text-gray-900 dark:text-white">{caseData.shift}</p>
+      <SectionCard
+        title="Case Information"
+        icon={FileText}
+        actions={
+          !caseData.isLocked && !isEditing && (
+            <button onClick={() => setIsEditing(true)} className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-semibold text-blue-600 dark:text-blue-400 hover:bg-blue-50 dark:hover:bg-blue-900/20 transition-colors">
+              <Edit3 className="w-3.5 h-3.5" /> Edit
+            </button>
+          )
+        }
+      >
+        {isEditing ? (
+          <div className="space-y-4">
+            <div className="grid md:grid-cols-2 lg:grid-cols-3 gap-4">
+              <div>
+                <label className="block text-xs font-medium text-gray-500 dark:text-gray-400 uppercase tracking-wide mb-1.5">Case Type</label>
+                <select value={editType} onChange={e => setEditType(e.target.value)} title="Case type" className="w-full px-3 py-2.5 rounded-lg border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-700 text-sm text-gray-900 dark:text-white focus:ring-2 focus:ring-blue-500">
+                  <option value="conflict">Workplace Conflict</option>
+                  <option value="conduct">Conduct Issue</option>
+                  <option value="safety">Safety Concern</option>
+                  <option value="other">Other</option>
+                </select>
+              </div>
+              <div>
+                <label className="block text-xs font-medium text-gray-500 dark:text-gray-400 uppercase tracking-wide mb-1.5">Incident Date</label>
+                <input type="date" value={editIncidentDate} onChange={e => setEditIncidentDate(e.target.value)} title="Incident date" className="w-full px-3 py-2.5 rounded-lg border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-700 text-sm text-gray-900 dark:text-white focus:ring-2 focus:ring-blue-500" />
+              </div>
+              <div>
+                <label className="block text-xs font-medium text-gray-500 dark:text-gray-400 uppercase tracking-wide mb-1.5">Location</label>
+                <input type="text" value={editLocation} onChange={e => setEditLocation(e.target.value)} placeholder="e.g. Building A" className="w-full px-3 py-2.5 rounded-lg border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-700 text-sm text-gray-900 dark:text-white placeholder-gray-400 focus:ring-2 focus:ring-blue-500" />
+              </div>
+              <div>
+                <label className="block text-xs font-medium text-gray-500 dark:text-gray-400 uppercase tracking-wide mb-1.5">Department</label>
+                <input type="text" value={editDepartment} onChange={e => setEditDepartment(e.target.value)} placeholder="e.g. Production" className="w-full px-3 py-2.5 rounded-lg border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-700 text-sm text-gray-900 dark:text-white placeholder-gray-400 focus:ring-2 focus:ring-blue-500" />
+              </div>
+              <div>
+                <label className="block text-xs font-medium text-gray-500 dark:text-gray-400 uppercase tracking-wide mb-1.5">Shift</label>
+                <input type="text" value={editShift} onChange={e => setEditShift(e.target.value)} placeholder="e.g. Day, Night" className="w-full px-3 py-2.5 rounded-lg border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-700 text-sm text-gray-900 dark:text-white placeholder-gray-400 focus:ring-2 focus:ring-blue-500" />
+              </div>
             </div>
-          )}
-          <div>
-            <p className="text-xs font-medium text-gray-500 dark:text-gray-400 uppercase tracking-wide mb-1">Created</p>
-            <p className="text-sm text-gray-900 dark:text-white">{formatDateTime(caseData.createdAt)}</p>
-          </div>
-          {caseData.createdByUser && (
             <div>
-              <p className="text-xs font-medium text-gray-500 dark:text-gray-400 uppercase tracking-wide mb-1">Created By</p>
-              <p className="text-sm text-gray-900 dark:text-white">{caseData.createdByUser.firstName} {caseData.createdByUser.lastName}</p>
+              <label className="block text-xs font-medium text-gray-500 dark:text-gray-400 uppercase tracking-wide mb-1.5">Description</label>
+              <textarea value={editDescription} onChange={e => setEditDescription(e.target.value)} rows={3} placeholder="Brief description of the incident..." className="w-full px-3 py-2.5 rounded-lg border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-700 text-sm text-gray-900 dark:text-white placeholder-gray-400 focus:ring-2 focus:ring-blue-500 resize-none" />
             </div>
-          )}
-        </div>
+            <div className="flex items-center gap-2 pt-2">
+              <button onClick={handleSaveCaseDetails} disabled={savingCase} className="px-4 py-2 rounded-lg text-sm font-semibold text-white bg-blue-600 hover:bg-blue-700 disabled:opacity-50 transition-colors flex items-center gap-1.5">
+                {savingCase ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Save className="w-3.5 h-3.5" />} Save Changes
+              </button>
+              <button onClick={handleCancelEdit} className="px-4 py-2 rounded-lg text-sm font-medium text-gray-500 hover:bg-gray-100 dark:hover:bg-gray-700 transition-colors">Cancel</button>
+            </div>
+          </div>
+        ) : (
+          <div className="grid md:grid-cols-2 lg:grid-cols-3 gap-6">
+            <div>
+              <p className="text-xs font-medium text-gray-500 dark:text-gray-400 uppercase tracking-wide mb-1">Case Number</p>
+              <p className="text-sm font-semibold text-gray-900 dark:text-white">{caseData.caseNumber}</p>
+            </div>
+            <div>
+              <p className="text-xs font-medium text-gray-500 dark:text-gray-400 uppercase tracking-wide mb-1">Type</p>
+              <Badge className={getCaseTypeColor(caseData.type)}>{getCaseTypeLabel(caseData.type)}</Badge>
+            </div>
+            <div>
+              <p className="text-xs font-medium text-gray-500 dark:text-gray-400 uppercase tracking-wide mb-1">Status</p>
+              <Badge className={getStatusColor(caseData.status)}>{getStatusLabel(caseData.status)}</Badge>
+            </div>
+            <div>
+              <p className="text-xs font-medium text-gray-500 dark:text-gray-400 uppercase tracking-wide mb-1">Incident Date</p>
+              <p className="text-sm text-gray-900 dark:text-white flex items-center gap-1.5"><Calendar className="w-3.5 h-3.5 text-gray-400" /> {formatDate(caseData.incidentDate)}</p>
+            </div>
+            <div>
+              <p className="text-xs font-medium text-gray-500 dark:text-gray-400 uppercase tracking-wide mb-1">Location</p>
+              <p className="text-sm text-gray-900 dark:text-white flex items-center gap-1.5"><MapPin className="w-3.5 h-3.5 text-gray-400" /> {caseData.location || '—'}</p>
+            </div>
+            <div>
+              <p className="text-xs font-medium text-gray-500 dark:text-gray-400 uppercase tracking-wide mb-1">Department</p>
+              <p className="text-sm text-gray-900 dark:text-white flex items-center gap-1.5"><Building2 className="w-3.5 h-3.5 text-gray-400" /> {caseData.department || '—'}</p>
+            </div>
+            {caseData.shift && (
+              <div>
+                <p className="text-xs font-medium text-gray-500 dark:text-gray-400 uppercase tracking-wide mb-1">Shift</p>
+                <p className="text-sm text-gray-900 dark:text-white">{caseData.shift}</p>
+              </div>
+            )}
+            <div>
+              <p className="text-xs font-medium text-gray-500 dark:text-gray-400 uppercase tracking-wide mb-1">Created</p>
+              <p className="text-sm text-gray-900 dark:text-white">{formatDateTime(caseData.createdAt)}</p>
+            </div>
+            {caseData.createdByUser && (
+              <div>
+                <p className="text-xs font-medium text-gray-500 dark:text-gray-400 uppercase tracking-wide mb-1">Created By</p>
+                <p className="text-sm text-gray-900 dark:text-white">{caseData.createdByUser.firstName} {caseData.createdByUser.lastName}</p>
+              </div>
+            )}
+            {caseData.description && (
+              <div className="md:col-span-2 lg:col-span-3">
+                <p className="text-xs font-medium text-gray-500 dark:text-gray-400 uppercase tracking-wide mb-1">Description</p>
+                <p className="text-sm text-gray-700 dark:text-gray-300 whitespace-pre-line">{caseData.description}</p>
+              </div>
+            )}
+          </div>
+        )}
       </SectionCard>
 
       {/* Involved Employees */}
       <SectionCard
-        title={`Involved Parties (${(caseData.involvedEmployees || []).length})`}
+        title={`Involved Parties (${uniqueEmployees.length})`}
         icon={Users}
         actions={
           !caseData.isLocked && (
@@ -228,7 +335,7 @@ function OverviewTab({ caseData, onUpdate, userId }: {
           )
         }
       >
-        {(caseData.involvedEmployees || []).length === 0 ? (
+        {uniqueEmployees.length === 0 ? (
           <p className="text-sm text-gray-400 dark:text-gray-500 text-center py-4">No employees added yet</p>
         ) : (
           <div className="space-y-3">
@@ -261,11 +368,11 @@ function OverviewTab({ caseData, onUpdate, userId }: {
                 </div>
               </div>
             )}
-            {others.length > 0 && (
+            {witnesses.length > 0 && (
               <div>
-                <p className="text-xs font-semibold text-gray-500 dark:text-gray-400 uppercase tracking-wide mb-2">Other Parties</p>
+                <p className="text-xs font-semibold text-gray-500 dark:text-gray-400 uppercase tracking-wide mb-2">Witnesses</p>
                 <div className="space-y-2">
-                  {others.map(emp => (
+                  {witnesses.map(emp => (
                     <div key={emp.id} className="flex items-center justify-between p-3 rounded-xl bg-gray-50 dark:bg-gray-700/30 border border-gray-200 dark:border-gray-600">
                       <div className="flex items-center gap-3">
                         <div className="p-2 rounded-lg bg-gray-100 dark:bg-gray-700">
@@ -770,11 +877,11 @@ function AnalysisTab({ caseData, onUpdate, userId }: {
             </div>
 
             {/* Side by Side */}
-            {comparisonResult.sideBySideComparison.length > 0 && (
+            {(comparisonResult.sideBySideComparison || []).length > 0 && (
               <div>
                 <h4 className="text-sm font-semibold text-gray-900 dark:text-white mb-3">Side-by-Side Comparison</h4>
                 <div className="space-y-2">
-                  {comparisonResult.sideBySideComparison.map((item, i) => (
+                  {(comparisonResult.sideBySideComparison || []).map((item, i) => (
                     <div key={i} className="rounded-xl border border-gray-200 dark:border-gray-700 overflow-hidden">
                       <div className={`px-4 py-2 text-xs font-semibold uppercase tracking-wide ${
                         item.status === 'agreement' ? 'bg-green-100 text-green-700 dark:bg-green-900/20 dark:text-green-400' :
@@ -802,28 +909,28 @@ function AnalysisTab({ caseData, onUpdate, userId }: {
 
             {/* Key Findings Grid */}
             <div className="grid md:grid-cols-2 gap-4">
-              {comparisonResult.agreementPoints.length > 0 && (
+              {(comparisonResult.agreementPoints || []).length > 0 && (
                 <div className="p-4 rounded-xl bg-green-50 dark:bg-green-900/10 border border-green-200 dark:border-green-800">
                   <h4 className="text-sm font-semibold text-green-700 dark:text-green-400 mb-2 flex items-center gap-1.5"><CheckCircle2 className="w-4 h-4" /> Agreement Points</h4>
-                  <ul className="space-y-1">{comparisonResult.agreementPoints.map((p, i) => <li key={i} className="text-sm text-gray-700 dark:text-gray-300 flex items-start gap-2"><span className="text-green-500 mt-1">•</span>{p}</li>)}</ul>
+                  <ul className="space-y-1">{(comparisonResult.agreementPoints || []).map((p, i) => <li key={i} className="text-sm text-gray-700 dark:text-gray-300 flex items-start gap-2"><span className="text-green-500 mt-1">•</span>{p}</li>)}</ul>
                 </div>
               )}
-              {comparisonResult.contradictions.length > 0 && (
+              {(comparisonResult.contradictions || []).length > 0 && (
                 <div className="p-4 rounded-xl bg-red-50 dark:bg-red-900/10 border border-red-200 dark:border-red-800">
                   <h4 className="text-sm font-semibold text-red-700 dark:text-red-400 mb-2 flex items-center gap-1.5"><XCircle className="w-4 h-4" /> Contradictions</h4>
-                  <ul className="space-y-1">{comparisonResult.contradictions.map((p, i) => <li key={i} className="text-sm text-gray-700 dark:text-gray-300 flex items-start gap-2"><span className="text-red-500 mt-1">•</span>{p}</li>)}</ul>
+                  <ul className="space-y-1">{(comparisonResult.contradictions || []).map((p, i) => <li key={i} className="text-sm text-gray-700 dark:text-gray-300 flex items-start gap-2"><span className="text-red-500 mt-1">•</span>{p}</li>)}</ul>
                 </div>
               )}
-              {comparisonResult.timelineDifferences.length > 0 && (
+              {(comparisonResult.timelineDifferences || []).length > 0 && (
                 <div className="p-4 rounded-xl bg-orange-50 dark:bg-orange-900/10 border border-orange-200 dark:border-orange-800">
                   <h4 className="text-sm font-semibold text-orange-700 dark:text-orange-400 mb-2 flex items-center gap-1.5"><Clock className="w-4 h-4" /> Timeline Differences</h4>
-                  <ul className="space-y-1">{comparisonResult.timelineDifferences.map((p, i) => <li key={i} className="text-sm text-gray-700 dark:text-gray-300 flex items-start gap-2"><span className="text-orange-500 mt-1">•</span>{p}</li>)}</ul>
+                  <ul className="space-y-1">{(comparisonResult.timelineDifferences || []).map((p, i) => <li key={i} className="text-sm text-gray-700 dark:text-gray-300 flex items-start gap-2"><span className="text-orange-500 mt-1">•</span>{p}</li>)}</ul>
                 </div>
               )}
-              {comparisonResult.missingDetails.length > 0 && (
+              {(comparisonResult.missingDetails || []).length > 0 && (
                 <div className="p-4 rounded-xl bg-gray-50 dark:bg-gray-700/30 border border-gray-200 dark:border-gray-600">
                   <h4 className="text-sm font-semibold text-gray-700 dark:text-gray-400 mb-2 flex items-center gap-1.5"><AlertTriangle className="w-4 h-4" /> Missing Details</h4>
-                  <ul className="space-y-1">{comparisonResult.missingDetails.map((p, i) => <li key={i} className="text-sm text-gray-700 dark:text-gray-300 flex items-start gap-2"><span className="text-gray-500 mt-1">•</span>{p}</li>)}</ul>
+                  <ul className="space-y-1">{(comparisonResult.missingDetails || []).map((p, i) => <li key={i} className="text-sm text-gray-700 dark:text-gray-300 flex items-start gap-2"><span className="text-gray-500 mt-1">•</span>{p}</li>)}</ul>
                 </div>
               )}
             </div>
@@ -841,7 +948,7 @@ function AnalysisTab({ caseData, onUpdate, userId }: {
                 <p className="text-sm text-gray-700 dark:text-gray-300 leading-relaxed">{policyResult.overallGuidance}</p>
               </div>
             )}
-            {policyResult.matches.map((m, i) => (
+            {(policyResult.matches || []).map((m, i) => (
               <div key={i} className="p-4 rounded-xl border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-800">
                 <div className="flex items-start justify-between gap-4">
                   <div>
@@ -855,9 +962,9 @@ function AnalysisTab({ caseData, onUpdate, userId }: {
                     <span className="text-xs font-semibold text-gray-600 dark:text-gray-400">{Math.round(m.matchConfidence * 100)}%</span>
                   </div>
                 </div>
-                {m.keyPhrases.length > 0 && (
+                {(m.keyPhrases || []).length > 0 && (
                   <div className="flex flex-wrap gap-1.5 mt-3">
-                    {m.keyPhrases.map((kp, j) => <Badge key={j} className="bg-purple-100 text-purple-700 dark:bg-purple-900/30 dark:text-purple-400">{kp}</Badge>)}
+                    {(m.keyPhrases || []).map((kp, j) => <Badge key={j} className="bg-purple-100 text-purple-700 dark:bg-purple-900/30 dark:text-purple-400">{kp}</Badge>)}
                   </div>
                 )}
               </div>
@@ -877,7 +984,7 @@ function AnalysisTab({ caseData, onUpdate, userId }: {
               </div>
             )}
             <div className="grid gap-4">
-              {recommendationResult.recommendations.map(rec => (
+              {(recommendationResult.recommendations || []).map(rec => (
                 <div
                   key={rec.id}
                   className={`p-5 rounded-xl border-2 transition-all cursor-pointer ${
@@ -913,7 +1020,7 @@ function AnalysisTab({ caseData, onUpdate, userId }: {
                   <div className="grid md:grid-cols-2 gap-3 mt-3">
                     <div>
                       <p className="text-xs font-semibold text-gray-500 dark:text-gray-400 mb-1">Next Steps</p>
-                      <ul className="space-y-0.5">{rec.nextSteps.map((s, i) => <li key={i} className="text-xs text-gray-600 dark:text-gray-400 flex items-start gap-1.5"><span className="text-blue-500 mt-0.5">•</span>{s}</li>)}</ul>
+                      <ul className="space-y-0.5">{(rec.nextSteps || []).map((s, i) => <li key={i} className="text-xs text-gray-600 dark:text-gray-400 flex items-start gap-1.5"><span className="text-blue-500 mt-0.5">•</span>{s}</li>)}</ul>
                     </div>
                     <div>
                       <p className="text-xs font-semibold text-gray-500 dark:text-gray-400 mb-1">Details</p>
@@ -921,7 +1028,7 @@ function AnalysisTab({ caseData, onUpdate, userId }: {
                         <p>Type: <span className="font-medium capitalize">{rec.type}</span></p>
                         <p>Timeframe: <span className="font-medium">{rec.timeframe}</span></p>
                         <p>Confidence: <span className="font-medium">{Math.round(rec.confidence * 100)}%</span></p>
-                        {rec.targetEmployeeNames.length > 0 && <p>Target: <span className="font-medium">{rec.targetEmployeeNames.join(', ')}</span></p>}
+                        {(rec.targetEmployeeNames || []).length > 0 && <p>Target: <span className="font-medium">{(rec.targetEmployeeNames || []).join(', ')}</span></p>}
                       </div>
                     </div>
                   </div>
@@ -1422,6 +1529,7 @@ function CaseDetailContent() {
   const [caseData, setCaseData] = useState<ConflictCase | null>(null);
   const [loading, setLoading] = useState(true);
   const [activeTab, setActiveTab] = useState<'overview' | 'documents' | 'analysis' | 'actions' | 'review' | 'timeline'>('overview');
+  const [deleting, setDeleting] = useState(false);
 
   const loadCase = useCallback(async () => {
     if (!caseId) return;
@@ -1434,6 +1542,19 @@ function CaseDetailContent() {
   }, [caseId]);
 
   useEffect(() => { loadCase(); }, [loadCase]);
+
+  const handleDeleteCase = async () => {
+    if (!caseData || caseData.isLocked) return;
+    if (!confirm(`Are you sure you want to delete case ${caseData.caseNumber}? This action cannot be undone.`)) return;
+    setDeleting(true);
+    try {
+      await deleteCase(caseData.id);
+      router.push('/hr');
+    } catch (err) {
+      console.error('Failed to delete case:', err);
+      alert('Failed to delete case. It may contain locked data.');
+    } finally { setDeleting(false); }
+  };
 
   if (loading) {
     return (
@@ -1491,7 +1612,84 @@ function CaseDetailContent() {
                 Created {formatDate(caseData.createdAt)}
               </p>
             </div>
+            {!caseData.isLocked && (
+              <button
+                onClick={handleDeleteCase}
+                disabled={deleting}
+                className="p-2.5 rounded-xl border border-red-200 dark:border-red-800 hover:bg-red-50 dark:hover:bg-red-900/20 transition-colors flex-shrink-0"
+                title="Delete case"
+              >
+                {deleting ? <Loader2 className="w-4 h-4 text-red-500 animate-spin" /> : <Trash2 className="w-4 h-4 text-red-500" />}
+              </button>
+            )}
           </div>
+
+          {/* Escalation Warning */}
+          {caseData.status === 'ESCALATED' && (
+            <div className="mt-4 p-3 rounded-xl bg-red-50 dark:bg-red-900/10 border border-red-200 dark:border-red-800 flex items-center gap-3">
+              <div className="p-2 rounded-lg bg-red-100 dark:bg-red-900/30">
+                <AlertTriangle className="w-4 h-4 text-red-600 dark:text-red-400" />
+              </div>
+              <div>
+                <p className="text-sm font-semibold text-red-700 dark:text-red-400">Case Escalated</p>
+                <p className="text-xs text-red-600 dark:text-red-500">This case has been escalated and requires immediate attention from senior management.</p>
+              </div>
+            </div>
+          )}
+
+          {/* Status Progress Stepper */}
+          {(() => {
+            const statusSteps = [
+              { key: 'DRAFT', label: 'Draft', icon: Edit3 },
+              { key: 'IN_PROGRESS', label: 'In Progress', icon: Clock },
+              { key: 'PENDING_REVIEW', label: 'Review', icon: Eye },
+              { key: 'AWAITING_ACTION', label: 'Action', icon: Gavel },
+              { key: 'CLOSED', label: 'Closed', icon: Lock },
+            ];
+            const statusOrder = statusSteps.map(s => s.key);
+            const currentIdx = statusOrder.indexOf(caseData.status);
+            const isEscalated = caseData.status === 'ESCALATED';
+            return (
+              <div className="mt-4 flex items-center gap-1">
+                {statusSteps.map((step, i) => {
+                  const isCurrent = step.key === caseData.status;
+                  const isPast = !isEscalated && currentIdx >= 0 && i < currentIdx;
+                  const StepIcon = step.icon;
+                  return (
+                    <div key={step.key} className="flex items-center gap-1 flex-1">
+                      <div className={`flex items-center gap-2 flex-1 px-3 py-2 rounded-lg transition-all ${
+                        isCurrent
+                          ? 'bg-blue-100 dark:bg-blue-900/20 border border-blue-300 dark:border-blue-700'
+                          : isPast
+                          ? 'bg-green-50 dark:bg-green-900/10 border border-green-200 dark:border-green-800'
+                          : 'bg-gray-50 dark:bg-gray-700/20 border border-gray-200 dark:border-gray-700'
+                      }`}>
+                        <div className={`p-1 rounded-md ${
+                          isCurrent ? 'bg-blue-200 dark:bg-blue-800/50' :
+                          isPast ? 'bg-green-200 dark:bg-green-800/50' :
+                          'bg-gray-200 dark:bg-gray-600'
+                        }`}>
+                          {isPast ? (
+                            <CheckCircle2 className="w-3 h-3 text-green-600 dark:text-green-400" />
+                          ) : (
+                            <StepIcon className={`w-3 h-3 ${isCurrent ? 'text-blue-600 dark:text-blue-400' : 'text-gray-400 dark:text-gray-500'}`} />
+                          )}
+                        </div>
+                        <span className={`text-xs font-medium truncate ${
+                          isCurrent ? 'text-blue-700 dark:text-blue-400' :
+                          isPast ? 'text-green-700 dark:text-green-400' :
+                          'text-gray-400 dark:text-gray-500'
+                        }`}>{step.label}</span>
+                      </div>
+                      {i < statusSteps.length - 1 && (
+                        <ChevronRight className={`w-3 h-3 flex-shrink-0 ${isPast ? 'text-green-400' : 'text-gray-300 dark:text-gray-600'}`} />
+                      )}
+                    </div>
+                  );
+                })}
+              </div>
+            );
+          })()}
 
           {/* Tabs */}
           <div className="flex items-center gap-1 mt-5 -mb-px overflow-x-auto">

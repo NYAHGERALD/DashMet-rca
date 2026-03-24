@@ -354,6 +354,32 @@ function CreatePolicyModal({ isOpen, onClose, onCreated, organizationId, userId 
 
           <div>
             <label className="block text-sm font-semibold text-gray-700 dark:text-gray-300 mb-2">Policy Text</label>
+            <div className="mb-2">
+              <div className="relative inline-block">
+                <input
+                  type="file"
+                  accept=".txt,.doc,.docx,.pdf,.md"
+                  onChange={(e) => {
+                    const file = e.target.files?.[0];
+                    if (!file) return;
+                    const reader = new FileReader();
+                    reader.onload = (ev) => {
+                      const text = ev.target?.result as string;
+                      setPolicyText(text);
+                      if (!name.trim()) setName(file.name.replace(/\.[^.]+$/, ''));
+                    };
+                    reader.readAsText(file);
+                    e.target.value = '';
+                  }}
+                  title="Upload policy file"
+                  className="absolute inset-0 opacity-0 cursor-pointer"
+                />
+                <div className="flex items-center gap-2 px-4 py-2 rounded-lg border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-700 text-sm text-gray-600 dark:text-gray-400 cursor-pointer hover:border-blue-400 transition-colors">
+                  <Upload className="w-4 h-4" />
+                  <span>Upload from file</span>
+                </div>
+              </div>
+            </div>
             <textarea
               value={policyText}
               onChange={e => setPolicyText(e.target.value)}
@@ -385,8 +411,8 @@ function CreatePolicyModal({ isOpen, onClose, onCreated, organizationId, userId 
 // ────────────────────────────────────────────────────────────────────────────────
 // CASES TAB
 // ────────────────────────────────────────────────────────────────────────────────
-function CasesTab({ cases, loading, onRefresh, onCreateCase, organizationId }: {
-  cases: ConflictCase[]; loading: boolean; onRefresh: () => void; onCreateCase: () => void; organizationId: string;
+function CasesTab({ cases, loading, onRefresh, onCreateCase, onDeleteCase, organizationId }: {
+  cases: ConflictCase[]; loading: boolean; onRefresh: () => void; onCreateCase: () => void; onDeleteCase: (id: string, caseNumber: string) => void; organizationId: string;
 }) {
   const router = useRouter();
   const [search, setSearch] = useState('');
@@ -546,7 +572,18 @@ function CasesTab({ cases, loading, onRefresh, onCreateCase, organizationId }: {
                     )}
                   </div>
                 </div>
-                <ChevronRight className="w-5 h-5 text-gray-400 group-hover:text-blue-500 transition-colors flex-shrink-0 mt-1" />
+                <div className="flex items-center gap-1 flex-shrink-0 mt-1">
+                  {!c.isLocked && (
+                    <button
+                      onClick={(e) => { e.stopPropagation(); onDeleteCase(c.id, c.caseNumber); }}
+                      className="p-1.5 rounded-lg hover:bg-red-100 dark:hover:bg-red-900/20 transition-colors opacity-0 group-hover:opacity-100"
+                      title="Delete case"
+                    >
+                      <Trash2 className="w-3.5 h-3.5 text-red-400" />
+                    </button>
+                  )}
+                  <ChevronRight className="w-5 h-5 text-gray-400 group-hover:text-blue-500 transition-colors" />
+                </div>
               </div>
             </button>
           ))}
@@ -559,8 +596,8 @@ function CasesTab({ cases, loading, onRefresh, onCreateCase, organizationId }: {
 // ────────────────────────────────────────────────────────────────────────────────
 // POLICIES TAB
 // ────────────────────────────────────────────────────────────────────────────────
-function PoliciesTab({ policies, loading, onRefresh, onCreatePolicy }: {
-  policies: WorkplacePolicy[]; loading: boolean; onRefresh: () => void; onCreatePolicy: () => void;
+function PoliciesTab({ policies, loading, onRefresh, onCreatePolicy, onDeletePolicy }: {
+  policies: WorkplacePolicy[]; loading: boolean; onRefresh: () => void; onCreatePolicy: () => void; onDeletePolicy: (id: string) => void;
 }) {
   return (
     <div className="space-y-6">
@@ -609,11 +646,20 @@ function PoliciesTab({ policies, loading, onRefresh, onCreatePolicy }: {
                     <p className="text-xs text-gray-500 dark:text-gray-400">v{p.version}</p>
                   </div>
                 </div>
+              <div className="flex items-center gap-2">
                 <span className={`px-2.5 py-0.5 rounded-full text-xs font-semibold ${
                   p.status === 'ACTIVE' ? 'bg-green-100 text-green-700 dark:bg-green-900/30 dark:text-green-400' : 'bg-gray-100 text-gray-600 dark:bg-gray-700 dark:text-gray-400'
                 }`}>
                   {p.status}
                 </span>
+                <button
+                  onClick={(e) => { e.stopPropagation(); onDeletePolicy(p.id); }}
+                  className="p-1.5 rounded-lg hover:bg-red-100 dark:hover:bg-red-900/20 transition-colors"
+                  title="Delete policy"
+                >
+                  <Trash2 className="w-3.5 h-3.5 text-red-400" />
+                </button>
+              </div>
               </div>
               {p.description && <p className="mt-3 text-sm text-gray-600 dark:text-gray-400 line-clamp-2">{p.description}</p>}
               <div className="mt-4 flex items-center gap-4 text-xs text-gray-400 dark:text-gray-500">
@@ -636,9 +682,16 @@ function PoliciesTab({ policies, loading, onRefresh, onCreatePolicy }: {
 // ────────────────────────────────────────────────────────────────────────────────
 // ANALYTICS TAB
 // ────────────────────────────────────────────────────────────────────────────────
-function AnalyticsTab({ analytics, loading, onRefresh }: {
-  analytics: CaseAnalytics | null; loading: boolean; onRefresh: () => void;
+function AnalyticsTab({ analytics, loading, onRefresh, onTimeRangeChange, timeRange }: {
+  analytics: CaseAnalytics | null; loading: boolean; onRefresh: () => void; onTimeRangeChange: (range: string) => void; timeRange: string;
 }) {
+  const timeRanges = [
+    { value: '30', label: '30 Days' },
+    { value: '90', label: '90 Days' },
+    { value: '365', label: '12 Months' },
+    { value: 'all', label: 'All Time' },
+  ];
+
   if (loading) {
     return (
       <div className="flex items-center justify-center py-20">
@@ -664,9 +717,26 @@ function AnalyticsTab({ analytics, loading, onRefresh }: {
           <h3 className="text-lg font-bold text-gray-900 dark:text-white">Analytics Dashboard</h3>
           <p className="text-sm text-gray-500 dark:text-gray-400">Overview of conflict resolution metrics</p>
         </div>
-        <button onClick={onRefresh} title="Refresh" className="p-2.5 rounded-xl border border-gray-300 dark:border-gray-600 hover:bg-gray-100 dark:hover:bg-gray-700 transition-colors">
-          <RefreshCw className={`w-4 h-4 text-gray-500 ${loading ? 'animate-spin' : ''}`} />
-        </button>
+        <div className="flex items-center gap-2">
+          <div className="flex items-center rounded-xl border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-800 overflow-hidden">
+            {timeRanges.map(tr => (
+              <button
+                key={tr.value}
+                onClick={() => onTimeRangeChange(tr.value)}
+                className={`px-3.5 py-2 text-xs font-semibold transition-colors ${
+                  timeRange === tr.value
+                    ? 'bg-blue-600 text-white'
+                    : 'text-gray-600 dark:text-gray-400 hover:bg-gray-100 dark:hover:bg-gray-700'
+                }`}
+              >
+                {tr.label}
+              </button>
+            ))}
+          </div>
+          <button onClick={onRefresh} title="Refresh" className="p-2.5 rounded-xl border border-gray-300 dark:border-gray-600 hover:bg-gray-100 dark:hover:bg-gray-700 transition-colors">
+            <RefreshCw className={`w-4 h-4 text-gray-500 ${loading ? 'animate-spin' : ''}`} />
+          </button>
+        </div>
       </div>
 
       {/* Summary Stats */}
@@ -829,13 +899,16 @@ function HRPageContent() {
   const [showCreateCase, setShowCreateCase] = useState(false);
   const [showCreatePolicy, setShowCreatePolicy] = useState(false);
 
+  // Analytics time range
+  const [timeRange, setTimeRange] = useState('all');
+
   const orgId = user?.organizationId || '';
 
   const loadCases = useCallback(async () => {
     if (!orgId) return;
     setCasesLoading(true);
     try {
-      const res = await fetchCases({ organizationId: orgId, createdBy: user?.id, limit: 200 });
+      const res = await fetchCases({ organizationId: orgId, limit: 200 });
       setCases(res.data);
     } catch (err) {
       console.error('Failed to load cases:', err);
@@ -862,14 +935,21 @@ function HRPageContent() {
     if (!orgId) return;
     setAnalyticsLoading(true);
     try {
-      const data = await fetchAnalytics({ organizationId: orgId });
+      const params: any = { organizationId: orgId };
+      if (timeRange !== 'all') {
+        const days = parseInt(timeRange);
+        const start = new Date();
+        start.setDate(start.getDate() - days);
+        params.startDate = start.toISOString();
+      }
+      const data = await fetchAnalytics(params);
       setAnalytics(data);
     } catch (err) {
       console.error('Failed to load analytics:', err);
     } finally {
       setAnalyticsLoading(false);
     }
-  }, [orgId]);
+  }, [orgId, timeRange]);
 
   useEffect(() => {
     loadCases();
@@ -947,6 +1027,13 @@ function HRPageContent() {
             loading={casesLoading}
             onRefresh={loadCases}
             onCreateCase={() => setShowCreateCase(true)}
+            onDeleteCase={async (id, caseNumber) => {
+              if (!confirm(`Delete case ${caseNumber}? This action cannot be undone.`)) return;
+              try {
+                await deleteCase(id);
+                setCases(prev => prev.filter(c => c.id !== id));
+              } catch (err) { console.error('Failed to delete case:', err); }
+            }}
             organizationId={orgId}
           />
         )}
@@ -956,6 +1043,13 @@ function HRPageContent() {
             loading={policiesLoading}
             onRefresh={loadPolicies}
             onCreatePolicy={() => setShowCreatePolicy(true)}
+            onDeletePolicy={async (id) => {
+              if (!confirm('Delete this policy? This cannot be undone.')) return;
+              try {
+                await deletePolicy(id);
+                setPolicies(prev => prev.filter(p => p.id !== id));
+              } catch (err) { console.error('Failed to delete policy:', err); }
+            }}
           />
         )}
         {activeTab === 'analytics' && (
@@ -963,6 +1057,11 @@ function HRPageContent() {
             analytics={analytics}
             loading={analyticsLoading}
             onRefresh={loadAnalytics}
+            timeRange={timeRange}
+            onTimeRangeChange={(range) => {
+              setTimeRange(range);
+              setAnalytics(null); // force re-fetch
+            }}
           />
         )}
       </div>
