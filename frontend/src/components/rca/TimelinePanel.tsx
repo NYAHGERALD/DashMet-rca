@@ -3,6 +3,7 @@
 import { useState, useEffect } from 'react';
 import { formatRelativeDateTime } from '@/lib/dateUtils';
 import api from '@/lib/api';
+import LoadingState from '@/components/ui/LoadingState';
 
 interface TimelineEvent {
   id: string;
@@ -106,11 +107,7 @@ export default function TimelinePanel({ incidentId }: TimelinePanelProps) {
   const formatDate = (dateString: string) => formatRelativeDateTime(dateString);
 
   if (loading) {
-    return (
-      <div className="flex justify-center py-8">
-        <div className="animate-spin rounded-full h-6 w-6 border-b-2 border-blue-600"></div>
-      </div>
-    );
+    return <LoadingState message="Loading timeline..." icon="data" color="blue" fullScreen={false} />;
   }
 
   if (error) {

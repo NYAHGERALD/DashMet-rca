@@ -8,6 +8,7 @@ import { formatDate } from '@/lib/dateUtils';
 import Link from 'next/link';
 import Image from 'next/image';
 import SlidingSidebar from '@/components/ui/SlidingSidebar';
+import { useSettingsModal } from '@/components/settings/SettingsModalProvider';
 
 interface Organization {
   id: string;
@@ -39,6 +40,7 @@ interface AccessCode {
 
 function SystemAdminContent() {
   const { user, logout } = useAuth();
+  const { openSettings } = useSettingsModal();
   const [organizations, setOrganizations] = useState<Organization[]>([]);
   const [stats, setStats] = useState<SystemStats | null>(null);
   const [accessCodes, setAccessCodes] = useState<AccessCode[]>([]);
@@ -165,7 +167,7 @@ function SystemAdminContent() {
         links={[
           { href: '/dashboard', icon: '🏠', label: 'Dashboard' },
           { href: '/system-admin', icon: '🏢', label: 'System Admin Portal' },
-          { href: '/settings', icon: '⚙️', label: 'Settings' },
+          { icon: '⚙️', label: 'Settings', onClick: () => openSettings() },
         ]}
       />
 

@@ -5,10 +5,11 @@ import Link from 'next/link';
 import { useRouter } from 'next/navigation';
 
 interface SidebarLink {
-  href: string;
+  href?: string;
   icon: string;
   label: string;
   show?: boolean;
+  onClick?: () => void;
 }
 
 interface SlidingSidebarProps {
@@ -277,25 +278,45 @@ export default function SlidingSidebar({
 
         {/* Links */}
         <nav ref={navRef} className="p-2 sm:p-4 space-y-1 sm:space-y-2 overflow-y-auto scroll-smooth" style={{ maxHeight: 'calc(100vh - 12rem)' }}>
-          {visibleLinks.map((link, index) => (
-            <Link
-              key={index}
-              href={link.href}
-              onClick={() => setIsOpen(false)}
-              className="flex items-center gap-2 sm:gap-3 px-3 sm:px-4 py-2 sm:py-3 rounded-lg text-gray-700 dark:text-gray-200 hover:bg-gray-100 dark:hover:bg-gray-700 transition-colors group"
-            >
-              <span className="text-lg sm:text-xl group-hover:scale-110 transition-transform">{link.icon}</span>
-              <span className="text-sm sm:text-base font-medium">{link.label}</span>
-              <svg
-                className="w-4 h-4 ml-auto opacity-0 group-hover:opacity-100 transition-opacity text-gray-400"
-                fill="none"
-                viewBox="0 0 24 24"
-                stroke="currentColor"
+          {visibleLinks.map((link, index) => {
+            const content = (
+              <>
+                <span className="text-lg sm:text-xl group-hover:scale-110 transition-transform">{link.icon}</span>
+                <span className="text-sm sm:text-base font-medium">{link.label}</span>
+                <svg
+                  className="w-4 h-4 ml-auto opacity-0 group-hover:opacity-100 transition-opacity text-gray-400"
+                  fill="none"
+                  viewBox="0 0 24 24"
+                  stroke="currentColor"
+                >
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 5l7 7-7 7" />
+                </svg>
+              </>
+            );
+
+            if (link.onClick) {
+              return (
+                <button
+                  key={index}
+                  onClick={() => { setIsOpen(false); link.onClick!(); }}
+                  className="w-full flex items-center gap-2 sm:gap-3 px-3 sm:px-4 py-2 sm:py-3 rounded-lg text-gray-700 dark:text-gray-200 hover:bg-gray-100 dark:hover:bg-gray-700 transition-colors group"
+                >
+                  {content}
+                </button>
+              );
+            }
+
+            return (
+              <Link
+                key={index}
+                href={link.href || '#'}
+                onClick={() => setIsOpen(false)}
+                className="flex items-center gap-2 sm:gap-3 px-3 sm:px-4 py-2 sm:py-3 rounded-lg text-gray-700 dark:text-gray-200 hover:bg-gray-100 dark:hover:bg-gray-700 transition-colors group"
               >
-                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 5l7 7-7 7" />
-              </svg>
-            </Link>
-          ))}
+                {content}
+              </Link>
+            );
+          })}
         </nav>
 
         {/* Scroll down indicator */}

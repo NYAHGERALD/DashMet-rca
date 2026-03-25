@@ -3,6 +3,7 @@
 import React, { useState, useEffect } from 'react';
 import api from '@/lib/api';
 import { useToast } from '@/components/ui/Toast';
+import LoadingState from '@/components/ui/LoadingState';
 
 interface FiveWhysStep {
   stepNumber: number;
@@ -687,14 +688,7 @@ export default function FiveWhysBuilder({
 
           {/* Loading First Question */}
           {loadingFirstQuestion && (
-            <div className="flex flex-col items-center justify-center py-8">
-              <svg className="animate-spin h-12 w-12 text-purple-600 mb-4" viewBox="0 0 24 24">
-                <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" fill="none" />
-                <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z" />
-              </svg>
-              <p className="text-purple-900 dark:text-purple-100 font-medium">Analyzing incident data...</p>
-              <p className="text-sm text-purple-700 dark:text-purple-300 mt-1">Generating a contextual first question</p>
-            </div>
+            <LoadingState message="Generating a contextual first question" title="Analyzing incident data..." icon="search" color="purple" fullScreen={false} />
           )}
 
           {/* Step 1: Awaiting First Why */}
@@ -746,14 +740,7 @@ export default function FiveWhysBuilder({
 
           {/* Step 2: Validating */}
           {aiWorkflowStep === 'validating' && (
-            <div className="flex flex-col items-center justify-center py-8">
-              <svg className="animate-spin h-12 w-12 text-purple-600 mb-4" viewBox="0 0 24 24">
-                <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" fill="none" />
-                <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z" />
-              </svg>
-              <p className="text-purple-900 dark:text-purple-100 font-medium">Validating your response against incident data...</p>
-              <p className="text-sm text-purple-700 dark:text-purple-300 mt-1">This ensures the analysis starts on the right track</p>
-            </div>
+            <LoadingState message="This ensures the analysis starts on the right track" title="Validating your response..." icon="search" color="purple" fullScreen={false} />
           )}
 
           {/* Step 3: Validation Feedback */}
@@ -864,14 +851,7 @@ export default function FiveWhysBuilder({
 
           {/* Step 4: Generating Remaining */}
           {aiWorkflowStep === 'generating_remaining' && (
-            <div className="flex flex-col items-center justify-center py-8">
-              <svg className="animate-spin h-12 w-12 text-purple-600 mb-4" viewBox="0 0 24 24">
-                <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" fill="none" />
-                <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z" />
-              </svg>
-              <p className="text-purple-900 dark:text-purple-100 font-medium">Generating complete 5 Whys analysis...</p>
-              <p className="text-sm text-purple-700 dark:text-purple-300 mt-1">Building on your first answer to find the root cause</p>
-            </div>
+            <LoadingState message="Building on your first answer to find the root cause" title="Generating 5 Whys analysis..." icon="search" color="purple" fullScreen={false} />
           )}
 
           {/* Step 5: Complete - Show Results */}

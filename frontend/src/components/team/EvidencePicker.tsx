@@ -1,6 +1,7 @@
 'use client';
 
 import React, { useState, useEffect, useCallback, useRef } from 'react';
+import LoadingState from '@/components/ui/LoadingState';
 import {
   FileText,
   Image as ImageIcon,
@@ -209,9 +210,7 @@ export default function EvidencePicker({
         {/* Evidence List */}
         <div className="flex-1 overflow-y-auto p-3 sm:p-4 space-y-2">
           {loading ? (
-            <div className="flex items-center justify-center py-8">
-              <Loader2 className="w-6 h-6 animate-spin text-blue-500" />
-            </div>
+            <LoadingState message="Loading evidence..." icon="search" color="blue" fullScreen={false} />
           ) : filteredEvidence.length === 0 ? (
             <div className="text-center py-8 text-gray-500 dark:text-gray-400 text-sm">
               {searchQuery ? 'No matching evidence found' : 'No evidence uploaded yet'}

@@ -3,6 +3,7 @@
 import { useState, useEffect } from 'react';
 import api from '@/lib/api';
 import { formatDate } from '@/lib/dateUtils';
+import LoadingState from '@/components/ui/LoadingState';
 
 interface SavedReport {
   id: string;
@@ -74,12 +75,7 @@ export default function SavedReportsList({ rcaId, onClose }: SavedReportsListPro
   };
 
   if (loading) {
-    return (
-      <div className="flex items-center justify-center py-8">
-        <div className="w-6 h-6 border-2 border-blue-500 border-t-transparent rounded-full animate-spin" />
-        <span className="ml-2 text-gray-500 dark:text-gray-400">Loading saved reports...</span>
-      </div>
-    );
+    return <LoadingState message="Loading saved reports..." icon="chart" color="blue" fullScreen={false} />;
   }
 
   if (error) {

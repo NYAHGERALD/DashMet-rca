@@ -1,8 +1,10 @@
 'use client';
 
 import { useState, useEffect, useCallback, useRef, useMemo } from 'react';
+import { createPortal } from 'react-dom';
 import { useAuth } from '@/components/providers/AuthProvider';
 import { useTheme } from '@/components/providers/ThemeProvider';
+import LoadingState from '@/components/ui/LoadingState';
 import api from '@/lib/api';
 import {
   FileText,
@@ -121,9 +123,10 @@ function formatWeekReadable(weekName: string): string {
 interface BakeryMetricsFormProps {
   onStepChange?: (step: number, total: number) => void;
   openRecentSubmissions?: number; // timestamp trigger from parent
+  openTrackerModal?: number; // timestamp trigger from parent
 }
 
-export default function BakeryMetricsForm({ onStepChange, openRecentSubmissions }: BakeryMetricsFormProps) {
+export default function BakeryMetricsForm({ onStepChange, openRecentSubmissions, openTrackerModal }: BakeryMetricsFormProps) {
   const { user } = useAuth();
   const { theme } = useTheme();
 
@@ -253,6 +256,7 @@ export default function BakeryMetricsForm({ onStepChange, openRecentSubmissions 
   const [logFilterUser, setLogFilterUser] = useState('');
   const [logFilterStartDate, setLogFilterStartDate] = useState('');
   const [logFilterEndDate, setLogFilterEndDate] = useState('');
+  const [showTrackerModal, setShowTrackerModal] = useState(false);
 
   const firstInvalidRef = useRef<HTMLInputElement | HTMLSelectElement | null>(null);
 
@@ -917,6 +921,14 @@ export default function BakeryMetricsForm({ onStepChange, openRecentSubmissions 
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [openRecentSubmissions]);
 
+  // Open tracker modal when parent triggers it
+  useEffect(() => {
+    if (openTrackerModal && openTrackerModal > 0) {
+      setShowTrackerModal(true);
+    }
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [openTrackerModal]);
+
   // ─── Input helper ─────────────────────────────────────────────────────────────
   const updateField = (field: keyof FormData, value: string) => {
     setFormData(prev => ({ ...prev, [field]: value }));
@@ -950,6 +962,492 @@ export default function BakeryMetricsForm({ onStepChange, openRecentSubmissions 
     warning: 'bg-orange-500 border-orange-300',
     info: 'bg-blue-500 border-blue-300',
   };
+
+  // ═════════════════════════════════════════════════════════════════════════════
+  // TRACKER CONTENT (reused inline on Step 1 and in modal overlay)
+  // ═════════════════════════════════════════════════════════════════════════════
+  const trackerContent = (
+    <>
+      {/* Header with Tabs */}
+      <div className="bg-gradient-to-r from-amber-500 to-orange-500 px-4 sm:px-5 py-3">
+        <div className="flex items-center justify-between">
+          <div className="flex items-center space-x-2.5">
+            <div className="p-1.5 bg-white/20 rounded-lg">
+              <ClipboardList className="w-4 h-4 text-white" />
+            </div>
+            <div>
+              <h3 className="text-sm font-bold text-white">Data Completeness Tracker</h3>
+              <p className="text-amber-100 text-[10px]">Missing submissions, shifts & metrics across all weeks</p>
+            </div>
+          </div>
+          <div className="flex items-center gap-2">
+            {/* Tab switcher */}
+            <div className="flex bg-white/15 rounded-lg p-0.5">
+              <button
+                onClick={() => setTrackerTab('outstanding')}
+                className={`px-2.5 py-1 rounded-md text-[10px] font-bold transition-all ${
+                  trackerTab === 'outstanding'
+                    ? 'bg-white text-amber-600 shadow-sm'
+                    : 'text-white/80 hover:text-white hover:bg-white/10'
+                }`}
+              >
+                Outstanding
+                {missingData && (() => {
+                  const outstandingCount = missingData.weeks?.reduce((acc: number, w: any) => {
+                    return acc + w.days.filter((d: any) => (d.status === 'missing' || d.status === 'incomplete') && !isResolved(w.week_name, d.day)).length;
+                  }, 0) || 0;
+                  return outstandingCount > 0 ? <span className="ml-1 px-1.5 py-0.5 bg-red-500 text-white rounded-full text-[9px]">{outstandingCount}</span> : null;
+                })()}
+              </button>
+              <button
+                onClick={() => setTrackerTab('resolved')}
+                className={`px-2.5 py-1 rounded-md text-[10px] font-bold transition-all ${
+                  trackerTab === 'resolved'
+                    ? 'bg-white text-amber-600 shadow-sm'
+                    : 'text-white/80 hover:text-white hover:bg-white/10'
+                }`}
+              >
+                Resolved
+                {resolutions.length > 0 && <span className="ml-1 px-1.5 py-0.5 bg-green-500 text-white rounded-full text-[9px]">{resolutions.length}</span>}
+              </button>
+              <button
+                onClick={() => setTrackerTab('activity')}
+                className={`px-2.5 py-1 rounded-md text-[10px] font-bold transition-all ${
+                  trackerTab === 'activity'
+                    ? 'bg-white text-amber-600 shadow-sm'
+                    : 'text-white/80 hover:text-white hover:bg-white/10'
+                }`}
+              >
+                Activity Log
+              </button>
+            </div>
+            {missingData && (
+              <span className="text-[10px] text-amber-100 font-medium hidden sm:inline">{missingData.total_weeks} week(s)</span>
+            )}
+          </div>
+        </div>
+      </div>
+
+      {/* Content */}
+      <div className="max-h-[55vh] overflow-y-auto scrollbar-thin flex-1">
+        {missingDataLoading ? (
+          <LoadingState message="Checking all weeks for missing information" title="Analyzing submission data..." icon="data" color="amber" fullScreen={false} />
+        ) : !missingData || missingData.weeks?.length === 0 ? (
+          <div className="flex flex-col items-center justify-center py-12">
+            <div className="w-12 h-12 bg-gray-100 dark:bg-gray-700 rounded-full flex items-center justify-center mb-3">
+              <ClipboardList className="w-6 h-6 text-gray-400" />
+            </div>
+            <p className="text-sm font-medium text-gray-600 dark:text-gray-400">No weeks to analyze</p>
+            <p className="text-[10px] text-gray-400 dark:text-gray-500 mt-0.5">Create weekly sheets first to start tracking completeness</p>
+          </div>
+        ) : trackerTab === 'resolved' ? (
+          /* ── RESOLVED TAB ─────────────────────────────────────────────── */
+          resolutions.length === 0 ? (
+            <div className="flex flex-col items-center justify-center py-12">
+              <div className="w-12 h-12 bg-green-50 dark:bg-green-900/20 rounded-full flex items-center justify-center mb-3">
+                <CheckCircle className="w-6 h-6 text-green-400" />
+              </div>
+              <p className="text-sm font-medium text-gray-600 dark:text-gray-400">No resolved items yet</p>
+              <p className="text-[10px] text-gray-400 dark:text-gray-500 mt-0.5">Resolve outstanding issues to see them here</p>
+            </div>
+          ) : (
+            <div className="divide-y divide-gray-100 dark:divide-gray-700">
+              {resolutions.map((res: any) => {
+                const weekFormatted = formatWeekReadable(res.weekName);
+                const shiftLabel = res.shiftType === 'first' ? '1st Shift' : res.shiftType === 'second' ? '2nd Shift' : null;
+                return (
+                  <div key={`${res.weekName}-${res.dayOfWeek}-${res.shiftType || 'day'}`} className="px-4 sm:px-5 py-3 hover:bg-gray-50 dark:hover:bg-gray-700/40 transition-colors">
+                    <div className="flex items-start justify-between gap-3">
+                      <div className="flex items-start gap-3 min-w-0 flex-1">
+                        <div className="w-2.5 h-2.5 rounded-full bg-green-500 mt-1.5 flex-shrink-0" />
+                        <div className="min-w-0">
+                          <p className="text-xs font-bold text-gray-900 dark:text-gray-100">
+                            {res.dayOfWeek} — {weekFormatted}
+                            {shiftLabel && (
+                              <span className="ml-1.5 text-[9px] px-1.5 py-0.5 rounded bg-blue-100 dark:bg-blue-900/30 text-blue-700 dark:text-blue-300 font-bold">
+                                {shiftLabel}
+                              </span>
+                            )}
+                          </p>
+                          <div className="flex items-start gap-1.5 mt-1">
+                            <MessageSquare className="w-3 h-3 text-gray-400 flex-shrink-0 mt-0.5" />
+                            <p className="text-[11px] text-gray-600 dark:text-gray-400 leading-relaxed">{res.reason}</p>
+                          </div>
+                          <p className="text-[9px] text-gray-400 dark:text-gray-500 mt-1">
+                            Resolved by <span className="font-semibold">{res.resolvedBy}</span> · {new Date(res.resolvedAt).toLocaleString('en-US', { month: 'short', day: 'numeric', year: 'numeric', hour: 'numeric', minute: '2-digit', hour12: true })}
+                          </p>
+                        </div>
+                      </div>
+                      <div className="flex items-center gap-2 flex-shrink-0">
+                        <button
+                          onClick={() => setUnresolveConfirm({ weekName: res.weekName, dayOfWeek: res.dayOfWeek, shiftType: res.shiftType })}
+                          className="inline-flex items-center gap-1 px-2 py-1 bg-gray-100 dark:bg-gray-700 hover:bg-red-50 dark:hover:bg-red-900/20 text-gray-500 hover:text-red-600 dark:text-gray-400 dark:hover:text-red-400 border border-gray-200 dark:border-gray-600 hover:border-red-300 dark:hover:border-red-700 rounded-md text-[9px] font-bold transition-all active:scale-95"
+                          title="Move back to Outstanding"
+                        >
+                          <RotateCcw className="w-3 h-3" /> Put Back
+                        </button>
+                        <span className="text-[9px] font-bold px-2 py-0.5 rounded-full bg-green-100 text-green-700 dark:bg-green-900/30 dark:text-green-300">
+                          Resolved
+                        </span>
+                      </div>
+                    </div>
+                  </div>
+                );
+              })}
+            </div>
+          )
+        ) : trackerTab === 'activity' ? (
+          /* ── ACTIVITY LOG TAB ─────────────────────────────────────────── */
+          <div>
+            {/* Filters */}
+            <div className="px-4 sm:px-5 py-3 bg-gray-50 dark:bg-gray-800/50 border-b border-gray-200 dark:border-gray-700">
+              <div className="flex items-center gap-2 mb-2">
+                <History className="w-3.5 h-3.5 text-gray-500 dark:text-gray-400" />
+                <span className="text-[10px] font-bold text-gray-600 dark:text-gray-300 uppercase tracking-wider">Filters</span>
+                {(logFilterAction || logFilterUser || logFilterStartDate || logFilterEndDate) && (
+                  <button
+                    onClick={() => { setLogFilterAction(''); setLogFilterUser(''); setLogFilterStartDate(''); setLogFilterEndDate(''); }}
+                    className="text-[9px] text-amber-600 dark:text-amber-400 font-bold hover:underline ml-auto"
+                  >
+                    Clear All
+                  </button>
+                )}
+              </div>
+              <div className="grid grid-cols-2 sm:grid-cols-4 gap-2">
+                <select
+                  value={logFilterAction}
+                  onChange={e => setLogFilterAction(e.target.value)}
+                  title="Filter by action type"
+                  className="px-2 py-1.5 rounded-md border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-700 text-gray-700 dark:text-gray-200 text-[10px] font-medium focus:border-amber-400 focus:ring-1 focus:ring-amber-200 dark:focus:ring-amber-800"
+                >
+                  <option value="">All Actions</option>
+                  <option value="RESOLVED">Resolved</option>
+                  <option value="UNRESOLVED">Unresolved</option>
+                  <option value="FILL_NOW">Fill Now</option>
+                </select>
+                <input
+                  type="text"
+                  value={logFilterUser}
+                  onChange={e => setLogFilterUser(e.target.value)}
+                  placeholder="Filter by user..."
+                  className="px-2 py-1.5 rounded-md border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-700 text-gray-700 dark:text-gray-200 text-[10px] font-medium placeholder-gray-400 dark:placeholder-gray-500 focus:border-amber-400 focus:ring-1 focus:ring-amber-200 dark:focus:ring-amber-800"
+                />
+                <input
+                  type="date"
+                  value={logFilterStartDate}
+                  onChange={e => setLogFilterStartDate(e.target.value)}
+                  className="px-2 py-1.5 rounded-md border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-700 text-gray-700 dark:text-gray-200 text-[10px] font-medium focus:border-amber-400 focus:ring-1 focus:ring-amber-200 dark:focus:ring-amber-800"
+                  title="Start date"
+                />
+                <input
+                  type="date"
+                  value={logFilterEndDate}
+                  onChange={e => setLogFilterEndDate(e.target.value)}
+                  className="px-2 py-1.5 rounded-md border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-700 text-gray-700 dark:text-gray-200 text-[10px] font-medium focus:border-amber-400 focus:ring-1 focus:ring-amber-200 dark:focus:ring-amber-800"
+                  title="End date"
+                />
+              </div>
+              <p className="text-[9px] text-gray-400 dark:text-gray-500 mt-1.5">
+                {activityLogsTotalCount} log{activityLogsTotalCount !== 1 ? 's' : ''} found
+              </p>
+            </div>
+
+            {/* Log entries */}
+            {activityLogsLoading ? (
+              <div className="flex flex-col items-center justify-center py-12">
+                <Loader2 className="w-7 h-7 text-amber-500 animate-spin mb-2" />
+                <p className="text-sm font-medium text-gray-600 dark:text-gray-400">Loading activity logs...</p>
+              </div>
+            ) : activityLogs.length === 0 ? (
+              <div className="flex flex-col items-center justify-center py-12">
+                <div className="w-12 h-12 bg-gray-100 dark:bg-gray-700 rounded-full flex items-center justify-center mb-3">
+                  <History className="w-6 h-6 text-gray-400" />
+                </div>
+                <p className="text-sm font-medium text-gray-600 dark:text-gray-400">No activity logs found</p>
+                <p className="text-[10px] text-gray-400 dark:text-gray-500 mt-0.5">
+                  {logFilterAction || logFilterUser || logFilterStartDate || logFilterEndDate
+                    ? 'Try adjusting your filters'
+                    : 'Resolve or unresolve records to generate activity logs'}
+                </p>
+              </div>
+            ) : (
+              <div className="divide-y divide-gray-100 dark:divide-gray-700">
+                {activityLogs.map((log: any) => {
+                  const actionConfig: Record<string, { icon: React.ReactNode; color: string; bgColor: string; label: string; badgeColor: string }> = {
+                    RESOLVED: {
+                      icon: <CheckCircle className="w-3.5 h-3.5 text-green-500" />,
+                      color: 'border-l-green-500',
+                      bgColor: 'bg-green-50/40 dark:bg-green-900/10',
+                      label: 'Resolved',
+                      badgeColor: 'bg-green-100 text-green-700 dark:bg-green-900/30 dark:text-green-300',
+                    },
+                    UNRESOLVED: {
+                      icon: <RotateCcw className="w-3.5 h-3.5 text-orange-500" />,
+                      color: 'border-l-orange-500',
+                      bgColor: 'bg-orange-50/40 dark:bg-orange-900/10',
+                      label: 'Unresolved',
+                      badgeColor: 'bg-orange-100 text-orange-700 dark:bg-orange-900/30 dark:text-orange-300',
+                    },
+                    FILL_NOW: {
+                      icon: <ExternalLink className="w-3.5 h-3.5 text-blue-500" />,
+                      color: 'border-l-blue-500',
+                      bgColor: 'bg-blue-50/40 dark:bg-blue-900/10',
+                      label: 'Fill Now',
+                      badgeColor: 'bg-blue-100 text-blue-700 dark:bg-blue-900/30 dark:text-blue-300',
+                    },
+                  };
+                  const config = actionConfig[log.action] || actionConfig.RESOLVED;
+                  const weekFormatted = formatWeekReadable(log.weekName);
+                  const parsedDetails = log.details ? (() => { try { return JSON.parse(log.details); } catch { return null; } })() : null;
+                  const logDate = new Date(log.createdAt);
+
+                  return (
+                    <div key={log.id} className={`border-l-[3px] ${config.color} ${config.bgColor} px-4 sm:px-5 py-3 hover:bg-gray-50/50 dark:hover:bg-gray-700/30 transition-colors`}>
+                      <div className="flex items-start justify-between gap-3">
+                        <div className="flex items-start gap-2.5 min-w-0 flex-1">
+                          <div className="mt-0.5 flex-shrink-0">{config.icon}</div>
+                          <div className="min-w-0">
+                            <div className="flex items-center gap-2 flex-wrap">
+                              <span className={`text-[9px] font-bold px-1.5 py-0.5 rounded-full ${config.badgeColor}`}>{config.label}</span>
+                              <span className="text-xs font-bold text-gray-900 dark:text-gray-100">{log.dayOfWeek}</span>
+                              <span className="text-[10px] text-gray-400 dark:text-gray-500">—</span>
+                              <span className="text-[10px] text-gray-600 dark:text-gray-400 font-medium">{weekFormatted}</span>
+                            </div>
+                            {log.reason && (
+                              <div className="flex items-start gap-1.5 mt-1">
+                                <MessageSquare className="w-3 h-3 text-gray-400 flex-shrink-0 mt-0.5" />
+                                <p className="text-[10px] text-gray-600 dark:text-gray-400 leading-relaxed">{log.reason}</p>
+                              </div>
+                            )}
+                            {parsedDetails?.action_description && (
+                              <p className="text-[10px] text-gray-500 dark:text-gray-400 mt-0.5 italic">{parsedDetails.action_description}</p>
+                            )}
+                            <div className="flex items-center gap-3 mt-1.5 flex-wrap">
+                              <span className="text-[9px] text-gray-500 dark:text-gray-400">
+                                <span className="font-semibold text-gray-700 dark:text-gray-300">{log.performedBy}</span>
+                              </span>
+                              <span className="text-[9px] text-gray-400 dark:text-gray-500">
+                                {logDate.toLocaleDateString('en-US', { weekday: 'short', month: 'short', day: 'numeric', year: 'numeric' })} at {logDate.toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit', second: '2-digit', hour12: true })}
+                              </span>
+                              {log.ipAddress && (
+                                <span className="text-[8px] text-gray-400 dark:text-gray-500 font-mono">IP: {log.ipAddress}</span>
+                              )}
+                            </div>
+                          </div>
+                        </div>
+                        <span className="text-[9px] text-gray-400 dark:text-gray-500 flex-shrink-0 font-mono">#{log.id}</span>
+                      </div>
+                    </div>
+                  );
+                })}
+              </div>
+            )}
+          </div>
+        ) : (
+          /* ── OUTSTANDING TAB ──────────────────────────────────────────── */
+          <div className="divide-y divide-gray-100 dark:divide-gray-700">
+            {missingData.weeks.map((week: any) => {
+              const isExpanded = expandedWeeks.has(week.week_name);
+              const hasIssues = week.total_issues > 0 || week.missing_days.length > 0;
+              const isFullyComplete = week.completion_pct === 100 && week.total_issues === 0;
+              const weekFormatted = formatWeekReadable(week.week_name);
+
+              const unresolvedDays = week.days.filter((d: any) =>
+                (d.status === 'missing' || d.status === 'incomplete') && !isResolved(week.week_name, d.day)
+              );
+
+              if (isFullyComplete && unresolvedDays.length === 0) {
+                // Still show complete weeks but collapsed
+              }
+
+              return (
+                <div key={week.week_name}>
+                  <button
+                    onClick={() => toggleWeekExpanded(week.week_name)}
+                    className="w-full flex items-center justify-between px-4 sm:px-5 py-3 hover:bg-gray-50 dark:hover:bg-gray-700/40 transition-colors group text-left"
+                  >
+                    <div className="flex items-center gap-3 min-w-0 flex-1">
+                      <div className={`w-2.5 h-2.5 rounded-full flex-shrink-0 ${
+                        isFullyComplete && unresolvedDays.length === 0 ? 'bg-green-500' : week.completion_pct >= 80 ? 'bg-yellow-500' : week.completion_pct >= 40 ? 'bg-orange-500' : 'bg-red-500'
+                      }`} />
+                      <div className="min-w-0">
+                        <p className="text-xs font-bold text-gray-900 dark:text-gray-100 truncate">{weekFormatted}</p>
+                        <p className="text-[10px] text-gray-500 dark:text-gray-400">
+                          {week.total_submitted}/{week.total_expected} days submitted
+                          {unresolvedDays.length > 0 && (
+                            <span className="text-red-600 dark:text-red-400 ml-1.5">· {unresolvedDays.length} unresolved</span>
+                          )}
+                        </p>
+                      </div>
+                    </div>
+                    <div className="flex items-center gap-2.5 flex-shrink-0">
+                      <span className={`text-[10px] font-bold px-2 py-0.5 rounded-full ${
+                        isFullyComplete && unresolvedDays.length === 0
+                          ? 'bg-green-100 text-green-700 dark:bg-green-900/30 dark:text-green-300'
+                          : hasIssues
+                          ? 'bg-amber-100 text-amber-700 dark:bg-amber-900/30 dark:text-amber-300'
+                          : 'bg-blue-100 text-blue-700 dark:bg-blue-900/30 dark:text-blue-300'
+                      }`}>
+                        {week.completion_pct}%
+                      </span>
+                      <div className="w-16 h-1.5 bg-gray-200 dark:bg-gray-600 rounded-full overflow-hidden hidden sm:block">
+                        <div
+                          className={`h-full rounded-full transition-all ${
+                            isFullyComplete ? 'bg-green-500' : week.completion_pct >= 80 ? 'bg-yellow-500' : 'bg-orange-500'
+                          }`}
+                          style={{ width: `${week.completion_pct}%` }}
+                        />
+                      </div>
+                      {isExpanded
+                        ? <ChevronUp className="w-4 h-4 text-gray-400 group-hover:text-gray-600 dark:group-hover:text-gray-300" />
+                        : <ChevronDown className="w-4 h-4 text-gray-400 group-hover:text-gray-600 dark:group-hover:text-gray-300" />
+                      }
+                    </div>
+                  </button>
+
+                  {isExpanded && (
+                    <div className="px-4 sm:px-5 pb-4 bg-gray-50/50 dark:bg-gray-800/50 border-t border-gray-100 dark:border-gray-700/50">
+                      {week.missing_days.length > 0 && (
+                        <div className="mt-3 mb-3 px-3 py-2 bg-red-50 dark:bg-red-900/15 border border-red-200 dark:border-red-800/40 rounded-lg">
+                          <div className="flex items-center gap-2 mb-1">
+                            <AlertCircle className="w-3.5 h-3.5 text-red-500 flex-shrink-0" />
+                            <span className="text-[11px] font-bold text-red-700 dark:text-red-300">
+                              {week.missing_days.length} day{week.missing_days.length !== 1 ? 's' : ''} not yet submitted
+                            </span>
+                          </div>
+                          <div className="flex flex-wrap gap-1.5 ml-5">
+                            {week.missing_days.map((day: string) => (
+                              <span key={day} className={`text-[10px] font-semibold px-2 py-0.5 rounded-full ${
+                                isResolved(week.week_name, day)
+                                  ? 'text-green-600 dark:text-green-400 bg-green-100 dark:bg-green-900/30 line-through'
+                                  : 'text-red-600 dark:text-red-400 bg-red-100 dark:bg-red-900/30'
+                              }`}>
+                                {day}{isResolved(week.week_name, day) ? ' ✓' : ''}
+                              </span>
+                            ))}
+                          </div>
+                        </div>
+                      )}
+
+                      <div className="space-y-2 mt-2">
+                        {week.days.map((day: any) => {
+                          const resolved = isResolved(week.week_name, day.day);
+                          const resolution = getResolution(week.week_name, day.day);
+                          const statusColors: Record<string, string> = {
+                            complete: 'border-l-green-500 bg-green-50/50 dark:bg-green-900/10',
+                            incomplete: resolved ? 'border-l-green-500 bg-green-50/30 dark:bg-green-900/10' : 'border-l-amber-500 bg-amber-50/50 dark:bg-amber-900/10',
+                            missing: resolved ? 'border-l-green-500 bg-green-50/30 dark:bg-green-900/10' : 'border-l-red-500 bg-red-50/50 dark:bg-red-900/10',
+                          };
+                          const statusIcons: Record<string, React.ReactNode> = {
+                            complete: <CheckCircle className="w-3.5 h-3.5 text-green-500" />,
+                            incomplete: resolved ? <CheckCircle className="w-3.5 h-3.5 text-green-500" /> : <AlertTriangle className="w-3.5 h-3.5 text-amber-500" />,
+                            missing: resolved ? <CheckCircle className="w-3.5 h-3.5 text-green-500" /> : <AlertCircle className="w-3.5 h-3.5 text-red-500" />,
+                          };
+                          const statusLabels: Record<string, string> = {
+                            complete: 'Complete',
+                            incomplete: resolved ? 'Resolved' : 'Has Issues',
+                            missing: resolved ? 'Resolved' : 'Not Submitted',
+                          };
+                          const statusBadgeColors: Record<string, string> = {
+                            complete: 'bg-green-100 text-green-700 dark:bg-green-900/30 dark:text-green-300',
+                            incomplete: resolved ? 'bg-green-100 text-green-700 dark:bg-green-900/30 dark:text-green-300' : 'bg-amber-100 text-amber-700 dark:bg-amber-900/30 dark:text-amber-300',
+                            missing: resolved ? 'bg-green-100 text-green-700 dark:bg-green-900/30 dark:text-green-300' : 'bg-red-100 text-red-700 dark:bg-red-900/30 dark:text-red-300',
+                          };
+
+                          return (
+                            <div
+                              key={day.day}
+                              className={`border-l-[3px] rounded-lg px-3 py-2.5 ${statusColors[day.status]}`}
+                            >
+                              <div className="flex items-center justify-between mb-1">
+                                <div className="flex items-center gap-2">
+                                  {statusIcons[day.status]}
+                                  <span className="text-xs font-bold text-gray-900 dark:text-gray-100">{day.day}</span>
+                                  <span className={`text-[9px] font-bold px-1.5 py-0.5 rounded-full ${statusBadgeColors[day.status]}`}>
+                                    {statusLabels[day.status]}
+                                  </span>
+                                </div>
+                                <div className="flex items-center gap-1.5">
+                                  {(day.status === 'missing' || day.status === 'incomplete') && !resolved && (
+                                    <>
+                                      <button
+                                        onClick={(e) => { e.stopPropagation(); handleFillNow(week.week_name, day.day); }}
+                                        className="inline-flex items-center gap-1 px-2 py-1 bg-blue-500 hover:bg-blue-600 text-white rounded-md text-[9px] font-bold transition-all active:scale-95 shadow-sm"
+                                        title="Fill in this record now"
+                                      >
+                                        <ExternalLink className="w-3 h-3" /> Fill Now
+                                      </button>
+                                      <button
+                                        onClick={(e) => { e.stopPropagation(); setResolveModal({ weekName: week.week_name, dayOfWeek: day.day }); setResolveReason(''); }}
+                                        className="inline-flex items-center gap-1 px-2 py-1 bg-amber-500 hover:bg-amber-600 text-white rounded-md text-[9px] font-bold transition-all active:scale-95 shadow-sm"
+                                        title="Mark as resolved with a reason"
+                                      >
+                                        <PenLine className="w-3 h-3" /> Resolve
+                                      </button>
+                                    </>
+                                  )}
+                                  {day.submitted_by && (
+                                    <div className="text-right">
+                                      <p className="text-[10px] text-gray-500 dark:text-gray-400">
+                                        by <span className="font-semibold">{day.submitted_by}</span>
+                                      </p>
+                                      {day.submitted_at && (
+                                        <p className="text-[9px] text-gray-400 dark:text-gray-500">
+                                          {new Date(day.submitted_at).toLocaleString('en-US', {
+                                            month: 'short', day: 'numeric', year: 'numeric',
+                                            hour: 'numeric', minute: '2-digit', hour12: true,
+                                          })}
+                                        </p>
+                                      )}
+                                    </div>
+                                  )}
+                                </div>
+                              </div>
+
+                              {resolved && resolution && (
+                                <div className="mt-1.5 ml-5 px-2.5 py-1.5 bg-green-50 dark:bg-green-900/15 border border-green-200 dark:border-green-800/40 rounded-md">
+                                  <div className="flex items-start gap-1.5">
+                                    <MessageSquare className="w-3 h-3 text-green-500 flex-shrink-0 mt-0.5" />
+                                    <div>
+                                      <p className="text-[10px] text-green-700 dark:text-green-300">{resolution.reason}</p>
+                                      <p className="text-[9px] text-green-500/70 dark:text-green-400/60 mt-0.5">
+                                        — {resolution.resolvedBy}, {new Date(resolution.resolvedAt).toLocaleDateString('en-US', { month: 'short', day: 'numeric' })}
+                                      </p>
+                                    </div>
+                                  </div>
+                                </div>
+                              )}
+
+                              {day.issues.length > 0 && day.status !== 'missing' && !resolved && (
+                                <div className="mt-1.5 ml-5 space-y-0.5">
+                                  {day.issues.map((issue: string, idx: number) => (
+                                    <div key={idx} className="flex items-start gap-1.5">
+                                      <ChevronRight className="w-3 h-3 text-amber-500 flex-shrink-0 mt-0.5" />
+                                      <span className="text-[10px] text-gray-600 dark:text-gray-400">{issue}</span>
+                                    </div>
+                                  ))}
+                                </div>
+                              )}
+
+                              {day.status === 'missing' && !resolved && (
+                                <p className="text-[10px] text-red-600/80 dark:text-red-400/70 mt-1 ml-5">
+                                  No metrics have been submitted for this day. Please submit your data or resolve with a reason.
+                                </p>
+                              )}
+                            </div>
+                          );
+                        })}
+                      </div>
+                    </div>
+                  )}
+                </div>
+              );
+            })}
+          </div>
+        )}
+      </div>
+    </>
+  );
 
   // ═════════════════════════════════════════════════════════════════════════════
   // RENDER
@@ -1587,548 +2085,31 @@ export default function BakeryMetricsForm({ onStepChange, openRecentSubmissions 
         )}
       </div>
       </div>{/* end flex row left col */}
-
-      {/* ─── Right Sidebar: Tips & Guidelines ───────────────────────────── */}
-      <div className="w-full xl:w-80 2xl:w-96 flex-shrink-0">
-
-        {/* Tips — scrollable to fit available space without pushing content down */}
-        <div className="bg-white dark:bg-gray-800 rounded-xl shadow-md border border-gray-200 dark:border-gray-700 p-4 flex flex-col max-h-[60vh] xl:max-h-[calc(100vh-220px)]">
-          <div className="flex items-center space-x-2 mb-3 flex-shrink-0">
-            <div className="p-1.5 bg-blue-500 rounded-lg">
-              <Lightbulb className="w-4 h-4 text-white" />
-            </div>
-            <h3 className="text-sm font-bold text-gray-800 dark:text-gray-100">Tips & Guidelines</h3>
-          </div>
-          <div className="space-y-2 overflow-y-auto flex-1 pr-1 scrollbar-thin scrollbar-thumb-gray-300 dark:scrollbar-thumb-gray-600">
-            {tipsData.map((tip, idx) => {
-              const iconMap: Record<string, any> = { check: Check, alert: AlertTriangle, clock: Clock, info: Info, lightbulb: Lightbulb, target: Target };
-              const TipIcon = iconMap[tip.icon] || Info;
-              return (
-                <div key={idx} className={`flex items-start space-x-2.5 px-3 py-2 bg-${tip.color}-50 dark:bg-${tip.color}-900/20 rounded-lg border border-${tip.color}-200 dark:border-${tip.color}-700`}>
-                  <div className={`w-6 h-6 bg-${tip.color}-500 rounded-full flex items-center justify-center flex-shrink-0 mt-0.5`}>
-                    <TipIcon className="w-3 h-3 text-white" />
-                  </div>
-                  <div>
-                    <h4 className="text-xs font-bold text-gray-900 dark:text-gray-100">{tip.title}</h4>
-                    <p className="text-[11px] text-gray-600 dark:text-gray-400">{tip.description}</p>
-                  </div>
-                </div>
-              );
-            })}
-          </div>
-        </div>
-      </div>
       </div>{/* end flex row */}
 
-      {/* ─── Missing Data Analysis Section (only on Step 1 — Info) ─────────── */}
-      {currentStep === 1 && (
-      <div className="bg-white dark:bg-gray-800 rounded-xl shadow-md border border-gray-200 dark:border-gray-700 overflow-hidden">
-        {/* Header with Tabs */}
-        <div className="bg-gradient-to-r from-amber-500 to-orange-500 px-4 sm:px-5 py-3">
-          <div className="flex items-center justify-between">
-            <div className="flex items-center space-x-2.5">
-              <div className="p-1.5 bg-white/20 rounded-lg">
-                <ClipboardList className="w-4 h-4 text-white" />
-              </div>
-              <div>
-                <h3 className="text-sm font-bold text-white">Data Completeness Tracker</h3>
-                <p className="text-amber-100 text-[10px]">Missing submissions, shifts & metrics across all weeks</p>
-              </div>
-            </div>
-            <div className="flex items-center gap-2">
-              {/* Tab switcher */}
-              <div className="flex bg-white/15 rounded-lg p-0.5">
+      {/* ─── Data Completeness Tracker Modal ────────────────────────────────── */}
+      {showTrackerModal && createPortal(
+        <div className="fixed inset-0 z-50" onClick={() => setShowTrackerModal(false)}>
+          <div className="absolute inset-0 backdrop-blur-sm bg-black/30" />
+          <div className="relative h-full flex items-center justify-center p-4">
+            <div
+              className="bg-white dark:bg-gray-800 rounded-xl shadow-2xl border border-gray-200 dark:border-gray-700 w-full max-w-4xl max-h-[85vh] overflow-hidden flex flex-col"
+              onClick={e => e.stopPropagation()}
+            >
+              {trackerContent}
+              {/* Close button footer */}
+              <div className="flex-shrink-0 px-4 py-3 border-t border-gray-200 dark:border-gray-700 bg-gray-50 dark:bg-gray-800/80 flex justify-end">
                 <button
-                  onClick={() => setTrackerTab('outstanding')}
-                  className={`px-2.5 py-1 rounded-md text-[10px] font-bold transition-all ${
-                    trackerTab === 'outstanding'
-                      ? 'bg-white text-amber-600 shadow-sm'
-                      : 'text-white/80 hover:text-white hover:bg-white/10'
-                  }`}
+                  onClick={() => setShowTrackerModal(false)}
+                  className="px-4 py-2 bg-gray-200 dark:bg-gray-700 text-gray-700 dark:text-gray-300 text-xs font-bold rounded-lg hover:bg-gray-300 dark:hover:bg-gray-600 transition-all active:scale-95"
                 >
-                  Outstanding
-                  {missingData && (() => {
-                    const outstandingCount = missingData.weeks?.reduce((acc: number, w: any) => {
-                      return acc + w.days.filter((d: any) => (d.status === 'missing' || d.status === 'incomplete') && !isResolved(w.week_name, d.day)).length;
-                    }, 0) || 0;
-                    return outstandingCount > 0 ? <span className="ml-1 px-1.5 py-0.5 bg-red-500 text-white rounded-full text-[9px]">{outstandingCount}</span> : null;
-                  })()}
-                </button>
-                <button
-                  onClick={() => setTrackerTab('resolved')}
-                  className={`px-2.5 py-1 rounded-md text-[10px] font-bold transition-all ${
-                    trackerTab === 'resolved'
-                      ? 'bg-white text-amber-600 shadow-sm'
-                      : 'text-white/80 hover:text-white hover:bg-white/10'
-                  }`}
-                >
-                  Resolved
-                  {resolutions.length > 0 && <span className="ml-1 px-1.5 py-0.5 bg-green-500 text-white rounded-full text-[9px]">{resolutions.length}</span>}
-                </button>
-                <button
-                  onClick={() => setTrackerTab('activity')}
-                  className={`px-2.5 py-1 rounded-md text-[10px] font-bold transition-all ${
-                    trackerTab === 'activity'
-                      ? 'bg-white text-amber-600 shadow-sm'
-                      : 'text-white/80 hover:text-white hover:bg-white/10'
-                  }`}
-                >
-                  Activity Log
+                  Close
                 </button>
               </div>
-              {missingData && (
-                <span className="text-[10px] text-amber-100 font-medium hidden sm:inline">{missingData.total_weeks} week(s)</span>
-              )}
             </div>
           </div>
         </div>
-
-        {/* Content */}
-        <div className="max-h-[55vh] overflow-y-auto scrollbar-thin">
-          {missingDataLoading ? (
-            <div className="flex flex-col items-center justify-center py-12">
-              <Loader2 className="w-7 h-7 text-amber-500 animate-spin mb-2" />
-              <p className="text-sm font-medium text-gray-600 dark:text-gray-400">Analyzing submission data...</p>
-              <p className="text-[10px] text-gray-400 dark:text-gray-500 mt-0.5">Checking all weeks for missing information</p>
-            </div>
-          ) : !missingData || missingData.weeks?.length === 0 ? (
-            <div className="flex flex-col items-center justify-center py-12">
-              <div className="w-12 h-12 bg-gray-100 dark:bg-gray-700 rounded-full flex items-center justify-center mb-3">
-                <ClipboardList className="w-6 h-6 text-gray-400" />
-              </div>
-              <p className="text-sm font-medium text-gray-600 dark:text-gray-400">No weeks to analyze</p>
-              <p className="text-[10px] text-gray-400 dark:text-gray-500 mt-0.5">Create weekly sheets first to start tracking completeness</p>
-            </div>
-          ) : trackerTab === 'resolved' ? (
-            /* ── RESOLVED TAB ─────────────────────────────────────────────── */
-            resolutions.length === 0 ? (
-              <div className="flex flex-col items-center justify-center py-12">
-                <div className="w-12 h-12 bg-green-50 dark:bg-green-900/20 rounded-full flex items-center justify-center mb-3">
-                  <CheckCircle className="w-6 h-6 text-green-400" />
-                </div>
-                <p className="text-sm font-medium text-gray-600 dark:text-gray-400">No resolved items yet</p>
-                <p className="text-[10px] text-gray-400 dark:text-gray-500 mt-0.5">Resolve outstanding issues to see them here</p>
-              </div>
-            ) : (
-              <div className="divide-y divide-gray-100 dark:divide-gray-700">
-                {resolutions.map((res: any) => {
-                  const weekFormatted = formatWeekReadable(res.weekName);
-                  const shiftLabel = res.shiftType === 'first' ? '1st Shift' : res.shiftType === 'second' ? '2nd Shift' : null;
-                  return (
-                    <div key={`${res.weekName}-${res.dayOfWeek}-${res.shiftType || 'day'}`} className="px-4 sm:px-5 py-3 hover:bg-gray-50 dark:hover:bg-gray-700/40 transition-colors">
-                      <div className="flex items-start justify-between gap-3">
-                        <div className="flex items-start gap-3 min-w-0 flex-1">
-                          <div className="w-2.5 h-2.5 rounded-full bg-green-500 mt-1.5 flex-shrink-0" />
-                          <div className="min-w-0">
-                            <p className="text-xs font-bold text-gray-900 dark:text-gray-100">
-                              {res.dayOfWeek} — {weekFormatted}
-                              {shiftLabel && (
-                                <span className="ml-1.5 text-[9px] px-1.5 py-0.5 rounded bg-blue-100 dark:bg-blue-900/30 text-blue-700 dark:text-blue-300 font-bold">
-                                  {shiftLabel}
-                                </span>
-                              )}
-                            </p>
-                            <div className="flex items-start gap-1.5 mt-1">
-                              <MessageSquare className="w-3 h-3 text-gray-400 flex-shrink-0 mt-0.5" />
-                              <p className="text-[11px] text-gray-600 dark:text-gray-400 leading-relaxed">{res.reason}</p>
-                            </div>
-                            <p className="text-[9px] text-gray-400 dark:text-gray-500 mt-1">
-                              Resolved by <span className="font-semibold">{res.resolvedBy}</span> · {new Date(res.resolvedAt).toLocaleString('en-US', { month: 'short', day: 'numeric', year: 'numeric', hour: 'numeric', minute: '2-digit', hour12: true })}
-                            </p>
-                          </div>
-                        </div>
-                        <div className="flex items-center gap-2 flex-shrink-0">
-                          <button
-                            onClick={() => setUnresolveConfirm({ weekName: res.weekName, dayOfWeek: res.dayOfWeek, shiftType: res.shiftType })}
-                            className="inline-flex items-center gap-1 px-2 py-1 bg-gray-100 dark:bg-gray-700 hover:bg-red-50 dark:hover:bg-red-900/20 text-gray-500 hover:text-red-600 dark:text-gray-400 dark:hover:text-red-400 border border-gray-200 dark:border-gray-600 hover:border-red-300 dark:hover:border-red-700 rounded-md text-[9px] font-bold transition-all active:scale-95"
-                            title="Move back to Outstanding"
-                          >
-                            <RotateCcw className="w-3 h-3" /> Put Back
-                          </button>
-                          <span className="text-[9px] font-bold px-2 py-0.5 rounded-full bg-green-100 text-green-700 dark:bg-green-900/30 dark:text-green-300">
-                            Resolved
-                          </span>
-                        </div>
-                      </div>
-                    </div>
-                  );
-                })}
-              </div>
-            )
-          ) : trackerTab === 'activity' ? (
-            /* ── ACTIVITY LOG TAB ─────────────────────────────────────────── */
-            <div>
-              {/* Filters */}
-              <div className="px-4 sm:px-5 py-3 bg-gray-50 dark:bg-gray-800/50 border-b border-gray-200 dark:border-gray-700">
-                <div className="flex items-center gap-2 mb-2">
-                  <History className="w-3.5 h-3.5 text-gray-500 dark:text-gray-400" />
-                  <span className="text-[10px] font-bold text-gray-600 dark:text-gray-300 uppercase tracking-wider">Filters</span>
-                  {(logFilterAction || logFilterUser || logFilterStartDate || logFilterEndDate) && (
-                    <button
-                      onClick={() => { setLogFilterAction(''); setLogFilterUser(''); setLogFilterStartDate(''); setLogFilterEndDate(''); }}
-                      className="text-[9px] text-amber-600 dark:text-amber-400 font-bold hover:underline ml-auto"
-                    >
-                      Clear All
-                    </button>
-                  )}
-                </div>
-                <div className="grid grid-cols-2 sm:grid-cols-4 gap-2">
-                  <select
-                    value={logFilterAction}
-                    onChange={e => setLogFilterAction(e.target.value)}
-                    title="Filter by action type"
-                    className="px-2 py-1.5 rounded-md border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-700 text-gray-700 dark:text-gray-200 text-[10px] font-medium focus:border-amber-400 focus:ring-1 focus:ring-amber-200 dark:focus:ring-amber-800"
-                  >
-                    <option value="">All Actions</option>
-                    <option value="RESOLVED">Resolved</option>
-                    <option value="UNRESOLVED">Unresolved</option>
-                    <option value="FILL_NOW">Fill Now</option>
-                  </select>
-                  <input
-                    type="text"
-                    value={logFilterUser}
-                    onChange={e => setLogFilterUser(e.target.value)}
-                    placeholder="Filter by user..."
-                    className="px-2 py-1.5 rounded-md border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-700 text-gray-700 dark:text-gray-200 text-[10px] font-medium placeholder-gray-400 dark:placeholder-gray-500 focus:border-amber-400 focus:ring-1 focus:ring-amber-200 dark:focus:ring-amber-800"
-                  />
-                  <input
-                    type="date"
-                    value={logFilterStartDate}
-                    onChange={e => setLogFilterStartDate(e.target.value)}
-                    className="px-2 py-1.5 rounded-md border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-700 text-gray-700 dark:text-gray-200 text-[10px] font-medium focus:border-amber-400 focus:ring-1 focus:ring-amber-200 dark:focus:ring-amber-800"
-                    title="Start date"
-                  />
-                  <input
-                    type="date"
-                    value={logFilterEndDate}
-                    onChange={e => setLogFilterEndDate(e.target.value)}
-                    className="px-2 py-1.5 rounded-md border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-700 text-gray-700 dark:text-gray-200 text-[10px] font-medium focus:border-amber-400 focus:ring-1 focus:ring-amber-200 dark:focus:ring-amber-800"
-                    title="End date"
-                  />
-                </div>
-                <p className="text-[9px] text-gray-400 dark:text-gray-500 mt-1.5">
-                  {activityLogsTotalCount} log{activityLogsTotalCount !== 1 ? 's' : ''} found
-                </p>
-              </div>
-
-              {/* Log entries */}
-              {activityLogsLoading ? (
-                <div className="flex flex-col items-center justify-center py-12">
-                  <Loader2 className="w-7 h-7 text-amber-500 animate-spin mb-2" />
-                  <p className="text-sm font-medium text-gray-600 dark:text-gray-400">Loading activity logs...</p>
-                </div>
-              ) : activityLogs.length === 0 ? (
-                <div className="flex flex-col items-center justify-center py-12">
-                  <div className="w-12 h-12 bg-gray-100 dark:bg-gray-700 rounded-full flex items-center justify-center mb-3">
-                    <History className="w-6 h-6 text-gray-400" />
-                  </div>
-                  <p className="text-sm font-medium text-gray-600 dark:text-gray-400">No activity logs found</p>
-                  <p className="text-[10px] text-gray-400 dark:text-gray-500 mt-0.5">
-                    {logFilterAction || logFilterUser || logFilterStartDate || logFilterEndDate
-                      ? 'Try adjusting your filters'
-                      : 'Resolve or unresolve records to generate activity logs'}
-                  </p>
-                </div>
-              ) : (
-                <div className="divide-y divide-gray-100 dark:divide-gray-700">
-                  {activityLogs.map((log: any) => {
-                    const actionConfig: Record<string, { icon: React.ReactNode; color: string; bgColor: string; label: string; badgeColor: string }> = {
-                      RESOLVED: {
-                        icon: <CheckCircle className="w-3.5 h-3.5 text-green-500" />,
-                        color: 'border-l-green-500',
-                        bgColor: 'bg-green-50/40 dark:bg-green-900/10',
-                        label: 'Resolved',
-                        badgeColor: 'bg-green-100 text-green-700 dark:bg-green-900/30 dark:text-green-300',
-                      },
-                      UNRESOLVED: {
-                        icon: <RotateCcw className="w-3.5 h-3.5 text-orange-500" />,
-                        color: 'border-l-orange-500',
-                        bgColor: 'bg-orange-50/40 dark:bg-orange-900/10',
-                        label: 'Unresolved',
-                        badgeColor: 'bg-orange-100 text-orange-700 dark:bg-orange-900/30 dark:text-orange-300',
-                      },
-                      FILL_NOW: {
-                        icon: <ExternalLink className="w-3.5 h-3.5 text-blue-500" />,
-                        color: 'border-l-blue-500',
-                        bgColor: 'bg-blue-50/40 dark:bg-blue-900/10',
-                        label: 'Fill Now',
-                        badgeColor: 'bg-blue-100 text-blue-700 dark:bg-blue-900/30 dark:text-blue-300',
-                      },
-                    };
-                    const config = actionConfig[log.action] || actionConfig.RESOLVED;
-                    const weekFormatted = formatWeekReadable(log.weekName);
-                    const parsedDetails = log.details ? (() => { try { return JSON.parse(log.details); } catch { return null; } })() : null;
-                    const logDate = new Date(log.createdAt);
-
-                    return (
-                      <div key={log.id} className={`border-l-[3px] ${config.color} ${config.bgColor} px-4 sm:px-5 py-3 hover:bg-gray-50/50 dark:hover:bg-gray-700/30 transition-colors`}>
-                        <div className="flex items-start justify-between gap-3">
-                          <div className="flex items-start gap-2.5 min-w-0 flex-1">
-                            <div className="mt-0.5 flex-shrink-0">{config.icon}</div>
-                            <div className="min-w-0">
-                              <div className="flex items-center gap-2 flex-wrap">
-                                <span className={`text-[9px] font-bold px-1.5 py-0.5 rounded-full ${config.badgeColor}`}>{config.label}</span>
-                                <span className="text-xs font-bold text-gray-900 dark:text-gray-100">{log.dayOfWeek}</span>
-                                <span className="text-[10px] text-gray-400 dark:text-gray-500">—</span>
-                                <span className="text-[10px] text-gray-600 dark:text-gray-400 font-medium">{weekFormatted}</span>
-                              </div>
-                              {log.reason && (
-                                <div className="flex items-start gap-1.5 mt-1">
-                                  <MessageSquare className="w-3 h-3 text-gray-400 flex-shrink-0 mt-0.5" />
-                                  <p className="text-[10px] text-gray-600 dark:text-gray-400 leading-relaxed">{log.reason}</p>
-                                </div>
-                              )}
-                              {parsedDetails?.action_description && (
-                                <p className="text-[10px] text-gray-500 dark:text-gray-400 mt-0.5 italic">{parsedDetails.action_description}</p>
-                              )}
-                              <div className="flex items-center gap-3 mt-1.5 flex-wrap">
-                                <span className="text-[9px] text-gray-500 dark:text-gray-400">
-                                  <span className="font-semibold text-gray-700 dark:text-gray-300">{log.performedBy}</span>
-                                </span>
-                                <span className="text-[9px] text-gray-400 dark:text-gray-500">
-                                  {logDate.toLocaleDateString('en-US', { weekday: 'short', month: 'short', day: 'numeric', year: 'numeric' })} at {logDate.toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit', second: '2-digit', hour12: true })}
-                                </span>
-                                {log.ipAddress && (
-                                  <span className="text-[8px] text-gray-400 dark:text-gray-500 font-mono">IP: {log.ipAddress}</span>
-                                )}
-                              </div>
-                            </div>
-                          </div>
-                          <span className="text-[9px] text-gray-400 dark:text-gray-500 flex-shrink-0 font-mono">#{log.id}</span>
-                        </div>
-                      </div>
-                    );
-                  })}
-                </div>
-              )}
-            </div>
-          ) : (
-            /* ── OUTSTANDING TAB ──────────────────────────────────────────── */
-            <div className="divide-y divide-gray-100 dark:divide-gray-700">
-              {missingData.weeks.map((week: any) => {
-                const isExpanded = expandedWeeks.has(week.week_name);
-                const hasIssues = week.total_issues > 0 || week.missing_days.length > 0;
-                const isFullyComplete = week.completion_pct === 100 && week.total_issues === 0;
-                const weekFormatted = formatWeekReadable(week.week_name);
-
-                // Count unresolved issues for this week
-                const unresolvedDays = week.days.filter((d: any) =>
-                  (d.status === 'missing' || d.status === 'incomplete') && !isResolved(week.week_name, d.day)
-                );
-
-                // Skip fully-resolved or complete weeks in Outstanding tab
-                if (isFullyComplete && unresolvedDays.length === 0) {
-                  // Still show complete weeks but collapsed
-                }
-
-                return (
-                  <div key={week.week_name}>
-                    {/* Week header row — clickable */}
-                    <button
-                      onClick={() => toggleWeekExpanded(week.week_name)}
-                      className="w-full flex items-center justify-between px-4 sm:px-5 py-3 hover:bg-gray-50 dark:hover:bg-gray-700/40 transition-colors group text-left"
-                    >
-                      <div className="flex items-center gap-3 min-w-0 flex-1">
-                        {/* Status indicator */}
-                        <div className={`w-2.5 h-2.5 rounded-full flex-shrink-0 ${
-                          isFullyComplete && unresolvedDays.length === 0 ? 'bg-green-500' : week.completion_pct >= 80 ? 'bg-yellow-500' : week.completion_pct >= 40 ? 'bg-orange-500' : 'bg-red-500'
-                        }`} />
-
-                        <div className="min-w-0">
-                          <p className="text-xs font-bold text-gray-900 dark:text-gray-100 truncate">
-                            {weekFormatted}
-                          </p>
-                          <p className="text-[10px] text-gray-500 dark:text-gray-400">
-                            {week.total_submitted}/{week.total_expected} days submitted
-                            {unresolvedDays.length > 0 && (
-                              <span className="text-red-600 dark:text-red-400 ml-1.5">
-                                · {unresolvedDays.length} unresolved
-                              </span>
-                            )}
-                          </p>
-                        </div>
-                      </div>
-
-                      <div className="flex items-center gap-2.5 flex-shrink-0">
-                        {/* Completion badge */}
-                        <span className={`text-[10px] font-bold px-2 py-0.5 rounded-full ${
-                          isFullyComplete && unresolvedDays.length === 0
-                            ? 'bg-green-100 text-green-700 dark:bg-green-900/30 dark:text-green-300'
-                            : hasIssues
-                            ? 'bg-amber-100 text-amber-700 dark:bg-amber-900/30 dark:text-amber-300'
-                            : 'bg-blue-100 text-blue-700 dark:bg-blue-900/30 dark:text-blue-300'
-                        }`}>
-                          {week.completion_pct}%
-                        </span>
-
-                        {/* Progress bar */}
-                        <div className="w-16 h-1.5 bg-gray-200 dark:bg-gray-600 rounded-full overflow-hidden hidden sm:block">
-                          <div
-                            className={`h-full rounded-full transition-all ${
-                              isFullyComplete ? 'bg-green-500' : week.completion_pct >= 80 ? 'bg-yellow-500' : 'bg-orange-500'
-                            }`}
-                            style={{ width: `${week.completion_pct}%` }}
-                          />
-                        </div>
-
-                        {/* Chevron */}
-                        {isExpanded
-                          ? <ChevronUp className="w-4 h-4 text-gray-400 group-hover:text-gray-600 dark:group-hover:text-gray-300" />
-                          : <ChevronDown className="w-4 h-4 text-gray-400 group-hover:text-gray-600 dark:group-hover:text-gray-300" />
-                        }
-                      </div>
-                    </button>
-
-                    {/* Expanded detail panel */}
-                    {isExpanded && (
-                      <div className="px-4 sm:px-5 pb-4 bg-gray-50/50 dark:bg-gray-800/50 border-t border-gray-100 dark:border-gray-700/50">
-                        {/* Missing days summary */}
-                        {week.missing_days.length > 0 && (
-                          <div className="mt-3 mb-3 px-3 py-2 bg-red-50 dark:bg-red-900/15 border border-red-200 dark:border-red-800/40 rounded-lg">
-                            <div className="flex items-center gap-2 mb-1">
-                              <AlertCircle className="w-3.5 h-3.5 text-red-500 flex-shrink-0" />
-                              <span className="text-[11px] font-bold text-red-700 dark:text-red-300">
-                                {week.missing_days.length} day{week.missing_days.length !== 1 ? 's' : ''} not yet submitted
-                              </span>
-                            </div>
-                            <div className="flex flex-wrap gap-1.5 ml-5">
-                              {week.missing_days.map((day: string) => (
-                                <span key={day} className={`text-[10px] font-semibold px-2 py-0.5 rounded-full ${
-                                  isResolved(week.week_name, day)
-                                    ? 'text-green-600 dark:text-green-400 bg-green-100 dark:bg-green-900/30 line-through'
-                                    : 'text-red-600 dark:text-red-400 bg-red-100 dark:bg-red-900/30'
-                                }`}>
-                                  {day}{isResolved(week.week_name, day) ? ' ✓' : ''}
-                                </span>
-                              ))}
-                            </div>
-                          </div>
-                        )}
-
-                        {/* Day-by-day breakdown */}
-                        <div className="space-y-2 mt-2">
-                          {week.days.map((day: any) => {
-                            const resolved = isResolved(week.week_name, day.day);
-                            const resolution = getResolution(week.week_name, day.day);
-                            const statusColors: Record<string, string> = {
-                              complete: 'border-l-green-500 bg-green-50/50 dark:bg-green-900/10',
-                              incomplete: resolved ? 'border-l-green-500 bg-green-50/30 dark:bg-green-900/10' : 'border-l-amber-500 bg-amber-50/50 dark:bg-amber-900/10',
-                              missing: resolved ? 'border-l-green-500 bg-green-50/30 dark:bg-green-900/10' : 'border-l-red-500 bg-red-50/50 dark:bg-red-900/10',
-                            };
-                            const statusIcons: Record<string, React.ReactNode> = {
-                              complete: <CheckCircle className="w-3.5 h-3.5 text-green-500" />,
-                              incomplete: resolved ? <CheckCircle className="w-3.5 h-3.5 text-green-500" /> : <AlertTriangle className="w-3.5 h-3.5 text-amber-500" />,
-                              missing: resolved ? <CheckCircle className="w-3.5 h-3.5 text-green-500" /> : <AlertCircle className="w-3.5 h-3.5 text-red-500" />,
-                            };
-                            const statusLabels: Record<string, string> = {
-                              complete: 'Complete',
-                              incomplete: resolved ? 'Resolved' : 'Has Issues',
-                              missing: resolved ? 'Resolved' : 'Not Submitted',
-                            };
-                            const statusBadgeColors: Record<string, string> = {
-                              complete: 'bg-green-100 text-green-700 dark:bg-green-900/30 dark:text-green-300',
-                              incomplete: resolved ? 'bg-green-100 text-green-700 dark:bg-green-900/30 dark:text-green-300' : 'bg-amber-100 text-amber-700 dark:bg-amber-900/30 dark:text-amber-300',
-                              missing: resolved ? 'bg-green-100 text-green-700 dark:bg-green-900/30 dark:text-green-300' : 'bg-red-100 text-red-700 dark:bg-red-900/30 dark:text-red-300',
-                            };
-
-                            return (
-                              <div
-                                key={day.day}
-                                className={`border-l-[3px] rounded-lg px-3 py-2.5 ${statusColors[day.status]}`}
-                              >
-                                <div className="flex items-center justify-between mb-1">
-                                  <div className="flex items-center gap-2">
-                                    {statusIcons[day.status]}
-                                    <span className="text-xs font-bold text-gray-900 dark:text-gray-100">{day.day}</span>
-                                    <span className={`text-[9px] font-bold px-1.5 py-0.5 rounded-full ${statusBadgeColors[day.status]}`}>
-                                      {statusLabels[day.status]}
-                                    </span>
-                                  </div>
-                                  <div className="flex items-center gap-1.5">
-                                    {/* Action buttons for missing/incomplete days */}
-                                    {(day.status === 'missing' || day.status === 'incomplete') && !resolved && (
-                                      <>
-                                        <button
-                                          onClick={(e) => { e.stopPropagation(); handleFillNow(week.week_name, day.day); }}
-                                          className="inline-flex items-center gap-1 px-2 py-1 bg-blue-500 hover:bg-blue-600 text-white rounded-md text-[9px] font-bold transition-all active:scale-95 shadow-sm"
-                                          title="Fill in this record now"
-                                        >
-                                          <ExternalLink className="w-3 h-3" /> Fill Now
-                                        </button>
-                                        <button
-                                          onClick={(e) => { e.stopPropagation(); setResolveModal({ weekName: week.week_name, dayOfWeek: day.day }); setResolveReason(''); }}
-                                          className="inline-flex items-center gap-1 px-2 py-1 bg-amber-500 hover:bg-amber-600 text-white rounded-md text-[9px] font-bold transition-all active:scale-95 shadow-sm"
-                                          title="Mark as resolved with a reason"
-                                        >
-                                          <PenLine className="w-3 h-3" /> Resolve
-                                        </button>
-                                      </>
-                                    )}
-                                    {day.submitted_by && (
-                                      <div className="text-right">
-                                        <p className="text-[10px] text-gray-500 dark:text-gray-400">
-                                          by <span className="font-semibold">{day.submitted_by}</span>
-                                        </p>
-                                        {day.submitted_at && (
-                                          <p className="text-[9px] text-gray-400 dark:text-gray-500">
-                                            {new Date(day.submitted_at).toLocaleString('en-US', {
-                                              month: 'short', day: 'numeric', year: 'numeric',
-                                              hour: 'numeric', minute: '2-digit', hour12: true,
-                                            })}
-                                          </p>
-                                        )}
-                                      </div>
-                                    )}
-                                  </div>
-                                </div>
-
-                                {/* Resolution info */}
-                                {resolved && resolution && (
-                                  <div className="mt-1.5 ml-5 px-2.5 py-1.5 bg-green-50 dark:bg-green-900/15 border border-green-200 dark:border-green-800/40 rounded-md">
-                                    <div className="flex items-start gap-1.5">
-                                      <MessageSquare className="w-3 h-3 text-green-500 flex-shrink-0 mt-0.5" />
-                                      <div>
-                                        <p className="text-[10px] text-green-700 dark:text-green-300">{resolution.reason}</p>
-                                        <p className="text-[9px] text-green-500/70 dark:text-green-400/60 mt-0.5">
-                                          — {resolution.resolvedBy}, {new Date(resolution.resolvedAt).toLocaleDateString('en-US', { month: 'short', day: 'numeric' })}
-                                        </p>
-                                      </div>
-                                    </div>
-                                  </div>
-                                )}
-
-                                {/* Issues list */}
-                                {day.issues.length > 0 && day.status !== 'missing' && !resolved && (
-                                  <div className="mt-1.5 ml-5 space-y-0.5">
-                                    {day.issues.map((issue: string, idx: number) => (
-                                      <div key={idx} className="flex items-start gap-1.5">
-                                        <ChevronRight className="w-3 h-3 text-amber-500 flex-shrink-0 mt-0.5" />
-                                        <span className="text-[10px] text-gray-600 dark:text-gray-400">{issue}</span>
-                                      </div>
-                                    ))}
-                                  </div>
-                                )}
-
-                                {day.status === 'missing' && !resolved && (
-                                  <p className="text-[10px] text-red-600/80 dark:text-red-400/70 mt-1 ml-5">
-                                    No metrics have been submitted for this day. Please submit your data or resolve with a reason.
-                                  </p>
-                                )}
-                              </div>
-                            );
-                          })}
-                        </div>
-                      </div>
-                    )}
-                  </div>
-                );
-              })}
-            </div>
-          )}
-        </div>
-      </div>
-      )}
-
+      , document.body)}
       {/* ─── Resolve Modal ──────────────────────────────────────────────────── */}
       {resolveModal && (
         <div className="fixed inset-0 z-50" onClick={() => setResolveModal(null)}>
@@ -2314,7 +2295,7 @@ export default function BakeryMetricsForm({ onStepChange, openRecentSubmissions 
       )}
 
       {/* ─── All Submissions Modal ──────────────────────────────────────────── */}
-      {showAllModal && (
+      {showAllModal && createPortal(
         <div className="fixed inset-0 z-50" onClick={() => setShowAllModal(false)}>
           <div className="absolute inset-0 backdrop-blur-sm bg-black/30" />
           <div className="relative h-full flex items-center justify-center p-4">
@@ -2389,7 +2370,7 @@ export default function BakeryMetricsForm({ onStepChange, openRecentSubmissions 
             </div>
           </div>
         </div>
-      )}
+      , document.body)}
 
       {/* ═══ Success Modal ═══ */}
       {successModal.show && (

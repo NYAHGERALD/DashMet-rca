@@ -7,6 +7,7 @@
 
 import { useState, useRef, useEffect, useCallback } from 'react';
 import api from '@/lib/api';
+import LoadingState from '@/components/ui/LoadingState';
 import { trimVideo as ffmpegTrimVideo, isFFmpegSupported, preloadFFmpeg } from '@/lib/ffmpegTrimmer';
 
 // Custom compact audio player component - fully inline, no popups
@@ -1472,10 +1473,8 @@ export default function EvidenceUpload({
       {/* Uploading indicator */}
       {uploading && (
         <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50">
-          <div className="bg-white dark:bg-slate-800 rounded-xl p-8 text-center shadow-xl">
-            <div className="w-16 h-16 border-4 border-primary-600 border-t-transparent rounded-full animate-spin mx-auto mb-4"></div>
-            <p className="text-lg font-medium text-gray-900 dark:text-white">Uploading Evidence...</p>
-            <p className="text-sm text-gray-500 dark:text-gray-400 mt-2">Please wait while files are being uploaded</p>
+          <div className="bg-white dark:bg-slate-800 rounded-xl p-8 shadow-xl">
+            <LoadingState message="Please wait while files are being uploaded" title="Uploading Evidence..." icon="upload" color="purple" fullScreen={false} />
           </div>
         </div>
       )}

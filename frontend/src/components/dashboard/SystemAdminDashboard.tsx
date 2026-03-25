@@ -1,6 +1,7 @@
 'use client';
 
 import { useState, useEffect } from 'react';
+import LoadingState from '@/components/ui/LoadingState';
 import {
   AreaChart,
   Area,
@@ -18,6 +19,7 @@ import {
 } from 'recharts';
 import { useAuth } from '@/components/providers/AuthProvider';
 import Link from 'next/link';
+import { useSettingsModal } from '@/components/settings/SettingsModalProvider';
 
 interface SystemAdminStats {
   // Platform overview
@@ -47,6 +49,7 @@ const COLORS = ['#3b82f6', '#22c55e', '#f59e0b', '#ef4444', '#8b5cf6', '#06b6d4'
 
 export default function SystemAdminDashboard() {
   const { user, getIdToken } = useAuth();
+  const { openSettings } = useSettingsModal();
   const [stats, setStats] = useState<SystemAdminStats | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -121,14 +124,7 @@ export default function SystemAdminDashboard() {
   });
 
   if (loading) {
-    return (
-      <div className="flex items-center justify-center h-64">
-        <div className="text-center">
-          <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-primary-600 mx-auto mb-4"></div>
-          <p className="text-gray-500 dark:text-gray-400">Loading system dashboard...</p>
-        </div>
-      </div>
-    );
+    return <LoadingState message="Loading system dashboard..." icon="data" color="purple" fullScreen={false} />;
   }
 
   if (error) {
@@ -461,13 +457,13 @@ export default function SystemAdminDashboard() {
             <span className="text-2xl mb-2">📄</span>
             <span className="text-sm font-medium text-purple-700 dark:text-purple-300">Manage Policies</span>
           </Link>
-          <Link
-            href="/settings"
+          <button
+            onClick={() => openSettings()}
             className="flex flex-col items-center p-4 rounded-lg bg-gray-50 dark:bg-gray-700/50 hover:bg-gray-100 dark:hover:bg-gray-700 transition-colors"
           >
             <span className="text-2xl mb-2">⚙️</span>
             <span className="text-sm font-medium text-gray-700 dark:text-gray-300">System Settings</span>
-          </Link>
+          </button>
         </div>
       </div>
     </div>

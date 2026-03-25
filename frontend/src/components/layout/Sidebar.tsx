@@ -6,6 +6,7 @@ import Link from 'next/link';
 import { usePathname } from 'next/navigation';
 import { useAuth } from '@/components/providers/AuthProvider';
 import { useI18n } from '@/lib/i18n/I18nProvider';
+import { useSettingsModal } from '@/components/settings/SettingsModalProvider';
 import {
   LayoutDashboard,
   AlertCircle,
@@ -29,6 +30,7 @@ export default function Sidebar() {
   const pathname = usePathname();
   const { user } = useAuth();
   const { t } = useI18n();
+  const { openSettings } = useSettingsModal();
 
   const isActive = (path: string) => pathname === path;
 
@@ -128,12 +130,6 @@ export default function Sidebar() {
       icon: Users,
       roles: ['ADMIN', 'SYSTEM_ADMIN'],
     },
-    {
-      name: t('nav.settings'),
-      href: '/settings',
-      icon: Settings,
-      roles: ['ADMIN', 'SYSTEM_ADMIN'],
-    },
   ];
 
   const hasAccess = (roles: string[]) => {
@@ -198,6 +194,17 @@ export default function Sidebar() {
             </Link>
           );
         })}
+
+        {/* Settings Button (opens modal) */}
+        {(user?.role === 'ADMIN' || user?.role === 'SYSTEM_ADMIN') && (
+          <button
+            onClick={() => openSettings()}
+            className="flex items-center space-x-3 px-4 py-3 rounded-lg transition-colors text-gray-700 dark:text-gray-300 hover:bg-gray-100 dark:hover:bg-gray-700 w-full text-left"
+          >
+            <Settings className="w-5 h-5" />
+            <span>{t('nav.settings')}</span>
+          </button>
+        )}
       </nav>
     </aside>
   );

@@ -3,6 +3,7 @@
 import { useState, useEffect, useRef } from 'react';
 import { useAuth } from '@/components/providers/AuthProvider';
 import { formatDate } from '@/lib/dateUtils';
+import LoadingState from '@/components/ui/LoadingState';
 import api from '@/lib/api';
 import Link from 'next/link';
 
@@ -187,9 +188,7 @@ export default function NotificationBell() {
           {/* Notification List */}
           <div className="max-h-96 overflow-y-auto">
             {loading ? (
-              <div className="p-4 text-center text-gray-500 dark:text-gray-400">
-                Loading...
-              </div>
+              <LoadingState message="Loading notifications..." icon="bolt" fullScreen={false} />
             ) : notifications.length === 0 ? (
               <div className="p-8 text-center text-gray-500 dark:text-gray-400">
                 <svg className="w-12 h-12 mx-auto mb-2 opacity-50" fill="none" stroke="currentColor" viewBox="0 0 24 24">

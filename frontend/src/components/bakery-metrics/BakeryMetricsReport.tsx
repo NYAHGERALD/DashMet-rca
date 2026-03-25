@@ -236,9 +236,10 @@ function PerfCard({ icon, iconBg, title, value, unit, status, statusGood, change
 interface BakeryMetricsReportProps {
   onFilterInfo?: (info: { week: string; day: string; totalRecords: number; isWeekSummary: boolean }) => void;
   triggerAction?: { type: 'refresh' | 'pdf' | 'excel'; ts: number };
+  onCongratsChange?: (showCongrats: boolean) => void;
 }
 
-export default function BakeryMetricsReport({ onFilterInfo, triggerAction }: BakeryMetricsReportProps) {
+export default function BakeryMetricsReport({ onFilterInfo, triggerAction, onCongratsChange }: BakeryMetricsReportProps) {
   const { theme } = useTheme();
   const { user } = useAuth();
   const currentUserName = user ? `${user.firstName} ${user.lastName}`.trim() : 'Unknown User';
@@ -246,7 +247,12 @@ export default function BakeryMetricsReport({ onFilterInfo, triggerAction }: Bak
   // ─── State ──────────────────────────────────────────────────────────────────
   const [loading, setLoading] = useState(true);
   const [weekFilter, setWeekFilter] = useState('');
-  const [dayFilter, setDayFilter] = useState('Monday');
+  const [dayFilter, setDayFilter] = useState(() => {
+    const dayNames = ['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday'];
+    const today = dayNames[new Date().getDay()];
+    if (today === 'Saturday' || today === 'Sunday') return 'Friday';
+    return today;
+  });
   const [weekOptions, setWeekOptions] = useState<string[]>([]);
   const [recordOptions, setRecordOptions] = useState<{ id: string; label: string }[]>([]);
   const [selectedRecord, setSelectedRecord] = useState('latest');
@@ -534,6 +540,7 @@ export default function BakeryMetricsReport({ onFilterInfo, triggerAction }: Bak
       (data.both_shift_die_cut2_waste_pct || 0) <= t.waste.die_cut_2 &&
       (data.total_waste_percent || 0) <= t.waste.total;
     setShowCongrats(allMet);
+    onCongratsChange?.(allMet);
   };
 
   // ─── Week Summary ────────────────────────────────────────────────────────
@@ -736,26 +743,6 @@ export default function BakeryMetricsReport({ onFilterInfo, triggerAction }: Bak
       )}
 
 
-
-      {/* ═══ CONGRATULATION ═══ */}
-      {showCongrats && (
-        <div className="bg-gradient-to-r from-emerald-50 to-green-50 dark:from-emerald-900/30 dark:to-green-900/30 border-2 border-emerald-200 dark:border-emerald-700 rounded-2xl shadow-lg p-5 animate-pulse">
-          <div className="flex items-center justify-between">
-            <div className="flex items-center gap-4">
-              <div className="p-3 bg-emerald-500 rounded-xl shadow-md">
-                <Trophy className="w-8 h-8 text-white" />
-              </div>
-              <div>
-                <h3 className="text-lg font-black text-emerald-800 dark:text-emerald-200">🎉 Outstanding Performance!</h3>
-                <p className="text-sm font-bold text-emerald-700 dark:text-emerald-300">All BOTH SHIFTS metrics are meeting or exceeding targets!</p>
-              </div>
-            </div>
-            <button onClick={() => setShowCongrats(false)} title="Dismiss" className="p-2 text-emerald-600 hover:bg-emerald-100 dark:hover:bg-emerald-800/40 rounded-lg transition-colors">
-              <X className="w-5 h-5" />
-            </button>
-          </div>
-        </div>
-      )}
 
       {/* ═══ METRICS TABLE ═══ */}
       <div className="bg-white/80 dark:bg-gray-800/80 backdrop-blur-md rounded-2xl shadow-xl border border-gray-200 dark:border-gray-700">

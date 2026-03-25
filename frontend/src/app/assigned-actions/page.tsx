@@ -3,6 +3,7 @@
 import { useState, useEffect, useCallback, useRef } from 'react';
 import { useAuth } from '@/components/providers/AuthProvider';
 import ProtectedRoute from '@/components/auth/ProtectedRoute';
+import LoadingState from '@/components/ui/LoadingState';
 import api from '@/lib/api';
 import Link from 'next/link';
 import {
@@ -502,34 +503,7 @@ function AssignedActionsContent() {
       <main className="px-6 lg:px-10 py-6 pb-24">
         {loading ? (
           <div className="flex flex-col items-center justify-center py-20 min-h-[60vh]">
-            {/* Animated Logo/Icon */}
-            <div className="relative mb-8">
-              {/* Outer Ring */}
-              <div className="absolute inset-0 w-20 h-20 rounded-full border-4 border-purple-200 dark:border-purple-900/50" />
-              
-              {/* Spinning Ring */}
-              <div className="w-20 h-20 rounded-full border-4 border-transparent border-t-purple-600 border-r-purple-600 animate-spin" />
-              
-              {/* Center Icon */}
-              <div className="absolute inset-0 flex items-center justify-center">
-                <ClipboardList className="w-8 h-8 text-purple-600 animate-pulse" />
-              </div>
-            </div>
-            
-            {/* Hang Tight Message */}
-            <h3 className="text-xl font-semibold text-gray-900 dark:text-white mb-2">
-              Hang tight!
-            </h3>
-            <p className="text-gray-500 dark:text-gray-400 text-center max-w-sm">
-              We're fetching your action items...
-            </p>
-            
-            {/* Animated Progress Dots */}
-            <div className="flex items-center gap-1.5 mt-6">
-              <div className="w-2 h-2 bg-purple-600 rounded-full animate-bounce" style={{ animationDelay: '0ms' }} />
-              <div className="w-2 h-2 bg-purple-500 rounded-full animate-bounce" style={{ animationDelay: '150ms' }} />
-              <div className="w-2 h-2 bg-purple-400 rounded-full animate-bounce" style={{ animationDelay: '300ms' }} />
-            </div>
+            <LoadingState message="We're fetching your action items..." icon="data" fullScreen={false} />
           </div>
         ) : error ? (
           <div className="flex flex-col items-center justify-center py-12">

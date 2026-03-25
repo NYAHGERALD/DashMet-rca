@@ -3,6 +3,7 @@
 import { useState, useEffect, useMemo, useCallback, useRef } from 'react';
 import { useRouter } from 'next/navigation';
 import { useAuth } from '@/components/providers/AuthProvider';
+import LoadingState from '@/components/ui/LoadingState';
 import ProtectedRoute from '@/components/auth/ProtectedRoute';
 import api from '@/lib/api';
 import { io, Socket } from 'socket.io-client';
@@ -543,14 +544,7 @@ function PrivilegesContent() {
   };
 
   if (loading) {
-    return (
-      <div className="min-h-screen bg-gray-50 dark:bg-gray-900 flex items-center justify-center">
-        <div className="text-center">
-          <Loader2 className="w-8 h-8 animate-spin text-primary-600 mx-auto mb-4" />
-          <p className="text-gray-600 dark:text-gray-400">Loading privilege settings...</p>
-        </div>
-      </div>
-    );
+    return <LoadingState message="Loading privilege settings..." icon="lock" />;
   }
 
   return (

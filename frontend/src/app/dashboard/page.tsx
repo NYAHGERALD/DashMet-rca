@@ -12,10 +12,12 @@ import SystemAdminDashboard from '@/components/dashboard/SystemAdminDashboard';
 import NotificationCenter from '@/components/layout/NotificationCenter';
 import { ContactSupportMenuItem } from '@/components/support/ContactSupportMenuItem';
 import { useI18n } from '@/lib/i18n/I18nProvider';
+import { useSettingsModal } from '@/components/settings/SettingsModalProvider';
 
 function DashboardContent() {
   const { user, logout } = useAuth();
   const { t } = useI18n();
+  const { openSettings } = useSettingsModal();
   const isAdmin = useIsAdmin();
   const isSupervisorPlus = useHasMinimumRole('SUPERVISOR');
   const isSystemAdmin = user?.role === 'SYSTEM_ADMIN';
@@ -109,8 +111,8 @@ function DashboardContent() {
               <NotificationCenter isSystemAdmin={isSystemAdmin} />
               
               {/* Settings Button - Glass style */}
-              <Link
-                href="/settings"
+              <button
+                onClick={() => openSettings()}
                 className="group p-2.5 sm:px-4 sm:py-2 text-sm font-medium text-gray-600 dark:text-gray-300 hover:text-gray-900 dark:hover:text-white backdrop-blur-md bg-white/50 dark:bg-gray-800/50 hover:bg-white/80 dark:hover:bg-gray-700/80 border border-gray-200/50 dark:border-gray-600/50 rounded-xl transition-all duration-200 hover:shadow-lg hover:shadow-black/5 hover:scale-105"
               >
                 <span className="hidden sm:inline flex items-center gap-2">
@@ -126,7 +128,7 @@ function DashboardContent() {
                     <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 12a3 3 0 11-6 0 3 3 0 016 0z" />
                   </svg>
                 </span>
-              </Link>
+              </button>
               
               {/* User Dropdown - Glass style */}
               <div className="relative" ref={dropdownRef}>
@@ -229,7 +231,7 @@ function DashboardContent() {
               links={isSystemAdmin ? [
                 // SYSTEM_ADMIN only sees system-level features (no incident/RCA access)
                 { href: '/system-admin', icon: '🏢', label: t('nav.systemAdmin') || 'System Admin Portal' },
-                { href: '/settings', icon: '⚙️', label: t('nav.settings') },
+                { icon: '⚙️', label: t('nav.settings'), onClick: () => openSettings() },
               ] : [
                 // Regular users see full navigation
                 { href: '/incidents/new', icon: '➕', label: t('nav.createIncident') },
@@ -251,7 +253,7 @@ function DashboardContent() {
                 { href: '/vacation', icon: '🏖️', label: 'Vacation Hub' },
                 { href: '/meetings', icon: '🎤', label: 'Meeting Intelligence' },
                 { href: '/assigned-actions', icon: '📌', label: 'My Action Items' },
-                { href: '/settings', icon: '⚙️', label: t('nav.settings') },
+                { icon: '⚙️', label: t('nav.settings'), onClick: () => openSettings() },
               ]}
             />
 
@@ -387,13 +389,12 @@ function DashboardContent() {
                     </Link>
                   )}
                   <div className="flex gap-3">
-                    <Link
-                      href="/settings"
-                      onClick={() => setShowProfileModal(false)}
+                    <button
+                      onClick={() => { setShowProfileModal(false); openSettings(); }}
                       className="flex-1 px-4 py-2 text-sm font-medium text-center text-gray-700 dark:text-gray-300 bg-gray-100 dark:bg-gray-700 hover:bg-gray-200 dark:hover:bg-gray-600 rounded-lg transition-colors"
                     >
                       {t('dashboard.editSettings')}
-                    </Link>
+                    </button>
                     <button
                       onClick={() => {
                         setShowProfileModal(false);

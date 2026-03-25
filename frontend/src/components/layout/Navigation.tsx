@@ -10,6 +10,7 @@ import { useState } from 'react';
 import Image from 'next/image';
 import NotificationBell from './NotificationBell';
 import NotificationCenter from './NotificationCenter';
+import { useSettingsModal } from '@/components/settings/SettingsModalProvider';
 
 export default function Navigation() {
   const { user, logout } = useAuth();
@@ -17,6 +18,7 @@ export default function Navigation() {
   const { language, setLanguage, t } = useLanguage();
   const [showUserMenu, setShowUserMenu] = useState(false);
   const [showLangMenu, setShowLangMenu] = useState(false);
+  const { openSettings } = useSettingsModal();
 
   return (
     <nav className="bg-white dark:bg-gray-800 shadow-sm border-b border-gray-200 dark:border-gray-700">
@@ -128,12 +130,18 @@ export default function Navigation() {
                     <p className="text-xs text-primary-600 mt-1">{user?.role}</p>
                   </div>
                   
-                  <button className="flex items-center space-x-2 w-full px-4 py-2 hover:bg-gray-100 dark:hover:bg-gray-700 text-left">
+                  <button 
+                    onClick={() => { setShowUserMenu(false); openSettings('profile'); }}
+                    className="flex items-center space-x-2 w-full px-4 py-2 hover:bg-gray-100 dark:hover:bg-gray-700 text-left"
+                  >
                     <User className="w-4 h-4" />
                     <span className="text-sm">Profile</span>
                   </button>
                   
-                  <button className="flex items-center space-x-2 w-full px-4 py-2 hover:bg-gray-100 dark:hover:bg-gray-700 text-left">
+                  <button 
+                    onClick={() => { setShowUserMenu(false); openSettings(); }}
+                    className="flex items-center space-x-2 w-full px-4 py-2 hover:bg-gray-100 dark:hover:bg-gray-700 text-left"
+                  >
                     <Settings className="w-4 h-4" />
                     <span className="text-sm">{t('nav.settings')}</span>
                   </button>

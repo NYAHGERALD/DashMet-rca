@@ -2,6 +2,7 @@
 
 import { useState, useEffect, useCallback, useRef, useMemo } from 'react';
 import api, { apiWithExtendedTimeout } from '@/lib/api';
+import LoadingState from '@/components/ui/LoadingState';
 import {
   Sparkles,
   Lightbulb,
@@ -236,7 +237,7 @@ function HealthGauge({ score, label }: { score: number; label: string }) {
           <span className={`text-3xl font-black ${color.text} transition-colors`}>
             {animatedScore}
           </span>
-          <span className="text-[10px] font-semibold text-gray-500 dark:text-gray-400 uppercase tracking-wider">Score</span>
+          <span className="text-sm font-semibold text-gray-500 dark:text-gray-400 uppercase tracking-wider">Score</span>
         </div>
       </div>
       <span className={`mt-2 text-sm font-bold ${color.text}`}>{label}</span>
@@ -264,7 +265,7 @@ function StatusBadge({ status }: { status: string }) {
   };
   const formatted = status.replace(/_/g, ' ').replace(/\b\w/g, c => c.toUpperCase());
   return (
-    <span className={`text-[10px] px-2 py-0.5 rounded-full font-bold uppercase tracking-wide ${config[status] || 'bg-gray-100 dark:bg-gray-700 text-gray-600 dark:text-gray-400'}`}>
+    <span className={`text-sm px-2 py-0.5 rounded-full font-bold uppercase tracking-wide ${config[status] || 'bg-gray-100 dark:bg-gray-700 text-gray-600 dark:text-gray-400'}`}>
       {formatted}
     </span>
   );
@@ -484,12 +485,12 @@ function WeeklyTrendChart({ values, labels, lowerIsBetter = false }: {
   return (
     <div className="mt-2 pt-2 border-t border-gray-100 dark:border-gray-700">
       <div className="flex items-center justify-between mb-0.5">
-        <p className="text-[9px] text-gray-400 dark:text-gray-500 font-bold uppercase tracking-wider">Weekly Trend</p>
+        <p className="text-sm text-gray-400 dark:text-gray-500 font-bold uppercase tracking-wider">Weekly Trend</p>
         <div className="flex items-center gap-1">
           {trending === 'up' && <TrendingUp size={10} className={isGoodOverall ? 'text-emerald-500' : 'text-red-500'} />}
           {trending === 'down' && <TrendingDown size={10} className={isGoodOverall ? 'text-emerald-500' : 'text-red-500'} />}
           {trending === 'flat' && <Minus size={10} className="text-gray-400" />}
-          <span className={`text-[9px] font-bold`} style={{ color: overallColor }}>
+          <span className={`text-sm font-bold`} style={{ color: overallColor }}>
             {lastVal.toFixed(1)}%
           </span>
         </div>
@@ -559,9 +560,9 @@ function WeeklyTrendChart({ values, labels, lowerIsBetter = false }: {
 function ChangeIndicator({ value, invertColor = false, suffix = '%' }: { value: number; invertColor?: boolean; suffix?: string }) {
   const isPositive = invertColor ? value < 0 : value > 0;
   const isZero = Math.abs(value) < 0.01;
-  if (isZero) return <span className="text-[10px] text-gray-400 font-medium">—</span>;
+  if (isZero) return <span className="text-sm text-gray-400 font-medium">—</span>;
   return (
-    <span className={`text-[10px] font-bold flex items-center gap-0.5 ${isPositive ? 'text-emerald-600 dark:text-emerald-400' : 'text-red-600 dark:text-red-400'}`}>
+    <span className={`text-sm font-bold flex items-center gap-0.5 ${isPositive ? 'text-emerald-600 dark:text-emerald-400' : 'text-red-600 dark:text-red-400'}`}>
       {isPositive ? <ArrowUpRight size={12} /> : <ArrowDownRight size={12} />}
       {Math.abs(value).toFixed(1)}{suffix}
     </span>
@@ -793,7 +794,7 @@ export default function BakeryMetricsInsights() {
             <div key={n.id} className={`px-4 py-3 rounded-xl shadow-lg max-w-xs border ${notifCfg[n.type]} animate-slide-in-right`}>
               <div className="flex items-center space-x-2">
                 <Ic className="w-4 h-4 text-white flex-shrink-0" />
-                <span className="text-xs font-semibold text-white">{n.message}</span>
+                <span className="text-sm font-semibold text-white">{n.message}</span>
               </div>
             </div>
           );
@@ -808,7 +809,7 @@ export default function BakeryMetricsInsights() {
               <Sparkles className="w-5 h-5 text-purple-500" />
               AI-Powered Production Intelligence
             </h3>
-            <p className="text-xs text-gray-500 dark:text-gray-400 mt-1">
+            <p className="text-sm text-gray-500 dark:text-gray-400 mt-1">
               Deep analysis powered by GPT • Real-time data from your bakery operations
             </p>
           </div>
@@ -817,7 +818,7 @@ export default function BakeryMetricsInsights() {
             <div ref={weekDropdownRef} className="relative">
               <button
                 onClick={() => setWeekDropdownOpen(!weekDropdownOpen)}
-                className="inline-flex items-center px-3 py-2 bg-white dark:bg-gray-700 border border-gray-300 dark:border-gray-600 rounded-lg text-xs font-semibold text-gray-700 dark:text-gray-300 shadow-sm hover:bg-gray-50 dark:hover:bg-gray-600 transition-colors min-w-[180px] justify-between"
+                className="inline-flex items-center px-3 py-2 bg-white dark:bg-gray-700 border border-gray-300 dark:border-gray-600 rounded-lg text-sm font-semibold text-gray-700 dark:text-gray-300 shadow-sm hover:bg-gray-50 dark:hover:bg-gray-600 transition-colors min-w-[180px] justify-between"
               >
                 <span className="flex items-center gap-1.5 truncate">
                   <Calendar className="w-3.5 h-3.5 text-purple-500 flex-shrink-0" />
@@ -831,7 +832,7 @@ export default function BakeryMetricsInsights() {
                     <button
                       key={w}
                       onClick={() => { setWeekFilter(w); setWeekDropdownOpen(false); }}
-                      className={`block w-full text-left px-3 py-2 text-xs font-medium hover:bg-purple-50 dark:hover:bg-purple-900/20 transition-colors ${
+                      className={`block w-full text-left px-3 py-2 text-sm font-medium hover:bg-purple-50 dark:hover:bg-purple-900/20 transition-colors ${
                         weekFilter === w ? 'bg-purple-50 dark:bg-purple-900/30 text-purple-700 dark:text-purple-300 font-bold' : 'text-gray-700 dark:text-gray-300'
                       }`}
                     >
@@ -860,26 +861,23 @@ export default function BakeryMetricsInsights() {
         <div className="bg-emerald-50 dark:bg-emerald-900/20 rounded-xl border border-emerald-200 dark:border-emerald-800 px-4 py-2.5 flex items-center justify-between animate-fade-in">
           <div className="flex items-center gap-2">
             <div className="w-2 h-2 rounded-full bg-emerald-500 animate-pulse" />
-            <span className="text-xs font-semibold text-emerald-700 dark:text-emerald-300">
+            <span className="text-sm font-semibold text-emerald-700 dark:text-emerald-300">
               Cached analysis
             </span>
-            <span className="text-xs text-emerald-600 dark:text-emerald-400">
+            <span className="text-sm text-emerald-600 dark:text-emerald-400">
               — Last analyzed by <span className="font-bold">{cachedInfo.generatedBy}</span>
               {cachedInfo.cachedAt && (
                 <> on {new Date(cachedInfo.cachedAt).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric', hour: 'numeric', minute: '2-digit' })}</>
               )}
             </span>
           </div>
-          <span className="text-[10px] text-emerald-500 dark:text-emerald-400 font-medium">No AI tokens used</span>
         </div>
       )}
 
       {/* ═══ LOADING STATE (initial cache load) ═══ */}
       {loading && !analyzing && (
-        <div className="bg-white/80 dark:bg-gray-800/80 rounded-2xl shadow-lg border border-gray-200 dark:border-gray-700 p-8 text-center animate-fade-in">
-          <Loader2 className="w-8 h-8 text-purple-500 mx-auto mb-3 animate-spin" />
-          <p className="text-sm font-bold text-gray-700 dark:text-gray-300">Loading cached analysis...</p>
-          <p className="text-xs text-gray-500 dark:text-gray-400 mt-1">Checking for saved results</p>
+        <div className="bg-white/80 dark:bg-gray-800/80 rounded-2xl shadow-lg border border-gray-200 dark:border-gray-700 p-8 animate-fade-in">
+          <LoadingState message="Checking for saved results" title="Loading cached analysis..." icon="data" color="purple" fullScreen={false} />
         </div>
       )}
 
@@ -894,7 +892,7 @@ export default function BakeryMetricsInsights() {
               <div className="w-3 h-3 rounded-full bg-blue-500 animate-bounce" style={{ animationDelay: '300ms' }} />
             </div>
             <p className="text-sm font-bold text-purple-700 dark:text-purple-300">AI is analyzing your production data...</p>
-            <p className="text-xs text-gray-500 dark:text-gray-400 mt-1.5">Examining OEE, waste patterns, machine performance, and shift comparisons</p>
+            <p className="text-sm text-gray-500 dark:text-gray-400 mt-1.5">Examining OEE, waste patterns, machine performance, and shift comparisons</p>
           </div>
           {/* Skeleton grid */}
           <div className="grid grid-cols-1 lg:grid-cols-3 gap-4">
@@ -914,7 +912,7 @@ export default function BakeryMetricsInsights() {
         <div className="bg-gradient-to-r from-purple-50 to-indigo-50 dark:from-purple-900/20 dark:to-indigo-900/20 rounded-2xl shadow-lg border border-purple-200 dark:border-purple-800 p-8 text-center animate-fade-in">
           <Sparkles className="w-10 h-10 text-purple-400 mx-auto mb-3" />
           <p className="text-sm font-bold text-purple-700 dark:text-purple-300">No analysis found for this week</p>
-          <p className="text-xs text-gray-500 dark:text-gray-400 mt-1 max-w-md mx-auto">Click the button below to generate an AI-powered analysis. Once generated, it will be saved and shared with all users.</p>
+          <p className="text-sm text-gray-500 dark:text-gray-400 mt-1 max-w-md mx-auto">Click the button below to generate an AI-powered analysis. Once generated, it will be saved and shared with all users.</p>
           <button
             onClick={() => reAnalyze(weekFilter)}
             className="mt-4 px-6 py-2.5 bg-gradient-to-r from-purple-600 to-indigo-600 text-white rounded-xl text-sm font-semibold hover:from-purple-700 hover:to-indigo-700 transition-all shadow-md hover:shadow-lg active:scale-95"
@@ -929,17 +927,17 @@ export default function BakeryMetricsInsights() {
         <div className="bg-red-50 dark:bg-red-900/20 rounded-2xl shadow-lg border border-red-200 dark:border-red-800 p-6 text-center animate-fade-in">
           <AlertCircle className="w-10 h-10 text-red-400 mx-auto mb-3" />
           <p className="text-sm font-bold text-red-700 dark:text-red-300">Analysis Failed</p>
-          <p className="text-xs text-red-600 dark:text-red-400 mt-1 max-w-md mx-auto">{error}</p>
+          <p className="text-sm text-red-600 dark:text-red-400 mt-1 max-w-md mx-auto">{error}</p>
           <div className="mt-4 flex items-center justify-center gap-3">
             <button
               onClick={() => loadInsights(weekFilter)}
-              className="px-4 py-2 bg-purple-600 text-white rounded-lg text-xs font-semibold hover:bg-purple-700 transition"
+              className="px-4 py-2 bg-purple-600 text-white rounded-lg text-sm font-semibold hover:bg-purple-700 transition"
             >
               <RefreshCw className="w-3.5 h-3.5 inline mr-1" /> Load Cached
             </button>
             <button
               onClick={() => reAnalyze(weekFilter)}
-              className="px-4 py-2 bg-red-600 text-white rounded-lg text-xs font-semibold hover:bg-red-700 transition"
+              className="px-4 py-2 bg-red-600 text-white rounded-lg text-sm font-semibold hover:bg-red-700 transition"
             >
               <RefreshCw className="w-3.5 h-3.5 inline mr-1" /> Retry Analysis
             </button>
@@ -957,9 +955,9 @@ export default function BakeryMetricsInsights() {
             <div className="lg:col-span-3 bg-white/80 dark:bg-gray-800/80 backdrop-blur-md rounded-2xl shadow-lg border border-gray-200 dark:border-gray-700 p-5 flex flex-col items-center justify-center">
               <HealthGauge score={insights.healthScore} label={insights.healthLabel} />
               <div className="mt-3 text-center">
-                <p className="text-[10px] text-gray-500 dark:text-gray-400 font-medium">Plant Health Score</p>
+                <p className="text-sm text-gray-500 dark:text-gray-400 font-medium">Plant Health Score</p>
                 {meta && (
-                  <p className="text-[9px] text-gray-400 dark:text-gray-500 mt-0.5">{meta.weekName}</p>
+                  <p className="text-sm text-gray-400 dark:text-gray-500 mt-0.5">{meta.weekName}</p>
                 )}
               </div>
             </div>
@@ -972,27 +970,27 @@ export default function BakeryMetricsInsights() {
                 </div>
                 <h4 className="text-sm font-bold text-gray-900 dark:text-white">Executive Summary</h4>
               </div>
-              <p className="text-sm text-gray-700 dark:text-gray-300 leading-relaxed">{insights.executiveSummary}</p>
+              <p className="text-base text-gray-700 dark:text-gray-300 leading-relaxed">{insights.executiveSummary}</p>
 
               {/* Quick Stats Row */}
               {chartData && (
                 <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 mt-4">
                   <div className="bg-white/60 dark:bg-gray-700/40 rounded-xl p-3 text-center">
-                    <p className="text-[10px] text-gray-500 dark:text-gray-400 font-medium">Avg OEE</p>
+                    <p className="text-sm text-gray-500 dark:text-gray-400 font-medium">Avg OEE</p>
                     <p className="text-lg font-black text-gray-900 dark:text-white">{chartData.currentWeek.avgOee}%</p>
                     {insights.weeklyComparison && <ChangeIndicator value={insights.weeklyComparison.oeeChange} />}
                   </div>
                   <div className="bg-white/60 dark:bg-gray-700/40 rounded-xl p-3 text-center">
-                    <p className="text-[10px] text-gray-500 dark:text-gray-400 font-medium">Avg Waste</p>
+                    <p className="text-sm text-gray-500 dark:text-gray-400 font-medium">Avg Waste</p>
                     <p className="text-lg font-black text-gray-900 dark:text-white">{chartData.currentWeek.avgWaste}%</p>
                     {insights.weeklyComparison && <ChangeIndicator value={insights.weeklyComparison.wasteChange} invertColor />}
                   </div>
                   <div className="bg-white/60 dark:bg-gray-700/40 rounded-xl p-3 text-center">
-                    <p className="text-[10px] text-gray-500 dark:text-gray-400 font-medium">DC1 OEE</p>
+                    <p className="text-sm text-gray-500 dark:text-gray-400 font-medium">DC1 OEE</p>
                     <p className="text-lg font-black text-gray-900 dark:text-white">{chartData.currentWeek.dc1AvgOee}%</p>
                   </div>
                   <div className="bg-white/60 dark:bg-gray-700/40 rounded-xl p-3 text-center">
-                    <p className="text-[10px] text-gray-500 dark:text-gray-400 font-medium">DC2 OEE</p>
+                    <p className="text-sm text-gray-500 dark:text-gray-400 font-medium">DC2 OEE</p>
                     <p className="text-lg font-black text-gray-900 dark:text-white">{chartData.currentWeek.dc2AvgOee}%</p>
                   </div>
                 </div>
@@ -1011,7 +1009,7 @@ export default function BakeryMetricsInsights() {
                   </div>
                   <div>
                     <h4 className="text-sm font-bold text-gray-900 dark:text-white">OEE Performance</h4>
-                    <p className="text-[10px] text-gray-500 dark:text-gray-400">Target: {chartData?.targets.oee.total}%</p>
+                    <p className="text-sm text-gray-500 dark:text-gray-400">Target: {chartData?.targets.oee.total}%</p>
                   </div>
                 </div>
                 <div className="flex items-center gap-2">
@@ -1019,9 +1017,9 @@ export default function BakeryMetricsInsights() {
                   <StatusBadge status={insights.oeeAnalysis?.status || 'info'} />
                 </div>
               </div>
-              <p className="text-xs text-gray-600 dark:text-gray-400 leading-relaxed">{insights.oeeAnalysis?.summary}</p>
+              <p className="text-base text-gray-600 dark:text-gray-400 leading-relaxed">{insights.oeeAnalysis?.summary}</p>
               {insights.oeeAnalysis?.trendDetail && (
-                <p className="text-[10px] text-gray-500 dark:text-gray-500 mt-2 italic">{insights.oeeAnalysis.trendDetail}</p>
+                <p className="text-sm text-gray-500 dark:text-gray-500 mt-2 italic">{insights.oeeAnalysis.trendDetail}</p>
               )}
               {/* Mini daily chart */}
               {chartData?.currentWeek?.days && chartData.currentWeek.days.length > 0 && (
@@ -1038,7 +1036,7 @@ export default function BakeryMetricsInsights() {
                   </div>
                   <div>
                     <h4 className="text-sm font-bold text-gray-900 dark:text-white">Waste Management</h4>
-                    <p className="text-[10px] text-gray-500 dark:text-gray-400">Target: ≤{chartData?.targets.waste.total}%</p>
+                    <p className="text-sm text-gray-500 dark:text-gray-400">Target: ≤{chartData?.targets.waste.total}%</p>
                   </div>
                 </div>
                 <div className="flex items-center gap-2">
@@ -1046,9 +1044,9 @@ export default function BakeryMetricsInsights() {
                   <StatusBadge status={insights.wasteAnalysis?.status || 'info'} />
                 </div>
               </div>
-              <p className="text-xs text-gray-600 dark:text-gray-400 leading-relaxed">{insights.wasteAnalysis?.summary}</p>
+              <p className="text-base text-gray-600 dark:text-gray-400 leading-relaxed">{insights.wasteAnalysis?.summary}</p>
               {insights.wasteAnalysis?.trendDetail && (
-                <p className="text-[10px] text-gray-500 dark:text-gray-500 mt-2 italic">{insights.wasteAnalysis.trendDetail}</p>
+                <p className="text-sm text-gray-500 dark:text-gray-500 mt-2 italic">{insights.wasteAnalysis.trendDetail}</p>
               )}
               {/* Mini daily chart */}
               {chartData?.currentWeek?.days && chartData.currentWeek.days.length > 0 && (
@@ -1071,27 +1069,27 @@ export default function BakeryMetricsInsights() {
               <div className="grid grid-cols-2 gap-3 mb-3">
                 <div className="bg-gray-50 dark:bg-gray-700/50 rounded-xl p-3">
                   <div className="flex items-center justify-between mb-1">
-                    <span className="text-[10px] font-bold text-gray-600 dark:text-gray-400">Die Cut 1</span>
+                    <span className="text-sm font-bold text-gray-600 dark:text-gray-400">Die Cut 1</span>
                     <StatusBadge status={insights.machineAnalysis?.dc1Status || 'average'} />
                   </div>
                   <p className="text-xl font-black text-gray-900 dark:text-white">{chartData?.currentWeek.dc1AvgOee || 0}%</p>
-                  <p className="text-[9px] text-gray-500 dark:text-gray-400">OEE Average</p>
+                  <p className="text-sm text-gray-500 dark:text-gray-400">OEE Average</p>
                 </div>
                 <div className="bg-gray-50 dark:bg-gray-700/50 rounded-xl p-3">
                   <div className="flex items-center justify-between mb-1">
-                    <span className="text-[10px] font-bold text-gray-600 dark:text-gray-400">Die Cut 2</span>
+                    <span className="text-sm font-bold text-gray-600 dark:text-gray-400">Die Cut 2</span>
                     <StatusBadge status={insights.machineAnalysis?.dc2Status || 'average'} />
                   </div>
                   <p className="text-xl font-black text-gray-900 dark:text-white">{chartData?.currentWeek.dc2AvgOee || 0}%</p>
-                  <p className="text-[9px] text-gray-500 dark:text-gray-400">OEE Average</p>
+                  <p className="text-sm text-gray-500 dark:text-gray-400">OEE Average</p>
                 </div>
               </div>
 
-              <p className="text-xs text-gray-600 dark:text-gray-400 leading-relaxed">{insights.machineAnalysis?.summary}</p>
+              <p className="text-base text-gray-600 dark:text-gray-400 leading-relaxed">{insights.machineAnalysis?.summary}</p>
               {insights.machineAnalysis?.imbalanceDetected && (
                 <div className="mt-2 flex items-start gap-2 bg-amber-50 dark:bg-amber-900/20 rounded-lg p-2">
                   <AlertTriangle className="w-3.5 h-3.5 text-amber-500 flex-shrink-0 mt-0.5" />
-                  <p className="text-[10px] text-amber-700 dark:text-amber-300 font-medium">{insights.machineAnalysis.imbalanceDetail}</p>
+                  <p className="text-sm text-amber-700 dark:text-amber-300 font-medium">{insights.machineAnalysis.imbalanceDetail}</p>
                 </div>
               )}
             </div>
@@ -1108,27 +1106,27 @@ export default function BakeryMetricsInsights() {
               <div className="grid grid-cols-2 gap-3 mb-3">
                 <div className="bg-gray-50 dark:bg-gray-700/50 rounded-xl p-3">
                   <div className="flex items-center justify-between mb-1">
-                    <span className="text-[10px] font-bold text-gray-600 dark:text-gray-400">1st Shift</span>
+                    <span className="text-sm font-bold text-gray-600 dark:text-gray-400">1st Shift</span>
                     <StatusBadge status={insights.shiftAnalysis?.firstShiftStatus || 'average'} />
                   </div>
                   <p className="text-xl font-black text-gray-900 dark:text-white">{chartData?.currentWeek ? Math.round((chartData.currentWeek.days.reduce((s, d) => s + d.oeeAvg, 0) / Math.max(chartData.currentWeek.days.length, 1)) * 10) / 10 : 0}%</p>
-                  <p className="text-[9px] text-gray-500 dark:text-gray-400">OEE Average</p>
+                  <p className="text-sm text-gray-500 dark:text-gray-400">OEE Average</p>
                 </div>
                 <div className="bg-gray-50 dark:bg-gray-700/50 rounded-xl p-3">
                   <div className="flex items-center justify-between mb-1">
-                    <span className="text-[10px] font-bold text-gray-600 dark:text-gray-400">2nd Shift</span>
+                    <span className="text-sm font-bold text-gray-600 dark:text-gray-400">2nd Shift</span>
                     <StatusBadge status={insights.shiftAnalysis?.secondShiftStatus || 'average'} />
                   </div>
                   <p className="text-xl font-black text-gray-900 dark:text-white">—</p>
-                  <p className="text-[9px] text-gray-500 dark:text-gray-400">OEE Average</p>
+                  <p className="text-sm text-gray-500 dark:text-gray-400">OEE Average</p>
                 </div>
               </div>
 
-              <p className="text-xs text-gray-600 dark:text-gray-400 leading-relaxed">{insights.shiftAnalysis?.summary}</p>
+              <p className="text-base text-gray-600 dark:text-gray-400 leading-relaxed">{insights.shiftAnalysis?.summary}</p>
               {insights.shiftAnalysis?.gapDetected && (
                 <div className="mt-2 flex items-start gap-2 bg-violet-50 dark:bg-violet-900/20 rounded-lg p-2">
                   <Activity className="w-3.5 h-3.5 text-violet-500 flex-shrink-0 mt-0.5" />
-                  <p className="text-[10px] text-violet-700 dark:text-violet-300 font-medium">{insights.shiftAnalysis.gapDetail}</p>
+                  <p className="text-sm text-violet-700 dark:text-violet-300 font-medium">{insights.shiftAnalysis.gapDetail}</p>
                 </div>
               )}
             </div>
@@ -1148,25 +1146,25 @@ export default function BakeryMetricsInsights() {
                 <>
                   <div className="space-y-2 mb-3">
                     <div className="flex items-center justify-between bg-gray-50 dark:bg-gray-700/50 rounded-lg p-2">
-                      <span className="text-[10px] font-medium text-gray-600 dark:text-gray-400">OEE Change</span>
+                      <span className="text-sm font-medium text-gray-600 dark:text-gray-400">OEE Change</span>
                       <ChangeIndicator value={insights.weeklyComparison.oeeChange} />
                     </div>
                     <div className="flex items-center justify-between bg-gray-50 dark:bg-gray-700/50 rounded-lg p-2">
-                      <span className="text-[10px] font-medium text-gray-600 dark:text-gray-400">Waste Change</span>
+                      <span className="text-sm font-medium text-gray-600 dark:text-gray-400">Waste Change</span>
                       <ChangeIndicator value={insights.weeklyComparison.wasteChange} invertColor />
                     </div>
                     <div className="flex items-center justify-between bg-gray-50 dark:bg-gray-700/50 rounded-lg p-2">
-                      <span className="text-[10px] font-medium text-gray-600 dark:text-gray-400">Production</span>
+                      <span className="text-sm font-medium text-gray-600 dark:text-gray-400">Production</span>
                       <ChangeIndicator value={insights.weeklyComparison.productionChange} />
                     </div>
                   </div>
-                  <p className="text-[10px] text-gray-500 dark:text-gray-400 leading-relaxed">{insights.weeklyComparison.summary}</p>
+                  <p className="text-base text-gray-500 dark:text-gray-400 leading-relaxed">{insights.weeklyComparison.summary}</p>
                 </>
               )}
               {insights.yearOverYear?.available && (
                 <div className="mt-3 pt-3 border-t border-gray-100 dark:border-gray-700">
-                  <p className="text-[9px] text-gray-400 dark:text-gray-500 font-bold uppercase mb-1">Year-over-Year</p>
-                  <p className="text-[10px] text-gray-600 dark:text-gray-400">{insights.yearOverYear.summary}</p>
+                  <p className="text-sm text-gray-400 dark:text-gray-500 font-bold uppercase mb-1">Year-over-Year</p>
+                  <p className="text-sm text-gray-600 dark:text-gray-400">{insights.yearOverYear.summary}</p>
                 </div>
               )}
             </div>
@@ -1183,7 +1181,7 @@ export default function BakeryMetricsInsights() {
                 <>
                   {/* Waste gauge bar */}
                   <div className="mb-3">
-                    <div className="flex items-center justify-between text-[10px] mb-1">
+                    <div className="flex items-center justify-between text-sm mb-1">
                       <span className="font-medium text-gray-600 dark:text-gray-400">Current: {insights.wasteReduction.currentLevel}%</span>
                       <span className="font-medium text-gray-600 dark:text-gray-400">Target: {insights.wasteReduction.targetLevel}%</span>
                     </div>
@@ -1203,7 +1201,7 @@ export default function BakeryMetricsInsights() {
                       />
                     </div>
                   </div>
-                  <div className="space-y-2 text-[10px]">
+                  <div className="space-y-2 text-sm">
                     <div>
                       <span className="font-bold text-gray-700 dark:text-gray-300">Top Contributor:</span>
                       <span className="text-gray-600 dark:text-gray-400 ml-1">{insights.wasteReduction.topContributor}</span>
@@ -1232,16 +1230,16 @@ export default function BakeryMetricsInsights() {
               {insights.dailyHighlights && (
                 <div className="space-y-3">
                   <div className="bg-emerald-50/50 dark:bg-emerald-900/10 rounded-lg p-3 border-l-3 border-emerald-500">
-                    <p className="text-[10px] font-bold text-emerald-700 dark:text-emerald-300 mb-0.5">🏆 Best Day</p>
-                    <p className="text-[10px] text-gray-600 dark:text-gray-400">{insights.dailyHighlights.bestDay}</p>
+                    <p className="text-sm font-bold text-emerald-700 dark:text-emerald-300 mb-0.5">🏆 Best Day</p>
+                    <p className="text-sm text-gray-600 dark:text-gray-400">{insights.dailyHighlights.bestDay}</p>
                   </div>
                   <div className="bg-red-50/50 dark:bg-red-900/10 rounded-lg p-3 border-l-3 border-red-500">
-                    <p className="text-[10px] font-bold text-red-700 dark:text-red-300 mb-0.5">⚠️ Worst Day</p>
-                    <p className="text-[10px] text-gray-600 dark:text-gray-400">{insights.dailyHighlights.worstDay}</p>
+                    <p className="text-sm font-bold text-red-700 dark:text-red-300 mb-0.5">⚠️ Worst Day</p>
+                    <p className="text-sm text-gray-600 dark:text-gray-400">{insights.dailyHighlights.worstDay}</p>
                   </div>
                   <div className="bg-blue-50/50 dark:bg-blue-900/10 rounded-lg p-3 border-l-3 border-blue-500">
-                    <p className="text-[10px] font-bold text-blue-700 dark:text-blue-300 mb-0.5">📊 Pattern</p>
-                    <p className="text-[10px] text-gray-600 dark:text-gray-400">{insights.dailyHighlights.pattern}</p>
+                    <p className="text-sm font-bold text-blue-700 dark:text-blue-300 mb-0.5">📊 Pattern</p>
+                    <p className="text-sm text-gray-600 dark:text-gray-400">{insights.dailyHighlights.pattern}</p>
                   </div>
                 </div>
               )}
@@ -1259,7 +1257,7 @@ export default function BakeryMetricsInsights() {
                   <Lightbulb className="w-4 h-4 text-amber-600 dark:text-amber-400" />
                 </div>
                 <h4 className="text-sm font-bold text-gray-900 dark:text-white">Key Performance Insights</h4>
-                <span className="text-[10px] bg-gray-100 dark:bg-gray-700 text-gray-600 dark:text-gray-400 px-2 py-0.5 rounded-full font-medium">
+                <span className="text-sm bg-gray-100 dark:bg-gray-700 text-gray-600 dark:text-gray-400 px-2 py-0.5 rounded-full font-medium">
                   {insights.keyInsights?.length || 0}
                 </span>
               </div>
@@ -1283,7 +1281,7 @@ export default function BakeryMetricsInsights() {
                           </div>
                           <div className="flex-1 min-w-0">
                             <div className="flex items-center gap-2 mb-1">
-                              <p className="text-xs font-bold text-gray-900 dark:text-gray-100">{item.title}</p>
+                              <p className="text-sm font-bold text-gray-900 dark:text-gray-100">{item.title}</p>
                               <span className={`text-[8px] px-1.5 py-0.5 rounded-full font-bold uppercase ${
                                 item.severity === 'critical' ? 'bg-red-200 dark:bg-red-800 text-red-800 dark:text-red-200' :
                                 item.severity === 'warning' ? 'bg-amber-200 dark:bg-amber-800 text-amber-800 dark:text-amber-200' :
@@ -1291,9 +1289,9 @@ export default function BakeryMetricsInsights() {
                                 'bg-blue-200 dark:bg-blue-800 text-blue-800 dark:text-blue-200'
                               }`}>{item.severity}</span>
                             </div>
-                            <p className="text-[10px] text-gray-600 dark:text-gray-400 leading-relaxed">{item.description}</p>
+                            <p className="text-base text-gray-600 dark:text-gray-400 leading-relaxed">{item.description}</p>
                             {item.impact && (
-                              <p className="text-[9px] text-gray-500 dark:text-gray-500 mt-1.5 italic flex items-center gap-1">
+                              <p className="text-sm text-gray-500 dark:text-gray-500 mt-1.5 italic flex items-center gap-1">
                                 <CircleDot className="w-3 h-3" /> {item.impact}
                               </p>
                             )}
@@ -1305,7 +1303,7 @@ export default function BakeryMetricsInsights() {
                 ) : (
                   <div className="col-span-2 text-center py-6">
                     <Lightbulb className="w-8 h-8 text-gray-300 dark:text-gray-600 mx-auto mb-2" />
-                    <p className="text-xs text-gray-500">No insights generated</p>
+                    <p className="text-sm text-gray-500">No insights generated</p>
                   </div>
                 )}
               </div>
@@ -1325,7 +1323,7 @@ export default function BakeryMetricsInsights() {
                     <Target className="w-4 h-4 text-blue-600 dark:text-blue-400" />
                   </div>
                   <h4 className="text-sm font-bold text-gray-900 dark:text-white">Recommendations</h4>
-                  <span className="text-[10px] bg-gray-100 dark:bg-gray-700 text-gray-600 dark:text-gray-400 px-2 py-0.5 rounded-full font-medium">
+                  <span className="text-sm bg-gray-100 dark:bg-gray-700 text-gray-600 dark:text-gray-400 px-2 py-0.5 rounded-full font-medium">
                     {insights.recommendations?.length || 0}
                   </span>
                 </div>
@@ -1345,7 +1343,7 @@ export default function BakeryMetricsInsights() {
                             </div>
                             <div className="flex-1 min-w-0">
                               <div className="flex items-center gap-2 mb-1 flex-wrap">
-                                <p className="text-xs font-bold text-gray-900 dark:text-gray-100">{rec.title}</p>
+                                <p className="text-sm font-bold text-gray-900 dark:text-gray-100">{rec.title}</p>
                                 <span className={`text-[8px] px-1.5 py-0.5 rounded-full font-bold uppercase ${pCfg.bg} ${pCfg.text}`}>
                                   {rec.priority}
                                 </span>
@@ -1353,9 +1351,9 @@ export default function BakeryMetricsInsights() {
                                   {rec.timeframe?.replace(/_/g, ' ')}
                                 </span>
                               </div>
-                              <p className="text-[10px] text-gray-600 dark:text-gray-400 leading-relaxed">{rec.description}</p>
+                              <p className="text-base text-gray-600 dark:text-gray-400 leading-relaxed">{rec.description}</p>
                               {rec.expectedImpact && (
-                                <p className="text-[9px] text-emerald-600 dark:text-emerald-400 mt-1.5 font-medium flex items-center gap-1">
+                                <p className="text-sm text-emerald-600 dark:text-emerald-400 mt-1.5 font-medium flex items-center gap-1">
                                   <TrendingUp className="w-3 h-3" /> {rec.expectedImpact}
                                 </p>
                               )}
@@ -1367,7 +1365,7 @@ export default function BakeryMetricsInsights() {
                   ) : (
                     <div className="text-center py-6">
                       <Target className="w-8 h-8 text-gray-300 dark:text-gray-600 mx-auto mb-2" />
-                      <p className="text-xs text-gray-500">No recommendations</p>
+                      <p className="text-sm text-gray-500">No recommendations</p>
                     </div>
                   )}
                 </div>
@@ -1386,7 +1384,7 @@ export default function BakeryMetricsInsights() {
                   </div>
                   <h4 className="text-sm font-bold text-gray-900 dark:text-white">Follow-up Tracker</h4>
                   {insights.followUps && insights.followUps.length > 0 && (
-                    <span className="text-[10px] bg-gray-100 dark:bg-gray-700 text-gray-600 dark:text-gray-400 px-2 py-0.5 rounded-full font-medium">
+                    <span className="text-sm bg-gray-100 dark:bg-gray-700 text-gray-600 dark:text-gray-400 px-2 py-0.5 rounded-full font-medium">
                       {completedTasks.length}/{insights.followUps.length} done
                     </span>
                   )}
@@ -1395,7 +1393,7 @@ export default function BakeryMetricsInsights() {
                   {completedTasks.length > 0 && (
                     <button
                       onClick={(e) => { e.stopPropagation(); clearTasks(); }}
-                      className="px-2 py-1 text-[9px] bg-gray-100 dark:bg-gray-700 hover:bg-gray-200 dark:hover:bg-gray-600 text-gray-500 rounded-md transition-colors"
+                      className="px-2 py-1 text-sm bg-gray-100 dark:bg-gray-700 hover:bg-gray-200 dark:hover:bg-gray-600 text-gray-500 rounded-md transition-colors"
                     >
                       <RotateCcw className="w-3 h-3 inline mr-0.5" /> Reset
                     </button>
@@ -1432,17 +1430,17 @@ export default function BakeryMetricsInsights() {
                                 className="mt-0.5 rounded border-gray-300 dark:border-gray-500 text-emerald-600 focus:ring-emerald-500 w-4 h-4"
                               />
                               <div className="flex-1">
-                                <p className={`text-xs font-bold ${done ? 'line-through text-gray-400' : 'text-gray-900 dark:text-gray-100'}`}>
+                                <p className={`text-sm font-bold ${done ? 'line-through text-gray-400' : 'text-gray-900 dark:text-gray-100'}`}>
                                   {fu.title}
                                 </p>
-                                <p className={`text-[10px] mt-0.5 ${done ? 'text-gray-400' : 'text-gray-600 dark:text-gray-400'}`}>
+                                <p className={`text-sm mt-0.5 ${done ? 'text-gray-400' : 'text-gray-600 dark:text-gray-400'}`}>
                                   {fu.description}
                                 </p>
                                 <div className="flex items-center gap-2 mt-1.5">
-                                  <span className="text-[9px] px-1.5 py-0.5 rounded-full bg-purple-100 dark:bg-purple-900/40 text-purple-700 dark:text-purple-300 font-medium">
+                                  <span className="text-sm px-1.5 py-0.5 rounded-full bg-purple-100 dark:bg-purple-900/40 text-purple-700 dark:text-purple-300 font-medium">
                                     <Clock className="w-3 h-3 inline mr-0.5" />{fu.dueDate?.replace(/_/g, ' ')}
                                   </span>
-                                  <span className="text-[9px] px-1.5 py-0.5 rounded-full bg-cyan-100 dark:bg-cyan-900/40 text-cyan-700 dark:text-cyan-300 font-medium">
+                                  <span className="text-sm px-1.5 py-0.5 rounded-full bg-cyan-100 dark:bg-cyan-900/40 text-cyan-700 dark:text-cyan-300 font-medium">
                                     <Users className="w-3 h-3 inline mr-0.5" />{fu.assignTo?.replace(/_/g, ' ')}
                                   </span>
                                 </div>
@@ -1454,7 +1452,7 @@ export default function BakeryMetricsInsights() {
                     ) : (
                       <div className="text-center py-6">
                         <CheckSquare className="w-8 h-8 text-gray-300 dark:text-gray-600 mx-auto mb-2" />
-                        <p className="text-xs text-gray-500">No follow-up items</p>
+                        <p className="text-sm text-gray-500">No follow-up items</p>
                       </div>
                     )}
                   </div>
@@ -1474,7 +1472,7 @@ export default function BakeryMetricsInsights() {
           <div className="max-w-7xl mx-auto flex flex-col lg:flex-row justify-between items-start lg:items-center gap-3">
             <div>
               <h4 className="text-sm font-bold text-gray-900 dark:text-white mb-1">📄 Analysis Report</h4>
-              <div className="flex flex-wrap gap-4 text-[10px] text-gray-600 dark:text-gray-400">
+              <div className="flex flex-wrap gap-4 text-sm text-gray-600 dark:text-gray-400">
                 <span>Week: <span className="font-semibold text-gray-800 dark:text-gray-200">{meta.weekName}</span></span>
                 <span>Period: <span className="font-semibold text-gray-800 dark:text-gray-200">{meta.weekStart} → {meta.weekEnd}</span></span>
                 <span>Days: <span className="font-semibold text-gray-800 dark:text-gray-200">{meta.daysWithData}/5</span></span>
