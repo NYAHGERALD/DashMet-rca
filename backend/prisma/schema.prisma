@@ -878,8 +878,59 @@ model Line {
   Incident    Incident[]
   Area        Area        @relation(fields: [areaId], references: [id], onDelete: Cascade)
   ShiftLine   ShiftLine[]
+  Equipment   Equipment[]
 
   @@index([areaId])
+}
+
+// ─── Equipment Registry ─────────────────────────────────────────────────────────
+
+model Equipment {
+  id              String               @id @default(uuid())
+  name            String
+  description     String?
+  assetTag        String?
+  manufacturer    String?
+  model           String?
+  serialNumber    String?
+  photos          Json                 @default("[]")
+  status          EquipmentStatus      @default(ACTIVE)
+  lineId          String
+  createdAt       DateTime             @default(now())
+  updatedAt       DateTime             @updatedAt
+  createdBy       String?
+
+  Line            Line                 @relation(fields: [lineId], references: [id], onDelete: Cascade)
+  Components      EquipmentComponent[]
+
+  @@index([lineId])
+  @@index([status])
+  @@index([assetTag])
+}
+
+model EquipmentComponent {
+  id              String               @id @default(uuid())
+  name            String
+  description     String?
+  partNumber      String?
+  manufacturer    String?
+  photos          Json                 @default("[]")
+  isCritical      Boolean              @default(false)
+  status          EquipmentStatus      @default(ACTIVE)
+  equipmentId     String
+  createdAt       DateTime             @default(now())
+  updatedAt       DateTime             @updatedAt
+
+  Equipment       Equipment            @relation(fields: [equipmentId], references: [id], onDelete: Cascade)
+
+  @@index([equipmentId])
+}
+
+enum EquipmentStatus {
+  ACTIVE
+  INACTIVE
+  MAINTENANCE
+  RETIRED
 }
 
 model Notification {

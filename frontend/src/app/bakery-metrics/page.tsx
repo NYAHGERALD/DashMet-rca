@@ -40,6 +40,13 @@ export default function BakeryMetricsPage() {
 
   // Submit Metrics modal (centered)
   const [showFormModal, setShowFormModal] = useState(false);
+  const [prefillWeekDay, setPrefillWeekDay] = useState<{ weekName: string; dayOfWeek: string; ts: number } | null>(null);
+
+  // Handle Fill Now from tracker — open form modal with prefilled week/day
+  const handleFillNow = (weekName: string, dayOfWeek: string) => {
+    setPrefillWeekDay({ weekName, dayOfWeek, ts: Date.now() });
+    setShowFormModal(true);
+  };
 
   // Tips & Guidelines modal
   const [showTipsPanel, setShowTipsPanel] = useState(false);
@@ -152,8 +159,8 @@ export default function BakeryMetricsPage() {
                 </div>
               </div>
 
-              {/* Center: Submit Metrics + Data Completeness buttons */}
-              <div className="hidden sm:flex items-center gap-2">
+              {/* Center: Submit Metrics + Data Completeness buttons (only on report tab) */}
+              {activeTab === 'report' && <div className="hidden sm:flex items-center gap-2">
                 <button
                   onClick={() => setShowFormModal(true)}
                   className="inline-flex items-center gap-1.5 px-3 py-1.5 bg-gradient-to-r from-blue-500 to-indigo-600 text-white rounded-lg text-xs font-bold shadow-sm hover:from-blue-600 hover:to-indigo-700 transition-all active:scale-95"
@@ -170,7 +177,7 @@ export default function BakeryMetricsPage() {
                   <ClipboardList className="w-3.5 h-3.5" />
                   Data Completeness
                 </button>
-              </div>
+              </div>}
 
               {/* Right: Dynamic tab context */}
               <div className="flex-shrink-0 hidden sm:block">
@@ -227,8 +234,8 @@ export default function BakeryMetricsPage() {
               </div>
             </div>
 
-            {/* Mobile: Submit Metrics + Data Completeness buttons */}
-            <div className="sm:hidden mb-2">
+            {/* Mobile: Submit Metrics + Data Completeness buttons (only on report tab) */}
+            {activeTab === 'report' && <div className="sm:hidden mb-2">
               <div className="flex items-center gap-1.5 mb-1.5">
                 <button
                   onClick={() => setShowFormModal(true)}
@@ -296,7 +303,7 @@ export default function BakeryMetricsPage() {
                   </div>
                 </div>
               )}
-            </div>
+            </div>}
 
             {/* Tab Switcher */}
             <div className="flex overflow-x-auto scrollbar-hide space-x-1 sm:space-x-3">
@@ -338,7 +345,7 @@ export default function BakeryMetricsPage() {
 
         {/* Always-mounted BakeryMetricsForm (off-screen) — needed for Recent Submissions & Data Completeness tracker modals */}
         <div aria-hidden="true" className="fixed -left-[9999px] top-0 w-px h-px overflow-hidden">
-          <BakeryMetricsForm onStepChange={handleStepChange} openRecentSubmissions={recentSubsTrigger} openTrackerModal={trackerModalTrigger} />
+          <BakeryMetricsForm onStepChange={handleStepChange} openRecentSubmissions={recentSubsTrigger} openTrackerModal={trackerModalTrigger} onFillNow={handleFillNow} />
         </div>
 
         {/* Submit Metrics Modal (centered) */}
@@ -360,7 +367,7 @@ export default function BakeryMetricsPage() {
                 </button>
               </div>
               <div className="p-4 sm:p-6">
-                <BakeryMetricsForm onStepChange={handleStepChange} openRecentSubmissions={recentSubsTrigger} />
+                <BakeryMetricsForm onStepChange={handleStepChange} openRecentSubmissions={recentSubsTrigger} prefillWeekDay={prefillWeekDay} />
               </div>
             </div>
           </div>

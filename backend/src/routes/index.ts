@@ -250,6 +250,10 @@ router.use('/recordings', recordingsRoutes);
 import lswRoutes from './lswRoutes';
 router.use('/lsw', lswRoutes);
 
+// Equipment Registry routes - authenticated
+import equipmentRoutes from './equipmentRoutes';
+router.use('/equipment', equipmentRoutes);
+
 // Vacation Hub routes - authenticated
 import vacationRoutes from './vacationRoutes';
 router.use('/vacation', vacationRoutes);

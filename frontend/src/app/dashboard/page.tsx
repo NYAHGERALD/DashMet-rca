@@ -275,6 +275,7 @@ function DashboardContent() {
                   { href: '/admin/departments', icon: '🏛️', label: t('nav.departments') },
                   { href: '/admin/areas', icon: '📦', label: t('nav.areas') },
                   { href: '/admin/lines', icon: '🔄', label: t('nav.lines') },
+                  { href: '/admin/equipment-registry', icon: '⚙️', label: 'Machine Registry' },
                   { href: '/admin/shifts', icon: '🕐', label: t('nav.shifts') },
                   { href: '/admin/categories', icon: '🏷️', label: t('nav.categories') },
                   { href: '/admin', icon: '👥', label: t('nav.userManagement') },

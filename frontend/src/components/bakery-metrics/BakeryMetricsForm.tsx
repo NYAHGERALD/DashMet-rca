@@ -42,6 +42,9 @@ import {
   MessageSquare,
   PenLine,
   ExternalLink,
+  Filter,
+  Plus,
+  Minus,
 } from 'lucide-react';
 
 // ─── Types ──────────────────────────────────────────────────────────────────────
@@ -119,14 +122,45 @@ function formatWeekReadable(weekName: string): string {
   return `${fmt(startStr)} – ${fmt(endStr)}, ${endYear}`;
 }
 
+// ─── Helper: parse week start/end dates from week_name ─────────────────────────
+function parseWeekDates(weekName: string): { start: Date; end: Date } | null {
+  const parts = weekName.split('_');
+  if (parts.length !== 2) return null;
+  const parseDate = (dateStr: string) => {
+    const [m, d, y] = dateStr.split('-');
+    if (!m || !d || !y) return null;
+    const date = new Date(parseInt(y), parseInt(m) - 1, parseInt(d));
+    return isNaN(date.getTime()) ? null : date;
+  };
+  const start = parseDate(parts[0]);
+  const end = parseDate(parts[1]);
+  if (!start || !end) return null;
+  return { start, end };
+}
+
+// ─── Helper: get a day's actual date within a week ──────────────────────────────
+function getDayDate(weekName: string, dayName: string): Date | null {
+  const dates = parseWeekDates(weekName);
+  if (!dates) return null;
+  const dayOffsets: Record<string, number> = { Monday: 0, Tuesday: 1, Wednesday: 2, Thursday: 3, Friday: 4 };
+  const offset = dayOffsets[dayName];
+  if (offset === undefined) return null;
+  const dayDate = new Date(dates.start);
+  dayDate.setDate(dayDate.getDate() + offset);
+  dayDate.setHours(0, 0, 0, 0);
+  return dayDate;
+}
+
 // ─── Component ──────────────────────────────────────────────────────────────────
 interface BakeryMetricsFormProps {
   onStepChange?: (step: number, total: number) => void;
   openRecentSubmissions?: number; // timestamp trigger from parent
   openTrackerModal?: number; // timestamp trigger from parent
+  onFillNow?: (weekName: string, dayOfWeek: string) => void; // callback when Fill Now is clicked in tracker
+  prefillWeekDay?: { weekName: string; dayOfWeek: string; ts: number } | null; // prefill week/day from parent
 }
 
-export default function BakeryMetricsForm({ onStepChange, openRecentSubmissions, openTrackerModal }: BakeryMetricsFormProps) {
+export default function BakeryMetricsForm({ onStepChange, openRecentSubmissions, openTrackerModal, onFillNow, prefillWeekDay }: BakeryMetricsFormProps) {
   const { user } = useAuth();
   const { theme } = useTheme();
 
@@ -257,6 +291,18 @@ export default function BakeryMetricsForm({ onStepChange, openRecentSubmissions,
   const [logFilterStartDate, setLogFilterStartDate] = useState('');
   const [logFilterEndDate, setLogFilterEndDate] = useState('');
   const [showTrackerModal, setShowTrackerModal] = useState(false);
+  const [showFilterPanel, setShowFilterPanel] = useState(false);
+  const [filterPanelClosing, setFilterPanelClosing] = useState(false);
+  const [activeFilters, setActiveFilters] = useState<string[]>([]);
+  const [outstandingFilterWeeks, setOutstandingFilterWeeks] = useState<string[]>([]);
+  const [outstandingFilterType, setOutstandingFilterType] = useState('');
+  const [outstandingFilterYear, setOutstandingFilterYear] = useState('');
+  // ─── Resolved tab filter state ─────────────────────────────────────────
+  const [resolvedFilterWeek, setResolvedFilterWeek] = useState('');
+  const [resolvedFilterDay, setResolvedFilterDay] = useState('');
+  const [resolvedFilterDate, setResolvedFilterDate] = useState('');
+  const [resolvedFilterCustomYear, setResolvedFilterCustomYear] = useState('');
+  const [resolvedFilterBy, setResolvedFilterBy] = useState('');
 
   const firstInvalidRef = useRef<HTMLInputElement | HTMLSelectElement | null>(null);
 
@@ -343,9 +389,6 @@ export default function BakeryMetricsForm({ onStepChange, openRecentSubmissions,
         const { data } = await api.get('/bakery-metrics/missing-data');
         if (data.success) {
           setMissingData(data);
-          // Auto-expand the first week that has issues
-          const first = data.weeks?.find((w: any) => w.total_issues > 0 || w.missing_days.length > 0);
-          if (first) setExpandedWeeks(new Set([first.week_name]));
         }
       } catch {
         // silent
@@ -441,17 +484,18 @@ export default function BakeryMetricsForm({ onStepChange, openRecentSubmissions,
     }
   };
 
-  // Handle "Fill Now" — set week+day and go to step 2
+  // Handle "Fill Now" — close tracker and notify parent to open form modal
   const handleFillNow = (weekName: string, dayOfWeek: string) => {
-    setFormData(prev => ({
-      ...prev,
-      week_name: weekName,
-      day_of_week: dayOfWeek,
-    }));
-    setCurrentStep(1);
-    // Scroll to form top
-    window.scrollTo({ top: 0, behavior: 'smooth' });
-    showNotification(`Selected ${dayOfWeek} of ${weekName} — fill in the info and click Next`, 'info');
+    setShowTrackerModal(false);
+    if (onFillNow) {
+      onFillNow(weekName, dayOfWeek);
+    } else {
+      // Fallback: set locally if no parent callback
+      setFormData(prev => ({ ...prev, week_name: weekName, day_of_week: dayOfWeek }));
+      setCurrentStep(1);
+      window.scrollTo({ top: 0, behavior: 'smooth' });
+    }
+    showNotification(`Selected ${dayOfWeek} of ${weekName} — fill in your metrics`, 'info');
     // Log Fill Now activity
     api.post('/bakery-metrics/activity-log', {
       action: 'FILL_NOW',
@@ -461,6 +505,20 @@ export default function BakeryMetricsForm({ onStepChange, openRecentSubmissions,
       details: { action_description: 'User clicked Fill Now to auto-select week and day for submission' },
     }).catch(() => {});
   };
+
+  // Apply prefill from parent
+  const prevPrefillRef = useRef(prefillWeekDay?.ts);
+  useEffect(() => {
+    if (prefillWeekDay && prefillWeekDay.ts !== prevPrefillRef.current) {
+      setFormData(prev => ({
+        ...prev,
+        week_name: prefillWeekDay.weekName,
+        day_of_week: prefillWeekDay.dayOfWeek,
+      }));
+      setCurrentStep(1);
+      prevPrefillRef.current = prefillWeekDay.ts;
+    }
+  }, [prefillWeekDay]);
 
   const toggleWeekExpanded = (weekName: string) => {
     setExpandedWeeks(prev => {
@@ -913,19 +971,30 @@ export default function BakeryMetricsForm({ onStepChange, openRecentSubmissions,
   };
 
   // Open recent submissions modal when parent triggers it
+  const prevRecentSubsRef = useRef(openRecentSubmissions);
   useEffect(() => {
-    if (openRecentSubmissions && openRecentSubmissions > 0) {
+    if (openRecentSubmissions && openRecentSubmissions > 0 && openRecentSubmissions !== prevRecentSubsRef.current) {
       setShowAllModal(true);
       loadAllSubmissions();
     }
+    prevRecentSubsRef.current = openRecentSubmissions;
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [openRecentSubmissions]);
 
   // Open tracker modal when parent triggers it
+  const prevTrackerRef = useRef(openTrackerModal);
   useEffect(() => {
-    if (openTrackerModal && openTrackerModal > 0) {
+    if (openTrackerModal && openTrackerModal > 0 && openTrackerModal !== prevTrackerRef.current) {
+      setExpandedWeeks(new Set());
+      setShowFilterPanel(false);
+      setFilterPanelClosing(false);
+      setActiveFilters([]);
+      setOutstandingFilterWeeks([]);
+      setOutstandingFilterType('');
+      setOutstandingFilterYear('');
       setShowTrackerModal(true);
     }
+    prevTrackerRef.current = openTrackerModal;
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [openTrackerModal]);
 
@@ -1024,12 +1093,41 @@ export default function BakeryMetricsForm({ onStepChange, openRecentSubmissions,
             {missingData && (
               <span className="text-[10px] text-amber-100 font-medium hidden sm:inline">{missingData.total_weeks} week(s)</span>
             )}
+            <button
+              onClick={() => {
+                if (showFilterPanel) {
+                  setFilterPanelClosing(true);
+                  setTimeout(() => { setShowFilterPanel(false); setFilterPanelClosing(false); }, 250);
+                } else {
+                  setShowFilterPanel(true);
+                }
+              }}
+              className={`p-1.5 rounded-lg transition-all relative ${showFilterPanel ? 'bg-white/30 text-white' : 'bg-white/10 text-white/70 hover:bg-white/20 hover:text-white'}`}
+              title="Toggle filters"
+            >
+              <Filter className="w-4 h-4" />
+              {(() => {
+                let fc = 0;
+                if (trackerTab === 'outstanding') {
+                  fc = outstandingFilterWeeks.length + (outstandingFilterType ? 1 : 0) + (outstandingFilterYear.length === 4 ? 1 : 0);
+                } else if (trackerTab === 'resolved') {
+                  fc = (resolvedFilterWeek ? 1 : 0) + (resolvedFilterDay ? 1 : 0) + (resolvedFilterDate ? 1 : 0) + (resolvedFilterBy ? 1 : 0);
+                } else if (trackerTab === 'activity') {
+                  fc = (logFilterAction ? 1 : 0) + (logFilterUser ? 1 : 0) + (logFilterStartDate ? 1 : 0) + (logFilterEndDate ? 1 : 0);
+                }
+                return fc > 0 ? (
+                  <span className="absolute -top-1.5 -right-1.5 min-w-[16px] h-4 flex items-center justify-center px-1 bg-red-500 text-white text-[9px] font-bold rounded-full animate-[filterBlink_2s_ease-in-out_infinite]">
+                    {fc}
+                  </span>
+                ) : null;
+              })()}
+            </button>
           </div>
         </div>
       </div>
 
       {/* Content */}
-      <div className="max-h-[55vh] overflow-y-auto scrollbar-thin flex-1">
+      <div className="overflow-y-auto scrollbar-thin flex-1 min-h-0">
         {missingDataLoading ? (
           <LoadingState message="Checking all weeks for missing information" title="Analyzing submission data..." icon="data" color="amber" fullScreen={false} />
         ) : !missingData || missingData.weeks?.length === 0 ? (
@@ -1052,7 +1150,27 @@ export default function BakeryMetricsForm({ onStepChange, openRecentSubmissions,
             </div>
           ) : (
             <div className="divide-y divide-gray-100 dark:divide-gray-700">
-              {resolutions.map((res: any) => {
+              {resolutions.filter((res: any) => {
+                if (resolvedFilterWeek && res.weekName !== resolvedFilterWeek) return false;
+                if (resolvedFilterDay && res.dayOfWeek !== resolvedFilterDay) return false;
+                if (resolvedFilterBy && res.resolvedBy !== resolvedFilterBy) return false;
+                if (resolvedFilterDate) {
+                  const rd = new Date(res.resolvedAt);
+                  const now = new Date();
+                  const startOfDay = new Date(now.getFullYear(), now.getMonth(), now.getDate());
+                  const dayOfWeekNum = now.getDay();
+                  const startOfWeek = new Date(startOfDay); startOfWeek.setDate(startOfWeek.getDate() - (dayOfWeekNum === 0 ? 6 : dayOfWeekNum - 1));
+                  if (resolvedFilterDate === 'today') { if (rd < startOfDay || rd >= new Date(startOfDay.getTime() + 86400000)) return false; }
+                  else if (resolvedFilterDate === 'thisWeek') { if (rd < startOfWeek) return false; }
+                  else if (resolvedFilterDate === 'lastWeek') { const lws = new Date(startOfWeek); lws.setDate(lws.getDate() - 7); if (rd < lws || rd >= startOfWeek) return false; }
+                  else if (resolvedFilterDate === 'lastMonth') { const lms = new Date(now.getFullYear(), now.getMonth() - 1, 1); const lme = new Date(now.getFullYear(), now.getMonth(), 1); if (rd < lms || rd >= lme) return false; }
+                  else if (resolvedFilterDate === 'lastQuarter') { const cq = Math.floor(now.getMonth() / 3); const lqs = new Date(now.getFullYear(), (cq - 1) * 3, 1); const lqe = new Date(now.getFullYear(), cq * 3, 1); if (cq === 0) { lqs.setFullYear(now.getFullYear() - 1); lqs.setMonth(9); lqe.setFullYear(now.getFullYear()); lqe.setMonth(0); } if (rd < lqs || rd >= lqe) return false; }
+                  else if (resolvedFilterDate === 'thisYear') { if (rd.getFullYear() !== now.getFullYear()) return false; }
+                  else if (resolvedFilterDate === 'lastYear') { if (rd.getFullYear() !== now.getFullYear() - 1) return false; }
+                  else if (resolvedFilterDate === 'customYear' && resolvedFilterCustomYear.length === 4) { const cy = parseInt(resolvedFilterCustomYear); if (!isNaN(cy) && cy <= now.getFullYear() && rd.getFullYear() !== cy) return false; }
+                }
+                return true;
+              }).map((res: any) => {
                 const weekFormatted = formatWeekReadable(res.weekName);
                 const shiftLabel = res.shiftType === 'first' ? '1st Shift' : res.shiftType === 'second' ? '2nd Shift' : null;
                 return (
@@ -1099,59 +1217,6 @@ export default function BakeryMetricsForm({ onStepChange, openRecentSubmissions,
         ) : trackerTab === 'activity' ? (
           /* ── ACTIVITY LOG TAB ─────────────────────────────────────────── */
           <div>
-            {/* Filters */}
-            <div className="px-4 sm:px-5 py-3 bg-gray-50 dark:bg-gray-800/50 border-b border-gray-200 dark:border-gray-700">
-              <div className="flex items-center gap-2 mb-2">
-                <History className="w-3.5 h-3.5 text-gray-500 dark:text-gray-400" />
-                <span className="text-[10px] font-bold text-gray-600 dark:text-gray-300 uppercase tracking-wider">Filters</span>
-                {(logFilterAction || logFilterUser || logFilterStartDate || logFilterEndDate) && (
-                  <button
-                    onClick={() => { setLogFilterAction(''); setLogFilterUser(''); setLogFilterStartDate(''); setLogFilterEndDate(''); }}
-                    className="text-[9px] text-amber-600 dark:text-amber-400 font-bold hover:underline ml-auto"
-                  >
-                    Clear All
-                  </button>
-                )}
-              </div>
-              <div className="grid grid-cols-2 sm:grid-cols-4 gap-2">
-                <select
-                  value={logFilterAction}
-                  onChange={e => setLogFilterAction(e.target.value)}
-                  title="Filter by action type"
-                  className="px-2 py-1.5 rounded-md border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-700 text-gray-700 dark:text-gray-200 text-[10px] font-medium focus:border-amber-400 focus:ring-1 focus:ring-amber-200 dark:focus:ring-amber-800"
-                >
-                  <option value="">All Actions</option>
-                  <option value="RESOLVED">Resolved</option>
-                  <option value="UNRESOLVED">Unresolved</option>
-                  <option value="FILL_NOW">Fill Now</option>
-                </select>
-                <input
-                  type="text"
-                  value={logFilterUser}
-                  onChange={e => setLogFilterUser(e.target.value)}
-                  placeholder="Filter by user..."
-                  className="px-2 py-1.5 rounded-md border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-700 text-gray-700 dark:text-gray-200 text-[10px] font-medium placeholder-gray-400 dark:placeholder-gray-500 focus:border-amber-400 focus:ring-1 focus:ring-amber-200 dark:focus:ring-amber-800"
-                />
-                <input
-                  type="date"
-                  value={logFilterStartDate}
-                  onChange={e => setLogFilterStartDate(e.target.value)}
-                  className="px-2 py-1.5 rounded-md border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-700 text-gray-700 dark:text-gray-200 text-[10px] font-medium focus:border-amber-400 focus:ring-1 focus:ring-amber-200 dark:focus:ring-amber-800"
-                  title="Start date"
-                />
-                <input
-                  type="date"
-                  value={logFilterEndDate}
-                  onChange={e => setLogFilterEndDate(e.target.value)}
-                  className="px-2 py-1.5 rounded-md border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-700 text-gray-700 dark:text-gray-200 text-[10px] font-medium focus:border-amber-400 focus:ring-1 focus:ring-amber-200 dark:focus:ring-amber-800"
-                  title="End date"
-                />
-              </div>
-              <p className="text-[9px] text-gray-400 dark:text-gray-500 mt-1.5">
-                {activityLogsTotalCount} log{activityLogsTotalCount !== 1 ? 's' : ''} found
-              </p>
-            </div>
-
             {/* Log entries */}
             {activityLogsLoading ? (
               <div className="flex flex-col items-center justify-center py-12">
@@ -1246,7 +1311,19 @@ export default function BakeryMetricsForm({ onStepChange, openRecentSubmissions,
         ) : (
           /* ── OUTSTANDING TAB ──────────────────────────────────────────── */
           <div className="divide-y divide-gray-100 dark:divide-gray-700">
-            {missingData.weeks.map((week: any) => {
+            {missingData.weeks.filter((week: any) => {
+              if (outstandingFilterWeeks.length > 0 && !outstandingFilterWeeks.includes(week.week_name)) return false;
+              if (outstandingFilterYear.length === 4 && parseInt(outstandingFilterYear) <= new Date().getFullYear() && !week.week_name.includes(outstandingFilterYear)) return false;
+              if (outstandingFilterType) {
+                const uDays = week.days.filter((d: any) => (d.status === 'missing' || d.status === 'incomplete') && !isResolved(week.week_name, d.day));
+                const fullyComplete = week.completion_pct === 100 && week.total_issues === 0;
+                const anyResolutions = week.days.some((d: any) => isResolved(week.week_name, d.day));
+                if (outstandingFilterType === 'unresolved') return uDays.length > 0;
+                if (outstandingFilterType === 'complete') return fullyComplete && uDays.length === 0;
+                if (outstandingFilterType === 'resolved') return uDays.length === 0 && anyResolutions;
+              }
+              return true;
+            }).map((week: any) => {
               const isExpanded = expandedWeeks.has(week.week_name);
               const hasIssues = week.total_issues > 0 || week.missing_days.length > 0;
               const isFullyComplete = week.completion_pct === 100 && week.total_issues === 0;
@@ -1255,6 +1332,41 @@ export default function BakeryMetricsForm({ onStepChange, openRecentSubmissions,
               const unresolvedDays = week.days.filter((d: any) =>
                 (d.status === 'missing' || d.status === 'incomplete') && !isResolved(week.week_name, d.day)
               );
+
+              // ── Week color: green/blue/red/yellow/gray ──
+              const today = new Date();
+              today.setHours(0, 0, 0, 0);
+              const weekDates = parseWeekDates(week.week_name);
+              const weekStatus = (() => {
+                if (!weekDates) return 'past' as const;
+                const end = new Date(weekDates.end); end.setHours(0, 0, 0, 0);
+                const start = new Date(weekDates.start); start.setHours(0, 0, 0, 0);
+                if (end < today) return 'past' as const;
+                if (start > today) return 'future' as const;
+                return 'current' as const;
+              })();
+              const hasAnyResolutions = week.days.some((d: any) => isResolved(week.week_name, d.day));
+              let weekColor: 'green' | 'blue' | 'red' | 'yellow' | 'gray';
+              if (unresolvedDays.length === 0 && (isFullyComplete || hasAnyResolutions)) {
+                weekColor = hasAnyResolutions ? 'blue' : 'green';
+              } else if (weekStatus === 'future') {
+                weekColor = 'gray';
+              } else if (weekStatus === 'past') {
+                weekColor = unresolvedDays.length > 0 ? 'red' : 'green';
+              } else {
+                const hasPastDueUnresolved = unresolvedDays.some((d: any) => {
+                  const dd = getDayDate(week.week_name, d.day);
+                  return dd !== null && dd < today;
+                });
+                weekColor = (!hasPastDueUnresolved && week.completion_pct === 0) ? 'gray' : 'yellow';
+              }
+              const wc = {
+                green: { dot: 'bg-green-500', badge: 'bg-green-100 text-green-700 dark:bg-green-900/30 dark:text-green-300', bar: 'bg-green-500' },
+                blue: { dot: 'bg-blue-500', badge: 'bg-blue-100 text-blue-700 dark:bg-blue-900/30 dark:text-blue-300', bar: 'bg-blue-500' },
+                red: { dot: 'bg-red-500', badge: 'bg-red-100 text-red-700 dark:bg-red-900/30 dark:text-red-300', bar: 'bg-red-500' },
+                yellow: { dot: 'bg-yellow-500', badge: 'bg-amber-100 text-amber-700 dark:bg-amber-900/30 dark:text-amber-300', bar: 'bg-yellow-500' },
+                gray: { dot: 'bg-gray-400', badge: 'bg-gray-100 text-gray-500 dark:bg-gray-700/30 dark:text-gray-400', bar: 'bg-gray-400' },
+              };
 
               if (isFullyComplete && unresolvedDays.length === 0) {
                 // Still show complete weeks but collapsed
@@ -1267,9 +1379,7 @@ export default function BakeryMetricsForm({ onStepChange, openRecentSubmissions,
                     className="w-full flex items-center justify-between px-4 sm:px-5 py-3 hover:bg-gray-50 dark:hover:bg-gray-700/40 transition-colors group text-left"
                   >
                     <div className="flex items-center gap-3 min-w-0 flex-1">
-                      <div className={`w-2.5 h-2.5 rounded-full flex-shrink-0 ${
-                        isFullyComplete && unresolvedDays.length === 0 ? 'bg-green-500' : week.completion_pct >= 80 ? 'bg-yellow-500' : week.completion_pct >= 40 ? 'bg-orange-500' : 'bg-red-500'
-                      }`} />
+                      <div className={`w-2.5 h-2.5 rounded-full flex-shrink-0 ${wc[weekColor].dot}`} />
                       <div className="min-w-0">
                         <p className="text-xs font-bold text-gray-900 dark:text-gray-100 truncate">{weekFormatted}</p>
                         <p className="text-[10px] text-gray-500 dark:text-gray-400">
@@ -1281,20 +1391,12 @@ export default function BakeryMetricsForm({ onStepChange, openRecentSubmissions,
                       </div>
                     </div>
                     <div className="flex items-center gap-2.5 flex-shrink-0">
-                      <span className={`text-[10px] font-bold px-2 py-0.5 rounded-full ${
-                        isFullyComplete && unresolvedDays.length === 0
-                          ? 'bg-green-100 text-green-700 dark:bg-green-900/30 dark:text-green-300'
-                          : hasIssues
-                          ? 'bg-amber-100 text-amber-700 dark:bg-amber-900/30 dark:text-amber-300'
-                          : 'bg-blue-100 text-blue-700 dark:bg-blue-900/30 dark:text-blue-300'
-                      }`}>
+                      <span className={`text-[10px] font-bold px-2 py-0.5 rounded-full ${wc[weekColor].badge}`}>
                         {week.completion_pct}%
                       </span>
                       <div className="w-16 h-1.5 bg-gray-200 dark:bg-gray-600 rounded-full overflow-hidden hidden sm:block">
                         <div
-                          className={`h-full rounded-full transition-all ${
-                            isFullyComplete ? 'bg-green-500' : week.completion_pct >= 80 ? 'bg-yellow-500' : 'bg-orange-500'
-                          }`}
+                          className={`h-full rounded-full transition-all ${wc[weekColor].bar}`}
                           style={{ width: `${week.completion_pct}%` }}
                         />
                       </div>
@@ -1316,15 +1418,20 @@ export default function BakeryMetricsForm({ onStepChange, openRecentSubmissions,
                             </span>
                           </div>
                           <div className="flex flex-wrap gap-1.5 ml-5">
-                            {week.missing_days.map((day: string) => (
-                              <span key={day} className={`text-[10px] font-semibold px-2 py-0.5 rounded-full ${
-                                isResolved(week.week_name, day)
-                                  ? 'text-green-600 dark:text-green-400 bg-green-100 dark:bg-green-900/30 line-through'
-                                  : 'text-red-600 dark:text-red-400 bg-red-100 dark:bg-red-900/30'
-                              }`}>
-                                {day}{isResolved(week.week_name, day) ? ' ✓' : ''}
-                              </span>
-                            ))}
+                            {week.missing_days.map((day: string) => {
+                              const pillFuture = (() => { const dd = getDayDate(week.week_name, day); return dd !== null && dd > today; })();
+                              return (
+                                <span key={day} className={`text-[10px] font-semibold px-2 py-0.5 rounded-full ${
+                                  isResolved(week.week_name, day)
+                                    ? 'text-blue-600 dark:text-blue-400 bg-blue-100 dark:bg-blue-900/30 line-through'
+                                    : pillFuture
+                                    ? 'text-gray-400 dark:text-gray-500 bg-gray-100 dark:bg-gray-700/30'
+                                    : 'text-red-600 dark:text-red-400 bg-red-100 dark:bg-red-900/30'
+                                }`}>
+                                  {day}{isResolved(week.week_name, day) ? ' ✓' : ''}
+                                </span>
+                              );
+                            })}
                           </div>
                         </div>
                       )}
@@ -1333,31 +1440,32 @@ export default function BakeryMetricsForm({ onStepChange, openRecentSubmissions,
                         {week.days.map((day: any) => {
                           const resolved = isResolved(week.week_name, day.day);
                           const resolution = getResolution(week.week_name, day.day);
+                          const dayIsFuture = (() => { const dd = getDayDate(week.week_name, day.day); return dd !== null && dd > today; })();
                           const statusColors: Record<string, string> = {
                             complete: 'border-l-green-500 bg-green-50/50 dark:bg-green-900/10',
-                            incomplete: resolved ? 'border-l-green-500 bg-green-50/30 dark:bg-green-900/10' : 'border-l-amber-500 bg-amber-50/50 dark:bg-amber-900/10',
-                            missing: resolved ? 'border-l-green-500 bg-green-50/30 dark:bg-green-900/10' : 'border-l-red-500 bg-red-50/50 dark:bg-red-900/10',
+                            incomplete: resolved ? 'border-l-blue-500 bg-blue-50/30 dark:bg-blue-900/10' : 'border-l-amber-500 bg-amber-50/50 dark:bg-amber-900/10',
+                            missing: resolved ? 'border-l-blue-500 bg-blue-50/30 dark:bg-blue-900/10' : 'border-l-red-500 bg-red-50/50 dark:bg-red-900/10',
                           };
                           const statusIcons: Record<string, React.ReactNode> = {
                             complete: <CheckCircle className="w-3.5 h-3.5 text-green-500" />,
-                            incomplete: resolved ? <CheckCircle className="w-3.5 h-3.5 text-green-500" /> : <AlertTriangle className="w-3.5 h-3.5 text-amber-500" />,
-                            missing: resolved ? <CheckCircle className="w-3.5 h-3.5 text-green-500" /> : <AlertCircle className="w-3.5 h-3.5 text-red-500" />,
+                            incomplete: resolved ? <CheckCircle className="w-3.5 h-3.5 text-blue-500" /> : <AlertTriangle className="w-3.5 h-3.5 text-amber-500" />,
+                            missing: resolved ? <CheckCircle className="w-3.5 h-3.5 text-blue-500" /> : <AlertCircle className="w-3.5 h-3.5 text-red-500" />,
                           };
                           const statusLabels: Record<string, string> = {
                             complete: 'Complete',
-                            incomplete: resolved ? 'Resolved' : 'Has Issues',
-                            missing: resolved ? 'Resolved' : 'Not Submitted',
+                            incomplete: resolved ? 'Resolved' : dayIsFuture ? 'Upcoming' : 'Has Issues',
+                            missing: resolved ? 'Resolved' : dayIsFuture ? 'Upcoming' : 'Not Submitted',
                           };
                           const statusBadgeColors: Record<string, string> = {
                             complete: 'bg-green-100 text-green-700 dark:bg-green-900/30 dark:text-green-300',
-                            incomplete: resolved ? 'bg-green-100 text-green-700 dark:bg-green-900/30 dark:text-green-300' : 'bg-amber-100 text-amber-700 dark:bg-amber-900/30 dark:text-amber-300',
-                            missing: resolved ? 'bg-green-100 text-green-700 dark:bg-green-900/30 dark:text-green-300' : 'bg-red-100 text-red-700 dark:bg-red-900/30 dark:text-red-300',
+                            incomplete: resolved ? 'bg-blue-100 text-blue-700 dark:bg-blue-900/30 dark:text-blue-300' : 'bg-amber-100 text-amber-700 dark:bg-amber-900/30 dark:text-amber-300',
+                            missing: resolved ? 'bg-blue-100 text-blue-700 dark:bg-blue-900/30 dark:text-blue-300' : 'bg-red-100 text-red-700 dark:bg-red-900/30 dark:text-red-300',
                           };
 
                           return (
                             <div
                               key={day.day}
-                              className={`border-l-[3px] rounded-lg px-3 py-2.5 ${statusColors[day.status]}`}
+                              className={`border-l-[3px] rounded-lg px-3 py-2.5 ${dayIsFuture ? 'border-l-gray-300 bg-gray-50/30 dark:bg-gray-800/20 opacity-50' : statusColors[day.status]}`}
                             >
                               <div className="flex items-center justify-between mb-1">
                                 <div className="flex items-center gap-2">
@@ -1368,7 +1476,7 @@ export default function BakeryMetricsForm({ onStepChange, openRecentSubmissions,
                                   </span>
                                 </div>
                                 <div className="flex items-center gap-1.5">
-                                  {(day.status === 'missing' || day.status === 'incomplete') && !resolved && (
+                                  {(day.status === 'missing' || day.status === 'incomplete') && !resolved && !dayIsFuture && (
                                     <>
                                       <button
                                         onClick={(e) => { e.stopPropagation(); handleFillNow(week.week_name, day.day); }}
@@ -1378,7 +1486,7 @@ export default function BakeryMetricsForm({ onStepChange, openRecentSubmissions,
                                         <ExternalLink className="w-3 h-3" /> Fill Now
                                       </button>
                                       <button
-                                        onClick={(e) => { e.stopPropagation(); setResolveModal({ weekName: week.week_name, dayOfWeek: day.day }); setResolveReason(''); }}
+                                        onClick={(e) => { e.stopPropagation(); setShowTrackerModal(false); setResolveModal({ weekName: week.week_name, dayOfWeek: day.day }); setResolveReason(''); }}
                                         className="inline-flex items-center gap-1 px-2 py-1 bg-amber-500 hover:bg-amber-600 text-white rounded-md text-[9px] font-bold transition-all active:scale-95 shadow-sm"
                                         title="Mark as resolved with a reason"
                                       >
@@ -1405,12 +1513,12 @@ export default function BakeryMetricsForm({ onStepChange, openRecentSubmissions,
                               </div>
 
                               {resolved && resolution && (
-                                <div className="mt-1.5 ml-5 px-2.5 py-1.5 bg-green-50 dark:bg-green-900/15 border border-green-200 dark:border-green-800/40 rounded-md">
+                                <div className="mt-1.5 ml-5 px-2.5 py-1.5 bg-blue-500 dark:bg-blue-600 border border-blue-600 dark:border-blue-700 rounded-md">
                                   <div className="flex items-start gap-1.5">
-                                    <MessageSquare className="w-3 h-3 text-green-500 flex-shrink-0 mt-0.5" />
+                                    <MessageSquare className="w-3 h-3 text-white flex-shrink-0 mt-0.5" />
                                     <div>
-                                      <p className="text-[10px] text-green-700 dark:text-green-300">{resolution.reason}</p>
-                                      <p className="text-[9px] text-green-500/70 dark:text-green-400/60 mt-0.5">
+                                      <p className="text-[10px] text-white">{resolution.reason}</p>
+                                      <p className="text-[9px] text-white/70 mt-0.5">
                                         — {resolution.resolvedBy}, {new Date(resolution.resolvedAt).toLocaleDateString('en-US', { month: 'short', day: 'numeric' })}
                                       </p>
                                     </div>
@@ -1429,7 +1537,7 @@ export default function BakeryMetricsForm({ onStepChange, openRecentSubmissions,
                                 </div>
                               )}
 
-                              {day.status === 'missing' && !resolved && (
+                              {day.status === 'missing' && !resolved && !dayIsFuture && (
                                 <p className="text-[10px] text-red-600/80 dark:text-red-400/70 mt-1 ml-5">
                                   No metrics have been submitted for this day. Please submit your data or resolve with a reason.
                                 </p>
@@ -1488,6 +1596,30 @@ export default function BakeryMetricsForm({ onStepChange, openRecentSubmissions,
         }
         .animate-bounce-in {
           animation: bounceIn 0.45s cubic-bezier(0.34, 1.56, 0.64, 1);
+        }
+        @keyframes slideInLeft {
+          from {
+            opacity: 0;
+            transform: translateX(-100%);
+          }
+          to {
+            opacity: 1;
+            transform: translateX(0);
+          }
+        }
+        @keyframes slideOutLeft {
+          from {
+            opacity: 1;
+            transform: translateX(0);
+          }
+          to {
+            opacity: 0;
+            transform: translateX(-100%);
+          }
+        }
+        @keyframes filterBlink {
+          0%, 100% { opacity: 1; }
+          50% { opacity: 0.2; }
         }
       `}</style>
 
@@ -2091,20 +2223,503 @@ export default function BakeryMetricsForm({ onStepChange, openRecentSubmissions,
       {showTrackerModal && createPortal(
         <div className="fixed inset-0 z-50" onClick={() => setShowTrackerModal(false)}>
           <div className="absolute inset-0 backdrop-blur-sm bg-black/30" />
-          <div className="relative h-full flex items-center justify-center p-4">
-            <div
-              className="bg-white dark:bg-gray-800 rounded-xl shadow-2xl border border-gray-200 dark:border-gray-700 w-full max-w-4xl max-h-[85vh] overflow-hidden flex flex-col"
-              onClick={e => e.stopPropagation()}
-            >
-              {trackerContent}
-              {/* Close button footer */}
-              <div className="flex-shrink-0 px-4 py-3 border-t border-gray-200 dark:border-gray-700 bg-gray-50 dark:bg-gray-800/80 flex justify-end">
-                <button
-                  onClick={() => setShowTrackerModal(false)}
-                  className="px-4 py-2 bg-gray-200 dark:bg-gray-700 text-gray-700 dark:text-gray-300 text-xs font-bold rounded-lg hover:bg-gray-300 dark:hover:bg-gray-600 transition-all active:scale-95"
-                >
-                  Close
-                </button>
+          <div className="relative h-full flex items-center justify-center p-2 sm:p-4">
+            <div className="flex h-[90vh] sm:h-[85vh] w-full max-w-4xl" onClick={e => e.stopPropagation()}>
+              {/* ── Slide-out Filter Panel ── */}
+              {showFilterPanel && (
+                <div className={`flex-shrink-0 w-56 sm:w-64 h-full bg-white dark:bg-gray-800 rounded-l-xl border border-r-0 border-gray-200 dark:border-gray-700 shadow-2xl flex flex-col overflow-hidden ${filterPanelClosing ? 'animate-[slideOutLeft_250ms_ease-in_forwards]' : 'animate-[slideInLeft_250ms_ease-out_forwards]'}`}>
+                  <div className="px-3 py-3 bg-gradient-to-r from-amber-500 to-orange-500 flex items-center justify-between">
+                    <div className="flex items-center gap-2">
+                      <Filter className="w-3.5 h-3.5 text-white" />
+                      <span className="text-[11px] font-bold text-white">Filters</span>
+                    </div>
+                    <button
+                      onClick={() => { setFilterPanelClosing(true); setTimeout(() => { setShowFilterPanel(false); setFilterPanelClosing(false); }, 250); }}
+                      className="p-1 bg-white/20 rounded-md hover:bg-white/30 transition-all"
+                      title="Close filters"
+                    >
+                      <X className="w-3 h-3 text-white" />
+                    </button>
+                  </div>
+
+                  <div className="flex-1 overflow-y-auto px-3 py-3 space-y-3">
+                    {/* Dynamic filters based on active tab */}
+                    {trackerTab === 'activity' ? (
+                      <>
+                        {/* Add Filter button for activity tab */}
+                        {!activeFilters.includes('action') && !activeFilters.includes('user') && !activeFilters.includes('startDate') && !activeFilters.includes('endDate') && (
+                          <p className="text-[10px] text-gray-400 dark:text-gray-500 text-center py-2">No filters added yet</p>
+                        )}
+
+                        {activeFilters.includes('action') && (
+                          <div className="space-y-1">
+                            <div className="flex items-center justify-between">
+                              <label className="text-[10px] font-bold text-gray-600 dark:text-gray-300">Action Type</label>
+                              <button onClick={() => { setActiveFilters(prev => prev.filter(f => f !== 'action')); setLogFilterAction(''); }} className="text-gray-400 hover:text-red-500 transition-colors" title="Remove filter"><Minus className="w-3 h-3" /></button>
+                            </div>
+                            <select
+                              value={logFilterAction}
+                              onChange={e => setLogFilterAction(e.target.value)}
+                              title="Filter by action type"
+                              className="w-full px-2 py-1.5 rounded-md border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-700 text-gray-700 dark:text-gray-200 text-[10px] font-medium focus:border-amber-400 focus:ring-1 focus:ring-amber-200 dark:focus:ring-amber-800"
+                            >
+                              <option value="">All Actions</option>
+                              <option value="RESOLVED">Resolved</option>
+                              <option value="UNRESOLVED">Unresolved</option>
+                              <option value="FILL_NOW">Fill Now</option>
+                            </select>
+                          </div>
+                        )}
+
+                        {activeFilters.includes('user') && (
+                          <div className="space-y-1">
+                            <div className="flex items-center justify-between">
+                              <label className="text-[10px] font-bold text-gray-600 dark:text-gray-300">User</label>
+                              <button onClick={() => { setActiveFilters(prev => prev.filter(f => f !== 'user')); setLogFilterUser(''); }} className="text-gray-400 hover:text-red-500 transition-colors" title="Remove filter"><Minus className="w-3 h-3" /></button>
+                            </div>
+                            <input
+                              type="text"
+                              value={logFilterUser}
+                              onChange={e => setLogFilterUser(e.target.value)}
+                              placeholder="Filter by user..."
+                              className="w-full px-2 py-1.5 rounded-md border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-700 text-gray-700 dark:text-gray-200 text-[10px] font-medium placeholder-gray-400 dark:placeholder-gray-500 focus:border-amber-400 focus:ring-1 focus:ring-amber-200 dark:focus:ring-amber-800"
+                            />
+                          </div>
+                        )}
+
+                        {activeFilters.includes('startDate') && (
+                          <div className="space-y-1">
+                            <div className="flex items-center justify-between">
+                              <label className="text-[10px] font-bold text-gray-600 dark:text-gray-300">Start Date</label>
+                              <button onClick={() => { setActiveFilters(prev => prev.filter(f => f !== 'startDate')); setLogFilterStartDate(''); }} className="text-gray-400 hover:text-red-500 transition-colors" title="Remove filter"><Minus className="w-3 h-3" /></button>
+                            </div>
+                            <input
+                              type="date"
+                              value={logFilterStartDate}
+                              onChange={e => setLogFilterStartDate(e.target.value)}
+                              title="Start date"
+                              className="w-full px-2 py-1.5 rounded-md border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-700 text-gray-700 dark:text-gray-200 text-[10px] font-medium focus:border-amber-400 focus:ring-1 focus:ring-amber-200 dark:focus:ring-amber-800"
+                            />
+                          </div>
+                        )}
+
+                        {activeFilters.includes('endDate') && (
+                          <div className="space-y-1">
+                            <div className="flex items-center justify-between">
+                              <label className="text-[10px] font-bold text-gray-600 dark:text-gray-300">End Date</label>
+                              <button onClick={() => { setActiveFilters(prev => prev.filter(f => f !== 'endDate')); setLogFilterEndDate(''); }} className="text-gray-400 hover:text-red-500 transition-colors" title="Remove filter"><Minus className="w-3 h-3" /></button>
+                            </div>
+                            <input
+                              type="date"
+                              value={logFilterEndDate}
+                              onChange={e => setLogFilterEndDate(e.target.value)}
+                              title="End date"
+                              className="w-full px-2 py-1.5 rounded-md border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-700 text-gray-700 dark:text-gray-200 text-[10px] font-medium focus:border-amber-400 focus:ring-1 focus:ring-amber-200 dark:focus:ring-amber-800"
+                            />
+                          </div>
+                        )}
+
+                        {/* Add Filter dropdown */}
+                        {(() => {
+                          const available = [
+                            { key: 'action', label: 'Action Type' },
+                            { key: 'user', label: 'User' },
+                            { key: 'startDate', label: 'Start Date' },
+                            { key: 'endDate', label: 'End Date' },
+                          ].filter(f => !activeFilters.includes(f.key));
+                          if (available.length === 0) return null;
+                          return (
+                            <div className="pt-2 border-t border-gray-200 dark:border-gray-700">
+                              <p className="text-[9px] font-bold text-gray-500 dark:text-gray-400 uppercase tracking-wider mb-1.5">Add Filter</p>
+                              <div className="space-y-1">
+                                {available.map(f => (
+                                  <button
+                                    key={f.key}
+                                    onClick={() => setActiveFilters(prev => [...prev, f.key])}
+                                    className="w-full flex items-center gap-2 px-2 py-1.5 rounded-md text-[10px] font-medium text-gray-600 dark:text-gray-300 hover:bg-amber-50 dark:hover:bg-amber-900/15 hover:text-amber-700 dark:hover:text-amber-300 transition-colors text-left"
+                                  >
+                                    <Plus className="w-3 h-3" /> {f.label}
+                                  </button>
+                                ))}
+                              </div>
+                            </div>
+                          );
+                        })()}
+                      </>
+                    ) : trackerTab === 'outstanding' ? (
+                      <>
+                        {outstandingFilterWeeks.length === 0 && !activeFilters.includes('weekType') && !activeFilters.includes('year') && (
+                          <p className="text-[10px] text-gray-400 dark:text-gray-500 text-center py-2">No filters added yet</p>
+                        )}
+
+                        {/* Render each added week filter */}
+                        {outstandingFilterWeeks.map((wk, idx) => (
+                          <div key={wk} className="space-y-1">
+                            <div className="flex items-center justify-between">
+                              <label className="text-[10px] font-bold text-gray-600 dark:text-gray-300">Week {outstandingFilterWeeks.length > 1 ? idx + 1 : ''}</label>
+                              <button onClick={() => setOutstandingFilterWeeks(prev => prev.filter(w => w !== wk))} className="text-gray-400 hover:text-red-500 transition-colors" title="Remove week filter"><Minus className="w-3 h-3" /></button>
+                            </div>
+                            <select
+                              value={wk}
+                              onChange={e => {
+                                const newVal = e.target.value;
+                                setOutstandingFilterWeeks(prev => newVal ? prev.map(w => w === wk ? newVal : w) : prev.filter(w => w !== wk));
+                              }}
+                              title="Filter by week"
+                              className="w-full px-2 py-1.5 rounded-md border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-700 text-gray-700 dark:text-gray-200 text-[10px] font-medium focus:border-amber-400 focus:ring-1 focus:ring-amber-200 dark:focus:ring-amber-800"
+                            >
+                              <option value={wk}>{formatWeekReadable(wk)}</option>
+                              {missingData?.weeks?.filter((w2: any) => !outstandingFilterWeeks.includes(w2.week_name) || w2.week_name === wk).map((w2: any) => (
+                                w2.week_name !== wk ? <option key={w2.week_name} value={w2.week_name}>{formatWeekReadable(w2.week_name)}</option> : null
+                              ))}
+                            </select>
+                          </div>
+                        ))}
+
+                        {activeFilters.includes('year') && (() => {
+                          const currentYear = new Date().getFullYear();
+                          const isFutureYear = outstandingFilterYear.length === 4 && parseInt(outstandingFilterYear) > currentYear;
+                          const allYears = Array.from(new Set((missingData?.weeks || []).map((w: any) => {
+                            const parts = w.week_name.split('_');
+                            return parts[1]?.split('-')[2] || parts[0]?.split('-')[2] || '';
+                          }).filter(Boolean))).sort();
+                          const hasMatchingWeeks = outstandingFilterYear.length === 4 && !isFutureYear && (missingData?.weeks || []).some((w: any) => w.week_name.includes(outstandingFilterYear));
+                          const noRecords = outstandingFilterYear.length === 4 && !isFutureYear && !hasMatchingWeeks;
+                          return (
+                            <div className="space-y-1">
+                              <div className="flex items-center justify-between">
+                                <label className="text-[10px] font-bold text-gray-600 dark:text-gray-300">Year</label>
+                                <button onClick={() => { setActiveFilters(prev => prev.filter(f => f !== 'year')); setOutstandingFilterYear(''); }} className="text-gray-400 hover:text-red-500 transition-colors" title="Remove filter"><Minus className="w-3 h-3" /></button>
+                              </div>
+                              <input
+                                type="text"
+                                inputMode="numeric"
+                                value={outstandingFilterYear}
+                                onChange={e => {
+                                  const val = e.target.value.replace(/\D/g, '').slice(0, 4);
+                                  setOutstandingFilterYear(val);
+                                }}
+                                placeholder="yyyy"
+                                title="Filter by year"
+                                className={`w-full px-2 py-1.5 rounded-md border bg-white dark:bg-gray-700 text-gray-700 dark:text-gray-200 text-[10px] font-medium placeholder-gray-400 dark:placeholder-gray-500 focus:ring-1 ${
+                                  isFutureYear || noRecords
+                                    ? 'border-red-400 dark:border-red-600 focus:border-red-500 focus:ring-red-200 dark:focus:ring-red-800'
+                                    : 'border-gray-300 dark:border-gray-600 focus:border-amber-400 focus:ring-amber-200 dark:focus:ring-amber-800'
+                                }`}
+                              />
+                              {isFutureYear && (
+                                <p className="text-[9px] text-red-500 dark:text-red-400 font-medium">Future year is not allowed</p>
+                              )}
+                              {noRecords && (
+                                <p className="text-[9px] text-red-500 dark:text-red-400 font-medium">
+                                  There is no record available for that year.{allYears.length > 0 && ` Available: ${allYears[0]}–${allYears[allYears.length - 1]}`}
+                                </p>
+                              )}
+                            </div>
+                          );
+                        })()}
+
+                        {activeFilters.includes('weekType') && (
+                          <div className="space-y-1">
+                            <div className="flex items-center justify-between">
+                              <label className="text-[10px] font-bold text-gray-600 dark:text-gray-300">Status</label>
+                              <button onClick={() => { setActiveFilters(prev => prev.filter(f => f !== 'weekType')); setOutstandingFilterType(''); }} className="text-gray-400 hover:text-red-500 transition-colors" title="Remove filter"><Minus className="w-3 h-3" /></button>
+                            </div>
+                            <select
+                              value={outstandingFilterType}
+                              onChange={e => setOutstandingFilterType(e.target.value)}
+                              title="Filter by status"
+                              className="w-full px-2 py-1.5 rounded-md border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-700 text-gray-700 dark:text-gray-200 text-[10px] font-medium focus:border-amber-400 focus:ring-1 focus:ring-amber-200 dark:focus:ring-amber-800"
+                            >
+                              <option value="">All Statuses</option>
+                              <option value="unresolved">Unresolved Weeks</option>
+                              <option value="complete">100% Completed Weeks</option>
+                              <option value="resolved">Resolved Weeks</option>
+                            </select>
+                          </div>
+                        )}
+
+                        {/* Add Filter */}
+                        {(() => {
+                          const allWeeksSelected = missingData?.weeks?.every((w: any) => outstandingFilterWeeks.includes(w.week_name));
+                          const available = [
+                            ...(!allWeeksSelected ? [{ key: 'week', label: 'Week' }] : []),
+                            ...(!activeFilters.includes('year') ? [{ key: 'year', label: 'Year' }] : []),
+                            ...(!activeFilters.includes('weekType') ? [{ key: 'weekType', label: 'Status' }] : []),
+                          ];
+                          if (available.length === 0) return null;
+                          return (
+                            <div className="pt-2 border-t border-gray-200 dark:border-gray-700">
+                              <p className="text-[9px] font-bold text-gray-500 dark:text-gray-400 uppercase tracking-wider mb-1.5">Add Filter</p>
+                              <div className="space-y-1">
+                                {available.map(f => (
+                                  <button
+                                    key={f.key}
+                                    onClick={() => {
+                                      if (f.key === 'week') {
+                                        const firstAvailable = missingData?.weeks?.find((w: any) => !outstandingFilterWeeks.includes(w.week_name));
+                                        if (firstAvailable) setOutstandingFilterWeeks(prev => [...prev, firstAvailable.week_name]);
+                                      } else {
+                                        setActiveFilters(prev => [...prev, f.key]);
+                                      }
+                                    }}
+                                    className="w-full flex items-center gap-2 px-2 py-1.5 rounded-md text-[10px] font-medium text-gray-600 dark:text-gray-300 hover:bg-amber-50 dark:hover:bg-amber-900/15 hover:text-amber-700 dark:hover:text-amber-300 transition-colors text-left"
+                                  >
+                                    <Plus className="w-3 h-3" /> {f.label}
+                                  </button>
+                                ))}
+                              </div>
+                            </div>
+                          );
+                        })()}
+                      </>
+                    ) : trackerTab === 'resolved' ? (
+                      <>
+                        {/* No filters message */}
+                        {!activeFilters.includes('resolvedWeek') && !activeFilters.includes('resolvedDay') && !activeFilters.includes('resolvedDate') && !activeFilters.includes('resolvedBy') && (
+                          <p className="text-[10px] text-gray-400 dark:text-gray-500 text-center py-2">No filters added yet</p>
+                        )}
+
+                        {/* Week Filter */}
+                        {activeFilters.includes('resolvedWeek') && (
+                          <div className="space-y-1">
+                            <div className="flex items-center justify-between">
+                              <label className="text-[10px] font-bold text-gray-600 dark:text-gray-300">Week</label>
+                              <button onClick={() => { setActiveFilters(prev => prev.filter(f => f !== 'resolvedWeek')); setResolvedFilterWeek(''); }} className="text-gray-400 hover:text-red-500 transition-colors" title="Remove filter"><Minus className="w-3 h-3" /></button>
+                            </div>
+                            <select
+                              value={resolvedFilterWeek}
+                              onChange={e => setResolvedFilterWeek(e.target.value)}
+                              title="Filter by week"
+                              className="w-full px-2 py-1.5 rounded-md border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-700 text-gray-700 dark:text-gray-200 text-[10px] font-medium focus:border-amber-400 focus:ring-1 focus:ring-amber-200 dark:focus:ring-amber-800"
+                            >
+                              <option value="">All Weeks</option>
+                              {Array.from(new Set(resolutions.map((r: any) => r.weekName))).sort().map((wk: any) => (
+                                <option key={wk} value={wk}>{formatWeekReadable(wk)}</option>
+                              ))}
+                            </select>
+                          </div>
+                        )}
+
+                        {/* Day Filter */}
+                        {activeFilters.includes('resolvedDay') && (
+                          <div className="space-y-1">
+                            <div className="flex items-center justify-between">
+                              <label className="text-[10px] font-bold text-gray-600 dark:text-gray-300">Day</label>
+                              <button onClick={() => { setActiveFilters(prev => prev.filter(f => f !== 'resolvedDay')); setResolvedFilterDay(''); }} className="text-gray-400 hover:text-red-500 transition-colors" title="Remove filter"><Minus className="w-3 h-3" /></button>
+                            </div>
+                            <select
+                              value={resolvedFilterDay}
+                              onChange={e => setResolvedFilterDay(e.target.value)}
+                              title="Filter by day"
+                              className="w-full px-2 py-1.5 rounded-md border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-700 text-gray-700 dark:text-gray-200 text-[10px] font-medium focus:border-amber-400 focus:ring-1 focus:ring-amber-200 dark:focus:ring-amber-800"
+                            >
+                              <option value="">All Days</option>
+                              {['Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday'].map(d => (
+                                <option key={d} value={d}>{d}</option>
+                              ))}
+                            </select>
+                          </div>
+                        )}
+
+                        {/* Resolved Date Filter */}
+                        {activeFilters.includes('resolvedDate') && (
+                          <div className="space-y-1">
+                            <div className="flex items-center justify-between">
+                              <label className="text-[10px] font-bold text-gray-600 dark:text-gray-300">Resolved Date</label>
+                              <button onClick={() => { setActiveFilters(prev => prev.filter(f => f !== 'resolvedDate')); setResolvedFilterDate(''); setResolvedFilterCustomYear(''); }} className="text-gray-400 hover:text-red-500 transition-colors" title="Remove filter"><Minus className="w-3 h-3" /></button>
+                            </div>
+                            <select
+                              value={resolvedFilterDate}
+                              onChange={e => { setResolvedFilterDate(e.target.value); if (e.target.value !== 'customYear') setResolvedFilterCustomYear(''); }}
+                              title="Filter by resolved date"
+                              className="w-full px-2 py-1.5 rounded-md border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-700 text-gray-700 dark:text-gray-200 text-[10px] font-medium focus:border-amber-400 focus:ring-1 focus:ring-amber-200 dark:focus:ring-amber-800"
+                            >
+                              <option value="">All Dates</option>
+                              <option value="today">Today</option>
+                              <option value="thisWeek">This Week</option>
+                              <option value="lastWeek">Last Week</option>
+                              <option value="lastMonth">Last Month</option>
+                              <option value="lastQuarter">Last Quarter</option>
+                              <option value="thisYear">This Year</option>
+                              <option value="lastYear">Last Year</option>
+                              <option value="customYear">Custom Year</option>
+                            </select>
+                            {resolvedFilterDate === 'customYear' && (() => {
+                              const currentYear = new Date().getFullYear();
+                              const isFutureYear = resolvedFilterCustomYear.length === 4 && parseInt(resolvedFilterCustomYear) > currentYear;
+                              const allResYears = Array.from(new Set(resolutions.map((r: any) => new Date(r.resolvedAt).getFullYear().toString()))).sort();
+                              const hasMatch = resolvedFilterCustomYear.length === 4 && !isFutureYear && resolutions.some((r: any) => new Date(r.resolvedAt).getFullYear().toString() === resolvedFilterCustomYear);
+                              const noRecords = resolvedFilterCustomYear.length === 4 && !isFutureYear && !hasMatch;
+                              return (
+                                <>
+                                  <input
+                                    type="text"
+                                    inputMode="numeric"
+                                    value={resolvedFilterCustomYear}
+                                    onChange={e => {
+                                      const val = e.target.value.replace(/\D/g, '').slice(0, 4);
+                                      setResolvedFilterCustomYear(val);
+                                    }}
+                                    placeholder="yyyy"
+                                    title="Enter year"
+                                    className={`w-full px-2 py-1.5 rounded-md border bg-white dark:bg-gray-700 text-gray-700 dark:text-gray-200 text-[10px] font-medium placeholder-gray-400 dark:placeholder-gray-500 focus:ring-1 ${
+                                      isFutureYear || noRecords
+                                        ? 'border-red-400 dark:border-red-600 focus:border-red-500 focus:ring-red-200 dark:focus:ring-red-800'
+                                        : 'border-gray-300 dark:border-gray-600 focus:border-amber-400 focus:ring-amber-200 dark:focus:ring-amber-800'
+                                    }`}
+                                  />
+                                  {isFutureYear && (
+                                    <p className="text-[9px] text-red-500 dark:text-red-400 font-medium">Future year is not allowed</p>
+                                  )}
+                                  {noRecords && (
+                                    <p className="text-[9px] text-red-500 dark:text-red-400 font-medium">
+                                      There is no record available for that year.{allResYears.length > 0 && ` Available: ${allResYears[0]}–${allResYears[allResYears.length - 1]}`}
+                                    </p>
+                                  )}
+                                </>
+                              );
+                            })()}
+                          </div>
+                        )}
+
+                        {/* Resolved By Filter */}
+                        {activeFilters.includes('resolvedBy') && (
+                          <div className="space-y-1">
+                            <div className="flex items-center justify-between">
+                              <label className="text-[10px] font-bold text-gray-600 dark:text-gray-300">Resolved By</label>
+                              <button onClick={() => { setActiveFilters(prev => prev.filter(f => f !== 'resolvedBy')); setResolvedFilterBy(''); }} className="text-gray-400 hover:text-red-500 transition-colors" title="Remove filter"><Minus className="w-3 h-3" /></button>
+                            </div>
+                            <select
+                              value={resolvedFilterBy}
+                              onChange={e => setResolvedFilterBy(e.target.value)}
+                              title="Filter by resolver"
+                              className="w-full px-2 py-1.5 rounded-md border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-700 text-gray-700 dark:text-gray-200 text-[10px] font-medium focus:border-amber-400 focus:ring-1 focus:ring-amber-200 dark:focus:ring-amber-800"
+                            >
+                              <option value="">All Users</option>
+                              {Array.from(new Set(resolutions.map((r: any) => r.resolvedBy).filter(Boolean))).sort().map((name: any) => (
+                                <option key={name} value={name}>{name}</option>
+                              ))}
+                            </select>
+                          </div>
+                        )}
+
+                        {/* Add Filter for Resolved Tab */}
+                        {(() => {
+                          const available = [
+                            { key: 'resolvedWeek', label: 'Week' },
+                            { key: 'resolvedDay', label: 'Day' },
+                            { key: 'resolvedDate', label: 'Resolved Date' },
+                            { key: 'resolvedBy', label: 'Resolved By' },
+                          ].filter(f => !activeFilters.includes(f.key));
+                          if (available.length === 0) return null;
+                          return (
+                            <div className="pt-2 border-t border-gray-200 dark:border-gray-700">
+                              <p className="text-[9px] font-bold text-gray-500 dark:text-gray-400 uppercase tracking-wider mb-1.5">Add Filter</p>
+                              <div className="space-y-1">
+                                {available.map(f => (
+                                  <button
+                                    key={f.key}
+                                    onClick={() => setActiveFilters(prev => [...prev, f.key])}
+                                    className="w-full flex items-center gap-2 px-2 py-1.5 rounded-md text-[10px] font-medium text-gray-600 dark:text-gray-300 hover:bg-amber-50 dark:hover:bg-amber-900/15 hover:text-amber-700 dark:hover:text-amber-300 transition-colors text-left"
+                                  >
+                                    <Plus className="w-3 h-3" /> {f.label}
+                                  </button>
+                                ))}
+                              </div>
+                            </div>
+                          );
+                        })()}
+                      </>
+                    ) : null}
+                  </div>
+
+                  {/* Clear All button at bottom */}
+                  {(activeFilters.length > 0 || outstandingFilterWeeks.length > 0 || outstandingFilterYear || resolvedFilterWeek || resolvedFilterDay || resolvedFilterDate || resolvedFilterBy) && (
+                    <div className="flex-shrink-0 px-3 py-2 border-t border-gray-200 dark:border-gray-700">
+                      <button
+                        onClick={() => { setActiveFilters([]); setLogFilterAction(''); setLogFilterUser(''); setLogFilterStartDate(''); setLogFilterEndDate(''); setOutstandingFilterWeeks([]); setOutstandingFilterType(''); setOutstandingFilterYear(''); setResolvedFilterWeek(''); setResolvedFilterDay(''); setResolvedFilterDate(''); setResolvedFilterCustomYear(''); setResolvedFilterBy(''); }}
+                        className="w-full px-2 py-1.5 text-[10px] font-bold text-amber-600 dark:text-amber-400 hover:bg-amber-50 dark:hover:bg-amber-900/15 rounded-md transition-colors"
+                      >
+                        Clear All Filters
+                      </button>
+                    </div>
+                  )}
+                </div>
+              )}
+
+              {/* ── Main Modal ── */}
+              <div className={`bg-white dark:bg-gray-800 shadow-2xl border border-gray-200 dark:border-gray-700 w-full h-full overflow-hidden flex flex-col ${showFilterPanel ? 'rounded-r-xl' : 'rounded-xl'}`}>
+                {trackerContent}
+                {/* Close button footer */}
+                <div className="flex-shrink-0 px-4 py-3 border-t border-gray-200 dark:border-gray-700 bg-gray-50 dark:bg-gray-800/80 flex items-center justify-between">
+                  <span className="text-xs font-bold text-gray-600 dark:text-gray-400">
+                    {(() => {
+                      let count = 0;
+                      if (trackerTab === 'outstanding' && missingData?.weeks) {
+                        count = missingData.weeks.filter((week: any) => {
+                          if (outstandingFilterWeeks.length > 0 && !outstandingFilterWeeks.includes(week.week_name)) return false;
+                          if (outstandingFilterYear.length === 4 && parseInt(outstandingFilterYear) <= new Date().getFullYear() && !week.week_name.includes(outstandingFilterYear)) return false;
+                          if (outstandingFilterType) {
+                            const uDays = week.days.filter((d: any) => (d.status === 'missing' || d.status === 'incomplete') && !isResolved(week.week_name, d.day));
+                            const fullyComplete = week.completion_pct === 100 && week.total_issues === 0;
+                            const anyResolutions = week.days.some((d: any) => isResolved(week.week_name, d.day));
+                            if (outstandingFilterType === 'unresolved') return uDays.length > 0;
+                            if (outstandingFilterType === 'complete') return fullyComplete && uDays.length === 0;
+                            if (outstandingFilterType === 'resolved') return uDays.length === 0 && anyResolutions;
+                          }
+                          return true;
+                        }).length;
+                      } else if (trackerTab === 'resolved') {
+                        count = resolutions.filter((res: any) => {
+                          if (resolvedFilterWeek && res.weekName !== resolvedFilterWeek) return false;
+                          if (resolvedFilterDay && res.dayOfWeek !== resolvedFilterDay) return false;
+                          if (resolvedFilterBy && res.resolvedBy !== resolvedFilterBy) return false;
+                          if (resolvedFilterDate) {
+                            const rd = new Date(res.resolvedAt);
+                            const now = new Date();
+                            const startOfDay = new Date(now.getFullYear(), now.getMonth(), now.getDate());
+                            const dayOfWeekNum = now.getDay();
+                            const startOfWeek = new Date(startOfDay); startOfWeek.setDate(startOfWeek.getDate() - (dayOfWeekNum === 0 ? 6 : dayOfWeekNum - 1));
+                            if (resolvedFilterDate === 'today') { if (rd < startOfDay || rd >= new Date(startOfDay.getTime() + 86400000)) return false; }
+                            else if (resolvedFilterDate === 'thisWeek') { if (rd < startOfWeek) return false; }
+                            else if (resolvedFilterDate === 'lastWeek') { const lws = new Date(startOfWeek); lws.setDate(lws.getDate() - 7); if (rd < lws || rd >= startOfWeek) return false; }
+                            else if (resolvedFilterDate === 'lastMonth') { const lms = new Date(now.getFullYear(), now.getMonth() - 1, 1); const lme = new Date(now.getFullYear(), now.getMonth(), 1); if (rd < lms || rd >= lme) return false; }
+                            else if (resolvedFilterDate === 'lastQuarter') { const cq = Math.floor(now.getMonth() / 3); const lqs = new Date(now.getFullYear(), (cq - 1) * 3, 1); const lqe = new Date(now.getFullYear(), cq * 3, 1); if (cq === 0) { lqs.setFullYear(now.getFullYear() - 1); lqs.setMonth(9); lqe.setFullYear(now.getFullYear()); lqe.setMonth(0); } if (rd < lqs || rd >= lqe) return false; }
+                            else if (resolvedFilterDate === 'thisYear') { if (rd.getFullYear() !== now.getFullYear()) return false; }
+                            else if (resolvedFilterDate === 'lastYear') { if (rd.getFullYear() !== now.getFullYear() - 1) return false; }
+                            else if (resolvedFilterDate === 'customYear' && resolvedFilterCustomYear.length === 4) { const cy = parseInt(resolvedFilterCustomYear); if (!isNaN(cy) && cy <= now.getFullYear() && rd.getFullYear() !== cy) return false; }
+                          }
+                          return true;
+                        }).length;
+                      } else if (trackerTab === 'activity') {
+                        count = activityLogs.length;
+                      }
+                      return `${count} ${count === 1 ? 'Record' : 'Records'}`;
+                    })()}
+                  </span>
+                  {(() => {
+                    let fc = 0;
+                    if (trackerTab === 'outstanding') {
+                      fc = outstandingFilterWeeks.length + (outstandingFilterType ? 1 : 0) + (outstandingFilterYear.length === 4 ? 1 : 0);
+                    } else if (trackerTab === 'resolved') {
+                      fc = (resolvedFilterWeek ? 1 : 0) + (resolvedFilterDay ? 1 : 0) + (resolvedFilterDate ? 1 : 0) + (resolvedFilterBy ? 1 : 0);
+                    } else if (trackerTab === 'activity') {
+                      fc = (logFilterAction ? 1 : 0) + (logFilterUser ? 1 : 0) + (logFilterStartDate ? 1 : 0) + (logFilterEndDate ? 1 : 0);
+                    }
+                    return fc > 0 ? (
+                      <span className="text-xs font-bold text-red-500 animate-[filterBlink_2s_ease-in-out_infinite]">
+                        {fc} {fc === 1 ? 'Filter added' : 'Filters added'}
+                      </span>
+                    ) : null;
+                  })()}
+                  <button
+                    onClick={() => setShowTrackerModal(false)}
+                    className="px-4 py-2 bg-gray-200 dark:bg-gray-700 text-gray-700 dark:text-gray-300 text-xs font-bold rounded-lg hover:bg-gray-300 dark:hover:bg-gray-600 transition-all active:scale-95"
+                  >
+                    Close
+                  </button>
+                </div>
               </div>
             </div>
           </div>
