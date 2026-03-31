@@ -254,6 +254,10 @@ router.use('/lsw', lswRoutes);
 import equipmentRoutes from './equipmentRoutes';
 router.use('/equipment', equipmentRoutes);
 
+// Operations (Machine & Quality Issues) routes - authenticated
+import operationsRoutes from './operationsRoutes';
+router.use('/operations', operationsRoutes);
+
 // Vacation Hub routes - authenticated
 import vacationRoutes from './vacationRoutes';
 router.use('/vacation', vacationRoutes);

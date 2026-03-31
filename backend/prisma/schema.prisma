@@ -75,6 +75,7 @@ model Area {
   Facility     Facility?   @relation(fields: [facilityId], references: [id], onDelete: Cascade)
   Incident     Incident[]
   Line         Line[]
+  MachineIssue MachineIssue[]
 
   @@index([departmentId])
   @@index([facilityId])
@@ -337,6 +338,7 @@ model Department {
   LswBoards                 LswBoard[]                  @relation("LswBoardDepartment")
   LswDailyTasks             LswDailyTask[]              @relation("LswDailyTaskDepartment")
   LswTodoItems              LswTodoItem[]               @relation("LswTodoItemDepartment")
+  MachineIssue              MachineIssue[]
 
   @@index([facilityId])
 }
@@ -879,6 +881,7 @@ model Line {
   Area        Area        @relation(fields: [areaId], references: [id], onDelete: Cascade)
   ShiftLine   ShiftLine[]
   Equipment   Equipment[]
+  MachineIssue MachineIssue[]
 
   @@index([areaId])
 }
@@ -902,6 +905,7 @@ model Equipment {
 
   Line            Line                 @relation(fields: [lineId], references: [id], onDelete: Cascade)
   Components      EquipmentComponent[]
+  MachineIssue    MachineIssue[]
 
   @@index([lineId])
   @@index([status])
@@ -922,6 +926,7 @@ model EquipmentComponent {
   updatedAt       DateTime             @updatedAt
 
   Equipment       Equipment            @relation(fields: [equipmentId], references: [id], onDelete: Cascade)
+  MachineIssues   MachineIssue[]
 
   @@index([equipmentId])
 }
@@ -931,6 +936,72 @@ enum EquipmentStatus {
   INACTIVE
   MAINTENANCE
   RETIRED
+}
+
+// ─── Operations: Machine & Quality Issues ────────────────────────────────────────
+
+enum IssueType {
+  MACHINE
+  QUALITY
+}
+
+enum IssuePriority {
+  LOW
+  MEDIUM
+  HIGH
+  CRITICAL
+}
+
+enum IssueStatus {
+  OPEN
+  IN_PROGRESS
+  RESOLVED
+  CLOSED
+}
+
+model MachineIssue {
+  id            String        @id @default(uuid())
+  issueNumber   String        @unique
+  type          IssueType
+  title         String
+  description   String
+  priority      IssuePriority @default(MEDIUM)
+  status        IssueStatus   @default(OPEN)
+  photos        Json          @default("[]")
+  departmentId  String
+  areaId        String?
+  lineId        String?
+  shiftId       String?
+  equipmentId   String?
+  componentId   String?
+  resolution    String?
+  resolvedAt    DateTime?
+  resolvedById  String?
+  reportedById  String
+  organizationId String
+  createdAt     DateTime      @default(now())
+  updatedAt     DateTime      @updatedAt
+
+  Department    Department    @relation(fields: [departmentId], references: [id])
+  Area          Area?         @relation(fields: [areaId], references: [id])
+  Line          Line?         @relation(fields: [lineId], references: [id])
+  Shift         Shift?        @relation(fields: [shiftId], references: [id])
+  Equipment     Equipment?    @relation(fields: [equipmentId], references: [id])
+  Component     EquipmentComponent? @relation(fields: [componentId], references: [id])
+  ReportedBy    User          @relation("IssueReportedBy", fields: [reportedById], references: [id])
+  ResolvedBy    User?         @relation("IssueResolvedBy", fields: [resolvedById], references: [id])
+  Organization  Organization  @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+
+  @@index([departmentId])
+  @@index([areaId])
+  @@index([lineId])
+  @@index([shiftId])
+  @@index([equipmentId])
+  @@index([componentId])
+  @@index([organizationId])
+  @@index([status])
+  @@index([type])
+  @@index([reportedById])
 }
 
 model Notification {
@@ -1001,6 +1072,9 @@ model Organization {
   VacationBlackoutPeriods    VacationBlackoutPeriod[]
   VacationActivityLogs       VacationActivityLog[]
   VacationNotifications      VacationNotification[]
+
+  // Operations Issue Tracking
+  MachineIssue               MachineIssue[]
 
   @@index([name])
   @@index([signupCode])
@@ -1272,6 +1346,7 @@ model Shift {
   Incident   Incident[]
   Facility   Facility?   @relation(fields: [facilityId], references: [id], onDelete: Cascade)
   ShiftLine  ShiftLine[]
+  MachineIssue MachineIssue[]
 
   @@index([facilityId])
   @@index([lineId])
@@ -1460,6 +1535,10 @@ model User {
   VacationsRequested                                                  Vacation[]                            @relation("VacationRequestedBy")
   VacationsApproved                                                   Vacation[]                            @relation("VacationApprovedBy")
   VacationBlackoutPeriods                                             VacationBlackoutPeriod[]
+
+  // Operations Issue Tracking
+  IssuesReported                                                      MachineIssue[]                        @relation("IssueReportedBy")
+  IssuesResolved                                                      MachineIssue[]                        @relation("IssueResolvedBy")
 
   @@index([email])
   @@index([isOnline])

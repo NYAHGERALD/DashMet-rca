@@ -252,6 +252,7 @@ function DashboardContent() {
                 { href: '/lsw', icon: '📋', label: 'Leaders Standard Work' },
                 { href: '/vacation', icon: '🏖️', label: 'Vacation Hub' },
                 { href: '/meetings', icon: '🎤', label: 'Meeting Intelligence' },
+                { href: '/operations', icon: '🔧', label: 'Operations' },
                 { href: '/assigned-actions', icon: '📌', label: 'My Action Items' },
                 { icon: '⚙️', label: t('nav.settings'), onClick: () => openSettings() },
               ]}

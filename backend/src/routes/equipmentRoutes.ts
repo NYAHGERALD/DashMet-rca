@@ -312,6 +312,22 @@ router.delete(
 // ─── Component CRUD ─────────────────────────────────────────────────────────────
 
 /**
+ * GET /api/equipment/components/all
+ * List all components across all equipment.
+ */
+router.get('/components/all', async (req: any, res: Response, next: NextFunction) => {
+  try {
+    const components = await prisma.equipmentComponent.findMany({
+      orderBy: [{ name: 'asc' }],
+      include: { equipment: { select: { id: true, name: true } } },
+    });
+    res.json({ success: true, data: { components } });
+  } catch (err) {
+    next(err);
+  }
+});
+
+/**
  * GET /api/equipment/:equipmentId/components
  * List components for a specific equipment.
  */

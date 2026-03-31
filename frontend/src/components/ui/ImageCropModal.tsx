@@ -1,8 +1,8 @@
 'use client';
 
-import React, { useState, useCallback } from 'react';
-import Cropper from 'react-easy-crop';
-import type { Area } from 'react-easy-crop';
+import React, { useState, useRef, useCallback } from 'react';
+import ReactCrop, { type Crop, type PixelCrop } from 'react-image-crop';
+import 'react-image-crop/dist/ReactCrop.css';
 
 interface ImageCropModalProps {
   imageSrc: string;
@@ -12,30 +12,24 @@ interface ImageCropModalProps {
   onCancel: () => void;
 }
 
-async function getCroppedImg(imageSrc: string, pixelCrop: Area): Promise<Blob> {
-  const image = new Image();
-  image.crossOrigin = 'anonymous';
-  await new Promise<void>((resolve, reject) => {
-    image.onload = () => resolve();
-    image.onerror = reject;
-    image.src = imageSrc;
-  });
-
+function getCroppedImg(image: HTMLImageElement, pixelCrop: PixelCrop): Promise<Blob> {
   const canvas = document.createElement('canvas');
-  canvas.width = pixelCrop.width;
-  canvas.height = pixelCrop.height;
+  const scaleX = image.naturalWidth / image.width;
+  const scaleY = image.naturalHeight / image.height;
+  canvas.width = pixelCrop.width * scaleX;
+  canvas.height = pixelCrop.height * scaleY;
   const ctx = canvas.getContext('2d')!;
 
   ctx.drawImage(
     image,
-    pixelCrop.x,
-    pixelCrop.y,
-    pixelCrop.width,
-    pixelCrop.height,
+    pixelCrop.x * scaleX,
+    pixelCrop.y * scaleY,
+    pixelCrop.width * scaleX,
+    pixelCrop.height * scaleY,
     0,
     0,
-    pixelCrop.width,
-    pixelCrop.height
+    canvas.width,
+    canvas.height
   );
 
   return new Promise<Blob>((resolve, reject) => {
@@ -47,20 +41,23 @@ async function getCroppedImg(imageSrc: string, pixelCrop: Area): Promise<Blob> {
 }
 
 export default function ImageCropModal({ imageSrc, fileName, onCropComplete, onUseOriginal, onCancel }: ImageCropModalProps) {
-  const [crop, setCrop] = useState({ x: 0, y: 0 });
-  const [zoom, setZoom] = useState(1);
-  const [croppedAreaPixels, setCroppedAreaPixels] = useState<Area | null>(null);
+  const [crop, setCrop] = useState<Crop>();
+  const [completedCrop, setCompletedCrop] = useState<PixelCrop>();
   const [processing, setProcessing] = useState(false);
+  const imgRef = useRef<HTMLImageElement>(null);
 
-  const onCropChange = useCallback((_: Area, areaPixels: Area) => {
-    setCroppedAreaPixels(areaPixels);
+  const onImageLoad = useCallback(() => {
+    // Start with no selection — user draws their own
+    setCrop(undefined);
+    setCompletedCrop(undefined);
   }, []);
 
   const handleConfirm = async () => {
-    if (!croppedAreaPixels) return;
+    if (!completedCrop || !imgRef.current) return;
+    if (completedCrop.width < 10 || completedCrop.height < 10) return;
     setProcessing(true);
     try {
-      const croppedBlob = await getCroppedImg(imageSrc, croppedAreaPixels);
+      const croppedBlob = await getCroppedImg(imgRef.current, completedCrop);
       onCropComplete(croppedBlob);
     } catch (err) {
       console.error('Crop failed:', err);
@@ -68,6 +65,8 @@ export default function ImageCropModal({ imageSrc, fileName, onCropComplete, onU
       setProcessing(false);
     }
   };
+
+  const hasCrop = completedCrop && completedCrop.width > 10 && completedCrop.height > 10;
 
   return (
     <div className="fixed inset-0 z-[9999] flex items-center justify-center bg-black/70 backdrop-blur-sm">
@@ -86,33 +85,27 @@ export default function ImageCropModal({ imageSrc, fileName, onCropComplete, onU
           </button>
         </div>
 
-        {/* Crop Area */}
-        <div className="relative w-full" style={{ height: '60vh' }}>
-          <Cropper
-            image={imageSrc}
-            crop={crop}
-            zoom={zoom}
-            aspect={undefined}
-            onCropChange={setCrop}
-            onZoomChange={setZoom}
-            onCropComplete={onCropChange}
-            showGrid
-          />
+        {/* Instruction */}
+        <div className="px-5 py-2 bg-blue-50 dark:bg-blue-900/20 text-xs text-blue-600 dark:text-blue-400">
+          Click and drag on the image to select the area you want to crop.
         </div>
 
-        {/* Zoom Control */}
-        <div className="px-5 py-3 flex items-center gap-3 border-t border-gray-200 dark:border-gray-700">
-          <span className="text-sm text-gray-500 dark:text-gray-400 min-w-[40px]">Zoom</span>
-          <input
-            type="range"
-            min={1}
-            max={3}
-            step={0.05}
-            value={zoom}
-            onChange={(e) => setZoom(Number(e.target.value))}
-            className="flex-1 accent-blue-600"
-          />
-          <span className="text-sm text-gray-500 dark:text-gray-400 min-w-[35px] text-right">{zoom.toFixed(1)}x</span>
+        {/* Crop Area */}
+        <div className="flex-1 overflow-auto flex items-center justify-center p-4 bg-gray-100 dark:bg-gray-900" style={{ maxHeight: '60vh' }}>
+          <ReactCrop
+            crop={crop}
+            onChange={(c) => setCrop(c)}
+            onComplete={(c) => setCompletedCrop(c)}
+          >
+            <img
+              ref={imgRef}
+              src={imageSrc}
+              alt={fileName}
+              onLoad={onImageLoad}
+              style={{ maxHeight: '55vh', maxWidth: '100%' }}
+              crossOrigin="anonymous"
+            />
+          </ReactCrop>
         </div>
 
         {/* Actions */}
@@ -131,7 +124,7 @@ export default function ImageCropModal({ imageSrc, fileName, onCropComplete, onU
           </button>
           <button
             onClick={handleConfirm}
-            disabled={processing}
+            disabled={processing || !hasCrop}
             className="px-4 py-2 text-sm font-medium text-white bg-blue-600 rounded-lg hover:bg-blue-700 disabled:opacity-50 transition-colors"
           >
             {processing ? 'Cropping...' : 'Crop & Use'}
