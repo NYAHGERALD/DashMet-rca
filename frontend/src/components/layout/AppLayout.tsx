@@ -1,6 +1,6 @@
 'use client';
 
-import { useState, useRef, useEffect } from 'react';
+import { useState, useRef, useEffect, useCallback } from 'react';
 import { useAuth } from '@/components/providers/AuthProvider';
 import { useHasMinimumRole, useIsAdmin } from '@/lib/rbac';
 import Link from 'next/link';
@@ -10,6 +10,7 @@ import NotificationCenter from '@/components/layout/NotificationCenter';
 import { ContactSupportMenuItem } from '@/components/support/ContactSupportMenuItem';
 import { useI18n } from '@/lib/i18n/I18nProvider';
 import { useSettingsModal } from '@/components/settings/SettingsModalProvider';
+import { usePathname } from 'next/navigation';
 import {
   Plus,
   ClipboardList,
@@ -65,7 +66,34 @@ export default function AppLayout({ children }: AppLayoutProps) {
   const [showDropdown, setShowDropdown] = useState(false);
   const [showProfileModal, setShowProfileModal] = useState(false);
   const [sidebarOpen, setSidebarOpen] = useState(true);
+  const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
+  const [mobileMenuTab, setMobileMenuTab] = useState<'nav' | 'admin'>('nav');
   const dropdownRef = useRef<HTMLDivElement>(null);
+  const pathname = usePathname();
+
+  // Close mobile menu on route change
+  useEffect(() => {
+    setMobileMenuOpen(false);
+  }, [pathname]);
+
+  // Prevent body scroll when mobile menu is open
+  useEffect(() => {
+    if (mobileMenuOpen) {
+      document.body.style.overflow = 'hidden';
+    } else {
+      document.body.style.overflow = '';
+    }
+    return () => { document.body.style.overflow = ''; };
+  }, [mobileMenuOpen]);
+
+  // Handle hamburger click: mobile overlay on small screens, sidebar toggle on desktop
+  const handleHamburgerClick = useCallback(() => {
+    if (window.innerWidth < 1024) {
+      setMobileMenuOpen(prev => !prev);
+    } else {
+      setSidebarOpen(prev => !prev);
+    }
+  }, []);
 
   // Close dropdown when clicking outside
   useEffect(() => {
@@ -95,18 +123,32 @@ export default function AppLayout({ children }: AppLayoutProps) {
   return (
     <div className="h-screen flex flex-col overflow-hidden bg-gradient-to-br from-slate-50 via-blue-50 to-indigo-100 dark:from-gray-950 dark:via-slate-900 dark:to-indigo-950">
       {/* Glassmorphism Navigation */}
-      <nav className="shrink-0 z-50 backdrop-blur-xl bg-white/70 dark:bg-gray-900/70 border-b border-white/20 dark:border-gray-700/50 shadow-lg shadow-black/5">
+      <nav className="shrink-0 z-50 backdrop-blur-xl bg-sky-100/80 dark:bg-gray-900/70 border-b border-sky-200/60 dark:border-gray-700/50 shadow-lg shadow-sky-500/10">
         <div className="px-4 sm:px-6 lg:px-8">
           <div className="flex justify-between h-16 sm:h-18">
             <div className="flex items-center space-x-4">
               {/* Hamburger Menu Button */}
               <button
-                onClick={() => setSidebarOpen(!sidebarOpen)}
+                onClick={handleHamburgerClick}
                 className="p-2 rounded-lg hover:bg-gray-100 dark:hover:bg-gray-700 transition-colors"
-                aria-label={sidebarOpen ? 'Close menu' : 'Open menu'}
+                aria-label="Toggle menu"
               >
+                {/* Mobile: X when open, hamburger when closed */}
                 <svg
-                  className="w-6 h-6 text-gray-600 dark:text-gray-300"
+                  className="w-6 h-6 text-gray-600 dark:text-gray-300 lg:hidden"
+                  fill="none"
+                  viewBox="0 0 24 24"
+                  stroke="currentColor"
+                >
+                  {mobileMenuOpen ? (
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
+                  ) : (
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 6h16M4 12h16M4 18h16" />
+                  )}
+                </svg>
+                {/* Desktop: X when sidebar open, hamburger when closed */}
+                <svg
+                  className="w-6 h-6 text-gray-600 dark:text-gray-300 hidden lg:block"
                   fill="none"
                   viewBox="0 0 24 24"
                   stroke="currentColor"
@@ -255,8 +297,9 @@ export default function AppLayout({ children }: AppLayoutProps) {
       </nav>
 
       <div className="flex flex-1 min-h-0">
-        {/* Left Sidebar - Quick Navigation (open by default, integrated in layout) */}
-        <SlidingSidebar
+        {/* Left Sidebar - Hidden on mobile, visible on lg+ */}
+        <div className="hidden lg:block">
+          <SlidingSidebar
           title={t('common.quickNavigation')}
           position="left"
           hideHandle={true}
@@ -291,15 +334,17 @@ export default function AppLayout({ children }: AppLayoutProps) {
             { icon: <Settings size={18} strokeWidth={1.8} />, label: t('nav.settings'), onClick: () => openSettings() },
           ]}
         />
+        </div>
 
         {/* Main Content Area - expands to fill remaining space, scrolls independently */}
-        <main className="flex-1 min-w-0 overflow-y-auto overflow-x-hidden transition-all duration-300">
+        <main className="flex-1 min-w-0 overflow-y-auto overflow-x-hidden transition-all duration-300 scrollbar-hide">
           {children}
         </main>
 
-        {/* Right Sidebar - Organization Management (Admin only) */}
+        {/* Right Sidebar - Organization Management (Admin only) - Hidden on mobile */}
         {isAdmin && (
-          <SlidingSidebar
+          <div className="hidden lg:block">
+            <SlidingSidebar
             title={t('common.organizationManagement')}
             position="right"
             links={user.role === 'SYSTEM_ADMIN' ? [
@@ -325,20 +370,167 @@ export default function AppLayout({ children }: AppLayoutProps) {
               { href: '/support-inbox', icon: <MailOpen size={18} strokeWidth={1.8} />, label: 'Support Inbox' },
             ]}
           />
+          </div>
         )}
 
-        {/* Right Sidebar - QC Management */}
+        {/* Right Sidebar - QC Management - Hidden on mobile */}
         {user?.role === 'QUALITY_CONTROL_MANAGER' && (
-          <SlidingSidebar
-            title="QC Management"
-            position="right"
-            links={[
-              { href: '/support-inbox', icon: <MailOpen size={18} strokeWidth={1.8} />, label: 'Support Inbox' },
-              { href: '/fmir/privileges', icon: <KeyRound size={18} strokeWidth={1.8} />, label: 'FMIR Privileges' },
-            ]}
-          />
+          <div className="hidden lg:block">
+            <SlidingSidebar
+              title="QC Management"
+              position="right"
+              links={[
+                { href: '/support-inbox', icon: <MailOpen size={18} strokeWidth={1.8} />, label: 'Support Inbox' },
+                { href: '/fmir/privileges', icon: <KeyRound size={18} strokeWidth={1.8} />, label: 'FMIR Privileges' },
+              ]}
+            />
+          </div>
         )}
       </div>
+
+      {/* ===== MOBILE MENU OVERLAY (lg:hidden) ===== */}
+      {mobileMenuOpen && (
+        <div className="fixed inset-0 z-40 lg:hidden">
+          {/* Backdrop */}
+          <div 
+            className="absolute inset-0 bg-black/40 backdrop-blur-sm"
+            onClick={() => setMobileMenuOpen(false)}
+          />
+          {/* Drawer */}
+          <div className="absolute inset-y-0 left-0 w-[280px] max-w-[85vw] bg-sky-100/95 dark:bg-gray-900/95 backdrop-blur-xl shadow-2xl flex flex-col animate-slide-in-left" style={{ top: '4rem' }}>
+            {/* Tabs (if admin/QC has right sidebar) */}
+            {(isAdmin || user?.role === 'QUALITY_CONTROL_MANAGER') && (
+              <div className="flex border-b border-gray-200/50 dark:border-gray-700/50 px-2 pt-2">
+                <button
+                  onClick={() => setMobileMenuTab('nav')}
+                  className={`flex-1 py-2 text-xs font-semibold rounded-t-lg transition-colors ${
+                    mobileMenuTab === 'nav'
+                      ? 'bg-primary-50 dark:bg-primary-900/30 text-primary-700 dark:text-primary-300 border-b-2 border-primary-500'
+                      : 'text-gray-500 dark:text-gray-400 hover:text-gray-700 dark:hover:text-gray-300'
+                  }`}
+                >
+                  Navigation
+                </button>
+                <button
+                  onClick={() => setMobileMenuTab('admin')}
+                  className={`flex-1 py-2 text-xs font-semibold rounded-t-lg transition-colors ${
+                    mobileMenuTab === 'admin'
+                      ? 'bg-primary-50 dark:bg-primary-900/30 text-primary-700 dark:text-primary-300 border-b-2 border-primary-500'
+                      : 'text-gray-500 dark:text-gray-400 hover:text-gray-700 dark:hover:text-gray-300'
+                  }`}
+                >
+                  {user?.role === 'QUALITY_CONTROL_MANAGER' ? 'QC Management' : 'Admin'}
+                </button>
+              </div>
+            )}
+
+            {/* Scrollable links */}
+            <nav className="flex-1 overflow-y-auto py-2 px-2 scrollbar-hide">
+              {mobileMenuTab === 'nav' && (
+                <div className="space-y-0.5">
+                  {(isSystemAdmin ? [
+                    { href: '/dashboard', icon: <LayoutDashboard size={18} strokeWidth={1.8} />, label: t('nav.dashboard') || 'Dashboard' },
+                    { href: '/system-admin', icon: <Building2 size={18} strokeWidth={1.8} />, label: t('nav.systemAdmin') || 'System Admin Portal' },
+                    { icon: <Settings size={18} strokeWidth={1.8} />, label: t('nav.settings'), onClick: () => { openSettings(); setMobileMenuOpen(false); } },
+                  ] : [
+                    { href: '/dashboard', icon: <LayoutDashboard size={18} strokeWidth={1.8} />, label: t('nav.dashboard') || 'Dashboard' },
+                    { href: '/incidents/new', icon: <Plus size={18} strokeWidth={2} />, label: t('nav.createIncident') },
+                    { href: '/incidents', icon: <ClipboardList size={18} strokeWidth={1.8} />, label: t('nav.myIncidents') },
+                    { href: '/incidents?filter=team', icon: <UsersRound size={18} strokeWidth={1.8} />, label: t('nav.teamIncidents'), show: isSupervisorPlus },
+                    { href: '/incidents?filter=public', icon: <Globe size={18} strokeWidth={1.8} />, label: t('nav.publicIncidents') },
+                    { href: '/rca', icon: <Microscope size={18} strokeWidth={1.8} />, label: t('nav.rcaWorkspace'), show: isSupervisorPlus },
+                    { href: '/capa', icon: <ListChecks size={18} strokeWidth={1.8} />, label: t('nav.capaBoard'), show: isSupervisorPlus },
+                    { href: '/reports', icon: <TrendingUp size={18} strokeWidth={1.8} />, label: t('nav.reportsCompliance'), show: isSupervisorPlus },
+                    { href: '/analytics', icon: <BarChart3 size={18} strokeWidth={1.8} />, label: t('nav.analyticsInsights'), show: isSupervisorPlus },
+                    { href: '/knowledge', icon: <Library size={18} strokeWidth={1.8} />, label: t('nav.knowledgeBase'), show: isSupervisorPlus },
+                    { href: '/workplace-report', icon: <FileWarning size={18} strokeWidth={1.8} />, label: t('nav.workplaceReport') },
+                    { href: '/investigation-report', icon: <FileSearch size={18} strokeWidth={1.8} />, label: t('nav.investigationReport') },
+                    { href: '/fmir', icon: <ShieldAlert size={18} strokeWidth={1.8} />, label: t('nav.fmir') || 'Foreign Material' },
+                    { href: '/workplace-safety', icon: <ShieldCheck size={18} strokeWidth={1.8} />, label: 'Safety Assessment', show: isSupervisorPlus },
+                    { href: '/hr', icon: <Gavel size={18} strokeWidth={1.8} />, label: 'HR Resolution', show: isSupervisorPlus },
+                    { href: '/bakery-metrics', icon: <PieChart size={18} strokeWidth={1.8} />, label: 'Bakery Metrics' },
+                    { href: '/lsw', icon: <ClipboardEdit size={18} strokeWidth={1.8} />, label: 'Leaders Standard Work' },
+                    { href: '/vacation', icon: <Palmtree size={18} strokeWidth={1.8} />, label: 'Vacation Hub' },
+                    { href: '/meetings', icon: <Mic size={18} strokeWidth={1.8} />, label: 'Meeting Intelligence' },
+                    { href: '/operations', icon: <Wrench size={18} strokeWidth={1.8} />, label: 'Operations' },
+                    { href: '/assigned-actions', icon: <Pin size={18} strokeWidth={1.8} />, label: 'My Action Items' },
+                    { icon: <Settings size={18} strokeWidth={1.8} />, label: t('nav.settings'), onClick: () => { openSettings(); setMobileMenuOpen(false); } },
+                  ]).filter(link => link.show !== false).map((link, idx) => (
+                    link.onClick ? (
+                      <button
+                        key={idx}
+                        onClick={link.onClick}
+                        className="w-full flex items-center gap-3 px-3 py-2.5 rounded-lg text-sm font-medium text-gray-700 dark:text-gray-300 hover:bg-sky-200/60 dark:hover:bg-primary-900/30 hover:text-sky-800 dark:hover:text-primary-300 transition-colors"
+                      >
+                        {link.icon}
+                        <span>{link.label}</span>
+                      </button>
+                    ) : (
+                      <Link
+                        key={idx}
+                        href={link.href!}
+                        onClick={() => setMobileMenuOpen(false)}
+                        className={`flex items-center gap-3 px-3 py-2.5 rounded-lg text-sm font-medium transition-colors ${
+                          pathname === link.href
+                            ? 'bg-primary-100 dark:bg-primary-900/40 text-primary-700 dark:text-primary-300'
+                            : 'text-gray-700 dark:text-gray-300 hover:bg-sky-200/60 dark:hover:bg-primary-900/30 hover:text-sky-800 dark:hover:text-primary-300'
+                        }`}
+                      >
+                        {link.icon}
+                        <span>{link.label}</span>
+                      </Link>
+                    )
+                  ))}
+                </div>
+              )}
+
+              {mobileMenuTab === 'admin' && (
+                <div className="space-y-0.5">
+                  {(user?.role === 'QUALITY_CONTROL_MANAGER' ? [
+                    { href: '/support-inbox', icon: <MailOpen size={18} strokeWidth={1.8} />, label: 'Support Inbox' },
+                    { href: '/fmir/privileges', icon: <KeyRound size={18} strokeWidth={1.8} />, label: 'FMIR Privileges' },
+                  ] : user?.role === 'SYSTEM_ADMIN' ? [
+                    { href: '/system-admin', icon: <Building2 size={18} strokeWidth={1.8} />, label: t('nav.systemAdmin') || 'System Admin Portal' },
+                    { href: '/admin/policies', icon: <FileKey size={18} strokeWidth={1.8} />, label: t('nav.policies') },
+                    { href: '/admin/support', icon: <MailOpen size={18} strokeWidth={1.8} />, label: t('nav.supportRequests') },
+                    { href: '/support-inbox', icon: <MailOpen size={18} strokeWidth={1.8} />, label: 'Support Inbox' },
+                  ] : [
+                    { href: '/admin/organizations', icon: <Building2 size={18} strokeWidth={1.8} />, label: t('nav.organizations') },
+                    { href: '/admin/facilities', icon: <Factory size={18} strokeWidth={1.8} />, label: t('nav.facilities') },
+                    { href: '/admin/departments', icon: <Landmark size={18} strokeWidth={1.8} />, label: t('nav.departments') },
+                    { href: '/admin/areas', icon: <PackageOpen size={18} strokeWidth={1.8} />, label: t('nav.areas') },
+                    { href: '/admin/lines', icon: <RefreshCw size={18} strokeWidth={1.8} />, label: t('nav.lines') },
+                    { href: '/admin/equipment-registry', icon: <Cog size={18} strokeWidth={1.8} />, label: 'Machine Registry' },
+                    { href: '/admin/shifts', icon: <Clock size={18} strokeWidth={1.8} />, label: t('nav.shifts') },
+                    { href: '/admin/categories', icon: <Tag size={18} strokeWidth={1.8} />, label: t('nav.categories') },
+                    { href: '/admin', icon: <UserCog size={18} strokeWidth={1.8} />, label: t('nav.userManagement') },
+                    { href: '/admin/privileges', icon: <KeyRound size={18} strokeWidth={1.8} />, label: t('nav.privileges') || 'Role Privileges' },
+                    { href: '/admin/work-order-templates', icon: <ListTodo size={18} strokeWidth={1.8} />, label: 'Work Order Templates' },
+                    { href: '/admin/enterprise', icon: <Shield size={18} strokeWidth={1.8} />, label: t('nav.enterprise') },
+                    { href: '/admin/calendar-config', icon: <CalendarDays size={18} strokeWidth={1.8} />, label: 'Calendar Year Config' },
+                    { href: '/admin/bakery-settings', icon: <Wheat size={18} strokeWidth={1.8} />, label: 'Bakery KPI Settings' },
+                    { href: '/support-inbox', icon: <MailOpen size={18} strokeWidth={1.8} />, label: 'Support Inbox' },
+                  ]).map((link, idx) => (
+                    <Link
+                      key={idx}
+                      href={link.href}
+                      onClick={() => setMobileMenuOpen(false)}
+                      className={`flex items-center gap-3 px-3 py-2.5 rounded-lg text-sm font-medium transition-colors ${
+                        pathname === link.href
+                          ? 'bg-primary-100 dark:bg-primary-900/40 text-primary-700 dark:text-primary-300'
+                          : 'text-gray-700 dark:text-gray-300 hover:bg-sky-200/60 dark:hover:bg-primary-900/30 hover:text-sky-800 dark:hover:text-primary-300'
+                      }`}
+                    >
+                      {link.icon}
+                      <span>{link.label}</span>
+                    </Link>
+                  ))}
+                </div>
+              )}
+            </nav>
+          </div>
+        </div>
+      )}
 
       {/* Profile Modal */}
       {showProfileModal && (

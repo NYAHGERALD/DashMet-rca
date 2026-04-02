@@ -109,7 +109,7 @@ function ExpandButton({ setIsOpen, title, position }: { setIsOpen: (v: boolean) 
     >
       <button
         onClick={() => setIsOpen(true)}
-        className="w-9 h-9 rounded-xl flex items-center justify-center transition-all duration-300 hover:bg-primary-100 dark:hover:bg-primary-900/40 hover:scale-110 hover:shadow-md group"
+        className="w-9 h-9 rounded-xl flex items-center justify-center transition-all duration-300 hover:bg-sky-200/70 dark:hover:bg-primary-900/40 hover:scale-110 hover:shadow-md group"
         aria-label="Expand panel"
       >
         <svg className={`w-4 h-4 text-gray-400 group-hover:text-primary-600 transition-colors duration-200 ${position === 'left' ? '' : 'rotate-180'}`} fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2.2}>
@@ -145,7 +145,7 @@ function CollapsedIconItem({ link, index, position, hoveredIndex, setHoveredInde
           isEmoji ? 'text-lg' : 'text-gray-600 dark:text-gray-400'
         } ${isHovered 
           ? 'bg-primary-100 dark:bg-primary-900/40 scale-110 shadow-lg shadow-primary-200/40 text-primary-600 dark:text-primary-400' 
-          : 'bg-white dark:bg-gray-700/40 shadow-sm hover:bg-primary-50 dark:hover:bg-primary-900/20'
+          : 'bg-white dark:bg-gray-700/40 shadow-sm hover:bg-sky-200/60 dark:hover:bg-primary-900/20'
         }`}
       >
         {link.icon}
@@ -271,12 +271,12 @@ export default function SlidingSidebar({
         }`}
         style={{
           width: isOpen ? 240 : 0,
-          background: 'rgba(255, 255, 255, 0.72)',
+          background: 'rgba(186, 230, 253, 0.55)',
           backdropFilter: 'blur(20px) saturate(180%)',
           WebkitBackdropFilter: 'blur(20px) saturate(180%)',
-          boxShadow: '0 4px 24px rgba(0, 0, 0, 0.06), 0 0 0 1px rgba(255,255,255,0.18) inset',
-          borderRight: position === 'left' ? '1px solid rgba(200,200,200,0.25)' : 'none',
-          borderLeft: position === 'right' ? '1px solid rgba(200,200,200,0.25)' : 'none',
+          boxShadow: '0 4px 24px rgba(14, 165, 233, 0.1), 0 0 0 1px rgba(125,211,252,0.3) inset',
+          borderRight: position === 'left' ? '1px solid rgba(125,211,252,0.4)' : 'none',
+          borderLeft: position === 'right' ? '1px solid rgba(125,211,252,0.4)' : 'none',
         }}
         onMouseEnter={() => setHovered(true)}
         onMouseLeave={() => setHovered(false)}
@@ -338,14 +338,14 @@ export default function SlidingSidebar({
         )}
 
         {/* Links — expanded */}
-        <nav ref={navRef} className="p-2 space-y-0.5 overflow-y-auto scroll-smooth flex-1 min-h-0">
+        <nav ref={navRef} className="p-2 space-y-0.5 overflow-y-auto scroll-smooth flex-1 min-h-0 scrollbar-hide">
           {visibleLinks.map((link, index) => {
             const isEmoji = typeof link.icon === 'string';
             const content = (
               <>
                 <span className={`shrink-0 flex items-center justify-center w-8 h-8 rounded-lg transition-all duration-200 ${
                   isEmoji ? 'text-base' : 'text-gray-500 dark:text-gray-400 group-hover:text-primary-600 dark:group-hover:text-primary-400'
-                } bg-white/60 dark:bg-gray-700/50 group-hover:bg-primary-100 dark:group-hover:bg-primary-800/40 group-hover:scale-110 group-hover:shadow-md group-hover:shadow-primary-200/50`}>
+                } bg-white/60 dark:bg-gray-700/50 group-hover:bg-sky-200/70 dark:group-hover:bg-primary-800/40 group-hover:scale-110 group-hover:shadow-md group-hover:shadow-sky-300/50`}>
                   {link.icon}
                 </span>
                 <span className="text-[12px] sm:text-[13px] font-medium text-gray-700 dark:text-gray-200 group-hover:text-primary-700 dark:group-hover:text-primary-300 truncate">{link.label}</span>
@@ -363,7 +363,7 @@ export default function SlidingSidebar({
                 <button
                   key={index}
                   onClick={() => { link.onClick!(); }}
-                  className="w-full flex items-center gap-2.5 px-2 py-1.5 rounded-lg text-gray-700 dark:text-gray-200 hover:bg-primary-100/70 dark:hover:bg-primary-900/30 transition-all duration-200 group"
+                  className="w-full flex items-center gap-2.5 px-2 py-1.5 rounded-lg text-gray-700 dark:text-gray-200 hover:bg-sky-200/60 dark:hover:bg-primary-900/30 transition-all duration-200 group"
                 >
                   {content}
                 </button>
@@ -374,7 +374,7 @@ export default function SlidingSidebar({
               <Link
                 key={index}
                 href={link.href || '#'}
-                className="flex items-center gap-2.5 px-2 py-1.5 rounded-lg text-gray-700 dark:text-gray-200 hover:bg-primary-100/70 dark:hover:bg-primary-900/30 transition-all duration-200 group"
+                className="flex items-center gap-2.5 px-2 py-1.5 rounded-lg text-gray-700 dark:text-gray-200 hover:bg-sky-200/60 dark:hover:bg-primary-900/30 transition-all duration-200 group"
               >
                 {content}
               </Link>
@@ -397,12 +397,12 @@ export default function SlidingSidebar({
           className="absolute inset-0 flex flex-col"
           style={{
             width: collapsedWidth,
-            background: 'linear-gradient(180deg, rgba(248, 250, 252, 0.95) 0%, rgba(241, 245, 249, 0.92) 100%)',
+            background: 'linear-gradient(180deg, rgba(186, 230, 253, 0.9) 0%, rgba(164, 220, 251, 0.88) 100%)',
             backdropFilter: 'blur(24px) saturate(180%)',
             WebkitBackdropFilter: 'blur(24px) saturate(180%)',
             boxShadow: position === 'left'
-              ? '4px 0 20px rgba(0, 0, 0, 0.08), 1px 0 0 rgba(200,200,200,0.3)'
-              : '-4px 0 20px rgba(0, 0, 0, 0.08), -1px 0 0 rgba(200,200,200,0.3)',
+              ? '4px 0 20px rgba(14, 165, 233, 0.12), 1px 0 0 rgba(125,211,252,0.5)'
+              : '-4px 0 20px rgba(14, 165, 233, 0.12), -1px 0 0 rgba(125,211,252,0.5)',
           }}
         >
           {/* Expand button at top */}

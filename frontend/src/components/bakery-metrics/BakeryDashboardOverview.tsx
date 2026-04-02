@@ -627,7 +627,7 @@ export default function BakeryDashboardOverview() {
           </div>
 
           {viewTab === 'weekly' && (
-          <div className="grid grid-cols-1 lg:grid-cols-2 gap-4 mt-3">
+          <div className="grid grid-cols-1 lg:grid-cols-2 gap-4 mt-3 overflow-x-auto scrollbar-hide">
             {/* Combined OEE Chart */}
             <div className="bg-gray-50 dark:bg-gray-900/50 rounded-lg p-3 border border-gray-100 dark:border-gray-700">
               <ResponsiveContainer width="100%" height={290}>

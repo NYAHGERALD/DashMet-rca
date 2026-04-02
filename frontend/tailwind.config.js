@@ -94,6 +94,7 @@ module.exports = {
         'ring-pulse': 'ringPulse 2s ease-in-out infinite',
         'glow-pulse': 'glowPulse 3s ease-in-out infinite',
         'slide-in-right': 'slideInRight 0.5s cubic-bezier(0.16, 1, 0.3, 1) forwards',
+        'slide-in-left': 'slideInLeft 0.3s cubic-bezier(0.16, 1, 0.3, 1) forwards',
         'shrink-width': 'shrinkWidth 5s linear forwards',
       },
       keyframes: {
@@ -192,6 +193,16 @@ module.exports = {
           '0%': { 
             opacity: '0', 
             transform: 'translateX(100%)' 
+          },
+          '100%': { 
+            opacity: '1', 
+            transform: 'translateX(0)' 
+          },
+        },
+        slideInLeft: {
+          '0%': { 
+            opacity: '0', 
+            transform: 'translateX(-100%)' 
           },
           '100%': { 
             opacity: '1', 

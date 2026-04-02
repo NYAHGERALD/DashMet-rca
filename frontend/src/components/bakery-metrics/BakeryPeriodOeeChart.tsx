@@ -565,7 +565,8 @@ export default function BakeryPeriodOeeChart({ startDate, endDate }: BakeryPerio
               <p className="text-xs mt-1">Try adjusting your date range</p>
             </div>
           ) : (
-            <div className="w-full">
+            <div className="w-full overflow-x-auto scrollbar-hide">
+              <div className="min-w-[900px]">
               <ResponsiveContainer width="100%" height={490}>
                 <ComposedChart data={chartData} margin={{ top: 30, right: 20, left: 0, bottom: 10 }}>
                   <defs>
@@ -734,6 +735,7 @@ export default function BakeryPeriodOeeChart({ startDate, endDate }: BakeryPerio
                   />
                 </ComposedChart>
               </ResponsiveContainer>
+              </div>
 
 
             </div>
@@ -772,7 +774,8 @@ export default function BakeryPeriodOeeChart({ startDate, endDate }: BakeryPerio
               <p className="text-xs mt-1">Try adjusting your date range</p>
             </div>
           ) : (
-            <div className="w-full">
+            <div className="w-full overflow-x-auto scrollbar-hide">
+              <div className="min-w-[900px]">
               <ResponsiveContainer width="100%" height={490}>
                 <ComposedChart data={chartData} margin={{ top: 30, right: 20, left: 0, bottom: 10 }}>
                   <defs>
@@ -939,6 +942,7 @@ export default function BakeryPeriodOeeChart({ startDate, endDate }: BakeryPerio
                   />
                 </ComposedChart>
               </ResponsiveContainer>
+              </div>
             </div>
           )}
         </div>
