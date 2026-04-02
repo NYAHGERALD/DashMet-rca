@@ -24,7 +24,6 @@ import {
   CheckCircle,
   XCircle,
   Upload,
-  ArrowLeft,
   GripVertical,
   Plus,
   Video,
@@ -264,13 +263,6 @@ function MeetingsContent() {
         <div className="w-full px-4 sm:px-6 lg:px-8 py-6">
           <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4">
             <div className="flex items-center space-x-3">
-              <Link
-                href="/dashboard"
-                className="p-2 hover:bg-gray-100 dark:hover:bg-gray-700 rounded-lg transition-colors"
-                title="Back to Dashboard"
-              >
-                <ArrowLeft className="w-5 h-5 text-gray-600 dark:text-gray-400" />
-              </Link>
               <div className="p-2 bg-gradient-to-br from-purple-500 to-indigo-600 rounded-xl shadow-lg">
                 <Mic className="w-6 h-6 text-white" />
               </div>

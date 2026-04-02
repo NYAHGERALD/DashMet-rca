@@ -116,12 +116,6 @@ export default function AdminPoliciesPage() {
         <div className="max-w-full mx-auto p-6">
           <div className="flex items-start justify-between gap-4 mb-6">
             <div className="flex items-center gap-4">
-              <a
-                href="/dashboard"
-                className="text-gray-600 dark:text-gray-400 hover:text-gray-900 dark:hover:text-white"
-              >
-                ← Back
-              </a>
               <div>
                 <h1 className="text-2xl font-bold text-gray-900 dark:text-white">Policies</h1>
                 <p className="text-sm text-gray-600 dark:text-gray-400">

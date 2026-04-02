@@ -1183,15 +1183,11 @@ router.post(
       include: {
         WSASection: {
           include: {
-            WSAItem: {
-              include: {
-                WSAPhoto: true,
-              },
-            },
+            WSAItem: true,
           },
         },
         Department: true,
-        CreatedBy: {
+        User: {
           select: { id: true, firstName: true, lastName: true, email: true },
         },
       },

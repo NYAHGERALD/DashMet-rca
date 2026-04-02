@@ -5,7 +5,6 @@ import { useRouter, useParams } from 'next/navigation';
 import { useAuth } from '@/components/providers/AuthProvider';
 import ProtectedRoute from '@/components/auth/ProtectedRoute';
 import {
-  ArrowLeft,
   Scale,
   Users,
   FileText,
@@ -1573,7 +1572,7 @@ function CaseDetailContent() {
         <div className="text-center">
           <XCircle className="w-12 h-12 text-red-400 mx-auto mb-3" />
           <h2 className="text-lg font-bold text-gray-700 dark:text-gray-300">Case Not Found</h2>
-          <button onClick={() => router.push('/hr')} className="mt-3 text-sm text-blue-600 hover:underline">Back to HR</button>
+          <button onClick={() => router.push('/hr')} className="mt-3 text-sm text-blue-600 hover:underline">Go to HR</button>
         </div>
       </div>
     );
@@ -1596,9 +1595,6 @@ function CaseDetailContent() {
       <div className="bg-white dark:bg-gray-800 border-b border-gray-200 dark:border-gray-700">
         <div className="w-full px-6 lg:px-8 py-5">
           <div className="flex items-center gap-4">
-            <button onClick={() => router.push('/hr')} title="Back to HR" className="p-2 rounded-xl hover:bg-gray-100 dark:hover:bg-gray-700 transition-colors">
-              <ArrowLeft className="w-5 h-5 text-gray-500" />
-            </button>
             <div className="flex-1">
               <div className="flex items-center gap-3 flex-wrap">
                 <h1 className="text-xl font-bold text-gray-900 dark:text-white">{caseData.caseNumber}</h1>

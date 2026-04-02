@@ -3081,14 +3081,6 @@ function FMIRNewPageContent() {
         <div className="w-full px-4 sm:px-6 lg:px-8 py-6 sm:py-8">
           {/* Header */}
           <div className="mb-6 sm:mb-8 lg:mb-10">
-            <button
-              onClick={() => router.push('/fmir')}
-              className="flex items-center gap-2 text-gray-500 dark:text-gray-400 hover:text-primary-600 dark:hover:text-primary-400 mb-4 sm:mb-6 transition-colors group"
-            >
-              <ArrowLeft className="w-4 h-4 group-hover:-translate-x-1 transition-transform" />
-              <span className="text-sm font-medium">Back to Reports</span>
-            </button>
-
             <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3 sm:gap-4">
               <div className="flex items-center gap-3">
                 <div className="p-2 sm:p-3 bg-gradient-to-br from-amber-400 via-orange-500 to-red-500 rounded-xl shadow-lg shadow-orange-500/20 flex-shrink-0">

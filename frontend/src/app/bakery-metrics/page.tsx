@@ -4,7 +4,7 @@ import { useState, useCallback, useEffect, useRef } from 'react';
 import { useRouter } from 'next/navigation';
 import { useAuth } from '@/components/providers/AuthProvider';
 import ProtectedRoute from '@/components/auth/ProtectedRoute';
-import { Wheat, FileBarChart, LayoutDashboard, ArrowLeft, FileText, BarChart3, Calendar, Clock, RefreshCw, FileSpreadsheet, Sparkles, History, ClipboardList, X, Plus, Lightbulb, Check, AlertTriangle, Info, Target, Trophy } from 'lucide-react';
+import { Wheat, FileBarChart, LayoutDashboard, FileText, BarChart3, Calendar, Clock, RefreshCw, FileSpreadsheet, Sparkles, History, ClipboardList, X, Plus, Lightbulb, Check, AlertTriangle, Info, Target, Trophy } from 'lucide-react';
 import BakeryMetricsForm from '@/components/bakery-metrics/BakeryMetricsForm';
 import BakeryMetricsReport from '@/components/bakery-metrics/BakeryMetricsReport';
 import BakeryMetricsInsights from '@/components/bakery-metrics/BakeryMetricsInsightsV2';
@@ -137,17 +137,10 @@ export default function BakeryMetricsPage() {
         {/* Sticky Header + Tabs */}
         <div className="sticky top-0 z-30 bg-gray-50 dark:bg-gray-900 border-b border-gray-200 dark:border-gray-700 shadow-sm">
           <div className="w-full px-4 sm:px-6 lg:px-8 pt-4 pb-0">
-            {/* Header row: back + title left, dynamic content right */}
+            {/* Header row: title left, dynamic content right */}
             <div className="mb-3 flex items-start justify-between gap-3">
-              {/* Left: Back + Title */}
+              {/* Left: Title */}
               <div className="flex items-start gap-3 min-w-0">
-                <button
-                  onClick={() => router.push('/dashboard')}
-                  className="mt-0.5 p-1.5 rounded-lg bg-gray-200 hover:bg-gray-300 dark:bg-gray-700 dark:hover:bg-gray-600 text-gray-600 dark:text-gray-300 transition-colors active:scale-95 flex-shrink-0"
-                  title="Back to Dashboard"
-                >
-                  <ArrowLeft className="w-4 h-4" />
-                </button>
                 <div className="min-w-0">
                   <h1 className="text-xl sm:text-2xl font-bold text-gray-900 dark:text-white flex items-center gap-2">
                     <Wheat className="w-6 h-6 text-amber-600" />
@@ -367,7 +360,7 @@ export default function BakeryMetricsPage() {
                 </button>
               </div>
               <div className="p-4 sm:p-6">
-                <BakeryMetricsForm onStepChange={handleStepChange} openRecentSubmissions={recentSubsTrigger} prefillWeekDay={prefillWeekDay} />
+                <BakeryMetricsForm onStepChange={handleStepChange} openRecentSubmissions={recentSubsTrigger} prefillWeekDay={prefillWeekDay} onSuccessClose={() => { setShowFormModal(false); setActiveTab('report'); }} />
               </div>
             </div>
           </div>

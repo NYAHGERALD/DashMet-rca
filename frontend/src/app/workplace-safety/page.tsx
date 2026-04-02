@@ -2466,20 +2466,6 @@ function WorkplaceSafetyContent() {
         <div className="w-full px-4 sm:px-6 lg:px-8">
           <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between py-4 gap-4">
             <div className="flex items-center gap-4">
-              {/* Back Button */}
-              <Link href="/dashboard">
-                <motion.button
-                  whileHover={{ scale: 1.05 }}
-                  whileTap={{ scale: 0.95 }}
-                  className="flex items-center gap-2 px-3 py-2 text-sm font-medium text-gray-700 dark:text-gray-300 bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-700 rounded-xl hover:bg-gray-50 dark:hover:bg-gray-700 transition-colors"
-                >
-                  <ArrowLeft className="w-4 h-4" />
-                  Back
-                </motion.button>
-              </Link>
-
-              <div className="w-px h-8 bg-gray-300 dark:bg-gray-600" />
-
               <motion.div
                 initial={{ scale: 0 }}
                 animate={{ scale: 1 }}

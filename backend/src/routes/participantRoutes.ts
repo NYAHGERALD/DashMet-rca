@@ -535,7 +535,7 @@ router.delete('/:incidentId/:userId', async (req, res) => {
 
   // Create system chat message (only if chat wasn't archived, since we just cleared it)
   const removedName = `${participant.User_IncidentParticipant_userIdToUser.firstName} ${participant.User_IncidentParticipant_userIdToUser.lastName}`;
-  const action = isSelf ? 'left' : 'was removed from';
+  const action = (userId === user.id) ? 'left' : 'was removed from';
   
   let systemMessage = null;
   if (!chatArchived) {

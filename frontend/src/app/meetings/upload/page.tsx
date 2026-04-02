@@ -8,7 +8,6 @@ import api from '@/lib/api';
 import Link from 'next/link';
 import {
   Upload,
-  ArrowLeft,
   FileAudio,
   X,
   Loader2,
@@ -226,12 +225,6 @@ function UploadContent() {
       <div className="bg-white/80 dark:bg-gray-900/80 backdrop-blur-xl border-b border-gray-200/50 dark:border-gray-700/50">
         <div className="max-w-3xl mx-auto px-4 sm:px-6 lg:px-8 py-6">
           <div className="flex items-center space-x-4">
-            <Link
-              href="/meetings"
-              className="p-2 hover:bg-gray-100 dark:hover:bg-gray-800 rounded-lg transition-colors"
-            >
-              <ArrowLeft className="w-5 h-5" />
-            </Link>
             <div>
               <h1 className="text-xl font-bold text-gray-900 dark:text-white">
                 Upload Recording
@@ -478,12 +471,6 @@ function UploadContent() {
             </h3>
             <p className="text-red-600 dark:text-red-400 mb-6">{error}</p>
             <div className="flex items-center justify-center space-x-3">
-              <Link
-                href="/meetings"
-                className="px-6 py-2 text-gray-700 dark:text-gray-300 hover:bg-gray-100 dark:hover:bg-gray-800 rounded-lg transition-colors"
-              >
-                Back to Meetings
-              </Link>
               <button
                 onClick={resetUpload}
                 className="flex items-center space-x-2 px-6 py-2 bg-gradient-to-r from-purple-600 to-indigo-600 text-white rounded-lg hover:from-purple-700 hover:to-indigo-700 shadow-lg shadow-purple-500/25 transition-all"

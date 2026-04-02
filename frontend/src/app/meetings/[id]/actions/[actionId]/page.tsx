@@ -9,7 +9,6 @@ import Link from 'next/link';
 import { storage } from '@/lib/firebase';
 import { ref, uploadBytesResumable, getDownloadURL } from 'firebase/storage';
 import {
-  ArrowLeft,
   Loader2,
   AlertCircle,
   CheckCircle,
@@ -999,9 +998,7 @@ function ActionItemDetailContent() {
         <div className="text-center">
           <AlertCircle className="w-12 h-12 text-red-500 mx-auto mb-4" />
           <p className="text-gray-600 dark:text-gray-400">{error || 'Action item not found'}</p>
-          <Link href="/assigned-actions" className="mt-4 inline-block text-purple-600 hover:underline">
-            ← Back to My Action Items
-          </Link>
+
         </div>
       </div>
     );
@@ -1017,12 +1014,6 @@ function ActionItemDetailContent() {
         <div className="px-6 lg:px-10">
           <div className="flex items-center justify-between h-16">
             <div className="flex items-center gap-4">
-              <Link
-                href="/assigned-actions"
-                className="p-2 hover:bg-gray-100 dark:hover:bg-gray-700 rounded-lg transition-colors"
-              >
-                <ArrowLeft className="w-5 h-5 text-gray-600 dark:text-gray-400" />
-              </Link>
               <h1 className="text-xl font-bold text-gray-900 dark:text-white">Action Item</h1>
             </div>
             <div className="flex items-center gap-3">

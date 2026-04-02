@@ -1190,12 +1190,6 @@ export default function IncidentDetailPage() {
           </p>
           <div className="flex flex-col gap-3">
             <Link
-              href="/dashboard"
-              className="w-full px-6 py-3 bg-primary-600 text-white font-semibold rounded-lg hover:bg-primary-700 transition-colors"
-            >
-              Back to Dashboard
-            </Link>
-            <Link
               href="/incidents"
               className="w-full px-6 py-3 bg-gray-200 dark:bg-slate-700 text-gray-700 dark:text-gray-300 font-semibold rounded-lg hover:bg-gray-300 dark:hover:bg-slate-600 transition-colors"
             >
@@ -1311,14 +1305,6 @@ export default function IncidentDetailPage() {
               <div className="relative w-8 h-8 sm:w-10 sm:h-10 flex-shrink-0">
                 <Image src="/images/logo.png" alt="DASHMET Logo" fill className="object-contain" />
               </div>
-              <Link
-                href="/dashboard"
-                className="text-gray-500 hover:text-gray-700 dark:text-gray-400 dark:hover:text-gray-200 flex-shrink-0"
-              >
-                <svg className="w-5 h-5 sm:w-6 sm:h-6" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M10 19l-7-7m0 0l7-7m-7 7h18" />
-                </svg>
-              </Link>
               <div className="min-w-0">
                 <h1 className="text-base sm:text-xl font-bold text-gray-900 dark:text-white truncate">
                   {incident.incidentNumber}

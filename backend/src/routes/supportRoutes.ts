@@ -4,6 +4,7 @@ import asyncHandler from 'express-async-handler';
 import { authenticate, AuthRequest } from '../middleware/auth';
 import { requireAdmin, requireSystemAdmin } from '../middleware/rbac';
 import { prisma } from '../utils/prisma';
+import { SupportRecipientRole } from '@prisma/client';
 import { upload, handleMulterError } from '../middleware/upload';
 import { adminStorage } from '../config/firebase-admin';
 import { v4 as uuidv4 } from 'uuid';
@@ -113,13 +114,13 @@ router.post(
               );
             }
             
-            const supportRequest = await prisma.supportRequest.create({
+            const supportRequest: any = await prisma.supportRequest.create({
               data: {
                 subject,
                 description: messageContent,
                 category: category || 'GENERAL_INQUIRY',
                 recipientRole: recipientRole || null,
-                attachments: attachments,
+                attachments: attachments as any,
                 submittedByUserId: user?.id,
                 submittedByUserEmail: user ? user.email : email,
                 organizationId: user?.organizationId,
@@ -337,7 +338,7 @@ router.get(
     // Calculate stats for this inbox
     const allInboxRequests = await prisma.supportRequest.findMany({
       where: { 
-        recipientRole, 
+        recipientRole: recipientRole as SupportRecipientRole, 
         organizationId: user.organizationId,
       },
       select: { status: true },

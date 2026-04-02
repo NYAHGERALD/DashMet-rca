@@ -45,7 +45,7 @@ router.get(
         isActive: true,
       },
       include: {
-        UploadedBy: {
+        User: {
           select: {
             id: true,
             firstName: true,
@@ -100,7 +100,7 @@ router.get(
         organizationId,
       },
       include: {
-        UploadedBy: {
+        User: {
           select: {
             id: true,
             firstName: true,
@@ -201,6 +201,7 @@ router.post(
     // Create the new template
     const template = await prisma.workOrderTemplate.create({
       data: {
+        id: require('uuid').v4(),
         organizationId,
         name,
         fileName,
@@ -211,9 +212,10 @@ router.post(
         version: nextVersion,
         isActive: true,
         uploadedById: userId,
-      },
+        updatedAt: new Date(),
+      } as any,
       include: {
-        UploadedBy: {
+        User: {
           select: {
             id: true,
             firstName: true,
@@ -326,12 +328,14 @@ router.put(
         formTitle: formTitle || undefined,
       },
       create: {
+        id: require('uuid').v4(),
         organizationId,
         enableInAppForm: enableInAppForm ?? true,
         enableTemplateDownload: enableTemplateDownload ?? false,
         preferredOption: preferredOption || 'form',
         formTitle: formTitle || 'Maintenance Work Order Request',
-      },
+        updatedAt: new Date(),
+      } as any,
     });
 
     console.log(`Work order settings updated for org: ${organizationId}`);
@@ -406,7 +410,7 @@ router.put(
         isActive: isActive !== undefined ? isActive : existingTemplate.isActive,
       },
       include: {
-        UploadedBy: {
+        User: {
           select: {
             id: true,
             firstName: true,

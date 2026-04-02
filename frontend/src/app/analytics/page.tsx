@@ -332,12 +332,7 @@ export default function AnalyticsPage() {
               <p className="text-sm text-gray-500">Phase 12: Trends, predictions, and insights</p>
             </div>
           </div>
-          <Link 
-            href="/dashboard"
-            className="text-blue-600 hover:text-blue-800"
-          >
-            ← Back to Dashboard
-          </Link>
+
         </div>
       </header>
 

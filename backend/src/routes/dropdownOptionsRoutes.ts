@@ -564,6 +564,25 @@ router.post('/populate', requireMinimumRole(UserRole.ADMIN), async (req, res) =>
       { value: 'PREFER_NOT_TO_SAY', label: 'Prefer Not to Say', description: 'Prefer not to disclose' },
       { value: 'OTHER', label: 'Other', description: 'Other gender identity' },
     ],
+    [DropdownType.RESPONSIBLE_PARTY]: [
+      { value: 'QUALITY_ASSURANCE', label: 'Quality Assurance Team', description: 'Quality assurance and control team' },
+      { value: 'MAINTENANCE', label: 'Maintenance Team', description: 'Facility and equipment maintenance team' },
+      { value: 'PRODUCTION', label: 'Production Team', description: 'Production and manufacturing team' },
+      { value: 'ENGINEERING', label: 'Engineering Team', description: 'Engineering and design team' },
+      { value: 'SAFETY', label: 'Safety Team', description: 'Health and safety team' },
+      { value: 'OPERATIONS', label: 'Operations Team', description: 'Operations management team' },
+      { value: 'HR', label: 'Human Resources', description: 'Human resources department' },
+      { value: 'LOGISTICS', label: 'Logistics Team', description: 'Logistics and supply chain team' },
+      { value: 'TRAINING', label: 'Training Team', description: 'Training and development team' },
+      { value: 'MANAGEMENT', label: 'Management', description: 'Management and leadership team' },
+    ],
+    [DropdownType.PREVENTIVE_CONTROL_TYPE]: [
+      { value: 'PROCESS', label: 'Process Change', description: 'Changes to workflows, procedures, or standard operating procedures' },
+      { value: 'TRAINING', label: 'Training', description: 'Training programs, competency assessments, and skill development' },
+      { value: 'EQUIPMENT', label: 'Equipment', description: 'Equipment upgrades, maintenance schedules, and physical safeguards' },
+      { value: 'DOCUMENTATION', label: 'Documentation', description: 'Checklists, logs, records, and written procedures' },
+      { value: 'MONITORING', label: 'Monitoring', description: 'Inspections, audits, key metrics tracking, and early warning systems' },
+    ],
   };
 
   let totalCreated = 0;

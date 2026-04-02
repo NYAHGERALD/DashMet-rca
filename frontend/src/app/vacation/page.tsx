@@ -1409,15 +1409,6 @@ export default function VacationHubPage() {
           <div className="px-4 py-3">
             <div className="flex items-center justify-between">
               <div className="flex items-center gap-4">
-                {/* Back Button */}
-                <Link
-                  href="/dashboard"
-                  className="p-2 rounded-lg hover:bg-gray-100 dark:hover:bg-gray-800 transition-colors flex items-center gap-1"
-                >
-                  <svg className="w-5 h-5 text-gray-600 dark:text-gray-300" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 19l-7-7 7-7" />
-                  </svg>
-                </Link>
                 <div>
                   <h1 className="text-xl font-bold text-gray-900 dark:text-white flex items-center gap-2">
                     🏖️ Vacation Hub

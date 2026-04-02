@@ -642,12 +642,6 @@ export default function EquipmentRegistryPage() {
       <div className="w-full h-screen flex flex-col overflow-hidden">
         {/* Header */}
         <div className="flex-shrink-0 px-4 sm:px-8 pt-2 sm:pt-3 pb-2 bg-gradient-to-r from-primary-50 via-white to-primary-50/60 dark:from-slate-800 dark:via-slate-800/80 dark:to-primary-900/20 border-b border-primary-100 dark:border-slate-700/60 z-20">
-          <Link
-            href="/dashboard"
-            className="inline-flex items-center text-primary-600 dark:text-primary-400 hover:text-primary-700 dark:hover:text-primary-300 mb-1 text-sm"
-          >
-            ← Back to Dashboard
-          </Link>
           <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-1">
             <div>
               <h1 className="text-xl sm:text-2xl font-bold text-gray-900 dark:text-white flex items-center gap-2">

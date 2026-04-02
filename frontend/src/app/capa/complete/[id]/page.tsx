@@ -497,12 +497,6 @@ function CompleteActionContent() {
               <div className="relative w-7 h-7 sm:w-8 sm:h-8">
                 <Image src="/images/logo.png" alt="DASHMET Logo" fill className="object-contain" />
               </div>
-              <Link 
-                href="/capa" 
-                className="text-xs sm:text-sm text-gray-600 dark:text-gray-400 hover:text-gray-900 dark:hover:text-white flex items-center gap-1"
-              >
-                ← <span className="hidden xs:inline">Back to</span> CAPA Board
-              </Link>
               <div className="h-4 sm:h-6 w-px bg-gray-300 dark:bg-gray-600"></div>
               <h1 className="text-base sm:text-xl font-bold text-gray-900 dark:text-white">
                 ✅ Complete Action

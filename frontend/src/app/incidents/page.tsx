@@ -314,12 +314,6 @@ export default function IncidentsPage() {
                 <Image src="/images/logo.png" alt="DASHMET Logo" fill className="object-contain" />
               </div>
               <div>
-                <Link
-                  href="/dashboard"
-                  className="inline-flex items-center text-sm sm:text-base text-primary-600 dark:text-primary-400 hover:text-primary-700 dark:hover:text-primary-300 mb-2"
-                >
-                  ← Back to Dashboard
-                </Link>
                 <h1 className="text-xl sm:text-2xl lg:text-3xl font-bold text-gray-900 dark:text-white">
                   {filterType === 'team' ? '👥 Team Incidents' : filterType === 'public' ? '🌐 Public Incidents' : '📋 My Incidents'}
                 </h1>

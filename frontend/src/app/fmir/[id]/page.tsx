@@ -11,7 +11,6 @@ import ProtectedRoute from '@/components/auth/ProtectedRoute';
 import FMIRVisibilityOffModal from '@/components/fmir/FMIRVisibilityOffModal';
 import api from '@/lib/api';
 import {
-  ArrowLeft,
   Edit,
   Send,
   AlertTriangle,
@@ -922,13 +921,7 @@ export default function FMIRDetailPage() {
           <h2 className="text-xl font-semibold text-gray-900 dark:text-white mb-2">
             {error || 'Report not found'}
           </h2>
-          <Link
-            href="/fmir"
-            className="inline-flex items-center gap-2 text-primary-600 hover:text-primary-700"
-          >
-            <ArrowLeft className="w-4 h-4" />
-            Back to Reports
-          </Link>
+
         </div>
       </div>
     );
@@ -962,14 +955,6 @@ export default function FMIRDetailPage() {
         <div className="w-full px-4 sm:px-6 lg:px-8 py-6 sm:py-8">
           {/* Header */}
           <div className="mb-8">
-            <button
-              onClick={() => router.push('/fmir')}
-              className="flex items-center gap-2 text-gray-600 dark:text-gray-400 hover:text-gray-900 dark:hover:text-white mb-4 transition-colors"
-            >
-              <ArrowLeft className="w-5 h-5" />
-              <span>Back to Reports</span>
-            </button>
-
             <div className="bg-white dark:bg-gray-800 rounded-xl shadow-sm border border-gray-200 dark:border-gray-700 p-6">
               <div className="flex flex-col lg:flex-row lg:items-center lg:justify-between gap-4">
                 <div className="flex items-start gap-4">

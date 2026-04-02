@@ -151,15 +151,6 @@ export default function AreasPage() {
   return (
     <ProtectedRoute allowedRoles={['ADMIN', 'SYSTEM_ADMIN']}>
       <div className="p-8">
-        <div className="mb-6">
-          <Link
-            href="/dashboard"
-            className="inline-flex items-center text-primary-600 dark:text-primary-400 hover:text-primary-700 dark:hover:text-primary-300 mb-4"
-          >
-            ← Back to Dashboard
-          </Link>
-        </div>
-
         <div className="mb-6 flex items-center justify-between">
           <div>
             <h1 className="text-3xl font-bold text-gray-900 dark:text-white">Areas</h1>

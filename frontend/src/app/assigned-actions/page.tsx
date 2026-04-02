@@ -20,7 +20,6 @@ import {
   RefreshCw,
   CheckCircle,
   Sparkles,
-  ArrowLeft,
   GripVertical,
   Trash2,
   MessageSquare,
@@ -411,12 +410,6 @@ function AssignedActionsContent() {
         <div className="px-6 lg:px-10">
           <div className="flex items-center justify-between h-16">
             <div className="flex items-center gap-4">
-              <Link
-                href="/dashboard"
-                className="p-2 hover:bg-gray-100 dark:hover:bg-gray-700 rounded-lg transition-colors"
-              >
-                <ArrowLeft className="w-5 h-5 text-gray-600 dark:text-gray-400" />
-              </Link>
               <div className="flex items-center gap-2">
                 <ClipboardList className="w-6 h-6 text-purple-600" />
                 <h1 className="text-xl font-bold text-gray-900 dark:text-white">

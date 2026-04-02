@@ -156,12 +156,6 @@ export default function TriageManagementPage() {
         <div className="w-full">
           {/* Header */}
           <div className="mb-6">
-            <Link
-              href="/dashboard"
-              className="inline-flex items-center text-primary-600 dark:text-primary-400 hover:text-primary-700 dark:hover:text-primary-300 mb-4"
-            >
-              ← Back to Dashboard
-            </Link>
             <h1 className="text-3xl font-bold text-gray-900 dark:text-white">
               Triage & Auto-Assignment Management
             </h1>

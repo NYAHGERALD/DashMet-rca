@@ -2144,13 +2144,6 @@ function NewIncidentPageContent() {
             <div className="relative w-8 h-8 sm:w-10 sm:h-10">
               <Image src="/images/logo.png" alt="DASHMET Logo" fill className="object-contain" />
             </div>
-            <button
-              onClick={() => router.push('/dashboard')}
-              type="button"
-              className="inline-flex items-center text-sm sm:text-base text-primary-600 dark:text-primary-400 hover:text-primary-700 dark:hover:text-primary-300 cursor-pointer touch-manipulation"
-            >
-              ← Back to Dashboard
-            </button>
           </div>
 
           <div className="bg-white dark:bg-slate-800 rounded-xl shadow-lg p-4 sm:p-6 lg:p-8 border border-gray-200 dark:border-slate-700">

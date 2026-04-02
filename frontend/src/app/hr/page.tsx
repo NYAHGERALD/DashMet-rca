@@ -28,7 +28,6 @@ import {
   RefreshCw,
   Eye,
   Trash2,
-  ArrowLeft,
   Upload,
   BookOpen,
 } from 'lucide-react';
@@ -973,9 +972,6 @@ function HRPageContent() {
         <div className="w-full px-6 lg:px-8 py-6">
           <div className="flex items-center justify-between">
             <div className="flex items-center gap-4">
-              <button onClick={() => router.push('/dashboard')} title="Back to dashboard" className="p-2 rounded-xl hover:bg-gray-100 dark:hover:bg-gray-700 transition-colors">
-                <ArrowLeft className="w-5 h-5 text-gray-500" />
-              </button>
               <div>
                 <div className="flex items-center gap-3">
                   <div className="p-2.5 rounded-xl bg-gradient-to-br from-blue-500 to-indigo-600 shadow-lg shadow-blue-600/30">

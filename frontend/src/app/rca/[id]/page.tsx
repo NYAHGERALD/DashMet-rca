@@ -586,12 +586,6 @@ export default function RCAWorkspacePage() {
       <div className="min-h-screen bg-gray-50 dark:bg-gray-900 flex items-center justify-center">
         <div className="text-center">
           <h2 className="text-2xl font-bold text-gray-900 dark:text-white">RCA Not Found</h2>
-          <button
-            onClick={() => router.push('/rca')}
-            className="mt-4 text-blue-600 hover:text-blue-500"
-          >
-            Back to RCA List
-          </button>
         </div>
       </div>
     );
@@ -604,12 +598,6 @@ export default function RCAWorkspacePage() {
         <div className="text-center">
           <h2 className="text-2xl font-bold text-gray-900 dark:text-white">Incident Data Not Available</h2>
           <p className="mt-2 text-gray-500 dark:text-gray-400">The incident associated with this RCA could not be loaded.</p>
-          <button
-            onClick={() => router.push('/rca')}
-            className="mt-4 text-blue-600 hover:text-blue-500"
-          >
-            Back to RCA List
-          </button>
         </div>
       </div>
     );
@@ -622,14 +610,6 @@ export default function RCAWorkspacePage() {
         <div className="w-full px-3 sm:px-4 md:px-6 lg:px-8 py-3 sm:py-4">
           <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3 sm:gap-0">
             <div className="flex items-center space-x-3 sm:space-x-4">
-              <button
-                onClick={() => router.push('/rca')}
-                className="text-gray-500 hover:text-gray-700 dark:text-gray-400 dark:hover:text-gray-200"
-              >
-                <svg className="w-5 h-5 sm:w-6 sm:h-6" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M10 19l-7-7m0 0l7-7m-7 7h18" />
-                </svg>
-              </button>
               <div className="min-w-0 flex-1">
                 <h1 className="text-base sm:text-xl font-bold text-gray-900 dark:text-white truncate">
                   RCA Workspace - {rca.incident?.incidentNumber || 'Unknown'}

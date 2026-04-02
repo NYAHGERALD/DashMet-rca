@@ -447,12 +447,6 @@ function StartActionContent() {
               <div className="relative w-7 h-7 sm:w-8 sm:h-8 flex-shrink-0">
                 <Image src="/images/logo.png" alt="DASHMET Logo" fill className="object-contain" />
               </div>
-              <Link 
-                href="/capa" 
-                className="text-gray-600 dark:text-gray-400 hover:text-gray-900 dark:hover:text-white flex items-center gap-1 text-sm sm:text-base flex-shrink-0"
-              >
-                <span className="hidden xs:inline">←</span> <span className="hidden sm:inline">Back to CAPA Board</span><span className="sm:hidden">← Back</span>
-              </Link>
               <div className="hidden sm:block h-6 w-px bg-gray-300 dark:bg-gray-600 flex-shrink-0"></div>
               <h1 className="hidden sm:block text-lg sm:text-xl font-bold text-gray-900 dark:text-white truncate">
                 🚀 Start Action

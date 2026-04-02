@@ -11,7 +11,6 @@ import {
   Calendar,
   Clock,
   User,
-  ArrowLeft,
   ArrowRight,
   FileText,
   Loader2,
@@ -433,13 +432,7 @@ function MeetingDetailContent() {
         <div className="text-center">
           <AlertCircle className="w-8 h-8 text-red-500 mx-auto mb-4" />
           <p className="text-red-600 mb-4">{error || 'Meeting not found'}</p>
-          <Link
-            href="/meetings"
-            className="inline-flex items-center space-x-2 px-4 py-2 bg-purple-600 text-white rounded-lg hover:bg-purple-700"
-          >
-            <ArrowLeft className="w-4 h-4" />
-            <span>Back to Meetings</span>
-          </Link>
+
         </div>
       </div>
     );
@@ -454,12 +447,6 @@ function MeetingDetailContent() {
       <div className="bg-white/80 dark:bg-gray-900/80 backdrop-blur-xl border-b border-gray-200/50 dark:border-gray-700/50 sticky top-0 z-10">
         <div className="w-full px-4 sm:px-6 lg:px-8 py-4">
           <div className="flex items-center space-x-4">
-            <Link
-              href="/meetings"
-              className="p-2 hover:bg-gray-100 dark:hover:bg-gray-800 rounded-lg transition-colors"
-            >
-              <ArrowLeft className="w-5 h-5" />
-            </Link>
             <div className="flex-1 min-w-0">
               <div className="flex items-center space-x-2 mb-1">
                 <span

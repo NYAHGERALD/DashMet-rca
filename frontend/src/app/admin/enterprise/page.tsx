@@ -364,9 +364,6 @@ function EnterpriseAdminContent() {
               <div className="relative w-8 h-8">
                 <Image src="/images/logo.png" alt="DASHMET Logo" fill className="object-contain" />
               </div>
-              <Link href="/dashboard" className="text-gray-600 dark:text-gray-400 hover:text-gray-900 dark:hover:text-white">
-                ← Back
-              </Link>
               <h1 className="text-xl font-bold text-gray-900 dark:text-white">🛡️ Enterprise Administration</h1>
             </div>
             <span className="px-3 py-1 bg-purple-100 dark:bg-purple-900 text-purple-800 dark:text-purple-200 rounded-full text-sm font-medium">

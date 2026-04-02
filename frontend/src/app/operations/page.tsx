@@ -8,7 +8,6 @@ import api from '@/lib/api';
 import ImageCropModal from '@/components/ui/ImageCropModal';
 import PhotoLightbox from '@/components/ui/PhotoLightbox';
 import {
-  ArrowLeft,
   Wrench,
   Plus,
   Search,
@@ -48,7 +47,7 @@ import { format } from 'date-fns';
 interface Department { id: string; name: string; }
 interface Area { id: string; name: string; departmentId?: string; }
 interface Line { id: string; name: string; lineNumber?: string; areaId?: string; }
-interface Shift { id: string; name: string; startTime?: string; endTime?: string; }
+interface Shift { id: string; name: string; startTime?: string; endTime?: string; lineIds?: string[]; areaIds?: string[]; departmentIds?: string[]; }
 interface Equipment { id: string; name: string; assetTag?: string; lineId?: string; }
 interface ComponentItem { id: string; name: string; partNumber?: string; equipmentId?: string; }
 
@@ -240,17 +239,73 @@ export default function OperationsPage() {
 
   const saveCellEdit = async (issueId: string, field: string, value: string | null) => {
     setEditingCell(null);
-    // Optimistic update — reflect the change in UI immediately
+
+    // Build cascading updates: when a parent changes, auto-select first child values
+    const issue = issues.find(i => i.id === issueId);
+    const updates: Record<string, string | null> = { [field]: value };
+
+    if (field === 'departmentId') {
+      // Department changed → cascade Area → Line → Shift + Equipment → Component
+      const filteredAreas = value ? areas.filter(a => a.departmentId === value) : [];
+      const firstArea = filteredAreas[0] || null;
+      updates.areaId = firstArea?.id || null;
+
+      const filteredLines = firstArea ? lines.filter(l => l.areaId === firstArea.id) : [];
+      const firstLine = filteredLines[0] || null;
+      updates.lineId = firstLine?.id || null;
+
+      // Cascade shift based on new line
+      const filteredShifts = firstLine ? shifts.filter(s => s.lineIds?.includes(firstLine.id)) : [];
+      updates.shiftId = filteredShifts[0]?.id || null;
+
+      const filteredEquip = firstLine ? equipment.filter(eq => eq.lineId === firstLine.id) : [];
+      const firstEquip = filteredEquip[0] || null;
+      updates.equipmentId = firstEquip?.id || null;
+
+      const filteredComps = firstEquip ? components.filter(c => c.equipmentId === firstEquip.id) : [];
+      updates.componentId = filteredComps[0]?.id || null;
+    } else if (field === 'areaId') {
+      // Area changed → cascade Line → Shift + Equipment → Component
+      const filteredLines = value ? lines.filter(l => l.areaId === value) : [];
+      const firstLine = filteredLines[0] || null;
+      updates.lineId = firstLine?.id || null;
+
+      const filteredShifts = firstLine ? shifts.filter(s => s.lineIds?.includes(firstLine.id)) : [];
+      updates.shiftId = filteredShifts[0]?.id || null;
+
+      const filteredEquip = firstLine ? equipment.filter(eq => eq.lineId === firstLine.id) : [];
+      const firstEquip = filteredEquip[0] || null;
+      updates.equipmentId = firstEquip?.id || null;
+
+      const filteredComps = firstEquip ? components.filter(c => c.equipmentId === firstEquip.id) : [];
+      updates.componentId = filteredComps[0]?.id || null;
+    } else if (field === 'lineId') {
+      // Line changed → cascade Shift + Equipment → Component
+      const filteredShifts = value ? shifts.filter(s => s.lineIds?.includes(value)) : [];
+      updates.shiftId = filteredShifts[0]?.id || null;
+
+      const filteredEquip = value ? equipment.filter(eq => eq.lineId === value) : [];
+      const firstEquip = filteredEquip[0] || null;
+      updates.equipmentId = firstEquip?.id || null;
+
+      const filteredComps = firstEquip ? components.filter(c => c.equipmentId === firstEquip.id) : [];
+      updates.componentId = filteredComps[0]?.id || null;
+    } else if (field === 'equipmentId') {
+      // Equipment changed → cascade Component
+      const filteredComps = value ? components.filter(c => c.equipmentId === value) : [];
+      updates.componentId = filteredComps[0]?.id || null;
+    }
+
+    // Optimistic update — reflect all cascaded changes in UI immediately
     setIssues(prev => prev.map(i => {
       if (i.id !== issueId) return i;
-      const updated = { ...i, [field]: value };
-      return updated;
+      return { ...i, ...updates };
     }));
     if (selectedIssue?.id === issueId) {
-      setSelectedIssue(prev => prev ? { ...prev, [field]: value } : prev);
+      setSelectedIssue(prev => prev ? { ...prev, ...updates } : prev);
     }
     try {
-      const res = await api.patch(`/operations/issues/${issueId}`, { [field]: value });
+      const res = await api.patch(`/operations/issues/${issueId}`, updates);
       if (res.data.success) {
         // Reconcile with server response (includes relation data)
         setIssues(prev => prev.map(i => i.id === issueId ? { ...i, ...res.data.data } : i));
@@ -438,34 +493,54 @@ export default function OperationsPage() {
 
   // ─── Load dropdown data ──────────────────────────────────────────────────
   const loadDropdownData = useCallback(async () => {
-    try {
-      const [deptRes, areaRes, lineRes, shiftRes, equipRes, compRes] = await Promise.all([
-        api.get('/facilities/departments'),
-        api.get('/facilities/areas'),
-        api.get('/facilities/lines'),
-        api.get('/facilities/shifts'),
-        api.get('/equipment'),
-        api.get('/equipment/components/all'),
-      ]);
-      setDepartments(deptRes.data?.data?.departments || []);
-      setAreas(areaRes.data?.data?.areas || []);
-      setLines(lineRes.data?.data?.lines || []);
-      setShifts(shiftRes.data?.data?.shifts || []);
-      setEquipment(equipRes.data?.data?.equipment || []);
-      setComponents(compRes.data?.data?.components || []);
-    } catch (err) {
-      console.error('Failed to load dropdown data:', err);
+    const results = await Promise.allSettled([
+      api.get('/facilities/departments'),
+      api.get('/facilities/areas'),
+      api.get('/facilities/lines'),
+      api.get('/facilities/shifts'),
+      api.get('/equipment'),
+      api.get('/equipment/components/all'),
+    ]);
+    const [deptRes, areaRes, lineRes, shiftRes, equipRes, compRes] = results;
+
+    if (deptRes.status === 'fulfilled') {
+      const depts = deptRes.value.data?.data?.departments || deptRes.value.data?.departments || [];
+      setDepartments(depts);
+    }
+    if (areaRes.status === 'fulfilled') {
+      const a = areaRes.value.data?.data?.areas || areaRes.value.data?.areas || [];
+      setAreas(a);
+    }
+    if (lineRes.status === 'fulfilled') {
+      const l = lineRes.value.data?.data?.lines || lineRes.value.data?.lines || [];
+      setLines(l);
+    }
+    if (shiftRes.status === 'fulfilled') {
+      const s = shiftRes.value.data?.data?.shifts || shiftRes.value.data?.shifts || [];
+      setShifts(s.map((shift: any) => {
+        const lineIds = shift.ShiftLine?.map((sl: any) => sl.lineId || sl.Line?.id).filter(Boolean) || [];
+        const areaIds = [...new Set(shift.ShiftLine?.map((sl: any) => sl.Line?.Area?.id).filter(Boolean) || [])];
+        const departmentIds = [...new Set(shift.ShiftLine?.map((sl: any) => sl.Line?.Area?.Department?.id).filter(Boolean) || [])];
+        return { ...shift, lineIds, areaIds, departmentIds };
+      }));
+    }
+    if (equipRes.status === 'fulfilled') {
+      const eq = equipRes.value.data?.data?.equipment || equipRes.value.data?.equipment || [];
+      setEquipment(eq);
+    }
+    if (compRes.status === 'fulfilled') {
+      const c = compRes.value.data?.data?.components || compRes.value.data?.components || [];
+      setComponents(c);
     }
   }, []);
 
-  // ─── Load components when equipment changes ────────────────────────────────
+  // ─── Load components when equipment changes (form only) ────────────────────
   useEffect(() => {
     if (formEquipment) {
       api.get(`/equipment/${formEquipment}/components`)
         .then(res => setComponents(res.data?.data?.components || []))
-        .catch(() => setComponents([]));
+        .catch(() => {});
     } else {
-      setComponents([]);
       setFormComponent('');
     }
   }, [formEquipment]);
@@ -934,13 +1009,6 @@ export default function OperationsPage() {
           <div className="w-full px-4 sm:px-6 lg:px-8 py-4">
             <div className="flex items-center justify-between">
               <div className="flex items-center gap-3">
-                <button
-                  onClick={() => router.push('/dashboard')}
-                  className="p-1.5 rounded-lg bg-gray-200 hover:bg-gray-300 dark:bg-gray-700 dark:hover:bg-gray-600 text-gray-600 dark:text-gray-300 transition-colors"
-                  title="Back to Dashboard"
-                >
-                  <ArrowLeft className="w-4 h-4" />
-                </button>
                 <div>
                   <h1 className="text-xl font-bold text-gray-900 dark:text-white flex items-center gap-2">
                     <Wrench className="w-5 h-5 text-[#3aa8e8]" />
@@ -1401,9 +1469,9 @@ export default function OperationsPage() {
                             {/* Department — dropdown */}
                             <td className="px-4 py-3 text-xs text-gray-700 dark:text-gray-300 whitespace-nowrap" onClick={(e) => startCellEdit(e, issue.id, 'department')}>
                               {editingCell?.issueId === issue.id && editingCell.column === 'department' && dropdownPos ? (
-                                <div ref={inlineEditRef} className="fixed z-[9999] bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-600 rounded-lg shadow-xl min-w-[160px] max-h-[200px] overflow-y-auto py-1" style={{ top: dropdownPos.top, left: dropdownPos.left }}>
+                                <div ref={inlineEditRef} style={{ position: 'fixed', zIndex: 9999, background: '#fff', border: '1px solid #e5e7eb', borderRadius: '8px', boxShadow: '0 10px 25px rgba(0,0,0,0.15)', minWidth: '160px', maxHeight: '300px', overflowY: 'auto', padding: '4px 0', top: dropdownPos.top, left: dropdownPos.left }}>
                                   {departments.map(d => (
-                                    <button key={d.id} className={`w-full text-left px-3 py-1.5 text-xs hover:bg-gray-100 dark:hover:bg-gray-700 ${issue.Department?.id === d.id ? 'bg-blue-50 dark:bg-blue-900/30 font-semibold' : ''}`}
+                                    <button key={d.id} style={{ display: 'block', color: '#000', backgroundColor: issue.Department?.id === d.id ? '#eff6ff' : '#f0f0f0', margin: '2px 4px', padding: '6px 12px', border: '1px solid #ccc', borderRadius: '4px', fontSize: '12px', width: 'calc(100% - 8px)', textAlign: 'left', fontWeight: issue.Department?.id === d.id ? 600 : 400, cursor: 'pointer' }}
                                       onClick={(e) => { e.stopPropagation(); if (d.id !== issue.Department?.id) saveCellEdit(issue.id, 'departmentId', d.id); else setEditingCell(null); }}>
                                       {d.name}
                                     </button>
@@ -1416,11 +1484,11 @@ export default function OperationsPage() {
                             {/* Area — dropdown */}
                             <td className="px-4 py-3 text-xs text-gray-700 dark:text-gray-300 whitespace-nowrap" onClick={(e) => startCellEdit(e, issue.id, 'area')}>
                               {editingCell?.issueId === issue.id && editingCell.column === 'area' && dropdownPos ? (
-                                <div ref={inlineEditRef} className="fixed z-[9999] bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-600 rounded-lg shadow-xl min-w-[160px] max-h-[200px] overflow-y-auto py-1" style={{ top: dropdownPos.top, left: dropdownPos.left }}>
-                                  <button className="w-full text-left px-3 py-1.5 text-xs text-gray-400 hover:bg-gray-100 dark:hover:bg-gray-700"
+                                <div ref={inlineEditRef} style={{ position: 'fixed', zIndex: 9999, background: '#fff', border: '1px solid #e5e7eb', borderRadius: '8px', boxShadow: '0 10px 25px rgba(0,0,0,0.15)', minWidth: '160px', maxHeight: '300px', overflowY: 'auto', padding: '4px 0', top: dropdownPos.top, left: dropdownPos.left }}>
+                                  <button style={{ display: 'block', color: '#9ca3af', margin: '2px 4px', padding: '6px 12px', border: 'none', background: 'transparent', fontSize: '12px', width: 'calc(100% - 8px)', textAlign: 'left', cursor: 'pointer' }}
                                     onClick={(e) => { e.stopPropagation(); saveCellEdit(issue.id, 'areaId', null); }}>— None —</button>
-                                  {areas.map(a => (
-                                    <button key={a.id} className={`w-full text-left px-3 py-1.5 text-xs hover:bg-gray-100 dark:hover:bg-gray-700 ${issue.Area?.id === a.id ? 'bg-blue-50 dark:bg-blue-900/30 font-semibold' : ''}`}
+                                  {areas.filter(a => !issue.Department?.id || a.departmentId === issue.Department.id).map(a => (
+                                    <button key={a.id} style={{ display: 'block', color: '#000', backgroundColor: issue.Area?.id === a.id ? '#eff6ff' : '#f0f0f0', margin: '2px 4px', padding: '6px 12px', border: '1px solid #ccc', borderRadius: '4px', fontSize: '12px', width: 'calc(100% - 8px)', textAlign: 'left', fontWeight: issue.Area?.id === a.id ? 600 : 400, cursor: 'pointer' }}
                                       onClick={(e) => { e.stopPropagation(); if (a.id !== issue.Area?.id) saveCellEdit(issue.id, 'areaId', a.id); else setEditingCell(null); }}>
                                       {a.name}
                                     </button>
@@ -1433,11 +1501,11 @@ export default function OperationsPage() {
                             {/* Line — dropdown */}
                             <td className="px-4 py-3 text-xs text-gray-700 dark:text-gray-300 whitespace-nowrap" onClick={(e) => startCellEdit(e, issue.id, 'line')}>
                               {editingCell?.issueId === issue.id && editingCell.column === 'line' && dropdownPos ? (
-                                <div ref={inlineEditRef} className="fixed z-[9999] bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-600 rounded-lg shadow-xl min-w-[160px] max-h-[200px] overflow-y-auto py-1" style={{ top: dropdownPos.top, left: dropdownPos.left }}>
-                                  <button className="w-full text-left px-3 py-1.5 text-xs text-gray-400 hover:bg-gray-100 dark:hover:bg-gray-700"
+                                <div ref={inlineEditRef} style={{ position: 'fixed', zIndex: 9999, background: '#fff', border: '1px solid #e5e7eb', borderRadius: '8px', boxShadow: '0 10px 25px rgba(0,0,0,0.15)', minWidth: '160px', maxHeight: '300px', overflowY: 'auto', padding: '4px 0', top: dropdownPos.top, left: dropdownPos.left }}>
+                                  <button style={{ display: 'block', color: '#9ca3af', margin: '2px 4px', padding: '6px 12px', border: 'none', background: 'transparent', fontSize: '12px', width: 'calc(100% - 8px)', textAlign: 'left', cursor: 'pointer' }}
                                     onClick={(e) => { e.stopPropagation(); saveCellEdit(issue.id, 'lineId', null); }}>— None —</button>
-                                  {lines.map(l => (
-                                    <button key={l.id} className={`w-full text-left px-3 py-1.5 text-xs hover:bg-gray-100 dark:hover:bg-gray-700 ${issue.Line?.id === l.id ? 'bg-blue-50 dark:bg-blue-900/30 font-semibold' : ''}`}
+                                  {lines.filter(l => !issue.Area?.id || l.areaId === issue.Area.id).map(l => (
+                                    <button key={l.id} style={{ display: 'block', color: '#000', backgroundColor: issue.Line?.id === l.id ? '#eff6ff' : '#f0f0f0', margin: '2px 4px', padding: '6px 12px', border: '1px solid #ccc', borderRadius: '4px', fontSize: '12px', width: 'calc(100% - 8px)', textAlign: 'left', fontWeight: issue.Line?.id === l.id ? 600 : 400, cursor: 'pointer' }}
                                       onClick={(e) => { e.stopPropagation(); if (l.id !== issue.Line?.id) saveCellEdit(issue.id, 'lineId', l.id); else setEditingCell(null); }}>
                                       {l.name}
                                     </button>
@@ -1450,11 +1518,16 @@ export default function OperationsPage() {
                             {/* Shift — dropdown */}
                             <td className="px-4 py-3 text-xs text-gray-700 dark:text-gray-300 whitespace-nowrap" onClick={(e) => startCellEdit(e, issue.id, 'shift')}>
                               {editingCell?.issueId === issue.id && editingCell.column === 'shift' && dropdownPos ? (
-                                <div ref={inlineEditRef} className="fixed z-[9999] bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-600 rounded-lg shadow-xl min-w-[160px] max-h-[200px] overflow-y-auto py-1" style={{ top: dropdownPos.top, left: dropdownPos.left }}>
-                                  <button className="w-full text-left px-3 py-1.5 text-xs text-gray-400 hover:bg-gray-100 dark:hover:bg-gray-700"
+                                <div ref={inlineEditRef} style={{ position: 'fixed', zIndex: 9999, background: '#fff', border: '1px solid #e5e7eb', borderRadius: '8px', boxShadow: '0 10px 25px rgba(0,0,0,0.15)', minWidth: '160px', maxHeight: '300px', overflowY: 'auto', padding: '4px 0', top: dropdownPos.top, left: dropdownPos.left }}>
+                                  <button style={{ display: 'block', color: '#9ca3af', margin: '2px 4px', padding: '6px 12px', border: 'none', background: 'transparent', fontSize: '12px', width: 'calc(100% - 8px)', textAlign: 'left', cursor: 'pointer' }}
                                     onClick={(e) => { e.stopPropagation(); saveCellEdit(issue.id, 'shiftId', null); }}>— None —</button>
-                                  {shifts.map(s => (
-                                    <button key={s.id} className={`w-full text-left px-3 py-1.5 text-xs hover:bg-gray-100 dark:hover:bg-gray-700 ${issue.Shift?.id === s.id ? 'bg-blue-50 dark:bg-blue-900/30 font-semibold' : ''}`}
+                                  {shifts.filter(s => {
+                                    if (issue.Line?.id) return s.lineIds?.includes(issue.Line.id);
+                                    if (issue.Area?.id) return s.areaIds?.includes(issue.Area.id);
+                                    if (issue.Department?.id) return s.departmentIds?.includes(issue.Department.id);
+                                    return true;
+                                  }).map(s => (
+                                    <button key={s.id} style={{ display: 'block', color: '#000', backgroundColor: issue.Shift?.id === s.id ? '#eff6ff' : '#f0f0f0', margin: '2px 4px', padding: '6px 12px', border: '1px solid #ccc', borderRadius: '4px', fontSize: '12px', width: 'calc(100% - 8px)', textAlign: 'left', fontWeight: issue.Shift?.id === s.id ? 600 : 400, cursor: 'pointer' }}
                                       onClick={(e) => { e.stopPropagation(); if (s.id !== issue.Shift?.id) saveCellEdit(issue.id, 'shiftId', s.id); else setEditingCell(null); }}>
                                       {s.name}
                                     </button>
@@ -1467,11 +1540,11 @@ export default function OperationsPage() {
                             {/* Equipment — dropdown */}
                             <td className="px-4 py-3 text-xs text-gray-700 dark:text-gray-300 whitespace-nowrap" onClick={(e) => startCellEdit(e, issue.id, 'equipment')}>
                               {editingCell?.issueId === issue.id && editingCell.column === 'equipment' && dropdownPos ? (
-                                <div ref={inlineEditRef} className="fixed z-[9999] bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-600 rounded-lg shadow-xl min-w-[160px] max-h-[200px] overflow-y-auto py-1" style={{ top: dropdownPos.top, left: dropdownPos.left }}>
-                                  <button className="w-full text-left px-3 py-1.5 text-xs text-gray-400 hover:bg-gray-100 dark:hover:bg-gray-700"
+                                <div ref={inlineEditRef} style={{ position: 'fixed', zIndex: 9999, background: '#fff', border: '1px solid #e5e7eb', borderRadius: '8px', boxShadow: '0 10px 25px rgba(0,0,0,0.15)', minWidth: '160px', maxHeight: '300px', overflowY: 'auto', padding: '4px 0', top: dropdownPos.top, left: dropdownPos.left }}>
+                                  <button style={{ display: 'block', color: '#9ca3af', margin: '2px 4px', padding: '6px 12px', border: 'none', background: 'transparent', fontSize: '12px', width: 'calc(100% - 8px)', textAlign: 'left', cursor: 'pointer' }}
                                     onClick={(e) => { e.stopPropagation(); saveCellEdit(issue.id, 'equipmentId', null); }}>— None —</button>
-                                  {equipment.map(eq => (
-                                    <button key={eq.id} className={`w-full text-left px-3 py-1.5 text-xs hover:bg-gray-100 dark:hover:bg-gray-700 ${issue.Equipment?.id === eq.id ? 'bg-blue-50 dark:bg-blue-900/30 font-semibold' : ''}`}
+                                  {equipment.filter(eq => !issue.Line?.id || eq.lineId === issue.Line.id).map(eq => (
+                                    <button key={eq.id} style={{ display: 'block', color: '#000', backgroundColor: issue.Equipment?.id === eq.id ? '#eff6ff' : '#f0f0f0', margin: '2px 4px', padding: '6px 12px', border: '1px solid #ccc', borderRadius: '4px', fontSize: '12px', width: 'calc(100% - 8px)', textAlign: 'left', fontWeight: issue.Equipment?.id === eq.id ? 600 : 400, cursor: 'pointer' }}
                                       onClick={(e) => { e.stopPropagation(); if (eq.id !== issue.Equipment?.id) saveCellEdit(issue.id, 'equipmentId', eq.id); else setEditingCell(null); }}>
                                       {eq.name}
                                     </button>
@@ -1484,11 +1557,11 @@ export default function OperationsPage() {
                             {/* Component — dropdown */}
                             <td className="px-4 py-3 text-xs text-gray-700 dark:text-gray-300 whitespace-nowrap" onClick={(e) => startCellEdit(e, issue.id, 'component')}>
                               {editingCell?.issueId === issue.id && editingCell.column === 'component' && dropdownPos ? (
-                                <div ref={inlineEditRef} className="fixed z-[9999] bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-600 rounded-lg shadow-xl min-w-[160px] max-h-[200px] overflow-y-auto py-1" style={{ top: dropdownPos.top, left: dropdownPos.left }}>
-                                  <button className="w-full text-left px-3 py-1.5 text-xs text-gray-400 hover:bg-gray-100 dark:hover:bg-gray-700"
+                                <div ref={inlineEditRef} style={{ position: 'fixed', zIndex: 9999, background: '#fff', border: '1px solid #e5e7eb', borderRadius: '8px', boxShadow: '0 10px 25px rgba(0,0,0,0.15)', minWidth: '160px', maxHeight: '300px', overflowY: 'auto', padding: '4px 0', top: dropdownPos.top, left: dropdownPos.left }}>
+                                  <button style={{ display: 'block', color: '#9ca3af', margin: '2px 4px', padding: '6px 12px', border: 'none', background: 'transparent', fontSize: '12px', width: 'calc(100% - 8px)', textAlign: 'left', cursor: 'pointer' }}
                                     onClick={(e) => { e.stopPropagation(); saveCellEdit(issue.id, 'componentId', null); }}>— None —</button>
-                                  {components.map(c => (
-                                    <button key={c.id} className={`w-full text-left px-3 py-1.5 text-xs hover:bg-gray-100 dark:hover:bg-gray-700 ${issue.Component?.id === c.id ? 'bg-blue-50 dark:bg-blue-900/30 font-semibold' : ''}`}
+                                  {components.filter(c => !issue.Equipment?.id || c.equipmentId === issue.Equipment.id).map(c => (
+                                    <button key={c.id} style={{ display: 'block', color: '#000', backgroundColor: issue.Component?.id === c.id ? '#eff6ff' : '#f0f0f0', margin: '2px 4px', padding: '6px 12px', border: '1px solid #ccc', borderRadius: '4px', fontSize: '12px', width: 'calc(100% - 8px)', textAlign: 'left', fontWeight: issue.Component?.id === c.id ? 600 : 400, cursor: 'pointer' }}
                                       onClick={(e) => { e.stopPropagation(); if (c.id !== issue.Component?.id) saveCellEdit(issue.id, 'componentId', c.id); else setEditingCell(null); }}>
                                       {c.name}
                                     </button>

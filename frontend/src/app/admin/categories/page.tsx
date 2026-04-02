@@ -416,15 +416,6 @@ export default function CategoriesPage() {
   return (
     <ProtectedRoute allowedRoles={[UserRole.ADMIN, UserRole.SYSTEM_ADMIN]}>
       <div className="p-4 sm:p-6 lg:p-8">
-        <div className="mb-6">
-          <Link
-            href="/dashboard"
-            className="inline-flex items-center text-primary-600 dark:text-primary-400 hover:text-primary-700 dark:hover:text-primary-300 mb-4"
-          >
-            ← Back to Dashboard
-          </Link>
-        </div>
-
         <div className="mb-4 sm:mb-6 flex flex-col lg:flex-row lg:items-center lg:justify-between gap-4">
           <div>
             <h1 className="text-xl sm:text-2xl lg:text-3xl font-bold text-gray-900 dark:text-white">Category Management</h1>

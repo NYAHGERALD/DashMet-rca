@@ -150,9 +150,6 @@ function AdminContent() {
               <div className="relative w-8 h-8">
                 <Image src="/images/logo.png" alt="DASHMET Logo" fill className="object-contain" />
               </div>
-              <Link href="/dashboard" className="text-gray-600 dark:text-gray-400 hover:text-gray-900 dark:hover:text-white">
-                ← Back
-              </Link>
               <h1 className="text-2xl font-bold text-gray-900 dark:text-white">
                 Admin Panel
               </h1>

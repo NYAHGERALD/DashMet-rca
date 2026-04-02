@@ -19,7 +19,6 @@ import {
   ChevronRight,
   Loader2,
   FileSpreadsheet,
-  ArrowLeft,
   X,
   ToggleLeft,
   ToggleRight,
@@ -392,15 +391,6 @@ export default function WorkplaceReportPage() {
 
   return (
     <div className="w-full px-6 py-8">
-      {/* Back Button */}
-      <button
-        onClick={() => router.back()}
-        className="flex items-center gap-2 text-gray-600 dark:text-gray-400 hover:text-gray-900 dark:hover:text-white mb-6 transition-colors"
-      >
-        <ArrowLeft className="w-5 h-5" />
-        <span>Back</span>
-      </button>
-
       {/* Header */}
       <div className="mb-8">
         <div className="flex items-center gap-3 mb-2">

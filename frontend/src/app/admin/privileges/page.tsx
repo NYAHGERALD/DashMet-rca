@@ -31,7 +31,6 @@ import {
   Filter,
   LayoutGrid,
   List,
-  ArrowLeft,
   History,
   Clock,
   Undo2,
@@ -554,13 +553,6 @@ function PrivilegesContent() {
         <div className="w-full px-4 sm:px-6 lg:px-8 py-4">
           <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4">
             <div className="flex items-center gap-3">
-              <button
-                onClick={() => router.back()}
-                className="p-2 hover:bg-gray-100 dark:hover:bg-gray-700 rounded-lg transition-colors"
-                title="Go back"
-              >
-                <ArrowLeft className="w-5 h-5 text-gray-600 dark:text-gray-400" />
-              </button>
               <div className="p-2 bg-primary-100 dark:bg-primary-900/30 rounded-lg">
                 <Shield className="w-6 h-6 text-primary-600 dark:text-primary-400" />
               </div>

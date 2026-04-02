@@ -92,6 +92,23 @@ router.get('/', async (req: any, res: Response, next: NextFunction) => {
 });
 
 /**
+ * GET /api/equipment/components/all
+ * List all components across all equipment.
+ * NOTE: Must be defined BEFORE /:id to avoid Express treating "components" as an :id param.
+ */
+router.get('/components/all', async (req: any, res: Response, next: NextFunction) => {
+  try {
+    const components = await prisma.equipmentComponent.findMany({
+      orderBy: [{ name: 'asc' }],
+      include: { Equipment: { select: { id: true, name: true } } },
+    });
+    res.json({ success: true, data: { components } });
+  } catch (err) {
+    next(err);
+  }
+});
+
+/**
  * GET /api/equipment/:id
  * Get a single equipment record with its components.
  */
@@ -310,22 +327,6 @@ router.delete(
 );
 
 // ─── Component CRUD ─────────────────────────────────────────────────────────────
-
-/**
- * GET /api/equipment/components/all
- * List all components across all equipment.
- */
-router.get('/components/all', async (req: any, res: Response, next: NextFunction) => {
-  try {
-    const components = await prisma.equipmentComponent.findMany({
-      orderBy: [{ name: 'asc' }],
-      include: { equipment: { select: { id: true, name: true } } },
-    });
-    res.json({ success: true, data: { components } });
-  } catch (err) {
-    next(err);
-  }
-});
 
 /**
  * GET /api/equipment/:equipmentId/components

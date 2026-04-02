@@ -373,12 +373,6 @@ export default function ReportsPage() {
               <div className="relative w-10 h-10">
                 <Image src="/images/logo.png" alt="DASHMET Logo" fill className="object-contain" />
               </div>
-              <button
-                onClick={() => router.push('/dashboard')}
-                className="text-gray-500 hover:text-gray-700 dark:text-gray-400 dark:hover:text-gray-200"
-              >
-                ← Back
-              </button>
               <div>
                 <h1 className="text-2xl font-bold text-gray-900 dark:text-white">Reports & Compliance</h1>
                 <p className="text-sm text-gray-500 dark:text-gray-400">Phase 11: Generate reports and compliance documentation</p>

@@ -6,6 +6,7 @@ import { useRouter } from 'next/navigation';
 import LoadingState from '@/components/ui/LoadingState';
 import { useEffect } from 'react';
 import FloatingSupportButton from '@/components/support/FloatingSupportButton';
+import AppLayout from '@/components/layout/AppLayout';
 
 interface ProtectedRouteProps {
   children: React.ReactNode;
@@ -70,10 +71,10 @@ export default function ProtectedRoute({
   }
 
   return (
-    <>
+    <AppLayout>
       {children}
       {/* Floating Support Button for non-Admin users */}
       <FloatingSupportButton />
-    </>
+    </AppLayout>
   );
 }
