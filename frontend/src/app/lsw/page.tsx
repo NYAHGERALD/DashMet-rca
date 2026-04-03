@@ -2,6 +2,7 @@
 
 import { useState, useEffect, useRef, useCallback } from 'react';
 import { useAuth } from '@/components/providers/AuthProvider';
+import { useWebSocket } from '@/lib/websocket';
 import ProtectedRoute from '@/components/auth/ProtectedRoute';
 import Link from 'next/link';
 import {
@@ -304,6 +305,7 @@ function getWeekOffsetText(selectedWeek: number, selectedYear: number, config?: 
 
 function LSWContent() {
   const { user } = useAuth();
+  const { onLswCompletionChanged } = useWebSocket();
   const [calendarConfig, setCalendarConfig] = useState<LswCalendarConfig>({ calendarYearStartMonth: 1, calendarYearStartDay: 1 });
   const [workDaysPerWeek, setWorkDaysPerWeek] = useState<number>(5);
   const [currentWeek, setCurrentWeek] = useState(getWeekNumber(new Date()));
@@ -713,6 +715,16 @@ function LSWContent() {
       loadLswData();
     }
   }, [user, loadLswData]);
+
+  // Real-time sync: re-fetch data when another device/tab changes completion state
+  useEffect(() => {
+    const unsub = onLswCompletionChanged((data: { weekNumber: number; year: number }) => {
+      if (data.weekNumber === currentWeek && data.year === currentYear) {
+        loadLswData();
+      }
+    });
+    return unsub;
+  }, [onLswCompletionChanged, currentWeek, currentYear, loadLswData]);
 
   // Toggle todo item - API-backed
   const toggleTodo = async (id: string) => {

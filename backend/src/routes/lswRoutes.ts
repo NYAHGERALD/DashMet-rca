@@ -2,6 +2,7 @@ import { Router, Response } from 'express';
 import { AuthRequest } from '../middleware/auth';
 import { authenticate } from '../middleware/auth';
 import lswService from '../services/lswService';
+import { websocketService } from '../services/websocketService';
 
 const router = Router();
 
@@ -127,6 +128,8 @@ router.put('/daily-tasks/:id/completion', async (req: AuthRequest, res: Response
       return res.status(400).json({ success: false, error: 'weekNumber, year, day, and value are required' });
     }
     const completion = await lswService.upsertDailyTaskCompletion(req.params.id, weekNumber, year, day, value);
+    // Notify all connected clients for this user (other tabs/devices)
+    websocketService.emitToUser(req.user!.id, 'lsw:completion-changed', { weekNumber, year });
     res.json({ success: true, data: completion });
   } catch (error: any) {
     console.error('Error updating daily task completion:', error);
@@ -555,6 +558,10 @@ router.post('/early-completion-logs', async (req: AuthRequest, res: Response) =>
       userId: req.user!.id,
       organizationId: req.user!.organizationId,
     });
+    websocketService.emitToUser(req.user!.id, 'lsw:completion-changed', {
+      weekNumber: req.body.weekNumber,
+      year: req.body.year,
+    });
     res.json({ success: true, data: log });
   } catch (error: any) {
     res.status(500).json({ success: false, error: error.message });
@@ -588,6 +595,10 @@ router.delete('/early-completion-logs', async (req: AuthRequest, res: Response) 
       Number(weekNumber),
       Number(year),
     );
+    websocketService.emitToUser(req.user!.id, 'lsw:completion-changed', {
+      weekNumber: Number(weekNumber),
+      year: Number(year),
+    });
     res.json({ success: true });
   } catch (error: any) {
     res.status(500).json({ success: false, error: error.message });

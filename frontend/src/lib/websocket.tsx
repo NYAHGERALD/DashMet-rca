@@ -249,6 +249,11 @@ interface WebSocketContextType {
   onIncidentEvidenceAdded: (callback: (data: { incidentId: string; evidence: { id: string; type: string; fileName: string; filePath: string; mimeType: string; uploadedById: string }; uploadedBy: { id: string; firstName: string; lastName: string }; timestamp: string }) => void) => () => void;
 
   // ========================================
+  // LSW COMPLETION EVENTS
+  // ========================================
+  onLswCompletionChanged: (callback: (data: { weekNumber: number; year: number }) => void) => () => void;
+
+  // ========================================
   // VIDEO CALL EVENTS
   // ========================================
   // Video call started notification
@@ -359,6 +364,9 @@ export function WebSocketProvider({ children }: { children: React.ReactNode }) {
   
   // Incident evidence callbacks
   const incidentEvidenceAddedCallbacks = useRef<Set<(data: any) => void>>(new Set());
+
+  // LSW completion callbacks
+  const lswCompletionChangedCallbacks = useRef<Set<(data: any) => void>>(new Set());
 
   const connect = useCallback((userId: string, organizationId: string) => {
     // Prevent multiple connection attempts
@@ -886,6 +894,13 @@ export function WebSocketProvider({ children }: { children: React.ReactNode }) {
       incidentEvidenceAddedCallbacks.current.forEach(cb => cb(data));
     });
 
+    // ========================================
+    // LSW COMPLETION EVENT HANDLERS
+    // ========================================
+    newSocket.on('lsw:completion-changed', (data: any) => {
+      lswCompletionChangedCallbacks.current.forEach(cb => cb(data));
+    });
+
     // Handle incident participants list
     newSocket.on('incident:participants', (data: { incidentId: string; participants: any[] }) => {
       const onlineIds = data.participants.filter(p => p.isOnline).map(p => p.id);
@@ -1347,6 +1362,14 @@ export function WebSocketProvider({ children }: { children: React.ReactNode }) {
     return () => { incidentEvidenceAddedCallbacks.current.delete(callback); };
   }, []);
 
+  // ========================================
+  // LSW COMPLETION CALLBACK HANDLERS
+  // ========================================
+  const onLswCompletionChanged = useCallback((callback: (data: any) => void) => {
+    lswCompletionChangedCallbacks.current.add(callback);
+    return () => { lswCompletionChangedCallbacks.current.delete(callback); };
+  }, []);
+
   const emitRCAModalState = useCallback((incidentId: string, action: 'opened' | 'closed' | 'method-selected' | 'visibility-changed' | 'analyzing', data?: { selectedMethod?: string; visibility?: string }) => {
     if (socket?.connected) {
       socket.emit('rca:modal-state', { incidentId, action, ...data });
@@ -1686,6 +1709,8 @@ export function WebSocketProvider({ children }: { children: React.ReactNode }) {
         emitVideoCallUserLeft,
         // Incident evidence
         onIncidentEvidenceAdded,
+        // LSW completion
+        onLswCompletionChanged,
       }}
     >
       {children}
