@@ -726,6 +726,31 @@ function LSWContent() {
     return unsub;
   }, [onLswCompletionChanged, currentWeek, currentYear, loadLswData]);
 
+  // Cross-platform sync: poll every 15s + refetch when tab becomes visible
+  useEffect(() => {
+    if (!user || !configReady) return;
+
+    // Refetch when user switches back to this tab
+    const handleVisibility = () => {
+      if (document.visibilityState === 'visible') {
+        loadLswData();
+      }
+    };
+    document.addEventListener('visibilitychange', handleVisibility);
+
+    // Periodic polling as reliable fallback
+    const interval = setInterval(() => {
+      if (document.visibilityState === 'visible') {
+        loadLswData();
+      }
+    }, 15000);
+
+    return () => {
+      document.removeEventListener('visibilitychange', handleVisibility);
+      clearInterval(interval);
+    };
+  }, [user, configReady, loadLswData]);
+
   // Toggle todo item - API-backed
   const toggleTodo = async (id: string) => {
     const item = todoItems.find(t => t.id === id);
