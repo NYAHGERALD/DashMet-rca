@@ -22,7 +22,13 @@ class WebSocketService {
   initialize(httpServer: HTTPServer, corsOrigins: string[]) {
     this.io = new Server(httpServer, {
       cors: {
-        origin: corsOrigins,
+        origin: (origin, callback) => {
+          // Allow requests with no Origin header (native mobile apps, server-to-server)
+          if (!origin) return callback(null, true);
+          // Allow configured web origins
+          if (corsOrigins.includes(origin)) return callback(null, true);
+          callback(new Error('Not allowed by CORS'));
+        },
         methods: ['GET', 'POST'],
         credentials: true,
       },
