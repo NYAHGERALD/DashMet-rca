@@ -298,7 +298,7 @@ export default function AppLayout({ children }: AppLayoutProps) {
 
       <div className="flex flex-1 min-h-0">
         {/* Left Sidebar - Hidden on mobile, visible on lg+ */}
-        <div className="hidden lg:block">
+        <div className="hidden lg:flex h-full">
           <SlidingSidebar
           title={t('common.quickNavigation')}
           position="left"
@@ -343,7 +343,7 @@ export default function AppLayout({ children }: AppLayoutProps) {
 
         {/* Right Sidebar - Organization Management (Admin only) - Hidden on mobile */}
         {isAdmin && (
-          <div className="hidden lg:block">
+          <div className="hidden lg:flex h-full">
             <SlidingSidebar
             title={t('common.organizationManagement')}
             position="right"
@@ -375,7 +375,7 @@ export default function AppLayout({ children }: AppLayoutProps) {
 
         {/* Right Sidebar - QC Management - Hidden on mobile */}
         {user?.role === 'QUALITY_CONTROL_MANAGER' && (
-          <div className="hidden lg:block">
+          <div className="hidden lg:flex h-full">
             <SlidingSidebar
               title="QC Management"
               position="right"

@@ -688,6 +688,12 @@ export async function getEarlyCompletionLogs(userId: string, weekNumber?: number
   });
 }
 
+export async function deleteEarlyCompletionLog(userId: string, dailyTaskId: string, dayKey: string, weekNumber: number, year: number) {
+  return prisma.lswEarlyCompletionLog.deleteMany({
+    where: { userId, dailyTaskId, dayKey, weekNumber, year },
+  });
+}
+
 export default {
   getOrCreateBoard, updateBoard,
   getDepartments,
@@ -705,5 +711,5 @@ export default {
   getStylePresets, upsertStylePreset,
   getFullLswData,
   updateWorkDaysPerWeek,
-  createEarlyCompletionLog, getEarlyCompletionLogs,
+  createEarlyCompletionLog, getEarlyCompletionLogs, deleteEarlyCompletionLog,
 };

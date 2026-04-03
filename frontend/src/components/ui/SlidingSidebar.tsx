@@ -338,7 +338,7 @@ export default function SlidingSidebar({
         )}
 
         {/* Links — expanded */}
-        <nav ref={navRef} className="p-2 space-y-0.5 overflow-y-auto scroll-smooth flex-1 min-h-0 scrollbar-hide">
+        <nav ref={navRef} className="p-2 space-y-0.5 overflow-y-auto scroll-smooth flex-1 min-h-0" style={{ scrollbarWidth: 'thin', scrollbarColor: 'rgba(14,165,233,0.25) transparent' }}>
           {visibleLinks.map((link, index) => {
             const isEmoji = typeof link.icon === 'string';
             const content = (

@@ -575,4 +575,23 @@ router.get('/early-completion-logs', async (req: AuthRequest, res: Response) => 
   }
 });
 
+router.delete('/early-completion-logs', async (req: AuthRequest, res: Response) => {
+  try {
+    const { dailyTaskId, dayKey, weekNumber, year } = req.body;
+    if (!dailyTaskId || !dayKey || !weekNumber || !year) {
+      return res.status(400).json({ success: false, error: 'dailyTaskId, dayKey, weekNumber, and year are required' });
+    }
+    await lswService.deleteEarlyCompletionLog(
+      req.user!.id,
+      dailyTaskId,
+      dayKey,
+      Number(weekNumber),
+      Number(year),
+    );
+    res.json({ success: true });
+  } catch (error: any) {
+    res.status(500).json({ success: false, error: error.message });
+  }
+});
+
 export default router;

@@ -456,3 +456,7 @@ export async function getLswEarlyCompletionLogs(weekNumber?: number, year?: numb
   const res = await api.get(`/lsw/early-completion-logs?${params.toString()}`);
   return res.data.data;
 }
+
+export async function deleteLswEarlyCompletionLog(dailyTaskId: string, dayKey: string, weekNumber: number, year: number): Promise<void> {
+  await api.delete('/lsw/early-completion-logs', { data: { dailyTaskId, dayKey, weekNumber, year } });
+}

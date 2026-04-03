@@ -52,6 +52,8 @@ import {
   Smartphone,
   FilePlus,
   ClipboardList,
+  Bell,
+  MousePointer2,
 } from 'lucide-react';
 import { format } from 'date-fns';
 import Link from 'next/link';
@@ -1000,7 +1002,17 @@ function WorkplaceSafetyContent() {
   const [submitting, setSubmitting] = useState(false);
   const [showToast, setShowToast] = useState<{ type: 'success' | 'error'; message: string } | null>(null);
   const [activeTab, setActiveTab] = useState<'form' | 'history' | 'view'>('form');
+  const [showIncompleteDropdown, setShowIncompleteDropdown] = useState(false);
+  const incompleteDropdownRef = useRef<HTMLDivElement>(null);
   const [savedAssessments, setSavedAssessments] = useState<SafetyAssessment[]>([]);
+  const [selectionMode, setSelectionMode] = useState(false);
+  const [selectedRows, setSelectedRows] = useState<Set<string>>(new Set());
+  const lastSelectedIndexRef = useRef<number | null>(null);
+  const [contextMenu, setContextMenu] = useState<{ x: number; y: number; assessment: any; index: number } | null>(null);
+  const contextMenuRef = useRef<HTMLDivElement>(null);
+  const [deleteConfirm, setDeleteConfirm] = useState<{ assessment: any } | null>(null);
+  const [deleteInput, setDeleteInput] = useState('');
+  const [deleting, setDeleting] = useState(false);
   const [loadingHistory, setLoadingHistory] = useState(false);
   const [loadingDraft, setLoadingDraft] = useState(false);
   const [draftLoadError, setDraftLoadError] = useState<string | null>(null);
@@ -1015,6 +1027,153 @@ function WorkplaceSafetyContent() {
     fileSize: number;
     mimeType: string;
   }>>([]);
+
+  // Close incomplete dropdown on outside click
+  useEffect(() => {
+    const handleClickOutside = (e: MouseEvent) => {
+      if (incompleteDropdownRef.current && !incompleteDropdownRef.current.contains(e.target as Node)) {
+        setShowIncompleteDropdown(false);
+      }
+    };
+    if (showIncompleteDropdown) {
+      document.addEventListener('mousedown', handleClickOutside);
+    }
+    return () => document.removeEventListener('mousedown', handleClickOutside);
+  }, [showIncompleteDropdown]);
+
+  // Close context menu on outside click or scroll
+  useEffect(() => {
+    if (!contextMenu) return;
+    const close = (e: MouseEvent) => {
+      if (contextMenuRef.current && !contextMenuRef.current.contains(e.target as Node)) {
+        setContextMenu(null);
+      }
+    };
+    const closeOnScroll = () => setContextMenu(null);
+    document.addEventListener('mousedown', close);
+    window.addEventListener('scroll', closeOnScroll, true);
+    return () => {
+      document.removeEventListener('mousedown', close);
+      window.removeEventListener('scroll', closeOnScroll, true);
+    };
+  }, [contextMenu]);
+
+  // Load full report for viewing
+  const loadReportForViewing = useCallback(async (assessmentNumber: string) => {
+    setLoadingReport(true);
+    try {
+      const response = await api.get(`/workplace-safety/view/${encodeURIComponent(assessmentNumber)}`);
+      const { assessment: loadedAssessment } = response.data?.data || {};
+      
+      if (loadedAssessment) {
+        // Map the sections with item details
+        const mappedSections = getInitialSections().map((section) => {
+          const loadedSection = loadedAssessment.Sections?.find((s: any) => s.sectionId === section.id);
+          if (loadedSection) {
+            return {
+              ...section,
+              items: section.items.map((item) => {
+                const loadedItem = loadedSection.Items?.find((i: any) => i.itemId === item.id);
+                if (loadedItem) {
+                  return {
+                    ...item,
+                    status: loadedItem.status as 'A' | 'U' | 'NA' | null,
+                    deficiency: loadedItem.deficiency || undefined,
+                    correctiveAction: loadedItem.correctiveAction || undefined,
+                    photos: loadedItem.Photos?.map((photo: any) => ({
+                      id: photo.id,
+                      name: photo.fileName,
+                      fileUrl: photo.fileUrl,
+                      preview: photo.fileUrl,
+                    })) || [],
+                  };
+                }
+                return item;
+              }),
+            };
+          }
+          return section;
+        });
+
+        setViewReportData({
+          ...loadedAssessment,
+          sections: mappedSections,
+        });
+        setActiveTab('view'); // Switch to view tab
+      }
+    } catch (error) {
+      console.error('Error loading report:', error);
+      setShowToast({ type: 'error', message: 'Failed to load report' });
+    } finally {
+      setLoadingReport(false);
+    }
+  }, []);
+
+  // Row click handler — view or select depending on mode
+  const handleRowClick = useCallback((assessment: any, index: number, e: React.MouseEvent) => {
+    if (selectionMode) {
+      setSelectedRows(prev => {
+        const next = new Set(prev);
+        if (e.shiftKey && lastSelectedIndexRef.current !== null) {
+          const start = Math.min(lastSelectedIndexRef.current, index);
+          const end = Math.max(lastSelectedIndexRef.current, index);
+          for (let i = start; i <= end; i++) {
+            next.add(savedAssessments[i]?.id);
+          }
+        } else {
+          if (next.has(assessment.id)) {
+            next.delete(assessment.id);
+          } else {
+            next.add(assessment.id);
+          }
+          lastSelectedIndexRef.current = index;
+        }
+        return next;
+      });
+    } else {
+      loadReportForViewing(assessment.assessmentNumber);
+    }
+  }, [selectionMode, savedAssessments, loadReportForViewing]);
+
+  // Right-click context menu handler
+  const handleRowContextMenu = useCallback((e: React.MouseEvent, assessment: any, index: number) => {
+    e.preventDefault();
+    setContextMenu({ x: e.clientX, y: e.clientY, assessment, index });
+  }, []);
+
+  // Exit selection mode
+  const exitSelectionMode = useCallback(() => {
+    setSelectionMode(false);
+    setSelectedRows(new Set());
+    lastSelectedIndexRef.current = null;
+  }, []);
+
+  // Delete assessment handler
+  const handleDeleteAssessment = useCallback(async () => {
+    if (!deleteConfirm || deleteInput !== deleteConfirm.assessment.assessmentNumber) return;
+    setDeleting(true);
+    try {
+      await api.delete(`/workplace-safety/${deleteConfirm.assessment.id}`, {
+        data: { confirmNumber: deleteInput },
+      });
+      setShowToast({ type: 'success', message: `Assessment ${deleteConfirm.assessment.assessmentNumber} permanently deleted` });
+      setDeleteConfirm(null);
+      setDeleteInput('');
+      // Refresh history
+      setSavedAssessments(prev => prev.filter(a => a.id !== deleteConfirm.assessment.id));
+    } catch (error: any) {
+      console.error('Error deleting assessment:', error);
+      setShowToast({ type: 'error', message: error?.response?.data?.error || 'Failed to delete assessment' });
+    } finally {
+      setDeleting(false);
+    }
+  }, [deleteConfirm, deleteInput]);
+
+  // Edit assessment handler — navigate to form tab with edit param
+  const handleEditAssessment = useCallback((assessment: any) => {
+    window.history.replaceState(null, '', `/workplace-safety?edit=${assessment.id}`);
+    window.location.reload();
+  }, []);
   
   const [completionStats, setCompletionStats] = useState<{
     totalItems: number;
@@ -1880,57 +2039,6 @@ function WorkplaceSafetyContent() {
     }
   }, []);
 
-  // Load full report for viewing
-  const loadReportForViewing = useCallback(async (assessmentNumber: string) => {
-    setLoadingReport(true);
-    try {
-      const response = await api.get(`/workplace-safety/view/${encodeURIComponent(assessmentNumber)}`);
-      const { assessment: loadedAssessment } = response.data?.data || {};
-      
-      if (loadedAssessment) {
-        // Map the sections with item details
-        const mappedSections = getInitialSections().map((section) => {
-          const loadedSection = loadedAssessment.Sections?.find((s: any) => s.sectionId === section.id);
-          if (loadedSection) {
-            return {
-              ...section,
-              items: section.items.map((item) => {
-                const loadedItem = loadedSection.Items?.find((i: any) => i.itemId === item.id);
-                if (loadedItem) {
-                  return {
-                    ...item,
-                    status: loadedItem.status as 'A' | 'U' | 'NA' | null,
-                    deficiency: loadedItem.deficiency || undefined,
-                    correctiveAction: loadedItem.correctiveAction || undefined,
-                    photos: loadedItem.Photos?.map((photo: any) => ({
-                      id: photo.id,
-                      name: photo.fileName,
-                      fileUrl: photo.fileUrl,
-                      preview: photo.fileUrl,
-                    })) || [],
-                  };
-                }
-                return item;
-              }),
-            };
-          }
-          return section;
-        });
-
-        setViewReportData({
-          ...loadedAssessment,
-          sections: mappedSections,
-        });
-        setActiveTab('view'); // Switch to view tab
-      }
-    } catch (error) {
-      console.error('Error loading report:', error);
-      setShowToast({ type: 'error', message: 'Failed to load report' });
-    } finally {
-      setLoadingReport(false);
-    }
-  }, []);
-
   // Print report
   const handlePrintReport = () => {
     if (reportPrintRef.current && viewReportData) {
@@ -2514,6 +2622,69 @@ function WorkplaceSafetyContent() {
                 </span>
               </div>
 
+              {/* Incomplete Assessment Notification */}
+              {stats.pending > 0 && (
+                <div className="relative" ref={incompleteDropdownRef}>
+                  <motion.button
+                    whileHover={{ scale: 1.05 }}
+                    whileTap={{ scale: 0.95 }}
+                    onClick={() => setShowIncompleteDropdown(!showIncompleteDropdown)}
+                    className="relative flex items-center justify-center w-10 h-10 rounded-xl bg-amber-100 dark:bg-amber-900/30 border border-amber-200 dark:border-amber-800/50 hover:bg-amber-200 dark:hover:bg-amber-900/50 transition-colors"
+                    title={`${stats.pending} items not assessed`}
+                  >
+                    <Bell className="w-5 h-5 text-amber-600 dark:text-amber-400" />
+                    <span className="absolute -top-1 -right-1 flex items-center justify-center w-5 h-5 text-[10px] font-bold text-white bg-amber-500 rounded-full shadow-sm">
+                      {stats.pending}
+                    </span>
+                  </motion.button>
+
+                  <AnimatePresence>
+                    {showIncompleteDropdown && (
+                      <motion.div
+                        initial={{ opacity: 0, y: -8, scale: 0.95 }}
+                        animate={{ opacity: 1, y: 0, scale: 1 }}
+                        exit={{ opacity: 0, y: -8, scale: 0.95 }}
+                        transition={{ duration: 0.15 }}
+                        className="absolute right-0 top-12 z-50 w-80 p-4 backdrop-blur-xl bg-white/95 dark:bg-gray-800/95 rounded-xl border border-amber-200 dark:border-amber-700/50 shadow-xl shadow-amber-500/10"
+                      >
+                        <div className="flex items-center gap-2 mb-3">
+                          <AlertTriangle className="w-4 h-4 text-amber-500" />
+                          <h4 className="text-sm font-semibold text-amber-800 dark:text-amber-200">
+                            {stats.pending} items remaining
+                          </h4>
+                        </div>
+                        <div className="space-y-1.5 max-h-60 overflow-y-auto scrollbar-hide">
+                          {assessment.sections
+                            .filter(section => section.items.some(item => item.status === null))
+                            .map(section => {
+                              const pendingItems = section.items.filter(item => item.status === null);
+                              return (
+                                <button
+                                  key={section.id}
+                                  onClick={() => {
+                                    setExpandedSections(prev => new Set([...prev, section.id]));
+                                    const element = document.getElementById(`section-${section.id}`);
+                                    element?.scrollIntoView({ behavior: 'smooth', block: 'start' });
+                                    setShowIncompleteDropdown(false);
+                                  }}
+                                  className="w-full flex items-center justify-between px-3 py-2 text-left rounded-lg hover:bg-amber-50 dark:hover:bg-amber-900/20 transition-colors group"
+                                >
+                                  <span className="text-xs font-medium text-gray-700 dark:text-gray-300 group-hover:text-amber-700 dark:group-hover:text-amber-300 truncate">
+                                    {section.title}
+                                  </span>
+                                  <span className="text-[10px] font-medium text-amber-600 dark:text-amber-400 bg-amber-100 dark:bg-amber-900/30 px-1.5 py-0.5 rounded-full whitespace-nowrap ml-2">
+                                    {pendingItems.length} left
+                                  </span>
+                                </button>
+                              );
+                            })}
+                        </div>
+                      </motion.div>
+                    )}
+                  </AnimatePresence>
+                </div>
+              )}
+
               {/* Action buttons */}
               <div className="flex items-center gap-2">
                 {/* Reset/New Assessment Button - only show when editing an existing draft */}
@@ -2615,36 +2786,48 @@ function WorkplaceSafetyContent() {
       {/* Main Content */}
       <main className="w-full px-4 sm:px-6 lg:px-8 py-8">
         {/* Tabs */}
-        <div className="flex gap-2 mb-6">
-          <button
-            onClick={() => setActiveTab('form')}
-            className={`px-6 py-3 rounded-xl font-medium transition-all ${
-              activeTab === 'form'
-                ? 'bg-gradient-to-r from-emerald-500 to-teal-600 text-white shadow-lg shadow-emerald-500/25'
-                : 'bg-white/50 dark:bg-gray-800/50 text-gray-700 dark:text-gray-300 hover:bg-white dark:hover:bg-gray-800'
-            }`}
-          >
-            <div className="flex items-center gap-2">
-              <FileText className="w-4 h-4" />
-              New Assessment
-            </div>
-          </button>
-          <button
-            onClick={() => setActiveTab('history')}
-            className={`px-6 py-3 rounded-xl font-medium transition-all ${
-              activeTab === 'history'
-                ? 'bg-gradient-to-r from-emerald-500 to-teal-600 text-white shadow-lg shadow-emerald-500/25'
-                : 'bg-white/50 dark:bg-gray-800/50 text-gray-700 dark:text-gray-300 hover:bg-white dark:hover:bg-gray-800'
-            }`}
-          >
-            <div className="flex items-center gap-2">
-              <History className="w-4 h-4" />
-              History
-            </div>
-          </button>
+        <div className="relative mb-6">
+          <div className="flex border-b border-gray-200 dark:border-gray-700">
+            {[
+              { key: 'form' as const, label: 'New Assessment', icon: FileText },
+              { key: 'history' as const, label: 'History', icon: History },
+              ...(viewReportData ? [{ key: 'view' as const, label: `Report: ${viewReportData.assessmentNumber}`, icon: Eye }] : []),
+            ].map((tab) => {
+              const isActive = activeTab === tab.key;
+              const Icon = tab.icon;
+              return (
+                <button
+                  key={tab.key}
+                  onClick={() => setActiveTab(tab.key)}
+                  className="relative flex items-center gap-2 px-5 py-3 text-sm font-medium transition-colors duration-200 focus:outline-none"
+                  style={{ marginBottom: '-1px' }}
+                >
+                  <Icon className={`w-4 h-4 transition-colors duration-200 ${isActive ? 'text-emerald-600 dark:text-emerald-400' : 'text-gray-400 dark:text-gray-500'}`} />
+                  <span className={`transition-colors duration-200 whitespace-nowrap ${isActive ? 'text-emerald-700 dark:text-emerald-300' : 'text-gray-500 dark:text-gray-400 hover:text-gray-700 dark:hover:text-gray-300'}`}>
+                    {tab.label}
+                  </span>
+                  {isActive && (
+                    <motion.div
+                      layoutId="safety-tab-indicator"
+                      className="absolute bottom-0 left-0 right-0 h-[2px] bg-gradient-to-r from-emerald-500 to-teal-500 rounded-full"
+                      transition={{ type: 'spring', stiffness: 400, damping: 30 }}
+                    />
+                  )}
+                </button>
+              );
+            })}
+          </div>
         </div>
 
-        {activeTab === 'form' ? (
+        <AnimatePresence mode="wait">
+        {activeTab === 'form' && (
+          <motion.div
+            key="form-tab"
+            initial={{ opacity: 0, y: 12 }}
+            animate={{ opacity: 1, y: 0 }}
+            exit={{ opacity: 0, y: -12 }}
+            transition={{ duration: 0.2 }}
+          >
           <motion.div
             variants={containerVariants}
             initial="hidden"
@@ -2823,48 +3006,6 @@ function WorkplaceSafetyContent() {
                 </div>
               ))}
             </motion.div>
-
-            {/* Incomplete Sections Warning - Show when there are pending items */}
-            {stats.pending > 0 && (
-              <motion.div
-                variants={itemVariants}
-                className="p-4 backdrop-blur-xl bg-amber-50 dark:bg-amber-900/20 rounded-xl border border-amber-200 dark:border-amber-800/50"
-              >
-                <div className="flex items-start gap-3">
-                  <AlertTriangle className="w-5 h-5 text-amber-600 dark:text-amber-400 flex-shrink-0 mt-0.5" />
-                  <div className="flex-1">
-                    <h4 className="text-sm font-semibold text-amber-800 dark:text-amber-200 mb-2">
-                      Incomplete Assessment - {stats.pending} items remaining
-                    </h4>
-                    <div className="space-y-2">
-                      {assessment.sections
-                        .filter(section => section.items.some(item => item.status === null))
-                        .map(section => {
-                          const pendingItems = section.items.filter(item => item.status === null);
-                          return (
-                            <div key={section.id} className="flex items-center gap-2">
-                              <button
-                                onClick={() => {
-                                  setExpandedSections(prev => new Set([...prev, section.id]));
-                                  // Scroll to section
-                                  const element = document.getElementById(`section-${section.id}`);
-                                  element?.scrollIntoView({ behavior: 'smooth', block: 'start' });
-                                }}
-                                className="text-xs text-amber-700 dark:text-amber-300 hover:underline font-medium"
-                              >
-                                {section.title}
-                              </button>
-                              <span className="text-xs text-amber-600 dark:text-amber-400">
-                                ({pendingItems.length} item{pendingItems.length > 1 ? 's' : ''} not assessed)
-                              </span>
-                            </div>
-                          );
-                        })}
-                    </div>
-                  </div>
-                </div>
-              </motion.div>
-            )}
 
             {/* Assessment Sections */}
             {assessment.sections.map((section, sectionIndex) => (
@@ -3542,11 +3683,21 @@ function WorkplaceSafetyContent() {
               </div>
             </motion.div>
           </motion.div>
-        ) : (
+          </motion.div>
+        )}
+
+        {activeTab === 'history' && (
           /* History Tab */
           <motion.div
-            initial={{ opacity: 0, y: 20 }}
+            key="history-tab"
+            initial={{ opacity: 0, y: 12 }}
             animate={{ opacity: 1, y: 0 }}
+            exit={{ opacity: 0, y: -12 }}
+            transition={{ duration: 0.2 }}
+          >
+          <motion.div
+            initial={{ opacity: 1 }}
+            animate={{ opacity: 1 }}
             className="backdrop-blur-xl bg-white/80 dark:bg-gray-800/80 rounded-2xl shadow-xl shadow-black/5 border border-white/20 dark:border-gray-700/50 p-6"
           >
             {/* Header */}
@@ -3606,42 +3757,97 @@ function WorkplaceSafetyContent() {
                 </button>
               </div>
             ) : (
-              /* Assessment List */
-              <div className="space-y-3">
-                {savedAssessments.map((assessment: any, index) => (
-                  <motion.div
-                    key={assessment.id}
-                    initial={{ opacity: 0, y: 10 }}
-                    animate={{ opacity: 1, y: 0 }}
-                    transition={{ delay: index * 0.05 }}
-                    className="group bg-white dark:bg-gray-800 rounded-xl border border-gray-200 dark:border-gray-700 p-4 hover:shadow-md hover:border-emerald-300 dark:hover:border-emerald-600 transition-all"
-                  >
-                    <div className="flex items-center justify-between">
-                      <div className="flex items-center gap-4">
-                        {/* Status Badge */}
-                        <div className={`w-12 h-12 rounded-xl flex items-center justify-center ${
-                          assessment.status === 'SUBMITTED' 
-                            ? 'bg-green-100 dark:bg-green-900/30' 
-                            : assessment.status === 'COMPLETED'
-                            ? 'bg-blue-100 dark:bg-blue-900/30'
-                            : 'bg-amber-100 dark:bg-amber-900/30'
-                        }`}>
-                          {assessment.status === 'SUBMITTED' ? (
-                            <CheckCircle className="w-6 h-6 text-green-600 dark:text-green-400" />
-                          ) : assessment.status === 'COMPLETED' ? (
-                            <CheckCircle className="w-6 h-6 text-blue-600 dark:text-blue-400" />
-                          ) : (
-                            <FileText className="w-6 h-6 text-amber-600 dark:text-amber-400" />
-                          )}
-                        </div>
-                        
-                        {/* Assessment Info */}
-                        <div>
-                          <div className="flex items-center gap-2">
-                            <h4 className="font-semibold text-gray-900 dark:text-white">
+              <>
+              {/* Assessment Table */}
+              <div className="overflow-x-auto scrollbar-hide rounded-xl border border-gray-300 dark:border-gray-600">
+                {/* Selection mode toolbar */}
+                <AnimatePresence>
+                  {selectionMode && (
+                    <motion.div
+                      initial={{ height: 0, opacity: 0 }}
+                      animate={{ height: 'auto', opacity: 1 }}
+                      exit={{ height: 0, opacity: 0 }}
+                      transition={{ duration: 0.2 }}
+                      className="overflow-hidden"
+                    >
+                      <div className="flex items-center justify-between px-4 py-2.5 bg-blue-50 dark:bg-blue-900/20 border-b border-gray-300 dark:border-gray-600">
+                        <span className="text-sm font-medium text-blue-700 dark:text-blue-300">
+                          {selectedRows.size} selected
+                        </span>
+                        <button
+                          onClick={exitSelectionMode}
+                          className="text-xs font-medium text-blue-600 dark:text-blue-400 hover:text-blue-800 dark:hover:text-blue-200 transition-colors px-3 py-1 rounded-md hover:bg-blue-100 dark:hover:bg-blue-900/30"
+                        >
+                          Cancel
+                        </button>
+                      </div>
+                    </motion.div>
+                  )}
+                </AnimatePresence>
+
+                <table className="w-full text-sm">
+                  <thead>
+                    <tr className="bg-gray-50 dark:bg-gray-800/80 border-b-2 border-gray-900/20 dark:border-gray-300/20">
+                      <th className="text-left px-5 py-3.5 text-xs font-semibold uppercase tracking-wider text-gray-500 dark:text-gray-400">Assessment #</th>
+                      <th className="text-left px-5 py-3.5 text-xs font-semibold uppercase tracking-wider text-gray-500 dark:text-gray-400">Department</th>
+                      <th className="text-left px-5 py-3.5 text-xs font-semibold uppercase tracking-wider text-gray-500 dark:text-gray-400">Date</th>
+                      <th className="text-left px-5 py-3.5 text-xs font-semibold uppercase tracking-wider text-gray-500 dark:text-gray-400">Time</th>
+                      <th className="text-left px-5 py-3.5 text-xs font-semibold uppercase tracking-wider text-gray-500 dark:text-gray-400">Team Leader</th>
+                      <th className="text-left px-5 py-3.5 text-xs font-semibold uppercase tracking-wider text-gray-500 dark:text-gray-400">Status</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {savedAssessments.map((assessment: any, index) => {
+                      const isSelected = selectedRows.has(assessment.id);
+                      return (
+                        <motion.tr
+                          key={assessment.id}
+                          initial={{ opacity: 0 }}
+                          animate={{ opacity: 1 }}
+                          transition={{ delay: index * 0.03 }}
+                          onClick={(e) => handleRowClick(assessment, index, e)}
+                          onContextMenu={(e) => handleRowContextMenu(e, assessment, index)}
+                          className={`border-b border-gray-900/10 dark:border-gray-300/10 transition-colors duration-150 select-none ${
+                            isSelected
+                              ? 'bg-blue-50 dark:bg-blue-900/25 hover:bg-blue-100 dark:hover:bg-blue-900/35'
+                              : 'bg-white dark:bg-gray-800/50 hover:bg-gray-50 dark:hover:bg-gray-700/40'
+                          } ${selectionMode ? 'cursor-pointer' : 'cursor-pointer'}`}
+                        >
+                          <td className="px-5 py-3.5 font-medium text-gray-900 dark:text-white whitespace-nowrap">
+                            <div className="flex items-center gap-2.5">
+                              {selectionMode && (
+                                <motion.div
+                                  initial={{ scale: 0, opacity: 0 }}
+                                  animate={{ scale: 1, opacity: 1 }}
+                                  exit={{ scale: 0, opacity: 0 }}
+                                  className={`w-4 h-4 rounded border-2 flex items-center justify-center flex-shrink-0 transition-colors ${
+                                    isSelected
+                                      ? 'bg-blue-500 border-blue-500'
+                                      : 'border-gray-300 dark:border-gray-500'
+                                  }`}
+                                >
+                                  {isSelected && (
+                                    <CheckCircle className="w-3 h-3 text-white" />
+                                  )}
+                                </motion.div>
+                              )}
                               {assessment.assessmentNumber}
-                            </h4>
-                            <span className={`px-2 py-0.5 text-xs font-medium rounded-full ${
+                            </div>
+                          </td>
+                          <td className="px-5 py-3.5 text-gray-600 dark:text-gray-400 whitespace-nowrap">
+                            {assessment.Department?.name || '—'}
+                          </td>
+                          <td className="px-5 py-3.5 text-gray-600 dark:text-gray-400 whitespace-nowrap">
+                            {format(new Date(assessment.createdAt), 'MMM d, yyyy')}
+                          </td>
+                          <td className="px-5 py-3.5 text-gray-600 dark:text-gray-400 whitespace-nowrap">
+                            {format(new Date(assessment.createdAt), 'h:mm a')}
+                          </td>
+                          <td className="px-5 py-3.5 text-gray-600 dark:text-gray-400 whitespace-nowrap">
+                            {assessment.teamLeaderName || '—'}
+                          </td>
+                          <td className="px-5 py-3.5 whitespace-nowrap">
+                            <span className={`inline-flex px-2.5 py-1 text-xs font-semibold rounded-full ${
                               assessment.status === 'SUBMITTED'
                                 ? 'bg-green-100 text-green-700 dark:bg-green-900/40 dark:text-green-300'
                                 : assessment.status === 'COMPLETED'
@@ -3650,55 +3856,196 @@ function WorkplaceSafetyContent() {
                             }`}>
                               {assessment.status}
                             </span>
-                          </div>
-                          <div className="flex items-center gap-4 mt-1 text-sm text-gray-500 dark:text-gray-400">
-                            {assessment.Department?.name && (
-                              <span className="flex items-center gap-1">
-                                <Building2 className="w-3.5 h-3.5" />
-                                {assessment.Department.name}
-                              </span>
-                            )}
-                            <span className="flex items-center gap-1">
-                              <Calendar className="w-3.5 h-3.5" />
-                              {format(new Date(assessment.createdAt), 'MMM d, yyyy')}
-                            </span>
-                            <span className="flex items-center gap-1">
-                              <Clock className="w-3.5 h-3.5" />
-                              {format(new Date(assessment.createdAt), 'h:mm a')}
-                            </span>
-                          </div>
-                          {assessment.teamLeaderName && (
-                            <div className="flex items-center gap-1 mt-1 text-sm text-gray-500 dark:text-gray-400">
-                              <User className="w-3.5 h-3.5" />
-                              Team Leader: {assessment.teamLeaderName}
-                            </div>
-                          )}
-                        </div>
-                      </div>
-
-                      {/* Actions */}
-                      <div className="flex items-center gap-2 opacity-0 group-hover:opacity-100 transition-opacity">
-                        <button
-                          onClick={() => loadReportForViewing(assessment.assessmentNumber)}
-                          className="inline-flex items-center gap-1.5 px-3 py-1.5 text-sm font-medium text-emerald-600 dark:text-emerald-400 bg-emerald-50 dark:bg-emerald-900/30 rounded-lg hover:bg-emerald-100 dark:hover:bg-emerald-900/50 transition-colors"
-                        >
-                          <Eye className="w-4 h-4" />
-                          View
-                        </button>
-                      </div>
-                    </div>
-                  </motion.div>
-                ))}
+                          </td>
+                        </motion.tr>
+                      );
+                    })}
+                  </tbody>
+                </table>
               </div>
+
+              {/* Context Menu */}
+              <AnimatePresence>
+                {contextMenu && (
+                  <Portal>
+                    <motion.div
+                      ref={contextMenuRef}
+                      initial={{ opacity: 0, scale: 0.92 }}
+                      animate={{ opacity: 1, scale: 1 }}
+                      exit={{ opacity: 0, scale: 0.92 }}
+                      transition={{ duration: 0.12 }}
+                      className="fixed z-[9999] w-48 py-1.5 backdrop-blur-xl bg-white/95 dark:bg-gray-800/95 rounded-xl border border-gray-200 dark:border-gray-700 shadow-2xl shadow-black/20"
+                      style={{ top: contextMenu.y, left: contextMenu.x }}
+                    >
+                      <button
+                        onClick={() => {
+                          loadReportForViewing(contextMenu.assessment.assessmentNumber);
+                          setContextMenu(null);
+                        }}
+                        className="w-full flex items-center gap-3 px-4 py-2.5 text-sm text-gray-700 dark:text-gray-300 hover:bg-gray-100 dark:hover:bg-gray-700/50 transition-colors"
+                      >
+                        <Eye className="w-4 h-4 text-gray-400" />
+                        View Report
+                      </button>
+                      <button
+                        onClick={() => {
+                          if (!selectionMode) {
+                            setSelectionMode(true);
+                            setSelectedRows(new Set([contextMenu.assessment.id]));
+                            lastSelectedIndexRef.current = contextMenu.index;
+                          }
+                          setContextMenu(null);
+                        }}
+                        className="w-full flex items-center gap-3 px-4 py-2.5 text-sm text-gray-700 dark:text-gray-300 hover:bg-gray-100 dark:hover:bg-gray-700/50 transition-colors"
+                      >
+                        <MousePointer2 className="w-4 h-4 text-gray-400" />
+                        Select
+                      </button>
+                      <div className="my-1 border-t border-gray-200 dark:border-gray-700" />
+                      <button
+                        onClick={() => {
+                          handleEditAssessment(contextMenu.assessment);
+                          setContextMenu(null);
+                        }}
+                        className="w-full flex items-center gap-3 px-4 py-2.5 text-sm text-gray-700 dark:text-gray-300 hover:bg-gray-100 dark:hover:bg-gray-700/50 transition-colors"
+                      >
+                        <Pen className="w-4 h-4 text-gray-400" />
+                        Edit
+                      </button>
+                      <button
+                        onClick={() => {
+                          setDeleteConfirm({ assessment: contextMenu.assessment });
+                          setContextMenu(null);
+                        }}
+                        className="w-full flex items-center gap-3 px-4 py-2.5 text-sm text-red-600 dark:text-red-400 hover:bg-red-50 dark:hover:bg-red-900/20 transition-colors"
+                      >
+                        <Trash2 className="w-4 h-4" />
+                        Delete
+                      </button>
+                    </motion.div>
+                  </Portal>
+                )}
+              </AnimatePresence>
+              </>
             )}
           </motion.div>
+          </motion.div>
         )}
+
+        {/* Delete Confirmation Modal */}
+        <AnimatePresence>
+          {deleteConfirm && (
+            <Portal>
+              <motion.div
+                initial={{ opacity: 0 }}
+                animate={{ opacity: 1 }}
+                exit={{ opacity: 0 }}
+                transition={{ duration: 0.2 }}
+                className="fixed inset-0 z-[10000] flex items-center justify-center bg-black/50 backdrop-blur-sm"
+                onClick={() => { setDeleteConfirm(null); setDeleteInput(''); }}
+              >
+                <motion.div
+                  initial={{ opacity: 0, scale: 0.9, y: 20 }}
+                  animate={{ opacity: 1, scale: 1, y: 0 }}
+                  exit={{ opacity: 0, scale: 0.9, y: 20 }}
+                  transition={{ type: 'spring', damping: 25, stiffness: 350 }}
+                  className="w-full max-w-md mx-4 bg-white/95 dark:bg-gray-800/95 backdrop-blur-xl rounded-2xl border border-gray-200 dark:border-gray-700 shadow-2xl shadow-black/20 overflow-hidden"
+                  onClick={(e) => e.stopPropagation()}
+                >
+                  {/* Header */}
+                  <div className="px-6 pt-6 pb-4">
+                    <div className="flex items-center gap-3 mb-3">
+                      <div className="w-10 h-10 rounded-full bg-red-100 dark:bg-red-900/30 flex items-center justify-center">
+                        <Trash2 className="w-5 h-5 text-red-600 dark:text-red-400" />
+                      </div>
+                      <div>
+                        <h3 className="text-lg font-semibold text-gray-900 dark:text-white">Delete Assessment</h3>
+                        <p className="text-sm text-gray-500 dark:text-gray-400">This action cannot be undone</p>
+                      </div>
+                    </div>
+                    <p className="text-sm text-gray-600 dark:text-gray-300 mt-3">
+                      You are about to permanently delete assessment:
+                    </p>
+                    <p className="text-lg font-bold text-red-600 dark:text-red-400 mt-2 tracking-wide">
+                      {deleteConfirm.assessment.assessmentNumber}
+                    </p>
+                    <p className="text-sm text-gray-500 dark:text-gray-400 mt-3">
+                      Type the assessment number below to confirm deletion:
+                    </p>
+                  </div>
+
+                  {/* Input */}
+                  <div className="px-6 pb-4">
+                    <input
+                      type="text"
+                      value={deleteInput}
+                      onChange={(e) => setDeleteInput(e.target.value)}
+                      placeholder={deleteConfirm.assessment.assessmentNumber}
+                      className={`w-full px-4 py-3 text-sm rounded-xl border-2 transition-colors outline-none ${
+                        deleteInput === deleteConfirm.assessment.assessmentNumber
+                          ? 'border-red-500 bg-red-50/50 dark:bg-red-900/10 text-red-700 dark:text-red-300 focus:ring-2 focus:ring-red-500/30'
+                          : 'border-gray-200 dark:border-gray-600 bg-gray-50 dark:bg-gray-700/50 text-gray-900 dark:text-white focus:border-gray-400 dark:focus:border-gray-500'
+                      }`}
+                      autoFocus
+                      autoComplete="off"
+                      spellCheck={false}
+                    />
+                    {deleteInput.length > 0 && deleteInput !== deleteConfirm.assessment.assessmentNumber && (
+                      <p className="mt-1.5 text-xs text-red-500 flex items-center gap-1">
+                        <AlertTriangle className="w-3 h-3" />
+                        Assessment number does not match
+                      </p>
+                    )}
+                  </div>
+
+                  {/* Actions */}
+                  <div className="px-6 pb-6 flex items-center gap-3">
+                    <button
+                      onClick={() => { setDeleteConfirm(null); setDeleteInput(''); }}
+                      className="flex-1 px-4 py-2.5 text-sm font-medium text-gray-700 dark:text-gray-300 bg-gray-100 dark:bg-gray-700 hover:bg-gray-200 dark:hover:bg-gray-600 rounded-xl transition-colors"
+                    >
+                      Cancel
+                    </button>
+                    <button
+                      onClick={handleDeleteAssessment}
+                      disabled={deleteInput !== deleteConfirm.assessment.assessmentNumber || deleting}
+                      className={`flex-1 px-4 py-2.5 text-sm font-medium rounded-xl transition-all flex items-center justify-center gap-2 ${
+                        deleteInput === deleteConfirm.assessment.assessmentNumber && !deleting
+                          ? 'bg-red-600 hover:bg-red-700 text-white shadow-lg shadow-red-600/25'
+                          : 'bg-gray-200 dark:bg-gray-700 text-gray-400 dark:text-gray-500 cursor-not-allowed'
+                      }`}
+                    >
+                      {deleting ? (
+                        <>
+                          <Loader2 className="w-4 h-4 animate-spin" />
+                          Deleting...
+                        </>
+                      ) : (
+                        <>
+                          <Trash2 className="w-4 h-4" />
+                          Delete Permanently
+                        </>
+                      )}
+                    </button>
+                  </div>
+                </motion.div>
+              </motion.div>
+            </Portal>
+          )}
+        </AnimatePresence>
 
         {/* View Report Full Page */}
         {activeTab === 'view' && (
           <motion.div
-            initial={{ opacity: 0, y: 20 }}
+            key="view-tab"
+            initial={{ opacity: 0, y: 12 }}
             animate={{ opacity: 1, y: 0 }}
+            exit={{ opacity: 0, y: -12 }}
+            transition={{ duration: 0.2 }}
+          >
+          <motion.div
+            initial={{ opacity: 1 }}
+            animate={{ opacity: 1 }}
             className="backdrop-blur-xl bg-white/80 dark:bg-gray-800/80 rounded-2xl shadow-xl shadow-black/5 border border-white/20 dark:border-gray-700/50"
           >
             {loadingReport ? (
@@ -3708,34 +4055,23 @@ function WorkplaceSafetyContent() {
               </div>
             ) : viewReportData ? (
               <>
-                {/* Header */}
-                <div className="flex items-center justify-between px-6 py-4 border-b border-gray-200 dark:border-gray-700 bg-gradient-to-r from-emerald-500 to-teal-600 rounded-t-2xl">
-                  <div className="flex items-center gap-4">
-                    <button
-                      onClick={() => {
-                        setActiveTab('history');
-                        setViewReportData(null);
-                      }}
-                      className="p-2 text-white/80 hover:text-white hover:bg-white/10 rounded-lg transition-colors"
-                    >
-                      <ArrowLeft className="w-5 h-5" />
-                    </button>
-                    <div>
-                      <h2 className="text-xl font-bold text-white">Workplace Safety Assessment Report</h2>
-                      <p className="text-emerald-100 text-sm">{viewReportData.assessmentNumber}</p>
-                    </div>
+                {/* Report Actions */}
+                <div className="flex items-center justify-between px-6 py-4 border-b border-gray-200 dark:border-gray-700">
+                  <div>
+                    <h2 className="text-lg font-semibold text-gray-900 dark:text-white">Workplace Safety Assessment Report</h2>
+                    <p className="text-sm text-gray-500 dark:text-gray-400">{viewReportData.assessmentNumber}</p>
                   </div>
                   <div className="flex items-center gap-2">
                     <button
                       onClick={handlePrintReport}
-                      className="inline-flex items-center gap-2 px-4 py-2 text-sm font-medium text-emerald-700 bg-white rounded-lg hover:bg-emerald-50 transition-colors"
+                      className="inline-flex items-center gap-2 px-4 py-2 text-sm font-medium text-gray-700 dark:text-gray-300 bg-gray-100 dark:bg-gray-700 rounded-lg hover:bg-gray-200 dark:hover:bg-gray-600 transition-colors"
                     >
                       <Printer className="w-4 h-4" />
                       Print
                     </button>
                     <button
                       onClick={handleDownloadReport}
-                      className="inline-flex items-center gap-2 px-4 py-2 text-sm font-medium text-emerald-700 bg-white rounded-lg hover:bg-emerald-50 transition-colors"
+                      className="inline-flex items-center gap-2 px-4 py-2 text-sm font-medium text-white bg-gradient-to-r from-emerald-500 to-teal-600 rounded-lg hover:shadow-lg hover:shadow-emerald-500/25 transition-all"
                     >
                       <Download className="w-4 h-4" />
                       Download PDF
@@ -3945,7 +4281,9 @@ function WorkplaceSafetyContent() {
               </div>
             )}
           </motion.div>
+          </motion.div>
         )}
+        </AnimatePresence>
       </main>
 
       {/* No Template Available Modal */}

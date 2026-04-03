@@ -16,7 +16,7 @@ import {
   createLswPersonalGoal, updateLswPersonalGoal, deleteLswPersonalGoal,
   createLswRcaTrigger, updateLswRcaTrigger, deleteLswRcaTrigger,
   updateLswWorkDaysPerWeek,
-  createLswEarlyCompletionLog, getLswEarlyCompletionLogs,
+  createLswEarlyCompletionLog, getLswEarlyCompletionLogs, deleteLswEarlyCompletionLog,
   type LswDailyTask, type LswTodoItem, type LswFrequencyTask, type LswEarlyCompletionLog,
   type LswProject, type LswProjectUpdate, type LswMeetingRail,
   type LswFollowUp, type LswKeyResultSet, type LswKeyResult,
@@ -308,6 +308,7 @@ function LSWContent() {
   const [workDaysPerWeek, setWorkDaysPerWeek] = useState<number>(5);
   const [currentWeek, setCurrentWeek] = useState(getWeekNumber(new Date()));
   const [currentYear, setCurrentYear] = useState(new Date().getFullYear());
+  const [configReady, setConfigReady] = useState(false);
   const [selectedDepartment, setSelectedDepartment] = useState('all');
   const [editingWeek, setEditingWeek] = useState(false);
   const [weekInputValue, setWeekInputValue] = useState('');
@@ -664,11 +665,16 @@ function LSWContent() {
             if (orgWeek !== currentWeek || orgYear !== currentYear) {
               setCurrentWeek(orgWeek);
               setCurrentYear(orgYear);
+              setConfigReady(true);
               setIsLoading(false);
               return; // Will re-trigger loadLswData via useEffect
             }
           }
+          setConfigReady(true);
         }
+      } else if (initialLoad.current) {
+        initialLoad.current = false;
+        setConfigReady(true);
       }
 
       // Restore work days per week preference
@@ -881,9 +887,11 @@ function LSWContent() {
     );
     updateLswDailyTaskCompletion(taskId, currentWeek, currentYear, DAY_KEY_TO_DB[day], false)
       .catch(e => console.error('Failed to update day completion:', e));
-    // If it was early completed, remove from local logs
+    // If it was early completed, remove from local logs AND database
     if (wasEarly) {
       setEarlyCompletionLogs(prev => prev.filter(log => !(log.dailyTaskId === taskId && log.dayKey === day && log.weekNumber === currentWeek && log.year === currentYear)));
+      deleteLswEarlyCompletionLog(taskId, day, currentWeek, currentYear)
+        .catch(e => console.error('Failed to delete early completion log:', e));
     }
     setShowUncheckModal(false);
     setUncheckContext(null);

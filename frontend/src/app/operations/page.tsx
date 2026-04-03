@@ -1718,20 +1718,14 @@ export default function OperationsPage() {
                 {/* Issue Type */}
                 <div>
                   <label className="block text-xs font-medium text-gray-700 dark:text-gray-300 mb-1">Issue Type *</label>
-                  <div className="flex gap-2">
-                    <button
-                      onClick={() => setFormType('MACHINE')}
-                      className={`flex-1 py-2 rounded-lg text-sm font-medium transition-colors border ${formType === 'MACHINE' ? 'bg-purple-100 dark:bg-purple-900/50 border-purple-300 dark:border-purple-600 text-purple-700 dark:text-purple-300' : 'bg-white dark:bg-gray-700 border-gray-300 dark:border-gray-600 text-gray-600 dark:text-gray-400 hover:bg-gray-50 dark:hover:bg-gray-600'}`}
-                    >
-                      ⚙️ Machine Issue
-                    </button>
-                    <button
-                      onClick={() => setFormType('QUALITY')}
-                      className={`flex-1 py-2 rounded-lg text-sm font-medium transition-colors border ${formType === 'QUALITY' ? 'bg-teal-100 dark:bg-teal-900/50 border-teal-300 dark:border-teal-600 text-teal-700 dark:text-teal-300' : 'bg-white dark:bg-gray-700 border-gray-300 dark:border-gray-600 text-gray-600 dark:text-gray-400 hover:bg-gray-50 dark:hover:bg-gray-600'}`}
-                    >
-                      ✅ Quality Issue
-                    </button>
-                  </div>
+                  <select
+                    value={formType}
+                    onChange={(e) => setFormType(e.target.value as 'MACHINE' | 'QUALITY')}
+                    className="w-full px-3 py-2 text-sm rounded-lg border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-700 text-gray-900 dark:text-white focus:ring-2 focus:ring-[#3aa8e8] focus:border-transparent"
+                  >
+                    <option value="MACHINE">⚙️ Machine Issue</option>
+                    <option value="QUALITY">✅ Quality Issue</option>
+                  </select>
                 </div>
 
                 {/* Title */}
@@ -1761,17 +1755,15 @@ export default function OperationsPage() {
                 {/* Priority */}
                 <div>
                   <label className="block text-xs font-medium text-gray-700 dark:text-gray-300 mb-1">Priority</label>
-                  <div className="flex gap-2">
+                  <select
+                    value={formPriority}
+                    onChange={(e) => setFormPriority(e.target.value as IssuePriority)}
+                    className="w-full px-3 py-2 text-sm rounded-lg border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-700 text-gray-900 dark:text-white focus:ring-2 focus:ring-[#3aa8e8] focus:border-transparent"
+                  >
                     {(['LOW', 'MEDIUM', 'HIGH', 'CRITICAL'] as IssuePriority[]).map(p => (
-                      <button
-                        key={p}
-                        onClick={() => setFormPriority(p)}
-                        className={`flex-1 py-1.5 rounded-lg text-xs font-medium transition-colors border ${formPriority === p ? `${priorityConfig[p].bg} ${priorityConfig[p].color} border-current` : 'bg-white dark:bg-gray-700 border-gray-300 dark:border-gray-600 text-gray-600 dark:text-gray-400 hover:bg-gray-50 dark:hover:bg-gray-600'}`}
-                      >
-                        {priorityConfig[p].label}
-                      </button>
+                      <option key={p} value={p}>{priorityConfig[p].label}</option>
                     ))}
-                  </div>
+                  </select>
                 </div>
 
                 {/* Location Dropdowns */}
