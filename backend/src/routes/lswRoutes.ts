@@ -83,7 +83,9 @@ router.get('/departments', async (req: AuthRequest, res: Response) => {
 // ─────────────────────────────────────────────────────────────────────────────
 router.get('/daily-tasks', async (req: AuthRequest, res: Response) => {
   try {
-    const tasks = await lswService.getDailyTasks(req.user!.id);
+    const weekNumber = req.query.weekNumber ? parseInt(req.query.weekNumber as string) : undefined;
+    const year = req.query.year ? parseInt(req.query.year as string) : undefined;
+    const tasks = await lswService.getDailyTasks(req.user!.id, weekNumber, year);
     res.json({ success: true, data: tasks });
   } catch (error: any) {
     res.status(500).json({ success: false, error: error.message });
