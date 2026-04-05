@@ -1,4 +1,10 @@
 /** @type {import('next').NextConfig} */
+
+// Derive backend origin from API URL for CSP connect-src
+const apiUrl = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:5001/api';
+const backendOrigin = new URL(apiUrl).origin; // e.g. http://localhost:5001
+const wsOrigin = backendOrigin.replace(/^http/, 'ws'); // e.g. ws://localhost:5001
+
 const nextConfig = {
   reactStrictMode: true,
   swcMinify: true,
@@ -10,7 +16,7 @@ const nextConfig = {
     ignoreDuringBuilds: true,
   },
   env: {
-    NEXT_PUBLIC_API_URL: process.env.NEXT_PUBLIC_API_URL || 'http://localhost:5000',
+    NEXT_PUBLIC_API_URL: process.env.NEXT_PUBLIC_API_URL || 'http://localhost:5001/api',
   },
   images: {
     remotePatterns: [
@@ -60,7 +66,7 @@ const nextConfig = {
               "style-src 'self' 'unsafe-inline' https://fonts.googleapis.com",
               "font-src 'self' https://fonts.gstatic.com",
               "img-src 'self' data: blob: https://firebasestorage.googleapis.com https://*.googleusercontent.com",
-              "connect-src 'self' https://*.googleapis.com https://*.firebaseio.com wss://*.firebaseio.com https://identitytoolkit.googleapis.com https://securetoken.googleapis.com",
+              `connect-src 'self' ${backendOrigin} ${wsOrigin} https://*.googleapis.com https://*.firebaseio.com wss://*.firebaseio.com https://identitytoolkit.googleapis.com https://securetoken.googleapis.com`,
               "frame-src 'self' https://*.firebaseapp.com",
               "object-src 'none'",
               "base-uri 'self'",

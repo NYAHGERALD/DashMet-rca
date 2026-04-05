@@ -192,6 +192,14 @@ export default function LoginPage() {
         setLoading(false);
         return;
       }
+      // DEBUG: Log the actual error for diagnosis
+      console.error('[LOGIN DEBUG] check-user error:', {
+        message: err.message,
+        code: err.code,
+        status: err.response?.status,
+        data: err.response?.data,
+        name: err.name,
+      });
       const errorMsg = typeof err.response?.data?.error === 'string' 
         ? err.response.data.error 
         : getFirebaseErrorMessage(err, 'Failed to verify email');

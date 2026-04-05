@@ -23,33 +23,17 @@ interface Organization {
   };
 }
 
-interface AccessCode {
+interface Invitation {
   id: string;
-  code: string;
+  email: string;
   role: string;
-  isActive: boolean;
-  usedCount: number;
-  maxUses: number;
+  status: string;
   createdAt: string;
+  expiresAt: string;
 }
 
-interface OrganizationAccessCode {
-  id: string;
-  code: string;
-  role: string;
-  isActive: boolean;
-  usedCount: number;
-  maxUses: number;
-  createdAt: string;
-  User?: {
-    id: string;
-    firstName: string;
-    lastName: string;
-  };
-}
-
-// Role options for organization access codes (excludes Admin and System Admin)
-const ORG_ACCESS_CODE_ROLES = [
+// Role options for invitations
+const INVITE_ROLES = [
   { value: 'SUPERVISOR', label: 'Supervisor' },
   { value: 'QA_FOOD_SAFETY', label: 'QA / Food Safety' },
   { value: 'QUALITY_CONTROL_MANAGER', label: 'Quality Control Manager' },
@@ -60,7 +44,6 @@ const ORG_ACCESS_CODE_ROLES = [
 
 function AdminOrganizationsContent() {
   const { user } = useAuth();
-  const [activeTab, setActiveTab] = useState<'organizations' | 'accessCodes'>('organizations');
   const [organizations, setOrganizations] = useState<Organization[]>([]);
   const [loading, setLoading] = useState(true);
   const [showForm, setShowForm] = useState(false);
@@ -75,23 +58,15 @@ function AdminOrganizationsContent() {
   const [error, setError] = useState('');
   const [message, setMessage] = useState('');
 
-  // System-wide Access Code Management States (SYSTEM_ADMIN only)
-  const [accessCodes, setAccessCodes] = useState<AccessCode[]>([]);
-  const [loadingAccessCodes, setLoadingAccessCodes] = useState(false);
-  const [showAccessCodeForm, setShowAccessCodeForm] = useState(false);
-  const [accessCodeFormData, setAccessCodeFormData] = useState({
-    role: 'ADMIN' as UserRole,
-    maxUses: 1000,
-  });
+  // Invite user modal state (within org edit)
+  const [showInviteModal, setShowInviteModal] = useState(false);
+  const [inviteEmail, setInviteEmail] = useState('');
+  const [inviteRole, setInviteRole] = useState('SUPERVISOR');
+  const [inviteSending, setInviteSending] = useState(false);
 
-  // Organization-specific Access Code Management States
-  const [orgAccessCodes, setOrgAccessCodes] = useState<OrganizationAccessCode[]>([]);
-  const [loadingOrgAccessCodes, setLoadingOrgAccessCodes] = useState(false);
-  const [showOrgAccessCodeForm, setShowOrgAccessCodeForm] = useState(false);
-  const [orgAccessCodeFormData, setOrgAccessCodeFormData] = useState({
-    role: 'SUPERVISOR',
-    maxUses: 100,
-  });
+  // Recent invitations for the org being edited
+  const [orgInvitations, setOrgInvitations] = useState<Invitation[]>([]);
+  const [loadingInvitations, setLoadingInvitations] = useState(false);
 
   // Password confirmation modal state
   const [showPasswordModal, setShowPasswordModal] = useState(false);
@@ -101,15 +76,11 @@ function AdminOrganizationsContent() {
 
   useEffect(() => {
     loadOrganizations();
-    if (user?.role === UserRole.SYSTEM_ADMIN) {
-      loadAccessCodes();
-    }
   }, [user]);
 
   const loadOrganizations = async () => {
     try {
       const response = await api.get('/organizations');
-      // Normalize PascalCase to camelCase for _count fields
       const orgsData = response.data.data?.organizations || response.data.data || [];
       const normalizedOrgs = (Array.isArray(orgsData) ? orgsData : []).map((org: any) => ({
         ...org,
@@ -126,116 +97,42 @@ function AdminOrganizationsContent() {
     }
   };
 
-  const loadAccessCodes = async () => {
-    setLoadingAccessCodes(true);
+  const loadOrgInvitations = async () => {
+    setLoadingInvitations(true);
     try {
-      const response = await api.get('/access-codes');
-      setAccessCodes(response.data.data || []);
+      const response = await api.get('/invitations');
+      const allInvitations = response.data.data || [];
+      // Show the most recent 5 invitations
+      setOrgInvitations(allInvitations.slice(0, 5));
     } catch (err: any) {
-      console.error('Failed to load access codes:', err);
+      console.error('Failed to load invitations:', err);
+      setOrgInvitations([]);
     } finally {
-      setLoadingAccessCodes(false);
+      setLoadingInvitations(false);
     }
   };
 
-  const handleGenerateAccessCode = async (e: React.FormEvent) => {
+  const handleSendInvite = async (e: React.FormEvent) => {
     e.preventDefault();
+    if (!inviteEmail.trim()) return;
+
+    setInviteSending(true);
     setError('');
-    setMessage('');
 
     try {
-      await api.post('/access-codes', accessCodeFormData);
-      setMessage('Access code generated successfully');
-      setShowAccessCodeForm(false);
-      setAccessCodeFormData({ role: 'ADMIN' as UserRole, maxUses: 1000 });
-      loadAccessCodes();
+      await api.post('/invitations', {
+        email: inviteEmail.trim(),
+        role: inviteRole,
+      });
+      setMessage(`Invitation sent to ${inviteEmail}`);
+      setInviteEmail('');
+      setShowInviteModal(false);
+      loadOrgInvitations();
     } catch (err: any) {
-      setError(err.response?.data?.error || 'Failed to generate access code');
-    }
-  };
-
-  const handleToggleAccessCode = async (id: string) => {
-    try {
-      await api.patch(`/access-codes/${id}/toggle`);
-      setMessage('Access code status updated');
-      loadAccessCodes();
-    } catch (err: any) {
-      setError(err.response?.data?.error || 'Failed to update access code');
-    }
-  };
-
-  const handleDeleteAccessCode = async (id: string) => {
-    if (!confirm('Are you sure you want to delete this access code?')) return;
-
-    try {
-      await api.delete(`/access-codes/${id}`);
-      setMessage('Access code deleted successfully');
-      loadAccessCodes();
-    } catch (err: any) {
-      setError(err.response?.data?.error || 'Failed to delete access code');
-    }
-  };
-
-  // Organization-specific access code handlers
-  const loadOrgAccessCodes = async (orgId: string) => {
-    setLoadingOrgAccessCodes(true);
-    try {
-      const response = await api.get(`/organizations/${orgId}/access-codes`);
-      setOrgAccessCodes(response.data.data || []);
-    } catch (err: any) {
-      console.error('Failed to load organization access codes:', err);
-      setOrgAccessCodes([]);
+      setError(err.response?.data?.error || 'Failed to send invitation');
     } finally {
-      setLoadingOrgAccessCodes(false);
+      setInviteSending(false);
     }
-  };
-
-  const handleGenerateOrgAccessCode = async (e: React.FormEvent) => {
-    e.preventDefault();
-    if (!editingId) return;
-    
-    setError('');
-    setMessage('');
-
-    try {
-      await api.post(`/organizations/${editingId}/access-codes`, orgAccessCodeFormData);
-      setMessage('Role-specific access code generated successfully');
-      setShowOrgAccessCodeForm(false);
-      setOrgAccessCodeFormData({ role: 'SUPERVISOR', maxUses: 100 });
-      loadOrgAccessCodes(editingId);
-    } catch (err: any) {
-      setError(err.response?.data?.error || 'Failed to generate access code');
-    }
-  };
-
-  const handleToggleOrgAccessCode = async (codeId: string) => {
-    if (!editingId) return;
-    
-    try {
-      await api.patch(`/organizations/${editingId}/access-codes/${codeId}/toggle`);
-      setMessage('Access code status updated');
-      loadOrgAccessCodes(editingId);
-    } catch (err: any) {
-      setError(err.response?.data?.error || 'Failed to update access code');
-    }
-  };
-
-  const handleDeleteOrgAccessCode = async (codeId: string) => {
-    if (!editingId) return;
-    if (!confirm('Are you sure you want to delete this access code?')) return;
-
-    try {
-      await api.delete(`/organizations/${editingId}/access-codes/${codeId}`);
-      setMessage('Access code deleted successfully');
-      loadOrgAccessCodes(editingId);
-    } catch (err: any) {
-      setError(err.response?.data?.error || 'Failed to delete access code');
-    }
-  };
-
-  const generateRandomCode = () => {
-    const code = Math.floor(100000 + Math.random() * 900000).toString();
-    setFormData({ ...formData, signupCode: code });
   };
 
   const handleSubmit = async (e: React.FormEvent) => {
@@ -243,7 +140,6 @@ function AdminOrganizationsContent() {
     setError('');
     setMessage('');
 
-    // Validate signup code if public
     if (formData.isPublic && !/^\d{6}$/.test(formData.signupCode)) {
       setError('A valid 6-digit signup code is required when making organization visible');
       return;
@@ -251,10 +147,8 @@ function AdminOrganizationsContent() {
 
     try {
       if (editingId) {
-        // For editing, show password confirmation modal
         setShowPasswordModal(true);
       } else {
-        // For creating new org (SYSTEM_ADMIN only)
         await api.post('/organizations', formData);
         setMessage('Organization created successfully');
         setShowForm(false);
@@ -274,13 +168,11 @@ function AdminOrganizationsContent() {
       return;
     }
 
-    // Check if user signed in with SSO (Google or Microsoft)
     const providerData = currentUser.providerData;
     const isGoogleUser = providerData.some(p => p.providerId === 'google.com');
     const isMicrosoftUser = providerData.some(p => p.providerId === 'microsoft.com');
     const isSSOUser = isGoogleUser || isMicrosoftUser;
 
-    // For password users, validate password is provided
     if (!isSSOUser && !password.trim()) {
       setPasswordError('Password is required');
       return;
@@ -290,7 +182,6 @@ function AdminOrganizationsContent() {
     setPasswordError('');
 
     try {
-      // Reauthenticate based on provider type
       if (isGoogleUser) {
         const googleProvider = new GoogleAuthProvider();
         await reauthenticateWithPopup(currentUser, googleProvider);
@@ -298,22 +189,18 @@ function AdminOrganizationsContent() {
         const microsoftProvider = new OAuthProvider('microsoft.com');
         await reauthenticateWithPopup(currentUser, microsoftProvider);
       } else {
-        // Email/password user
         const credential = EmailAuthProvider.credential(currentUser.email, password);
         await reauthenticateWithCredential(currentUser, credential);
       }
 
-      // Identity verified, now update the organization
       const updateData: any = {
         name: formData.name,
         region: formData.region,
         defaultLanguage: formData.defaultLanguage,
         isPublic: formData.isPublic,
-        // For SSO users, send ssoVerified flag; for password users, send password
         ...(isSSOUser ? { ssoVerified: true } : { password: password }),
       };
 
-      // Only include signupCode if making public
       if (formData.isPublic) {
         updateData.signupCode = formData.signupCode;
       }
@@ -356,10 +243,8 @@ function AdminOrganizationsContent() {
     setShowForm(true);
     setError('');
     setMessage('');
-    setShowOrgAccessCodeForm(false);
-    setOrgAccessCodeFormData({ role: 'SUPERVISOR', maxUses: 100 });
-    // Load organization's access codes
-    loadOrgAccessCodes(org.id);
+    setShowInviteModal(false);
+    loadOrgInvitations();
   };
 
   const handleDelete = async (id: string) => {
@@ -501,6 +386,97 @@ function AdminOrganizationsContent() {
         );
       })()}
 
+      {/* Invite User Modal */}
+      {showInviteModal && (
+        <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50">
+          <div className="bg-white dark:bg-gray-800 rounded-xl shadow-2xl p-6 w-full max-w-md mx-4">
+            <div className="text-center mb-6">
+              <div className="w-16 h-16 bg-primary-100 dark:bg-primary-900/30 rounded-full flex items-center justify-center mx-auto mb-4">
+                <svg className="w-8 h-8 text-primary-600 dark:text-primary-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M16 12a4 4 0 10-8 0 4 4 0 008 0zm0 0v1.5a2.5 2.5 0 005 0V12a9 9 0 10-9 9m4.5-1.206a8.959 8.959 0 01-4.5 1.207" />
+                </svg>
+              </div>
+              <h3 className="text-xl font-bold text-gray-900 dark:text-white">
+                Invite Team Member
+              </h3>
+              <p className="text-sm text-gray-600 dark:text-gray-400 mt-2">
+                Send an email invitation to join your organization
+              </p>
+            </div>
+
+            <form onSubmit={handleSendInvite} className="space-y-4">
+              <div>
+                <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">
+                  Email Address *
+                </label>
+                <input
+                  type="email"
+                  required
+                  value={inviteEmail}
+                  onChange={(e) => setInviteEmail(e.target.value)}
+                  className="w-full px-4 py-3 rounded-lg border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-700 text-gray-900 dark:text-white focus:ring-2 focus:ring-primary-500 focus:border-transparent"
+                  placeholder="colleague@company.com"
+                  autoFocus
+                />
+              </div>
+
+              <div>
+                <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">
+                  Role *
+                </label>
+                <select
+                  value={inviteRole}
+                  onChange={(e) => setInviteRole(e.target.value)}
+                  className="w-full px-4 py-3 rounded-lg border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-700 text-gray-900 dark:text-white focus:ring-2 focus:ring-primary-500 focus:border-transparent"
+                >
+                  {INVITE_ROLES.map((r) => (
+                    <option key={r.value} value={r.value}>{r.label}</option>
+                  ))}
+                </select>
+              </div>
+
+              <div className="bg-blue-50 dark:bg-blue-900/20 border border-blue-200 dark:border-blue-800 rounded-lg p-3">
+                <p className="text-xs text-blue-700 dark:text-blue-300">
+                  The user will receive an email with a secure link to create their account. The invitation expires in 48 hours.
+                </p>
+              </div>
+
+              <div className="flex gap-3 pt-2">
+                <button
+                  type="button"
+                  onClick={() => {
+                    setShowInviteModal(false);
+                    setInviteEmail('');
+                  }}
+                  className="flex-1 px-4 py-3 bg-gray-200 dark:bg-gray-700 text-gray-800 dark:text-gray-200 rounded-lg hover:bg-gray-300 dark:hover:bg-gray-600 font-medium"
+                >
+                  Cancel
+                </button>
+                <button
+                  type="submit"
+                  disabled={inviteSending || !inviteEmail.trim()}
+                  className="flex-1 px-4 py-3 bg-primary-600 text-white rounded-lg hover:bg-primary-700 disabled:opacity-50 disabled:cursor-not-allowed font-medium flex items-center justify-center gap-2"
+                >
+                  {inviteSending ? (
+                    <>
+                      <div className="animate-spin rounded-full h-4 w-4 border-b-2 border-white"></div>
+                      Sending...
+                    </>
+                  ) : (
+                    <>
+                      <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M3 8l7.89 5.26a2 2 0 002.22 0L21 8M5 19h14a2 2 0 002-2V7a2 2 0 00-2-2H5a2 2 0 00-2 2v10a2 2 0 002 2z" />
+                      </svg>
+                      Send Invitation
+                    </>
+                  )}
+                </button>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
+
       {/* Header */}
       <div className="bg-white dark:bg-gray-800 shadow">
         <div className="px-4 sm:px-6 lg:px-8 py-6">
@@ -513,72 +489,22 @@ function AdminOrganizationsContent() {
                 Manage companies and regions
               </p>
             </div>
-            {activeTab === 'organizations' && canCreateOrg && (
-              <button
-                onClick={() => {
-                  setShowForm(!showForm);
-                  setEditingId(null);
-                  setFormData({ name: '', region: 'USA', defaultLanguage: 'ENGLISH', isPublic: false, signupCode: '' });
-                }}
-                className="px-4 py-2 bg-primary-600 text-white rounded-lg hover:bg-primary-700"
-              >
-                + New Organization
-              </button>
-            )}
-            {activeTab === 'accessCodes' && user?.role === UserRole.SYSTEM_ADMIN && (
-              <button
-                onClick={() => setShowAccessCodeForm(!showAccessCodeForm)}
-                className="px-4 py-2 bg-primary-600 text-white rounded-lg hover:bg-primary-700"
-              >
-                + Generate Access Code
-              </button>
-            )}
+            <div className="flex items-center gap-3">
+              {canCreateOrg && (
+                <button
+                  onClick={() => {
+                    setShowForm(!showForm);
+                    setEditingId(null);
+                    setFormData({ name: '', region: 'USA', defaultLanguage: 'ENGLISH', isPublic: false, signupCode: '' });
+                  }}
+                  className="px-4 py-2 bg-primary-600 text-white rounded-lg hover:bg-primary-700"
+                >
+                  + New Organization
+                </button>
+              )}
+            </div>
           </div>
         </div>
-
-        {/* Tab Navigation - Only visible for SYSTEM_ADMIN */}
-        {user?.role === UserRole.SYSTEM_ADMIN && (
-          <div className="border-t border-gray-200 dark:border-gray-700">
-            <nav className="flex -mb-px px-4 sm:px-6 lg:px-8">
-              <button
-                onClick={() => {
-                  setActiveTab('organizations');
-                  setShowForm(false);
-                  setShowAccessCodeForm(false);
-                  setError('');
-                  setMessage('');
-                }}
-                className={`
-                  py-4 px-6 text-sm font-medium border-b-2 transition-colors
-                  ${activeTab === 'organizations'
-                    ? 'border-primary-600 text-primary-600 dark:text-primary-400'
-                    : 'border-transparent text-gray-500 hover:text-gray-700 hover:border-gray-300 dark:text-gray-400 dark:hover:text-gray-300'
-                  }
-                `}
-              >
-                Organizations
-              </button>
-              <button
-                onClick={() => {
-                  setActiveTab('accessCodes');
-                  setShowForm(false);
-                  setShowAccessCodeForm(false);
-                  setError('');
-                  setMessage('');
-                }}
-                className={`
-                  py-4 px-6 text-sm font-medium border-b-2 transition-colors
-                  ${activeTab === 'accessCodes'
-                    ? 'border-primary-600 text-primary-600 dark:text-primary-400'
-                    : 'border-transparent text-gray-500 hover:text-gray-700 hover:border-gray-300 dark:text-gray-400 dark:hover:text-gray-300'
-                  }
-                `}
-              >
-                Access Codes
-              </button>
-            </nav>
-          </div>
-        )}
       </div>
 
       <div className="px-4 sm:px-6 lg:px-8 py-8">
@@ -594,171 +520,8 @@ function AdminOrganizationsContent() {
           </div>
         )}
 
-        {/* Access Codes Tab Content */}
-        {activeTab === 'accessCodes' && user?.role === UserRole.SYSTEM_ADMIN && (
-          <>
-            {/* Access Code Generation Form */}
-            {showAccessCodeForm && (
-              <div className="bg-white dark:bg-gray-800 rounded-lg shadow-lg p-6 mb-6">
-                <h2 className="text-xl font-bold text-gray-900 dark:text-white mb-4">
-                  Generate New Access Code
-                </h2>
-                <form onSubmit={handleGenerateAccessCode} className="space-y-4">
-                  <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                    <div>
-                      <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">
-                        Role *
-                      </label>
-                      <select
-                        value={accessCodeFormData.role}
-                        onChange={(e) => setAccessCodeFormData({ ...accessCodeFormData, role: e.target.value as UserRole })}
-                        className="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-700 text-gray-900 dark:text-white"
-                      >
-                        <option value="SUPERVISOR">Supervisor</option>
-                        <option value="QA_FOOD_SAFETY">QA Food Safety</option>
-                        <option value="MAINTENANCE_ENGINEERING">Maintenance Engineering</option>
-                        <option value="CI_MANAGER">CI Manager</option>
-                        <option value="SAFETY_SECURITY_MANAGER">Safety & Security Manager</option>
-                        <option value="ADMIN">Admin</option>
-                        <option value="SYSTEM_ADMIN">System Admin</option>
-                      </select>
-                    </div>
-
-                    <div>
-                      <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">
-                        Max Uses *
-                      </label>
-                      <input
-                        type="number"
-                        min="1"
-                        value={accessCodeFormData.maxUses}
-                        onChange={(e) => setAccessCodeFormData({ ...accessCodeFormData, maxUses: parseInt(e.target.value) || 1 })}
-                        className="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-700 text-gray-900 dark:text-white"
-                        placeholder="1000"
-                      />
-                      <p className="mt-1 text-xs text-gray-500 dark:text-gray-400">
-                        Number of times this code can be used
-                      </p>
-                    </div>
-                  </div>
-
-                  <div className="flex gap-2 pt-4">
-                    <button
-                      type="submit"
-                      className="px-4 py-2 bg-primary-600 text-white rounded-lg hover:bg-primary-700 font-medium"
-                    >
-                      Generate Code
-                    </button>
-                    <button
-                      type="button"
-                      onClick={() => setShowAccessCodeForm(false)}
-                      className="px-4 py-2 bg-gray-200 dark:bg-gray-700 text-gray-800 dark:text-gray-200 rounded-lg hover:bg-gray-300 dark:hover:bg-gray-600"
-                    >
-                      Cancel
-                    </button>
-                  </div>
-                </form>
-              </div>
-            )}
-
-            {/* Access Codes List */}
-            <div className="bg-white dark:bg-gray-800 rounded-lg shadow">
-              {loadingAccessCodes ? (
-                <div className="flex items-center justify-center py-12">
-                  <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-primary-600"></div>
-                </div>
-              ) : accessCodes.length === 0 ? (
-                <div className="text-center py-12">
-                  <svg className="mx-auto h-12 w-12 text-gray-400" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 7a2 2 0 012 2m4 0a6 6 0 01-7.743 5.743L11 17H9v2H7v2H4a1 1 0 01-1-1v-2.586a1 1 0 01.293-.707l5.964-5.964A6 6 0 1121 9z" />
-                  </svg>
-                  <h3 className="mt-2 text-sm font-medium text-gray-900 dark:text-white">No access codes</h3>
-                  <p className="mt-1 text-sm text-gray-500 dark:text-gray-400">Get started by generating a new access code.</p>
-                </div>
-              ) : (
-                <div className="overflow-x-auto">
-                  <table className="w-full">
-                    <thead className="bg-gray-50 dark:bg-gray-700">
-                      <tr>
-                        <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 dark:text-gray-300 uppercase tracking-wider">
-                          Code
-                        </th>
-                        <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 dark:text-gray-300 uppercase tracking-wider">
-                          Role
-                        </th>
-                        <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 dark:text-gray-300 uppercase tracking-wider">
-                          Usage
-                        </th>
-                        <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 dark:text-gray-300 uppercase tracking-wider">
-                          Status
-                        </th>
-                        <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 dark:text-gray-300 uppercase tracking-wider">
-                          Created
-                        </th>
-                        <th className="px-6 py-3 text-right text-xs font-medium text-gray-500 dark:text-gray-300 uppercase tracking-wider">
-                          Actions
-                        </th>
-                      </tr>
-                    </thead>
-                    <tbody className="divide-y divide-gray-200 dark:divide-gray-700">
-                      {accessCodes.map((accessCode) => (
-                        <tr key={accessCode.id} className="hover:bg-gray-50 dark:hover:bg-gray-700/50">
-                          <td className="px-6 py-4 whitespace-nowrap">
-                            <span className="font-mono text-lg font-semibold text-gray-900 dark:text-white tracking-wider">
-                              {accessCode.code}
-                            </span>
-                          </td>
-                          <td className="px-6 py-4 whitespace-nowrap">
-                            <span className="inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium bg-blue-100 text-blue-800 dark:bg-blue-900/30 dark:text-blue-300">
-                              {accessCode.role.replace(/_/g, ' ')}
-                            </span>
-                          </td>
-                          <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-600 dark:text-gray-300">
-                            {accessCode.usedCount} / {accessCode.maxUses}
-                          </td>
-                          <td className="px-6 py-4 whitespace-nowrap">
-                            {accessCode.isActive ? (
-                              <span className="inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium bg-green-100 text-green-800 dark:bg-green-900/30 dark:text-green-300">
-                                Active
-                              </span>
-                            ) : (
-                              <span className="inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium bg-red-100 text-red-800 dark:bg-red-900/30 dark:text-red-300">
-                                Inactive
-                              </span>
-                            )}
-                          </td>
-                          <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-600 dark:text-gray-300">
-                            {formatDate(accessCode.createdAt)}
-                          </td>
-                          <td className="px-6 py-4 whitespace-nowrap text-right text-sm font-medium">
-                            <button
-                              onClick={() => handleToggleAccessCode(accessCode.id)}
-                              className="text-primary-600 hover:text-primary-900 dark:text-primary-400 mr-4"
-                            >
-                              {accessCode.isActive ? 'Deactivate' : 'Activate'}
-                            </button>
-                            <button
-                              onClick={() => handleDeleteAccessCode(accessCode.id)}
-                              className="text-red-600 hover:text-red-900 dark:text-red-400"
-                            >
-                              Delete
-                            </button>
-                          </td>
-                        </tr>
-                      ))}
-                    </tbody>
-                  </table>
-                </div>
-              )}
-            </div>
-          </>
-        )}
-
-        {/* Organizations Tab Content */}
-        {activeTab === 'organizations' && (
-          <>
-            {/* Form */}
-            {showForm && (canCreateOrg || editingId) && (
+        {/* Form */}
+        {showForm && (canCreateOrg || editingId) && (
           <div className="bg-white dark:bg-gray-800 rounded-lg shadow-lg p-6 mb-6">
             <h2 className="text-xl font-bold text-gray-900 dark:text-white mb-4">
               {editingId ? 'Edit Organization' : 'New Organization'}
@@ -810,149 +573,90 @@ function AdminOrganizationsContent() {
                 </div>
               </div>
 
-              {/* Role-Specific Access Codes Section - Only show when editing */}
+              {/* Invite Team Members Section - Only show when editing */}
               {editingId && (
                 <div className="border border-gray-200 dark:border-gray-600 rounded-lg p-4 mt-4">
                   <div className="flex items-center justify-between mb-4">
                     <div>
                       <h3 className="text-lg font-semibold text-gray-900 dark:text-white">
-                        Role-Specific Access Codes
+                        Invite Team Members
                       </h3>
                       <p className="text-xs text-gray-500 dark:text-gray-400 mt-1">
-                        Generate unique 6-digit codes for each role. Users joining with a code will be automatically assigned that role.
+                        Send email invitations to add users to your organization. Each user receives a secure link to register.
                       </p>
                     </div>
                     <button
                       type="button"
-                      onClick={() => setShowOrgAccessCodeForm(!showOrgAccessCodeForm)}
-                      className="px-3 py-1.5 bg-primary-600 text-white text-sm rounded-lg hover:bg-primary-700"
+                      onClick={() => setShowInviteModal(true)}
+                      className="px-3 py-1.5 bg-primary-600 text-white text-sm rounded-lg hover:bg-primary-700 flex items-center gap-1.5"
                     >
-                      + Generate Code
+                      <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M16 12a4 4 0 10-8 0 4 4 0 008 0zm0 0v1.5a2.5 2.5 0 005 0V12a9 9 0 10-9 9m4.5-1.206a8.959 8.959 0 01-4.5 1.207" />
+                      </svg>
+                      Invite User
                     </button>
                   </div>
 
-                  {/* Generate New Code Form */}
-                  {showOrgAccessCodeForm && (
-                    <div className="bg-gray-50 dark:bg-gray-700/50 rounded-lg p-4 mb-4">
-                      <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
-                        <div>
-                          <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">
-                            Role *
-                          </label>
-                          <select
-                            value={orgAccessCodeFormData.role}
-                            onChange={(e) => setOrgAccessCodeFormData({ ...orgAccessCodeFormData, role: e.target.value })}
-                            className="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-700 text-gray-900 dark:text-white text-sm"
-                          >
-                            {ORG_ACCESS_CODE_ROLES.map((r) => (
-                              <option key={r.value} value={r.value}>{r.label}</option>
-                            ))}
-                          </select>
-                        </div>
-                        <div>
-                          <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">
-                            Max Uses
-                          </label>
-                          <input
-                            type="number"
-                            min="1"
-                            value={orgAccessCodeFormData.maxUses}
-                            onChange={(e) => setOrgAccessCodeFormData({ ...orgAccessCodeFormData, maxUses: parseInt(e.target.value) || 1 })}
-                            className="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-700 text-gray-900 dark:text-white text-sm"
-                          />
-                        </div>
-                        <div className="flex items-end gap-2">
-                          <button
-                            type="button"
-                            onClick={handleGenerateOrgAccessCode}
-                            className="px-4 py-2 bg-green-600 text-white rounded-lg hover:bg-green-700 text-sm"
-                          >
-                            Generate
-                          </button>
-                          <button
-                            type="button"
-                            onClick={() => setShowOrgAccessCodeForm(false)}
-                            className="px-4 py-2 bg-gray-200 dark:bg-gray-600 text-gray-700 dark:text-gray-200 rounded-lg hover:bg-gray-300 dark:hover:bg-gray-500 text-sm"
-                          >
-                            Cancel
-                          </button>
-                        </div>
-                      </div>
-                    </div>
-                  )}
-
-                  {/* Access Codes List */}
-                  {loadingOrgAccessCodes ? (
+                  {/* Recent Invitations Preview */}
+                  {loadingInvitations ? (
                     <div className="flex items-center justify-center py-6">
                       <div className="animate-spin rounded-full h-6 w-6 border-b-2 border-primary-600"></div>
                     </div>
-                  ) : orgAccessCodes.length === 0 ? (
+                  ) : orgInvitations.length === 0 ? (
                     <div className="text-center py-6 text-gray-500 dark:text-gray-400">
                       <svg className="mx-auto h-8 w-8 text-gray-400 mb-2" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 7a2 2 0 012 2m4 0a6 6 0 01-7.743 5.743L11 17H9v2H7v2H4a1 1 0 01-1-1v-2.586a1 1 0 01.293-.707l5.964-5.964A6 6 0 1121 9z" />
+                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M3 8l7.89 5.26a2 2 0 002.22 0L21 8M5 19h14a2 2 0 002-2V7a2 2 0 00-2-2H5a2 2 0 00-2 2v10a2 2 0 002 2z" />
                       </svg>
-                      <p className="text-sm">No access codes generated yet</p>
-                      <p className="text-xs mt-1">Click &quot;Generate Code&quot; to create role-specific access codes</p>
+                      <p className="text-sm">No invitations sent yet</p>
+                      <p className="text-xs mt-1">Click &quot;Invite User&quot; to send email invitations to your team</p>
                     </div>
                   ) : (
-                    <div className="overflow-x-auto">
-                      <table className="w-full text-sm">
-                        <thead className="bg-gray-100 dark:bg-gray-700">
-                          <tr>
-                            <th className="px-3 py-2 text-left text-xs font-medium text-gray-500 dark:text-gray-300 uppercase">Code</th>
-                            <th className="px-3 py-2 text-left text-xs font-medium text-gray-500 dark:text-gray-300 uppercase">Role</th>
-                            <th className="px-3 py-2 text-left text-xs font-medium text-gray-500 dark:text-gray-300 uppercase">Usage</th>
-                            <th className="px-3 py-2 text-left text-xs font-medium text-gray-500 dark:text-gray-300 uppercase">Status</th>
-                            <th className="px-3 py-2 text-right text-xs font-medium text-gray-500 dark:text-gray-300 uppercase">Actions</th>
-                          </tr>
-                        </thead>
-                        <tbody className="divide-y divide-gray-200 dark:divide-gray-600">
-                          {orgAccessCodes.map((code) => (
-                            <tr key={code.id} className="hover:bg-gray-50 dark:hover:bg-gray-700/30">
-                              <td className="px-3 py-2">
-                                <span className="font-mono font-semibold text-gray-900 dark:text-white tracking-wider">
-                                  {code.code}
-                                </span>
-                              </td>
-                              <td className="px-3 py-2">
-                                <span className="inline-flex items-center px-2 py-0.5 rounded-full text-xs font-medium bg-blue-100 text-blue-800 dark:bg-blue-900/30 dark:text-blue-300">
-                                  {ORG_ACCESS_CODE_ROLES.find(r => r.value === code.role)?.label || code.role.replace(/_/g, ' ')}
-                                </span>
-                              </td>
-                              <td className="px-3 py-2 text-gray-600 dark:text-gray-300">
-                                {code.usedCount} / {code.maxUses}
-                              </td>
-                              <td className="px-3 py-2">
-                                {code.isActive ? (
-                                  <span className="inline-flex items-center px-2 py-0.5 rounded-full text-xs font-medium bg-green-100 text-green-800 dark:bg-green-900/30 dark:text-green-300">
-                                    Active
-                                  </span>
-                                ) : (
-                                  <span className="inline-flex items-center px-2 py-0.5 rounded-full text-xs font-medium bg-red-100 text-red-800 dark:bg-red-900/30 dark:text-red-300">
-                                    Inactive
-                                  </span>
-                                )}
-                              </td>
-                              <td className="px-3 py-2 text-right">
-                                <button
-                                  type="button"
-                                  onClick={() => handleToggleOrgAccessCode(code.id)}
-                                  className="text-primary-600 hover:text-primary-900 dark:text-primary-400 mr-3 text-xs"
-                                >
-                                  {code.isActive ? 'Deactivate' : 'Activate'}
-                                </button>
-                                <button
-                                  type="button"
-                                  onClick={() => handleDeleteOrgAccessCode(code.id)}
-                                  className="text-red-600 hover:text-red-900 dark:text-red-400 text-xs"
-                                >
-                                  Delete
-                                </button>
-                              </td>
+                    <div className="space-y-2">
+                      <div className="overflow-x-auto">
+                        <table className="w-full text-sm">
+                          <thead className="bg-gray-100 dark:bg-gray-700">
+                            <tr>
+                              <th className="px-3 py-2 text-left text-xs font-medium text-gray-500 dark:text-gray-300 uppercase">Email</th>
+                              <th className="px-3 py-2 text-left text-xs font-medium text-gray-500 dark:text-gray-300 uppercase">Role</th>
+                              <th className="px-3 py-2 text-left text-xs font-medium text-gray-500 dark:text-gray-300 uppercase">Status</th>
+                              <th className="px-3 py-2 text-left text-xs font-medium text-gray-500 dark:text-gray-300 uppercase">Sent</th>
                             </tr>
-                          ))}
-                        </tbody>
-                      </table>
+                          </thead>
+                          <tbody className="divide-y divide-gray-200 dark:divide-gray-600">
+                            {orgInvitations.map((inv) => (
+                              <tr key={inv.id} className="hover:bg-gray-50 dark:hover:bg-gray-700/30">
+                                <td className="px-3 py-2 text-gray-900 dark:text-white">{inv.email}</td>
+                                <td className="px-3 py-2">
+                                  <span className="inline-flex items-center px-2 py-0.5 rounded-full text-xs font-medium bg-blue-100 text-blue-800 dark:bg-blue-900/30 dark:text-blue-300">
+                                    {inv.role.replace(/_/g, ' ')}
+                                  </span>
+                                </td>
+                                <td className="px-3 py-2">
+                                  <span className={`inline-flex items-center px-2 py-0.5 rounded-full text-xs font-medium ${
+                                    inv.status === 'PENDING' ? 'bg-yellow-100 text-yellow-800 dark:bg-yellow-900/30 dark:text-yellow-300' :
+                                    inv.status === 'ACCEPTED' ? 'bg-green-100 text-green-800 dark:bg-green-900/30 dark:text-green-300' :
+                                    inv.status === 'EXPIRED' ? 'bg-gray-100 text-gray-800 dark:bg-gray-700 dark:text-gray-300' :
+                                    'bg-red-100 text-red-800 dark:bg-red-900/30 dark:text-red-300'
+                                  }`}>
+                                    {inv.status}
+                                  </span>
+                                </td>
+                                <td className="px-3 py-2 text-gray-600 dark:text-gray-300 text-xs">
+                                  {formatDate(inv.createdAt)}
+                                </td>
+                              </tr>
+                            ))}
+                          </tbody>
+                        </table>
+                      </div>
+                      <div className="text-right pt-2">
+                        <Link
+                          href="/admin/invitations"
+                          className="text-sm text-primary-600 hover:text-primary-700 dark:text-primary-400 dark:hover:text-primary-300 font-medium"
+                        >
+                          View all invitations →
+                        </Link>
+                      </div>
                     </div>
                   )}
                 </div>
@@ -970,7 +674,7 @@ function AdminOrganizationsContent() {
                   onClick={() => {
                     setShowForm(false);
                     setEditingId(null);
-                    setOrgAccessCodes([]);
+                    setOrgInvitations([]);
                   }}
                   className="px-4 py-2 bg-gray-200 dark:bg-gray-700 text-gray-800 dark:text-gray-200 rounded-lg hover:bg-gray-300 dark:hover:bg-gray-600"
                 >
@@ -1097,8 +801,6 @@ function AdminOrganizationsContent() {
             </table>
           </div>
         </div>
-          </>
-        )}
       </div>
     </div>
   );
