@@ -151,7 +151,7 @@ export async function sendEmailNotification(email: EmailNotification) {
 
   try {
     const { data, error } = await resend.emails.send({
-      from: process.env.EMAIL_FROM || 'DashMet RCA <onboarding@resend.dev>',
+      from: process.env.EMAIL_FROM || 'DashMet RCA <noreply@dashmet.com>',
       to: email.to,
       subject: email.subject,
       text: email.body,

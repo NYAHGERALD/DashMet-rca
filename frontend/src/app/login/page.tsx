@@ -7,7 +7,6 @@ import Link from 'next/link';
 import Image from 'next/image';
 import {
   signInWithEmailAndPassword,
-  createUserWithEmailAndPassword,
   signInWithPopup,
   sendPasswordResetEmail,
   fetchSignInMethodsForEmail,
@@ -183,7 +182,7 @@ export default function LoginPage() {
         setMessage('Please enter your password to complete your profile setup.');
         setStep('password');
       } else {
-        // User doesn't exist in Firebase - show registration
+        // User doesn't exist — invitation required (self-registration disabled)
         setStep('register');
       }
     } catch (err: any) {
@@ -263,39 +262,7 @@ export default function LoginPage() {
 
 
 
-  const handleRegister = async (e: React.FormEvent) => {
-    e.preventDefault();
-    setLoading(true);
-    setError('');
-
-    if (password !== confirmPassword) {
-      setError('Passwords do not match');
-      setLoading(false);
-      return;
-    }
-
-    if (password.length < 6) {
-      setError('Password must be at least 6 characters');
-      setLoading(false);
-      return;
-    }
-
-    try {
-      await createUserWithEmailAndPassword(auth, email, password);
-      router.push('/profile-setup');
-    } catch (err: any) {
-      if (err.code === 'auth/email-already-in-use') {
-        setNeedsProfileSetup(true);
-        setMessage('This email is already registered. Please enter your password to complete your profile setup.');
-        setError('');
-        setStep('password');
-      } else {
-        setError(getFirebaseErrorMessage(err, 'Registration failed. Please try again.'));
-      }
-    } finally {
-      setLoading(false);
-    }
-  };
+  // Self-registration is disabled — users must be invited by an organization admin
 
   const handleGoogleLogin = async () => {
     setLoading(true);
@@ -488,7 +455,7 @@ export default function LoginPage() {
             <p className="text-sm sm:text-base text-gray-300">
               Enterprise Root Cause Analysis Platform
             </p>
-            <p className="text-xs text-gray-400 mt-3">Sign in instantly with Google or Microsoft (Work, School, or Personal), or use your email address to login or create a new account.</p>
+            <p className="text-xs text-gray-400 mt-3">Sign in with Google, Microsoft (Work, School, or Personal), or your email. New users must be invited by their organization admin.</p>
           </div>
 
           {error && (
@@ -616,7 +583,7 @@ export default function LoginPage() {
           )}
 
           {step === 'register' && (
-            <form onSubmit={handleRegister} className="space-y-6">
+            <div className="space-y-6">
               <div>
                 <div className="flex items-center justify-between mb-2">
                   <label className="block text-sm font-medium text-gray-200">Email</label>
@@ -624,59 +591,26 @@ export default function LoginPage() {
                 </div>
                 <div className="px-4 py-3 rounded-lg bg-white/5 border border-white/10 text-white">{email}</div>
               </div>
+              <div className="p-4 bg-amber-500/10 border border-amber-500/30 rounded-lg text-sm">
+                <p className="text-amber-200 font-medium mb-1">Invitation Required</p>
+                <p className="text-amber-300/80">This email is not registered. To join DashMet RCA, you need an invitation from your organization administrator.</p>
+              </div>
               <div className="p-4 bg-blue-500/10 border border-blue-500/30 rounded-lg text-sm">
-                <p className="text-blue-200 font-medium mb-1">New Account</p>
-                <p className="text-blue-300/80">This email is not registered. Create a password to continue.</p>
-              </div>
-              <div>
-                <label className="block text-sm font-medium text-gray-200 mb-2">Password</label>
-                <div className="relative">
-                  <input
-                    type={showPassword ? 'text' : 'password'}
-                    value={password}
-                    onChange={(e) => setPassword(e.target.value)}
-                    required
-                    minLength={6}
-                    className="w-full px-4 py-3 pr-12 bg-white/5 border border-white/10 rounded-lg text-white placeholder-gray-400 focus:outline-none focus:ring-2 focus:ring-blue-500/50 focus:border-transparent"
-                    placeholder="Create a password (min 6 characters)"
-                  />
-                  <button
-                    type="button"
-                    onClick={() => setShowPassword(!showPassword)}
-                    className="absolute right-3 top-1/2 -translate-y-1/2 text-gray-400 hover:text-white transition-colors"
-                  >
-                    {showPassword ? <EyeOff className="h-5 w-5" /> : <Eye className="h-5 w-5" />}
-                  </button>
-                </div>
-              </div>
-              <div>
-                <label className="block text-sm font-medium text-gray-200 mb-2">Confirm Password</label>
-                <div className="relative">
-                  <input
-                    type={showConfirmPassword ? 'text' : 'password'}
-                    value={confirmPassword}
-                    onChange={(e) => setConfirmPassword(e.target.value)}
-                    required
-                    className="w-full px-4 py-3 pr-12 bg-white/5 border border-white/10 rounded-lg text-white placeholder-gray-400 focus:outline-none focus:ring-2 focus:ring-blue-500/50 focus:border-transparent"
-                    placeholder="Confirm your password"
-                  />
-                  <button
-                    type="button"
-                    onClick={() => setShowConfirmPassword(!showConfirmPassword)}
-                    className="absolute right-3 top-1/2 -translate-y-1/2 text-gray-400 hover:text-white transition-colors"
-                  >
-                    {showConfirmPassword ? <EyeOff className="h-5 w-5" /> : <Eye className="h-5 w-5" />}
-                  </button>
-                </div>
+                <p className="text-blue-200 font-medium mb-2">How to get started:</p>
+                <ol className="list-decimal list-inside space-y-1.5 text-blue-300/80">
+                  <li>Ask your organization admin to send you an invitation</li>
+                  <li>Check your email for the invitation link</li>
+                  <li>Click the link to create your account</li>
+                </ol>
               </div>
               <button
-                type="submit"
-                disabled={loading}
-                className="w-full px-6 py-3 bg-gradient-to-r from-blue-600 to-blue-500 text-white rounded-lg hover:from-blue-700 hover:to-blue-600 transition-all disabled:opacity-50 disabled:cursor-not-allowed font-medium shadow-lg"
+                type="button"
+                onClick={() => setStep('email')}
+                className="w-full px-6 py-3 bg-gradient-to-r from-blue-600 to-blue-500 text-white rounded-lg hover:from-blue-700 hover:to-blue-600 transition-all font-medium shadow-lg"
               >
-                {loading ? 'Creating Account...' : 'Create Account'}
+                Try a Different Email
               </button>
-            </form>
+            </div>
           )}
         </div>
       </div>
