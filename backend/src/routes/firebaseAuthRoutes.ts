@@ -375,29 +375,34 @@ router.post('/validate-access-code', async (req, res) => {
 });
 
 // Create user profile after Firebase registration (uses Firebase-only auth)
+// SECURITY: Invitation-only registration. The invitationToken determines org, role, and facility.
+// Users cannot self-select their role or organization.
 router.post('/create-profile', authenticateFirebaseOnly, async (req: FirebaseAuthRequest, res) => {
   const { 
     firstName, 
     lastName, 
-    role, 
-    organizationId, 
-    facilityId, 
-    accessCode,
-    orgAccessCodeId,      // For role-specific organization access codes
-    newOrganizationName,  // For ADMIN/SYSTEM_ADMIN to create new org
-    newFacilityName       // For ADMIN/SYSTEM_ADMIN to create new facility
+    invitationToken,     // Required: 64-char hex token from invitation email
+    // Legacy fields kept for backward compatibility but IGNORED when invitationToken is present
+    role: _legacyRole, 
+    organizationId: _legacyOrgId, 
+    facilityId: _legacyFacilityId, 
+    accessCode: _legacyAccessCode,
+    orgAccessCodeId: _legacyOrgAccessCodeId,
+    newOrganizationName: _legacyNewOrgName,
+    newFacilityName: _legacyNewFacilityName
   } = req.body;
   const firebaseUser = req.firebaseUser!;
 
   // Validate required fields
-  if (!firstName || !lastName || !role) {
-    throw new ValidationError('First name, last name, and role are required');
+  if (!firstName || !lastName) {
+    throw new ValidationError('First name and last name are required');
   }
 
-  const isAdminRole = role === 'ADMIN' || role === 'SYSTEM_ADMIN';
+  if (!invitationToken) {
+    throw new ValidationError('Invitation token is required. You must be invited by an organization admin to create an account.');
+  }
 
   // SECURITY: Check if this email is already registered in any organization
-  // One email can only belong to ONE organization
   const existingUserByEmail = await prisma.user.findUnique({
     where: { email: firebaseUser.email },
     select: { id: true, email: true, organizationId: true, Organization: { select: { name: true } } },
@@ -418,134 +423,39 @@ router.post('/create-profile', authenticateFirebaseOnly, async (req: FirebaseAut
     throw new ValidationError('Profile already exists for this user');
   }
 
-  // Validate access code for admin roles
-  if (isAdminRole) {
-    if (!accessCode) {
-      throw new ValidationError('Access code is required for admin roles');
-    }
+  // STEP 1: Validate invitation token
+  const invitation = await prisma.invitation.findUnique({
+    where: { token: invitationToken },
+    include: { Organization: { select: { name: true } } },
+  });
 
-    const validAccessCode = await prisma.accessCode.findFirst({
-      where: {
-        code: accessCode,
-        role: role,
-        isActive: true,
-      },
-    });
-
-    if (!validAccessCode) {
-      throw new ValidationError('Invalid access code for this role');
-    }
-
-    // Check if access code has reached max uses
-    if (validAccessCode.usedCount >= validAccessCode.maxUses) {
-      throw new ValidationError('Access code has reached maximum uses');
-    }
-
-    // Increment usage count
-    await prisma.accessCode.update({
-      where: { id: validAccessCode.id },
-      data: { usedCount: { increment: 1 } },
-    });
+  if (!invitation) {
+    throw new ValidationError('Invalid invitation token');
   }
 
-  let finalOrganizationId: string | null = null;
-
-  // For ADMIN/SYSTEM_ADMIN: Create new organization if name provided
-  if (isAdminRole) {
-    if (newOrganizationName) {
-      // Check for case-insensitive duplicate organization name
-      const existingOrg = await prisma.organization.findFirst({
-        where: {
-          name: {
-            equals: newOrganizationName,
-            mode: 'insensitive',
-          },
-        },
-      });
-
-      if (existingOrg) {
-        throw new ValidationError('An organization with this name already exists');
-      }
-
-      const newOrg = await prisma.organization.create({
-        data: {
-          id: uuidv4(),
-          updatedAt: new Date(),
-          name: newOrganizationName,
-          region: 'USA', // Default region
-          defaultLanguage: 'ENGLISH',
-          isActive: true,
-        },
-      });
-      finalOrganizationId = newOrg.id;
-      console.log('Created new organization');
-
-      // Optionally create facility if name provided
-      if (newFacilityName) {
-        // Check for case-insensitive duplicate facility name
-        const existingFacility = await prisma.facility.findFirst({
-          where: {
-            name: {
-              equals: newFacilityName,
-              mode: 'insensitive',
-            },
-          },
-        });
-
-        if (existingFacility) {
-          throw new ValidationError('A facility with this name already exists');
-        }
-
-        const newFacility = await prisma.facility.create({
-          data: {
-            id: uuidv4(),
-            updatedAt: new Date(),
-            name: newFacilityName,
-            organizationId: newOrg.id,
-            timezone: 'America/New_York', // Default timezone
-          },
-        });
-        console.log('Created new facility');
-      }
-    }
-    // SYSTEM_ADMIN can have null organization, ADMIN requires organization
-    if (role === 'ADMIN' && !finalOrganizationId) {
-      throw new ValidationError('Organization is required for Admin role');
-    }
-  } else {
-    // For non-admin roles: organizationId is required from dropdown selection
-    if (!organizationId) {
-      throw new ValidationError('Organization is required for this role');
-    }
-    finalOrganizationId = organizationId;
-
-    // If a role-specific organization access code was used, increment its usage count
-    if (orgAccessCodeId) {
-      const orgAccessCode = await prisma.organizationAccessCode.findFirst({
-        where: {
-          id: orgAccessCodeId,
-          organizationId: finalOrganizationId ?? undefined,
-          role: role,
-          isActive: true,
-        },
-      });
-
-      if (orgAccessCode) {
-        // Verify the code hasn't exceeded max uses
-        if (orgAccessCode.usedCount >= orgAccessCode.maxUses) {
-          throw new ValidationError('This access code has reached its maximum usage limit');
-        }
-
-        // Increment usage count
-        await prisma.organizationAccessCode.update({
-          where: { id: orgAccessCode.id },
-          data: { usedCount: { increment: 1 } },
-        });
-      }
-    }
+  if (invitation.status !== 'PENDING') {
+    throw new ValidationError(`This invitation has already been ${invitation.status.toLowerCase()}`);
   }
 
-  // Create user profile in PostgreSQL
+  if (invitation.expiresAt < new Date()) {
+    await prisma.invitation.update({
+      where: { id: invitation.id },
+      data: { status: 'EXPIRED' },
+    });
+    throw new ValidationError('This invitation has expired. Please ask your administrator to send a new invitation.');
+  }
+
+  // SECURITY: Verify the invitation email matches the Firebase user's email
+  if (invitation.email.toLowerCase() !== firebaseUser.email.toLowerCase()) {
+    throw new ValidationError('This invitation was sent to a different email address. You must register with the email that was invited.');
+  }
+
+  // Derive role, org, and facility from the invitation — user cannot override
+  const role = invitation.role;
+  const finalOrganizationId = invitation.organizationId;
+  const facilityId = invitation.facilityId;
+
+  // STEP 2: Create user profile in PostgreSQL
   const user = await prisma.user.create({
     data: {
       id: uuidv4(),
@@ -570,6 +480,16 @@ router.post('/create-profile', authenticateFirebaseOnly, async (req: FirebaseAut
       language: true,
       firebaseUid: true,
       profilePicture: true,
+    },
+  });
+
+  // STEP 3: Mark invitation as accepted
+  await prisma.invitation.update({
+    where: { id: invitation.id },
+    data: {
+      status: 'ACCEPTED',
+      acceptedAt: new Date(),
+      acceptedUserId: user.id,
     },
   });
 

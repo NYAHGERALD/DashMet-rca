@@ -147,7 +147,11 @@ router.use('/system-admin-auth', masterKeyRateLimiter, systemAdminAuthRoutes);
 // Support request routes
 router.use('/support', supportRoutes);
 
-// Bakery Metrics routes - PUBLIC, no auth required
+// Invitation-only registration routes
+import invitationRoutes from './invitationRoutes';
+router.use('/invitations', rateLimiter, invitationRoutes);
+
+// Bakery Metrics routes - authenticated (router.use(authenticate) applied in route file)
 // MUST be defined BEFORE root-mounted routes (departmentRoutes/facilityRoutes)
 // which use router.use(authenticate) and would intercept all paths
 import bakeryMetricsRoutes from './bakeryMetricsRoutes';

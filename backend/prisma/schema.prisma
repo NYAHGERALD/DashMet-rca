@@ -1076,6 +1076,9 @@ model Organization {
   // Operations Issue Tracking
   MachineIssue               MachineIssue[]
 
+  // Invitation-only registration
+  Invitations                Invitation[]
+
   @@index([name])
   @@index([signupCode])
 }
@@ -1097,6 +1100,33 @@ model OrganizationAccessCode {
   @@index([code])
   @@index([organizationId])
   @@index([role])
+}
+
+// Invitation-only registration: secure, time-limited invitations
+model Invitation {
+  id             String           @id @default(uuid())
+  token          String           @unique         // 64-char hex (crypto.randomBytes(32))
+  email          String                           // Invited email address
+  role           UserRole                         // Role assigned to invitee
+  organizationId String                           // Organization they're joining
+  facilityId     String?                          // Optional facility assignment
+  status         InvitationStatus @default(PENDING)
+  expiresAt      DateTime                         // 48-hour expiry
+  acceptedAt     DateTime?
+  revokedAt      DateTime?
+  invitedById    String                           // Admin/SystemAdmin who created it
+  acceptedUserId String?                          // User.id after acceptance
+  createdAt      DateTime         @default(now())
+  updatedAt      DateTime         @updatedAt
+
+  Organization   Organization     @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  InvitedBy      User             @relation("InvitationsSent", fields: [invitedById], references: [id])
+  AcceptedUser   User?            @relation("InvitationsAccepted", fields: [acceptedUserId], references: [id])
+
+  @@index([token])
+  @@index([email])
+  @@index([organizationId])
+  @@index([status])
 }
 
 model PolicyDocument {
@@ -1479,6 +1509,8 @@ model User {
   IncidentParticipant_IncidentParticipant_userIdToUser                IncidentParticipant[]                @relation("IncidentParticipant_userIdToUser")
   RecordingsCreated                                                   MeetingRecording[]                   @relation("RecordingRecordedBy")
   OrganizationAccessCode                                              OrganizationAccessCode[]
+  InvitationsSent                                                     Invitation[]                         @relation("InvitationsSent")
+  InvitationsAccepted                                                 Invitation[]                         @relation("InvitationsAccepted")
   PolicyDocument                                                      PolicyDocument[]
   PolicyRevision                                                      PolicyRevision[]
   RCAAnalysis                                                         RCAAnalysis[]
@@ -2146,6 +2178,8 @@ enum InvitationStatus {
   PENDING
   ACCEPTED
   DECLINED
+  EXPIRED
+  REVOKED
 }
 
 enum Language {

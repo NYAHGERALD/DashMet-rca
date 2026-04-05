@@ -20,13 +20,17 @@ const validate = (req: any, res: any, next: any) => {
 
 // Phase 1.1: Authentication Routes
 
-// POST /api/auth/register - Register new user
+// POST /api/auth/register - DISABLED: Registration is now invitation-only via /firebase-auth/create-profile
+// The legacy self-registration endpoint has been disabled for security.
+// Users must be invited by an organization admin and register through the invitation flow.
 router.post(
   '/register',
-  authRateLimiter,
-  validateRegister,
-  validate,
-  asyncHandler(authController.register)
+  (_req: any, res: any) => {
+    res.status(410).json({
+      success: false,
+      error: 'Self-registration is disabled. Please register through an invitation link from your organization administrator.',
+    });
+  }
 );
 
 // POST /api/auth/login - Email/Password login

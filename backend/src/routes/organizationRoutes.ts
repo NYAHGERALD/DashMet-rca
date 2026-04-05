@@ -1,4 +1,5 @@
 import { Router } from 'express';
+import crypto from 'crypto';
 import { authenticate, AuthRequest } from '../middleware/auth';
 import { requireMinimumRole } from '../middleware/rbac';
 import { UserRole } from '@prisma/client';
@@ -666,7 +667,7 @@ router.post('/:id/access-codes', authenticate, requireMinimumRole(UserRole.ADMIN
   const maxAttempts = 10;
 
   while (!isUnique && attempts < maxAttempts) {
-    code = Math.floor(100000 + Math.random() * 900000).toString();
+    code = crypto.randomInt(100000, 999999).toString();
     const existing = await prisma.organizationAccessCode.findUnique({
       where: { code },
     });
