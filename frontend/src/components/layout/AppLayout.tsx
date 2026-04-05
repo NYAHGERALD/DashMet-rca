@@ -50,6 +50,7 @@ import {
   MailOpen,
   FileKey,
   LayoutDashboard,
+  UserPlus,
 } from 'lucide-react';
 
 interface AppLayoutProps {
@@ -362,6 +363,7 @@ export default function AppLayout({ children }: AppLayoutProps) {
               { href: '/admin/shifts', icon: <Clock size={18} strokeWidth={1.8} />, label: t('nav.shifts') },
               { href: '/admin/categories', icon: <Tag size={18} strokeWidth={1.8} />, label: t('nav.categories') },
               { href: '/admin', icon: <UserCog size={18} strokeWidth={1.8} />, label: t('nav.userManagement') },
+              { href: '/admin/invitations', icon: <UserPlus size={18} strokeWidth={1.8} />, label: 'Invitations' },
               { href: '/admin/privileges', icon: <KeyRound size={18} strokeWidth={1.8} />, label: t('nav.privileges') || 'Role Privileges' },
               { href: '/admin/work-order-templates', icon: <ListTodo size={18} strokeWidth={1.8} />, label: 'Work Order Templates' },
               { href: '/admin/enterprise', icon: <Shield size={18} strokeWidth={1.8} />, label: t('nav.enterprise') },
@@ -504,6 +506,7 @@ export default function AppLayout({ children }: AppLayoutProps) {
                     { href: '/admin/shifts', icon: <Clock size={18} strokeWidth={1.8} />, label: t('nav.shifts') },
                     { href: '/admin/categories', icon: <Tag size={18} strokeWidth={1.8} />, label: t('nav.categories') },
                     { href: '/admin', icon: <UserCog size={18} strokeWidth={1.8} />, label: t('nav.userManagement') },
+                    { href: '/admin/invitations', icon: <UserPlus size={18} strokeWidth={1.8} />, label: 'Invitations' },
                     { href: '/admin/privileges', icon: <KeyRound size={18} strokeWidth={1.8} />, label: t('nav.privileges') || 'Role Privileges' },
                     { href: '/admin/work-order-templates', icon: <ListTodo size={18} strokeWidth={1.8} />, label: 'Work Order Templates' },
                     { href: '/admin/enterprise', icon: <Shield size={18} strokeWidth={1.8} />, label: t('nav.enterprise') },
