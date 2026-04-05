@@ -9,6 +9,9 @@ import { requireAdmin } from '../middleware/rbac';
 const router = Router();
 const prisma = new PrismaClient();
 
+// All bakery metrics routes require authentication
+router.use(authenticate);
+
 // ─────────────────────────────────────────────────────────────────────────────
 // GET /api/bakery-metrics/week-options
 // Returns unique week names for the filter dropdown

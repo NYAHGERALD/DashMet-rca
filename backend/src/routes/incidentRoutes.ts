@@ -387,6 +387,7 @@ router.get('/dashboard/stats', async (req: Request, res: Response) => {
 router.get('/:id', asyncHandler(async (req: Request, res: Response) => {
   const { id } = req.params;
   const currentUserId = (req as any).user?.id;
+  const currentUserOrgId = (req as any).user?.organizationId;
 
   const incident = await prisma.incident.findUnique({
     where: { id },
@@ -470,6 +471,11 @@ router.get('/:id', asyncHandler(async (req: Request, res: Response) => {
   });
 
   if (!incident) {
+    throw new ValidationError('Incident not found');
+  }
+
+  // Organization isolation: prevent cross-org access
+  if (incident.organizationId !== currentUserOrgId) {
     throw new ValidationError('Incident not found');
   }
 

@@ -66,26 +66,43 @@ function getEncryptionKeyBuffer(): Buffer {
 
 const ENCRYPTION_KEY_BUFFER = getEncryptionKeyBuffer();
 const IV_LENGTH = 16;
+const AUTH_TAG_LENGTH = 16;
 
 function encrypt(text: string): string {
   if (!text) return text;
   const iv = crypto.randomBytes(IV_LENGTH);
-  const cipher = crypto.createCipheriv('aes-256-cbc', ENCRYPTION_KEY_BUFFER, iv);
+  const cipher = crypto.createCipheriv('aes-256-gcm', ENCRYPTION_KEY_BUFFER, iv);
   let encrypted = cipher.update(text, 'utf8', 'hex');
   encrypted += cipher.final('hex');
-  return iv.toString('hex') + ':' + encrypted;
+  const authTag = cipher.getAuthTag().toString('hex');
+  // Format: iv:authTag:encryptedData (3-part = GCM)
+  return iv.toString('hex') + ':' + authTag + ':' + encrypted;
 }
 
 function decrypt(text: string): string {
   if (!text || !text.includes(':')) return text;
   try {
     const parts = text.split(':');
-    const iv = Buffer.from(parts[0], 'hex');
-    const encryptedText = parts[1];
-    const decipher = crypto.createDecipheriv('aes-256-cbc', ENCRYPTION_KEY_BUFFER, iv);
-    let decrypted = decipher.update(encryptedText, 'hex', 'utf8');
-    decrypted += decipher.final('utf8');
-    return decrypted;
+    if (parts.length === 3) {
+      // GCM format: iv:authTag:encryptedData
+      const iv = Buffer.from(parts[0], 'hex');
+      const authTag = Buffer.from(parts[1], 'hex');
+      const encryptedText = parts[2];
+      const decipher = crypto.createDecipheriv('aes-256-gcm', ENCRYPTION_KEY_BUFFER, iv);
+      decipher.setAuthTag(authTag);
+      let decrypted = decipher.update(encryptedText, 'hex', 'utf8');
+      decrypted += decipher.final('utf8');
+      return decrypted;
+    } else if (parts.length === 2) {
+      // Legacy CBC format: iv:encryptedData — read-only backward compat
+      const iv = Buffer.from(parts[0], 'hex');
+      const encryptedText = parts[1];
+      const decipher = crypto.createDecipheriv('aes-256-cbc', ENCRYPTION_KEY_BUFFER, iv);
+      let decrypted = decipher.update(encryptedText, 'hex', 'utf8');
+      decrypted += decipher.final('utf8');
+      return decrypted;
+    }
+    return text;
   } catch {
     return text; // Return original if decryption fails
   }

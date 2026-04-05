@@ -92,10 +92,14 @@ export async function updateDailyTask(id: string, userId: string, data: Partial<
   thursday: boolean; friday: boolean; saturday: boolean; sunday: boolean;
   sortOrder: number; isActive: boolean;
 }>) {
+  const existing = await prisma.lswDailyTask.findFirst({ where: { id, userId } });
+  if (!existing) throw new Error('Daily task not found or access denied');
   return prisma.lswDailyTask.update({ where: { id }, data });
 }
 
 export async function deleteDailyTask(id: string, userId: string) {
+  const existing = await prisma.lswDailyTask.findFirst({ where: { id, userId } });
+  if (!existing) throw new Error('Daily task not found or access denied');
   return prisma.lswDailyTask.update({ where: { id }, data: { isActive: false } });
 }
 
@@ -140,6 +144,8 @@ export async function updateTodoItem(id: string, userId: string, data: Partial<{
   task: string; completed: boolean; completedAt: Date | null; dueDate: string;
   sortOrder: number; isActive: boolean;
 }>) {
+  const existing = await prisma.lswTodoItem.findFirst({ where: { id, userId } });
+  if (!existing) throw new Error('Todo item not found or access denied');
   // Auto-set completedAt when toggling completed
   if (data.completed === true && !data.completedAt) {
     data.completedAt = new Date();
@@ -150,6 +156,8 @@ export async function updateTodoItem(id: string, userId: string, data: Partial<{
 }
 
 export async function deleteTodoItem(id: string, userId: string) {
+  const existing = await prisma.lswTodoItem.findFirst({ where: { id, userId } });
+  if (!existing) throw new Error('Todo item not found or access denied');
   return prisma.lswTodoItem.update({ where: { id }, data: { isActive: false } });
 }
 
@@ -234,12 +242,16 @@ export async function updateFrequencyTask(id: string, userId: string, data: Part
   task: string; minutes: number; dueDate: string;
   frequency: LswFrequency; sortOrder: number; isActive: boolean;
 }>) {
+  const existing = await prisma.lswFrequencyTask.findFirst({ where: { id, userId } });
+  if (!existing) throw new Error('Frequency task not found or access denied');
   const updateData: any = { ...data };
   if (data.dueDate) updateData.dueDate = new Date(data.dueDate);
   return prisma.lswFrequencyTask.update({ where: { id }, data: updateData });
 }
 
 export async function deleteFrequencyTask(id: string, userId: string) {
+  const existing = await prisma.lswFrequencyTask.findFirst({ where: { id, userId } });
+  if (!existing) throw new Error('Frequency task not found or access denied');
   return prisma.lswFrequencyTask.update({ where: { id }, data: { isActive: false } });
 }
 
@@ -288,6 +300,8 @@ export async function updateProject(id: string, userId: string, data: Partial<{
   defaultUpdateCellColor: string; defaultUpdateCellColorIntensity: number;
   sortOrder: number; isActive: boolean;
 }>) {
+  const existing = await prisma.lswProject.findFirst({ where: { id, userId } });
+  if (!existing) throw new Error('Project not found or access denied');
   return prisma.lswProject.update({
     where: { id },
     data,
@@ -296,6 +310,8 @@ export async function updateProject(id: string, userId: string, data: Partial<{
 }
 
 export async function deleteProject(id: string, userId: string) {
+  const existing = await prisma.lswProject.findFirst({ where: { id, userId } });
+  if (!existing) throw new Error('Project not found or access denied');
   return prisma.lswProject.update({
     where: { id },
     data: { isActive: false },
@@ -359,6 +375,8 @@ export async function updateMeetingRail(id: string, userId: string, data: Partia
   rail: string; dueDate: string; completed: boolean; completedAt: Date | null;
   sortOrder: number; isActive: boolean;
 }>) {
+  const existing = await prisma.lswMeetingRail.findFirst({ where: { id, userId } });
+  if (!existing) throw new Error('Meeting rail not found or access denied');
   const updateData: any = { ...data };
   if (data.dueDate) updateData.dueDate = new Date(data.dueDate);
   if (data.completed === true && !data.completedAt) {
@@ -370,6 +388,8 @@ export async function updateMeetingRail(id: string, userId: string, data: Partia
 }
 
 export async function deleteMeetingRail(id: string, userId: string) {
+  const existing = await prisma.lswMeetingRail.findFirst({ where: { id, userId } });
+  if (!existing) throw new Error('Meeting rail not found or access denied');
   return prisma.lswMeetingRail.update({ where: { id }, data: { isActive: false } });
 }
 
@@ -401,6 +421,8 @@ export async function updateFollowUp(id: string, userId: string, data: Partial<{
   comments: string; completed: boolean; completedAt: Date | null;
   sortOrder: number; isActive: boolean;
 }>) {
+  const existing = await prisma.lswFollowUp.findFirst({ where: { id, userId } });
+  if (!existing) throw new Error('Follow-up not found or access denied');
   const updateData: any = { ...data };
   if (data.dueDate) updateData.dueDate = new Date(data.dueDate);
   if (data.completed === true && !data.completedAt) {
@@ -416,6 +438,8 @@ export async function updateFollowUp(id: string, userId: string, data: Partial<{
 }
 
 export async function deleteFollowUp(id: string, userId: string) {
+  const existing = await prisma.lswFollowUp.findFirst({ where: { id, userId } });
+  if (!existing) throw new Error('Follow-up not found or access denied');
   return prisma.lswFollowUp.update({ where: { id }, data: { isActive: false } });
 }
 
@@ -498,12 +522,16 @@ export async function updatePersonalGoal(id: string, userId: string, data: Parti
   objective: string; dueDate: string; progress: number;
   sortOrder: number; isActive: boolean;
 }>) {
+  const existing = await prisma.lswPersonalGoal.findFirst({ where: { id, userId } });
+  if (!existing) throw new Error('Personal goal not found or access denied');
   const updateData: any = { ...data };
   if (data.dueDate) updateData.dueDate = new Date(data.dueDate);
   return prisma.lswPersonalGoal.update({ where: { id }, data: updateData });
 }
 
 export async function deletePersonalGoal(id: string, userId: string) {
+  const existing = await prisma.lswPersonalGoal.findFirst({ where: { id, userId } });
+  if (!existing) throw new Error('Personal goal not found or access denied');
   return prisma.lswPersonalGoal.update({ where: { id }, data: { isActive: false } });
 }
 
@@ -533,6 +561,8 @@ export async function updateRcaTrigger(id: string, userId: string, data: Partial
   trigger: string; eventDate: string | null; comments: string;
   sortOrder: number; isActive: boolean;
 }>) {
+  const existing = await prisma.lswRcaTrigger.findFirst({ where: { id, userId } });
+  if (!existing) throw new Error('RCA trigger not found or access denied');
   const updateData: any = { ...data };
   if (data.eventDate !== undefined) {
     updateData.eventDate = data.eventDate ? new Date(data.eventDate) : null;
@@ -541,6 +571,8 @@ export async function updateRcaTrigger(id: string, userId: string, data: Partial
 }
 
 export async function deleteRcaTrigger(id: string, userId: string) {
+  const existing = await prisma.lswRcaTrigger.findFirst({ where: { id, userId } });
+  if (!existing) throw new Error('RCA trigger not found or access denied');
   return prisma.lswRcaTrigger.update({ where: { id }, data: { isActive: false } });
 }
 
