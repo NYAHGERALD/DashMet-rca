@@ -25,9 +25,13 @@
 import { Router, Request, Response } from 'express';
 import { Prisma } from '@prisma/client';
 import { prisma } from '../utils/prisma';
+import { authenticateFirebaseOnly } from '../middleware/auth';
 import crypto from 'crypto';
 
 const router = Router();
+
+// All conflict case routes require Firebase authentication
+router.use(authenticateFirebaseOnly);
 
 // ============================================================================
 // ENCRYPTION UTILITIES

@@ -6,6 +6,7 @@
  */
 
 import { Router } from 'express';
+import { authenticateFirebaseOnly } from '../middleware/auth';
 import {
   getCurrentPolicy,
   createPolicy,
@@ -19,6 +20,9 @@ import {
 } from '../controllers/consentController';
 
 const router = Router();
+
+// All consent routes require Firebase authentication
+router.use(authenticateFirebaseOnly);
 
 // ===========================================
 // CONSENT POLICY ROUTES

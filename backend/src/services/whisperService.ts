@@ -13,10 +13,10 @@ import OpenAI from 'openai';
 import fs from 'fs';
 import path from 'path';
 import os from 'os';
-import { exec } from 'child_process';
+import { execFile } from 'child_process';
 import { promisify } from 'util';
 
-const execAsync = promisify(exec);
+const execFileAsync = promisify(execFile);
 
 // Initialize OpenAI client with extended timeout for long audio
 const openai = new OpenAI({
@@ -114,9 +114,12 @@ function getMeetingPrompt(meetingType?: string, previousContext?: string): strin
  */
 async function getAudioDuration(filePath: string): Promise<number> {
   try {
-    const { stdout } = await execAsync(
-      `ffprobe -v error -show_entries format=duration -of default=noprint_wrappers=1:nokey=1 "${filePath}"`
-    );
+    const { stdout } = await execFileAsync('ffprobe', [
+      '-v', 'error',
+      '-show_entries', 'format=duration',
+      '-of', 'default=noprint_wrappers=1:nokey=1',
+      filePath
+    ]);
     return parseFloat(stdout.trim());
   } catch {
     // Estimate based on file size (rough approximation for m4a ~128kbps)
@@ -152,9 +155,13 @@ async function splitAudioFile(
     const chunkPath = path.join(outputDir, `chunk_${i.toString().padStart(3, '0')}.m4a`);
     
     try {
-      await execAsync(
-        `ffmpeg -y -i "${inputPath}" -ss ${startTime} -t ${chunkDurationSeconds} -c copy "${chunkPath}" 2>/dev/null`
-      );
+      await execFileAsync('ffmpeg', [
+        '-y', '-i', inputPath,
+        '-ss', String(startTime),
+        '-t', String(chunkDurationSeconds),
+        '-c', 'copy',
+        chunkPath
+      ]);
       
       if (fs.existsSync(chunkPath) && fs.statSync(chunkPath).size > 0) {
         chunkPaths.push(chunkPath);

@@ -12,9 +12,13 @@
 
 import { Router, Request, Response } from 'express';
 import { PrismaClient } from '@prisma/client';
+import { authenticateFirebaseOnly } from '../middleware/auth';
 
 const router = Router();
 const prisma = new PrismaClient();
+
+// All dashboard routes require Firebase authentication
+router.use(authenticateFirebaseOnly);
 
 /**
  * GET /api/mobile/dashboard/stats

@@ -96,7 +96,7 @@ router.use('/mobile/tasks', authenticate, taskRoutes);
 // Mobile App Meeting routes - Firebase auth required
 router.use('/mobile/meetings', authenticate, meetingRoutes);
 
-// Consent & Compliance routes - PUBLIC for iOS app
+// Consent & Compliance routes - Firebase auth required (enforced in route file)
 // Recording consent, policy management, audit logs
 router.use('/consent', rateLimiter, consentRoutes);
 
@@ -118,11 +118,11 @@ router.use('/action-generation', aiRateLimiter, actionGenerationRoutes);
 // AI-powered policy parsing - AI rate limited
 router.use('/policy-parsing', aiRateLimiter, policyParsingRoutes);
 
-// Conflict Case CRUD routes - PUBLIC for iOS app
+// Conflict Case CRUD routes - Firebase auth required (enforced in route file)
 // Full CRUD for conflict cases with encryption
 router.use('/conflict-cases', rateLimiter, conflictCaseRoutes);
 
-// Dashboard routes - PUBLIC for iOS app
+// Dashboard routes - Firebase auth required (enforced in route file)
 // Aggregated dashboard statistics and activity feed
 router.use('/mobile/dashboard', rateLimiter, dashboardRoutes);
 
