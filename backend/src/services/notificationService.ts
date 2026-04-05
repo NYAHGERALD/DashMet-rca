@@ -3,7 +3,7 @@
 
 import { prisma } from '../utils/prisma';
 import { NotificationType } from '@prisma/client';
-import nodemailer from 'nodemailer';
+import { Resend } from 'resend';
 import { v4 as uuidv4 } from 'uuid';
 
 interface NotificationData {
@@ -21,22 +21,12 @@ interface EmailNotification {
   html?: string;
 }
 
-// Email transporter configuration (use environment variables in production)
-const createEmailTransporter = () => {
-  // Check if email is configured
-  if (!process.env.SMTP_HOST || !process.env.SMTP_USER) {
+// Resend email client (REST API — no SMTP/port issues)
+const getResendClient = (): Resend | null => {
+  if (!process.env.RESEND_API_KEY) {
     return null;
   }
-
-  return nodemailer.createTransport({
-    host: process.env.SMTP_HOST,
-    port: parseInt(process.env.SMTP_PORT || '587'),
-    secure: process.env.SMTP_SECURE === 'true',
-    auth: {
-      user: process.env.SMTP_USER,
-      pass: process.env.SMTP_PASS,
-    },
-  });
+  return new Resend(process.env.RESEND_API_KEY);
 };
 
 /**
@@ -149,26 +139,31 @@ export async function deleteNotification(notificationId: string, userId: string)
 }
 
 /**
- * Send email notification
+ * Send email notification via Resend (HTTPS REST API)
  */
 export async function sendEmailNotification(email: EmailNotification) {
-  const transporter = createEmailTransporter();
+  const resend = getResendClient();
   
-  if (!transporter) {
-    console.log('Email not configured - skipping email notification');
+  if (!resend) {
+    console.log('Email not configured - set RESEND_API_KEY to enable');
     return { success: false, reason: 'Email not configured' };
   }
 
   try {
-    const result = await transporter.sendMail({
-      from: process.env.SMTP_FROM || 'noreply@dashmet-rca.com',
+    const { data, error } = await resend.emails.send({
+      from: process.env.EMAIL_FROM || 'DashMet RCA <onboarding@resend.dev>',
       to: email.to,
       subject: email.subject,
       text: email.body,
       html: email.html,
     });
 
-    return { success: true, messageId: result.messageId };
+    if (error) {
+      console.error('Failed to send email:', error.message);
+      return { success: false, reason: error.message };
+    }
+
+    return { success: true, messageId: data?.id };
   } catch (error: any) {
     console.error('Failed to send email:', error.message);
     return { success: false, reason: error.message };
