@@ -6,7 +6,6 @@ import { useState, useEffect, Suspense } from 'react';
 import { Shield, Mail, ArrowLeft, CheckCircle2, Lock } from 'lucide-react';
 import { sendPasswordResetEmail } from 'firebase/auth';
 import { auth } from '@/lib/firebase';
-import api from '@/lib/api';
 import { getFirebaseErrorMessage } from '@/lib/firebaseErrors';
 
 function AccountLockedContent() {
@@ -17,7 +16,6 @@ function AccountLockedContent() {
   const [email] = useState(emailParam);
   const [resetEmailSent, setResetEmailSent] = useState(false);
   const [resetInProgress, setResetInProgress] = useState(false);
-  const [unlocking, setUnlocking] = useState(false);
   const [error, setError] = useState('');
   const [message, setMessage] = useState('');
 
@@ -40,21 +38,6 @@ function AccountLockedContent() {
       setError(getFirebaseErrorMessage(err, 'Failed to send password reset email. Please try again.'));
     } finally {
       setResetInProgress(false);
-    }
-  };
-
-  const handleUnlockAndRetry = async () => {
-    setUnlocking(true);
-    setError('');
-
-    try {
-      await api.post('/firebase-auth/confirm-password-reset', { email });
-      // Account re-enabled — redirect to login with success message
-      router.replace('/login?unlocked=true');
-    } catch {
-      setError('Password reset not detected. Please complete the password reset using the link sent to your email, then try again.');
-    } finally {
-      setUnlocking(false);
     }
   };
 
@@ -111,7 +94,7 @@ function AccountLockedContent() {
           )}
 
           {resetEmailSent ? (
-            /* Post-reset state */
+            /* Post-reset state — user must follow the email link */
             <div className="space-y-4">
               <div className="p-4 bg-green-500/10 border border-green-500/30 rounded-lg">
                 <div className="flex items-start gap-3">
@@ -127,18 +110,9 @@ function AccountLockedContent() {
 
               <div className="p-3 bg-blue-500/5 border border-blue-500/20 rounded-lg">
                 <p className="text-xs text-blue-300/80 text-center">
-                  After resetting your password, click the button below to unlock your account.
+                  Your account will be automatically unlocked when you complete the password reset from the email link.
                 </p>
               </div>
-
-              <button
-                type="button"
-                onClick={handleUnlockAndRetry}
-                disabled={unlocking}
-                className="w-full px-6 py-3 bg-gradient-to-r from-blue-600 to-cyan-600 text-white rounded-lg hover:from-blue-700 hover:to-cyan-700 transition-all duration-200 disabled:opacity-50 disabled:cursor-not-allowed font-medium"
-              >
-                {unlocking ? 'Verifying...' : 'I\u2019ve Reset My Password \u2014 Unlock Account'}
-              </button>
 
               <button
                 type="button"

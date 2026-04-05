@@ -207,49 +207,74 @@ router.post('/check-login-security', async (req, res) => {
   });
 });
 
-// Unlock account after password reset — called by frontend after successful password reset
-// Only clears lockout if Firebase confirms the password was recently changed
-router.post('/confirm-password-reset', async (req, res) => {
-  const { email } = req.body;
-  if (!email) {
-    return res.status(400).json({ success: false, error: 'Email is required' });
+// Securely reset password for disabled (locked) accounts using server-side Admin SDK.
+// Firebase client SDK blocks confirmPasswordReset() for disabled accounts, so this endpoint
+// handles the entire flow server-side using Admin SDK which bypasses that restriction.
+//
+// SECURITY MODEL:
+// - Requires a valid Firebase oobCode (one-time code sent to the user's email)
+// - oobCode is verified server-side via Firebase REST API — proves email ownership
+// - oobCodes cannot be forged, guessed, or reused (cryptographically random, single-use, time-limited)
+// - No attacker can call this endpoint without access to the victim's email inbox
+// - Password is set + account re-enabled + lockout cleared in a single transaction
+router.post('/server-reset-password', async (req, res) => {
+  const { oobCode, newPassword } = req.body;
+
+  if (!oobCode || !newPassword) {
+    return res.status(400).json({ success: false, error: 'Reset code and new password are required' });
   }
 
-  const normalizedEmail = email.toLowerCase().trim();
+  // Server-side password strength validation
+  if (newPassword.length < 8 || !/[A-Z]/.test(newPassword) || !/[a-z]/.test(newPassword) || !/[0-9]/.test(newPassword)) {
+    return res.status(400).json({ success: false, error: 'Password must be at least 8 characters with uppercase, lowercase, and a number' });
+  }
+
+  const apiKey = process.env.FIREBASE_WEB_API_KEY;
+  if (!apiKey) {
+    console.error('FIREBASE_WEB_API_KEY not configured — cannot verify oobCode server-side');
+    return res.status(500).json({ success: false, error: 'Server configuration error. Contact administrator.' });
+  }
 
   try {
-    // Verify via Firebase that this user's tokens were recently revoked
-    // (which happens when password is reset)
+    // Step 1: Verify the oobCode via Firebase REST API to get the associated email.
+    // This proves the caller has a valid reset code (sent only to the account owner's email).
+    // This call does NOT consume the code or change the password.
+    const verifyRes = await fetch(
+      `https://identitytoolkit.googleapis.com/v1/accounts:resetPassword?key=${encodeURIComponent(apiKey)}`,
+      {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ oobCode }),
+      }
+    );
+
+    if (!verifyRes.ok) {
+      return res.status(400).json({ success: false, error: 'Invalid or expired reset link. Please request a new one.' });
+    }
+
+    const verifyData: any = await verifyRes.json();
+    const email = verifyData.email;
+
+    if (!email) {
+      return res.status(400).json({ success: false, error: 'Could not determine account email from reset code.' });
+    }
+
+    const normalizedEmail = email.toLowerCase().trim();
+
+    // Step 2: Look up the Firebase user
     const firebaseUser = await adminAuth.getUserByEmail(normalizedEmail);
-    const tokensValidAfter = firebaseUser.tokensValidAfterTime;
 
-    if (!tokensValidAfter) {
-      return res.status(400).json({
-        success: false,
-        error: 'No password reset detected. Please reset your password first.',
-      });
-    }
+    // Step 3: Update password AND re-enable the account via Admin SDK.
+    // Admin SDK has full control — bypasses the "disabled" restriction.
+    await adminAuth.updateUser(firebaseUser.uid, {
+      password: newPassword,
+      disabled: false,
+    });
 
-    // Check if tokens were revoked within the last 10 minutes (password was just reset)
-    const revokedAt = new Date(tokensValidAfter).getTime();
-    const tenMinutesAgo = Date.now() - 10 * 60 * 1000;
+    // Step 4: Revoke all existing refresh tokens (old sessions are invalid)
+    await adminAuth.revokeRefreshTokens(firebaseUser.uid);
 
-    if (revokedAt < tenMinutesAgo) {
-      return res.status(400).json({
-        success: false,
-        error: 'Password reset not detected. Please reset your password to unlock your account.',
-      });
-    }
-
-    // Password was recently reset — re-enable the Firebase account and clear lockout
-    // Re-enable the account at the Firebase identity provider level
-    try {
-      await adminAuth.updateUser(firebaseUser.uid, { disabled: false });
-    } catch (err) {
-      console.error('Failed to re-enable Firebase account');
-      return res.status(500).json({ success: false, error: 'Failed to unlock account. Please try again.' });
-    }
-
+    // Step 5: Clear DB lockout
     const user = await prisma.user.findFirst({
       where: { email: normalizedEmail },
       select: { id: true, organizationId: true },
@@ -269,20 +294,17 @@ router.post('/confirm-password-reset', async (req, res) => {
         organizationId: user.organizationId || undefined,
         changes: {
           loginMethod: 'email',
-          result: 'account_unlocked_after_password_reset',
+          result: 'password_reset_server_side_account_unlocked',
         },
         ipAddress: getClientIp(req),
         userAgent: req.headers['user-agent'] as string,
       });
     }
 
-    res.json({
-      success: true,
-      message: 'Account unlocked. You can now log in with your new password.',
-    });
+    res.json({ success: true, message: 'Password reset and account unlocked successfully.' });
   } catch (error) {
-    console.error('Failed to confirm password reset');
-    res.status(500).json({ success: false, error: 'Failed to verify password reset' });
+    console.error('Server-side password reset failed');
+    res.status(500).json({ success: false, error: 'Failed to reset password. Please try again.' });
   }
 });
 

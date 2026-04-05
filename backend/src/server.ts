@@ -54,6 +54,22 @@ console.log('✅ Express app created, PORT:', PORT);
 
 // ==================== SECURITY & MIDDLEWARE ====================
 
+// Trust the first proxy (Render reverse proxy) — required for:
+// - Correct client IP in rate limiting (req.ip)
+// - Correct protocol detection (req.protocol / x-forwarded-proto)
+// - Correct host detection (x-forwarded-host)
+if (process.env.NODE_ENV === 'production') {
+  app.set('trust proxy', 1);
+}
+
+// HTTPS enforcement in production — redirect all HTTP requests
+app.use((req, res, next) => {
+  if (process.env.NODE_ENV === 'production' && req.header('x-forwarded-proto') !== 'https') {
+    return res.redirect(301, `https://${req.header('host')}${req.url}`);
+  }
+  next();
+});
+
 // Request ID tracking for every request
 app.use(requestId);
 

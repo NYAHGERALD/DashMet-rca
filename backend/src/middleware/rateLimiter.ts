@@ -99,6 +99,22 @@ export const aiRateLimiter = rateLimit({
   },
 });
 
+// ── Password Reset Rate Limiter (server-reset-password) ──
+// Strict limit: 3 attempts per hour per IP. oobCodes are single-use and time-limited,
+// but rate limiting prevents brute-force attempts against the endpoint.
+export const passwordResetRateLimiter = rateLimit({
+  windowMs: 60 * 60 * 1000,     // 1 hour
+  max: process.env.NODE_ENV === 'production' ? 3 : 10000,
+  skipSuccessfulRequests: false,
+  standardHeaders: true,
+  legacyHeaders: false,
+  keyGenerator: getClientKey,
+  message: {
+    success: false,
+    error: 'Too many password reset attempts. Please try again in 1 hour.',
+  },
+});
+
 // ── System Admin Master Key Rate Limiter ──
 export const masterKeyRateLimiter = rateLimit({
   windowMs: 60 * 60 * 1000,     // 1 hour

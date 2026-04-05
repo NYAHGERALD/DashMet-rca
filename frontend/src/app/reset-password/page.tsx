@@ -5,8 +5,9 @@ import { useState, useEffect, Suspense } from 'react';
 import { useRouter, useSearchParams } from 'next/navigation';
 import Link from 'next/link';
 import Image from 'next/image';
-import { confirmPasswordReset, verifyPasswordResetCode } from 'firebase/auth';
+import { verifyPasswordResetCode } from 'firebase/auth';
 import { auth } from '@/lib/firebase';
+import api from '@/lib/api';
 import { getFirebaseErrorMessage } from '@/lib/firebaseErrors';
 import { Eye, EyeOff } from 'lucide-react';
 
@@ -111,19 +112,24 @@ function ResetPasswordForm() {
     setLoading(true);
 
     try {
-      await confirmPasswordReset(auth, oobCode!, password);
+      // ALL password resets go through the server-side endpoint.
+      // The server verifies the oobCode (proves email ownership), sets the new password
+      // via Admin SDK, re-enables the account if locked, and clears DB lockout.
+      // No client-side Firebase password reset is used — it fails for disabled accounts.
+      await api.post('/firebase-auth/server-reset-password', {
+        oobCode,
+        newPassword: password,
+      });
+
       setSuccess(true);
     } catch (err: any) {
-      const errCode = err.code || '';
-      const isExpiredOrInvalid = errCode === 'auth/invalid-action-code' || errCode === 'auth/expired-action-code'
-        || (err.message && (err.message.includes('auth/invalid-action-code') || err.message.includes('auth/expired-action-code')));
-      
-      if (isExpiredOrInvalid) {
-        // Code expired or already used — show invalid link state
+      const serverError = err.response?.data?.error || '';
+
+      if (serverError.includes('expired') || serverError.includes('Invalid')) {
         setCodeValid(false);
         setError('This reset link has expired or was already used. Please request a new one.');
       } else {
-        setError(getFirebaseErrorMessage(err, 'Failed to reset password. Please try again.'));
+        setError(serverError || 'Failed to reset password. Please try again.');
       }
     } finally {
       setLoading(false);

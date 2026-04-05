@@ -51,7 +51,7 @@ import policyParsingRoutes from './policyParsingRoutes';
 import conflictCaseRoutes from './conflictCaseRoutes';
 import dashboardRoutes from './dashboardRoutes';
 import { authenticate } from '../middleware/auth';
-import { enumerationRateLimiter, otpRateLimiter, authRateLimiter, aiRateLimiter, masterKeyRateLimiter } from '../middleware/rateLimiter';
+import { rateLimiter, enumerationRateLimiter, otpRateLimiter, authRateLimiter, aiRateLimiter, masterKeyRateLimiter, passwordResetRateLimiter } from '../middleware/rateLimiter';
 import { getIncidentTranscripts } from '../controllers/transcriptController';
 
 const router = Router();
@@ -81,6 +81,7 @@ router.get('/version', (req, res) => {
 router.use('/firebase-auth/check-user', enumerationRateLimiter);
 router.use('/firebase-auth/validate-access-code', otpRateLimiter);
 router.use('/firebase-auth/create-profile', authRateLimiter);
+router.use('/firebase-auth/server-reset-password', passwordResetRateLimiter);
 router.use('/firebase-auth', firebaseAuthRoutes);
 
 // Mobile App Authentication routes - rate limited
@@ -97,7 +98,7 @@ router.use('/mobile/meetings', authenticate, meetingRoutes);
 
 // Consent & Compliance routes - PUBLIC for iOS app
 // Recording consent, policy management, audit logs
-router.use('/consent', consentRoutes);
+router.use('/consent', rateLimiter, consentRoutes);
 
 // Document OCR routes - AI rate limited
 router.use('/document-ocr', aiRateLimiter, documentOcrRoutes);
@@ -119,11 +120,11 @@ router.use('/policy-parsing', aiRateLimiter, policyParsingRoutes);
 
 // Conflict Case CRUD routes - PUBLIC for iOS app
 // Full CRUD for conflict cases with encryption
-router.use('/conflict-cases', conflictCaseRoutes);
+router.use('/conflict-cases', rateLimiter, conflictCaseRoutes);
 
 // Dashboard routes - PUBLIC for iOS app
 // Aggregated dashboard statistics and activity feed
-router.use('/mobile/dashboard', dashboardRoutes);
+router.use('/mobile/dashboard', rateLimiter, dashboardRoutes);
 
 // Phase 1: Legacy JWT Authentication routes (will be deprecated)
 router.use('/auth', authRoutes);
@@ -138,7 +139,7 @@ router.use('/preferences', preferencesRoutes);
 router.use('/grammar', aiRateLimiter, grammarRoutes);
 
 // Public policy routes (Privacy/Terms/Cookie/Security)
-router.use('/policies', policyRoutes);
+router.use('/policies', rateLimiter, policyRoutes);
 
 // System Admin Authentication - strict rate limiting
 router.use('/system-admin-auth', masterKeyRateLimiter, systemAdminAuthRoutes);
@@ -150,7 +151,7 @@ router.use('/support', supportRoutes);
 // MUST be defined BEFORE root-mounted routes (departmentRoutes/facilityRoutes)
 // which use router.use(authenticate) and would intercept all paths
 import bakeryMetricsRoutes from './bakeryMetricsRoutes';
-router.use('/bakery-metrics', bakeryMetricsRoutes);
+router.use('/bakery-metrics', rateLimiter, bakeryMetricsRoutes);
 
 // Phase 2.1: Organization routes
 router.use('/organizations', organizationRoutes);

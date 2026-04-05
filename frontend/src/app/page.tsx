@@ -177,13 +177,6 @@ export default function HomePage() {
         console.warn('Security check unavailable');
       }
 
-      // Check if this login follows a password reset (unlock the account)
-      try {
-        await api.post('/firebase-auth/confirm-password-reset', { email });
-      } catch {
-        // Not a post-reset login — that's fine
-      }
-
       api.post('/firebase-auth/report-successful-login', { email }).catch(() => {});
       
       const response = await api.post('/firebase-auth/check-user', { email });

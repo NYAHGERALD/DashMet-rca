@@ -222,13 +222,6 @@ export default function LoginPage() {
         console.warn('Security check unavailable');
       }
 
-      // Check if this login follows a password reset (unlock the account)
-      try {
-        await api.post('/firebase-auth/confirm-password-reset', { email });
-      } catch {
-        // Not a post-reset login — that's fine
-      }
-
       // No suspicious activity — report successful login and proceed
       api.post('/firebase-auth/report-successful-login', { email }).catch(() => {});
       
