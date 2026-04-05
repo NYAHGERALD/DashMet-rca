@@ -17,6 +17,7 @@
  */
 
 import { Router, Request, Response } from 'express';
+import asyncHandler from 'express-async-handler';
 import crypto from 'crypto';
 import { prisma } from '../utils/prisma';
 import { authenticate, AuthRequest } from '../middleware/auth';
@@ -79,7 +80,7 @@ function buildInvitationEmailHtml(inviterName: string, orgName: string, role: st
 // POST /api/invitations — Send invitation
 // ADMIN can invite to own org. SYSTEM_ADMIN can invite to any org.
 // ─────────────────────────────────────────────────────────────────────────────
-router.post('/', authenticate, requireMinimumRole(UserRole.ADMIN), async (req: AuthRequest, res: Response) => {
+router.post('/', authenticate, requireMinimumRole(UserRole.ADMIN), asyncHandler(async (req: AuthRequest, res: Response) => {
   const { email, role, organizationId, facilityId } = req.body;
   const user = req.user!;
 
@@ -197,12 +198,12 @@ router.post('/', authenticate, requireMinimumRole(UserRole.ADMIN), async (req: A
       emailSent: emailResult.success,
     },
   });
-});
+}));
 
 // ─────────────────────────────────────────────────────────────────────────────
 // GET /api/invitations — List invitations for caller's organization
 // ─────────────────────────────────────────────────────────────────────────────
-router.get('/', authenticate, requireMinimumRole(UserRole.ADMIN), async (req: AuthRequest, res: Response) => {
+router.get('/', authenticate, requireMinimumRole(UserRole.ADMIN), asyncHandler(async (req: AuthRequest, res: Response) => {
   const user = req.user!;
   const { status } = req.query;
 
@@ -242,13 +243,13 @@ router.get('/', authenticate, requireMinimumRole(UserRole.ADMIN), async (req: Au
   });
 
   res.json({ success: true, data: invitations });
-});
+}));
 
 // ─────────────────────────────────────────────────────────────────────────────
 // GET /api/invitations/:token/validate — Validate invitation token (PUBLIC)
 // Called by frontend when user lands on /accept-invite?token=xxx
 // ─────────────────────────────────────────────────────────────────────────────
-router.get('/:token/validate', async (req: Request, res: Response) => {
+router.get('/:token/validate', asyncHandler(async (req: Request, res: Response) => {
   const { token } = req.params;
 
   if (!token || token.length !== 64) {
@@ -292,12 +293,12 @@ router.get('/:token/validate', async (req: Request, res: Response) => {
       expiresAt: invitation.expiresAt,
     },
   });
-});
+}));
 
 // ─────────────────────────────────────────────────────────────────────────────
 // PATCH /api/invitations/:id/revoke — Revoke a pending invitation
 // ─────────────────────────────────────────────────────────────────────────────
-router.patch('/:id/revoke', authenticate, requireMinimumRole(UserRole.ADMIN), async (req: AuthRequest, res: Response) => {
+router.patch('/:id/revoke', authenticate, requireMinimumRole(UserRole.ADMIN), asyncHandler(async (req: AuthRequest, res: Response) => {
   const { id } = req.params;
   const user = req.user!;
 
@@ -324,12 +325,12 @@ router.patch('/:id/revoke', authenticate, requireMinimumRole(UserRole.ADMIN), as
   });
 
   res.json({ success: true, data: updated });
-});
+}));
 
 // ─────────────────────────────────────────────────────────────────────────────
 // POST /api/invitations/resend/:id — Resend invitation email
 // ─────────────────────────────────────────────────────────────────────────────
-router.post('/resend/:id', authenticate, requireMinimumRole(UserRole.ADMIN), async (req: AuthRequest, res: Response) => {
+router.post('/resend/:id', authenticate, requireMinimumRole(UserRole.ADMIN), asyncHandler(async (req: AuthRequest, res: Response) => {
   const { id } = req.params;
   const user = req.user!;
 
@@ -380,6 +381,6 @@ router.post('/resend/:id', authenticate, requireMinimumRole(UserRole.ADMIN), asy
       invitationLink,
     },
   });
-});
+}));
 
 export default router;
