@@ -726,11 +726,11 @@ function LSWContent() {
     return unsub;
   }, [onLswCompletionChanged, currentWeek, currentYear, loadLswData]);
 
-  // Cross-platform sync: poll every 15s + refetch when tab becomes visible
+  // Cross-platform sync: refetch only when tab becomes visible (no periodic polling)
   useEffect(() => {
     if (!user || !configReady) return;
 
-    // Refetch when user switches back to this tab
+    // Refetch when user switches back to this tab (e.g. after editing on another device)
     const handleVisibility = () => {
       if (document.visibilityState === 'visible') {
         loadLswData();
@@ -738,16 +738,8 @@ function LSWContent() {
     };
     document.addEventListener('visibilitychange', handleVisibility);
 
-    // Periodic polling as reliable fallback
-    const interval = setInterval(() => {
-      if (document.visibilityState === 'visible') {
-        loadLswData();
-      }
-    }, 15000);
-
     return () => {
       document.removeEventListener('visibilitychange', handleVisibility);
-      clearInterval(interval);
     };
   }, [user, configReady, loadLswData]);
 
@@ -1229,9 +1221,9 @@ function LSWContent() {
         {/* Main Grid Layout */}
         <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
           {/* Left Column */}
-          <div className="lg:col-span-2 space-y-6">
+          <div className="lg:col-span-2">
             {/* Daily & Weekly Standard Tasks */}
-            <div className="bg-white/80 dark:bg-gray-800/80 backdrop-blur-sm rounded-2xl border border-white/50 dark:border-gray-700/50 shadow-lg overflow-hidden">
+            <div className="bg-white/80 dark:bg-gray-800/80 backdrop-blur-sm overflow-hidden">
               <div className="px-5 py-4 bg-gradient-to-r from-emerald-500/10 to-teal-500/10 dark:from-emerald-500/20 dark:to-teal-500/20 border-b border-gray-200/50 dark:border-gray-700/50 flex items-center justify-between">
                 <h2 className="text-lg font-semibold text-gray-800 dark:text-white flex items-center gap-2">
                   <span className="text-xl">📅</span>
@@ -1354,9 +1346,9 @@ function LSWContent() {
                 </button>
               </div>
             </div>
-
+            <hr className="border-t border-black dark:border-gray-500 m-0" />
             {/* Improvement Projects & Updates */}
-            <div className="bg-white/80 dark:bg-gray-800/80 backdrop-blur-sm rounded-2xl border border-white/50 dark:border-gray-700/50 shadow-lg overflow-hidden">
+            <div className="bg-white/80 dark:bg-gray-800/80 backdrop-blur-sm overflow-hidden">
               <div className="px-5 py-4 bg-gradient-to-r from-blue-500/10 to-indigo-500/10 dark:from-blue-500/20 dark:to-indigo-500/20 border-b border-gray-200/50 dark:border-gray-700/50">
                 <h2 className="text-lg font-semibold text-gray-800 dark:text-white flex items-center gap-2">
                   <span className="text-xl">🚀</span>
@@ -1493,9 +1485,9 @@ function LSWContent() {
                 </button>
               </div>
             </div>
-
+            <hr className="border-t border-black dark:border-gray-500 m-0" />
             {/* Follow Ups */}
-            <div className="bg-white/80 dark:bg-gray-800/80 backdrop-blur-sm rounded-2xl border border-white/50 dark:border-gray-700/50 shadow-lg overflow-hidden">
+            <div className="bg-white/80 dark:bg-gray-800/80 backdrop-blur-sm overflow-hidden">
               <div className="px-5 py-4 bg-gradient-to-r from-amber-500/10 to-orange-500/10 dark:from-amber-500/20 dark:to-orange-500/20 border-b border-gray-200/50 dark:border-gray-700/50">
                 <h2 className="text-lg font-semibold text-gray-800 dark:text-white flex items-center gap-2">
                   <span className="text-xl">🔔</span>
@@ -1582,9 +1574,9 @@ function LSWContent() {
                 </button>
               </div>
             </div>
-
+            <hr className="border-t border-black dark:border-gray-500 m-0" />
             {/* RCA Triggers */}
-            <div className="bg-white/80 dark:bg-gray-800/80 backdrop-blur-sm rounded-2xl border border-white/50 dark:border-gray-700/50 shadow-lg overflow-hidden">
+            <div className="bg-white/80 dark:bg-gray-800/80 backdrop-blur-sm overflow-hidden">
               <div className="px-5 py-4 bg-gradient-to-r from-red-500/10 to-rose-500/10 dark:from-red-500/20 dark:to-rose-500/20 border-b border-gray-200/50 dark:border-gray-700/50">
                 <h2 className="text-lg font-semibold text-gray-800 dark:text-white flex items-center gap-2">
                   <span className="text-xl">⚠️</span>
@@ -1648,9 +1640,9 @@ function LSWContent() {
                 </button>
               </div>
             </div>
-
+            <hr className="border-t border-black dark:border-gray-500 m-0" />
             {/* Tasks by Frequency */}
-            <div className="bg-white/80 dark:bg-gray-800/80 backdrop-blur-sm rounded-2xl border border-white/50 dark:border-gray-700/50 shadow-lg overflow-hidden">
+            <div className="bg-white/80 dark:bg-gray-800/80 backdrop-blur-sm overflow-hidden">
               <div className="px-5 py-4 bg-gradient-to-r from-violet-500/10 to-purple-500/10 dark:from-violet-500/20 dark:to-purple-500/20 border-b border-gray-200/50 dark:border-gray-700/50 flex items-center justify-between">
                 <h2 className="text-lg font-semibold text-gray-800 dark:text-white flex items-center gap-2">
                   <span className="text-xl">📆</span>
@@ -1816,9 +1808,9 @@ function LSWContent() {
           </div>
 
           {/* Right Column */}
-          <div className="space-y-6">
+          <div>
             {/* To Do Today & This Week */}
-            <div className="bg-white/80 dark:bg-gray-800/80 backdrop-blur-sm rounded-2xl border border-white/50 dark:border-gray-700/50 shadow-lg overflow-hidden">
+            <div className="bg-white/80 dark:bg-gray-800/80 backdrop-blur-sm overflow-hidden">
               <div className="px-5 py-4 bg-gradient-to-r from-blue-500/10 to-cyan-500/10 dark:from-blue-500/20 dark:to-cyan-500/20 border-b border-gray-200/50 dark:border-gray-700/50">
                 <div className="flex items-center justify-between">
                   <h2 className="text-lg font-semibold text-gray-800 dark:text-white flex items-center gap-2">
@@ -1953,9 +1945,9 @@ function LSWContent() {
                 </button>
               </div>
             </div>
-
+            <hr className="border-t border-black dark:border-gray-500 m-0" />
             {/* Meeting Rails */}
-            <div className="bg-white/80 dark:bg-gray-800/80 backdrop-blur-sm rounded-2xl border border-white/50 dark:border-gray-700/50 shadow-lg overflow-hidden">
+            <div className="bg-white/80 dark:bg-gray-800/80 backdrop-blur-sm overflow-hidden">
               <div className="px-5 py-4 bg-gradient-to-r from-purple-500/10 to-pink-500/10 dark:from-purple-500/20 dark:to-pink-500/20 border-b border-gray-200/50 dark:border-gray-700/50">
                 <h2 className="text-lg font-semibold text-gray-800 dark:text-white flex items-center gap-2">
                   <span className="text-xl">🚂</span>
@@ -2021,9 +2013,9 @@ function LSWContent() {
                 </button>
               </div>
             </div>
-
+            <hr className="border-t border-black dark:border-gray-500 m-0" />
             {/* Key Results */}
-            <div className="bg-white/80 dark:bg-gray-800/80 backdrop-blur-sm rounded-2xl border border-white/50 dark:border-gray-700/50 shadow-lg overflow-hidden">
+            <div className="bg-white/80 dark:bg-gray-800/80 backdrop-blur-sm overflow-hidden">
               <div className="px-5 py-4 bg-gradient-to-r from-cyan-500/10 to-blue-500/10 dark:from-cyan-500/20 dark:to-blue-500/20 border-b border-gray-200/50 dark:border-gray-700/50">
                 <h2 className="text-lg font-semibold text-gray-800 dark:text-white flex items-center gap-2">
                   <span className="text-xl">📊</span>
@@ -2062,9 +2054,9 @@ function LSWContent() {
                 )}
               </div>
             </div>
-
+            <hr className="border-t border-black dark:border-gray-500 m-0" />
             {/* Personal Objectives/Goals */}
-            <div className="bg-white/80 dark:bg-gray-800/80 backdrop-blur-sm rounded-2xl border border-white/50 dark:border-gray-700/50 shadow-lg overflow-hidden">
+            <div className="bg-white/80 dark:bg-gray-800/80 backdrop-blur-sm overflow-hidden">
               <div className="px-5 py-4 bg-gradient-to-r from-rose-500/10 to-pink-500/10 dark:from-rose-500/20 dark:to-pink-500/20 border-b border-gray-200/50 dark:border-gray-700/50">
                 <h2 className="text-lg font-semibold text-gray-800 dark:text-white flex items-center gap-2">
                   <span className="text-xl">🎯</span>

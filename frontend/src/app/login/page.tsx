@@ -17,6 +17,7 @@ import {
 import { auth, googleProvider, microsoftProvider } from '@/lib/firebase';
 import { useAuth } from '@/components/providers/AuthProvider';
 import api from '@/lib/api';
+import { getFirebaseErrorMessage, isTooManyRequestsError, isSilentError } from '@/lib/firebaseErrors';
 import SystemAdminWarningModal from '@/components/modals/SystemAdminWarningModal';
 import { Eye, EyeOff } from 'lucide-react';
 
@@ -45,6 +46,23 @@ export default function LoginPage() {
   // Password visibility toggle state
   const [showPassword, setShowPassword] = useState(false);
   const [showConfirmPassword, setShowConfirmPassword] = useState(false);
+  
+  // Check if redirected here due to account lockout
+  useEffect(() => {
+    const params = new URLSearchParams(window.location.search);
+    if (params.get('locked') === 'true') {
+      const lockedEmail = params.get('email') || '';
+      if (lockedEmail) {
+        router.replace(`/account-locked?email=${encodeURIComponent(lockedEmail)}`);
+      }
+      window.history.replaceState({}, '', '/login');
+    }
+    // Handle return from successful unlock
+    if (params.get('unlocked') === 'true') {
+      setMessage('Account unlocked. Please sign in with your new password.');
+      window.history.replaceState({}, '', '/login');
+    }
+  }, [router]);
 
   // Redirect if user is already logged in (using AuthProvider)
   useEffect(() => {
@@ -122,14 +140,44 @@ export default function LoginPage() {
       const { existsInFirebase, existsInDatabase, hasProfile } = response.data.data;
 
       if (existsInFirebase && existsInDatabase && hasProfile) {
+        // SECURITY: Check if account is locked BEFORE showing password form
+        try {
+          const securityCheck = await api.post('/firebase-auth/check-login-security', { email });
+          if (securityCheck.data.data?.accountLocked) {
+            router.push(`/account-locked?email=${encodeURIComponent(email)}`);
+            return;
+          }
+        } catch {
+          // If security check fails, proceed to password — server-side lockout will still block
+        }
         // User exists in both Firebase and DB with complete profile - show password login
         setStep('password');
       } else if (existsInFirebase && !existsInDatabase) {
+        // SECURITY: Check if account is locked BEFORE showing password form
+        try {
+          const securityCheck = await api.post('/firebase-auth/check-login-security', { email });
+          if (securityCheck.data.data?.accountLocked) {
+            router.push(`/account-locked?email=${encodeURIComponent(email)}`);
+            return;
+          }
+        } catch {
+          // If security check fails, proceed to password — server-side lockout will still block
+        }
         // User exists in Firebase but not in DB - they need to complete profile setup
         setNeedsProfileSetup(true);
         setMessage('Your account exists but profile setup was not completed. Please enter your password to continue.');
         setStep('password');
       } else if (existsInFirebase && existsInDatabase && !hasProfile) {
+        // SECURITY: Check if account is locked BEFORE showing password form
+        try {
+          const securityCheck = await api.post('/firebase-auth/check-login-security', { email });
+          if (securityCheck.data.data?.accountLocked) {
+            router.push(`/account-locked?email=${encodeURIComponent(email)}`);
+            return;
+          }
+        } catch {
+          // If security check fails, proceed to password — server-side lockout will still block
+        }
         // User exists in both but profile incomplete
         setNeedsProfileSetup(true);
         setMessage('Please enter your password to complete your profile setup.');
@@ -140,14 +188,14 @@ export default function LoginPage() {
       }
     } catch (err: any) {
       // Handle System Admin trying to use regular login
-      if (err.response?.data?.isSystemAdmin) {
+      if (err.response?.status === 403) {
         setShowSystemAdminWarning(true);
         setLoading(false);
         return;
       }
       const errorMsg = typeof err.response?.data?.error === 'string' 
         ? err.response.data.error 
-        : err.message || 'Failed to verify email';
+        : getFirebaseErrorMessage(err, 'Failed to verify email');
       setError(errorMsg);
     } finally {
       setLoading(false);
@@ -162,6 +210,28 @@ export default function LoginPage() {
     try {
       await signInWithEmailAndPassword(auth, email, password);
       
+      // SECURITY: Check if account is locked due to brute-force detection
+      try {
+        const securityCheck = await api.post('/firebase-auth/check-login-security', { email });
+        if (securityCheck.data.data?.accountLocked) {
+          await auth.signOut();
+          router.push(`/account-locked?email=${encodeURIComponent(email)}`);
+          return;
+        }
+      } catch {
+        console.warn('Security check unavailable');
+      }
+
+      // Check if this login follows a password reset (unlock the account)
+      try {
+        await api.post('/firebase-auth/confirm-password-reset', { email });
+      } catch {
+        // Not a post-reset login — that's fine
+      }
+
+      // No suspicious activity — report successful login and proceed
+      api.post('/firebase-auth/report-successful-login', { email }).catch(() => {});
+      
       // Check if user has completed profile in PostgreSQL
       const response = await api.post('/firebase-auth/check-user', { email });
       const { existsInDatabase, hasProfile } = response.data.data;
@@ -173,24 +243,32 @@ export default function LoginPage() {
         router.push('/profile-setup');
       }
     } catch (err: any) {
+      // Report the failed attempt to backend for tracking
+      api.post('/firebase-auth/report-failed-login', { email }).catch(() => {});
+
       // Handle System Admin trying to use regular login
-      if (err.response?.data?.isSystemAdmin) {
+      if (err.response?.status === 403) {
         // Sign out from Firebase to clear the session
         await auth.signOut();
         setShowSystemAdminWarning(true);
         setLoading(false);
         return;
       }
-      if (err.code === 'auth/wrong-password' || err.code === 'auth/invalid-credential') {
-        setError('Invalid email or password');
+      // Account disabled at Firebase level OR Firebase rate-limited = account locked
+      if (isTooManyRequestsError(err) || err.code === 'auth/user-disabled') {
+        // Report to backend so it can disable the account if not already
+        api.post('/firebase-auth/report-failed-login', { email }).catch(() => {});
+        router.push(`/account-locked?email=${encodeURIComponent(email)}`);
+        return;
       } else {
-        const errorMsg = typeof err === 'string' ? err : (err.message || 'Login failed');
-        setError(errorMsg);
+        setError(getFirebaseErrorMessage(err, 'Login failed. Please try again.'));
       }
     } finally {
       setLoading(false);
     }
   };
+
+
 
   const handleRegister = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -214,18 +292,12 @@ export default function LoginPage() {
       router.push('/profile-setup');
     } catch (err: any) {
       if (err.code === 'auth/email-already-in-use') {
-        // Email exists in Firebase but not in PostgreSQL
-        // This means user registered but didn't complete profile setup
-        // Try to sign them in instead and redirect to profile setup
         setNeedsProfileSetup(true);
         setMessage('This email is already registered. Please enter your password to complete your profile setup.');
         setError('');
         setStep('password');
-      } else if (err.code === 'auth/weak-password') {
-        setError('Password is too weak');
       } else {
-        const errorMsg = typeof err === 'string' ? err : (err.message || 'Registration failed');
-        setError(errorMsg);
+        setError(getFirebaseErrorMessage(err, 'Registration failed. Please try again.'));
       }
     } finally {
       setLoading(false);
@@ -251,7 +323,7 @@ export default function LoginPage() {
     } catch (err: any) {
       console.error('Google login error:', err);
       // Handle System Admin trying to use regular login
-      if (err.response?.data?.isSystemAdmin) {
+      if (err.response?.status === 403) {
         // Sign out from Firebase to clear the session
         await auth.signOut();
         // Show the warning modal
@@ -259,19 +331,8 @@ export default function LoginPage() {
         setLoading(false);
         return;
       }
-      // Handle specific Firebase auth errors
-      if (err.code === 'auth/popup-closed-by-user') {
-        setError('Sign-in cancelled. Please try again.');
-      } else if (err.code === 'auth/popup-blocked') {
-        setError('Popup was blocked. Please allow popups for this site.');
-      } else if (err.code === 'auth/cancelled-popup-request') {
-        // User clicked button multiple times, ignore
-        return;
-      } else if (err.code === 'auth/network-request-failed') {
-        setError('Network error. Please check your connection.');
-      } else {
-        setError(err.message || 'Google login failed');
-      }
+      if (isSilentError(err)) return;
+      setError(getFirebaseErrorMessage(err, 'Google sign-in failed. Please try again.'));
     } finally {
       setLoading(false);
     }
@@ -297,7 +358,7 @@ export default function LoginPage() {
     } catch (err: any) {
       console.error('Microsoft login error:', err);
       // Handle System Admin trying to use regular login
-      if (err.response?.data?.isSystemAdmin) {
+      if (err.response?.status === 403) {
         // Sign out from Firebase to clear the session
         await auth.signOut();
         // Show the warning modal
@@ -305,18 +366,9 @@ export default function LoginPage() {
         setLoading(false);
         return;
       }
-      // Handle specific Firebase/Microsoft auth errors
-      if (err.code === 'auth/popup-closed-by-user') {
-        setError('Sign-in cancelled. Please try again.');
-      } else if (err.code === 'auth/popup-blocked') {
-        setError('Popup was blocked. Please allow popups for this site.');
-      } else if (err.code === 'auth/cancelled-popup-request') {
-        // User clicked button multiple times, ignore
-        return;
-      } else if (err.code === 'auth/network-request-failed') {
-        setError('Network error. Please check your connection.');
-      } else if (err.code === 'auth/account-exists-with-different-credential') {
-        // Get the email and existing sign-in methods
+      if (isSilentError(err)) return;
+      // Special handling for account-exists-with-different-credential
+      if (err.code === 'auth/account-exists-with-different-credential') {
         const email = err.customData?.email;
         if (email) {
           const methods = await fetchSignInMethodsForEmail(auth, email);
@@ -325,19 +377,13 @@ export default function LoginPage() {
           } else if (methods.includes('password')) {
             setError('This email is linked to email/password. Please sign in with your email and password.');
           } else {
-            setError('An account already exists with this email. Please sign in using your original method.');
+            setError(getFirebaseErrorMessage(err));
           }
         } else {
-          setError('An account already exists with this email. Please sign in using Google or email/password.');
+          setError(getFirebaseErrorMessage(err));
         }
-      } else if (err.code === 'auth/invalid-credential') {
-        setError('Invalid credentials. Please try again.');
-      } else if (err.code === 'auth/operation-not-allowed') {
-        setError('Microsoft sign-in is not enabled. Please contact support.');
-      } else if (err.code === 'auth/user-disabled') {
-        setError('This account has been disabled. Please contact support.');
       } else {
-        setError(err.message || 'Microsoft login failed. Please try again.');
+        setError(getFirebaseErrorMessage(err, 'Microsoft sign-in failed. Please try again.'));
       }
     } finally {
       setLoading(false);
@@ -390,12 +436,8 @@ export default function LoginPage() {
       if (err.code === 'auth/user-not-found') {
         // Don't reveal if user doesn't exist - just show success
         setResetSuccess(true);
-      } else if (err.code === 'auth/invalid-email') {
-        setResetError('Please enter a valid email address');
-      } else if (err.code === 'auth/too-many-requests') {
-        setResetError('Too many requests. Please try again later.');
       } else {
-        setResetError(err.message || 'Failed to send reset email. Please try again.');
+        setResetError(getFirebaseErrorMessage(err, 'Failed to send reset email. Please try again.'));
       }
     } finally {
       setResetLoading(false);

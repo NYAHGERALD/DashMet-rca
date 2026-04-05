@@ -10,12 +10,30 @@ import { v4 as uuidv4 } from 'uuid';
 
 const router = Router();
 
+// ==================== BRUTE-FORCE PROTECTION ====================
+// Threshold: after this many failed attempts, lock the account
+const FAILED_ATTEMPT_THRESHOLD = 5;
+// How long the account stays locked (30 minutes)
+const LOCKOUT_DURATION_MS = 30 * 60 * 1000;
+
+// Normalize response timing to prevent timing-based information leakage
+// Ensures all responses take at least a minimum time regardless of code path
+const normalizeResponseTime = async (startTime: number, minMs: number = 300) => {
+  const elapsed = Date.now() - startTime;
+  if (elapsed < minMs) {
+    await new Promise(r => setTimeout(r, minMs - elapsed + Math.random() * 100));
+  }
+};
+
 // Check if user exists in Firebase and database by email
-// Returns: existsInFirebase, existsInDatabase, hasProfile
+// Rate-limited by enumerationRateLimiter in routes/index.ts
 router.post('/check-user', async (req, res) => {
+  const startTime = Date.now();
   const { email } = req.body;
 
   if (!email) {
+    // Normalize response timing to prevent timing-based enumeration
+    await normalizeResponseTime(startTime);
     throw new ValidationError('Email is required');
   }
 
@@ -50,26 +68,245 @@ router.post('/check-user', async (req, res) => {
 
   // SECURITY: System Admins must use the dedicated System Admin portal with Master Key
   if (dbUser && dbUser.role === 'SYSTEM_ADMIN') {
+    await normalizeResponseTime(startTime);
     return res.status(403).json({
       success: false,
-      error: 'System Administrators must use the dedicated Control Center portal for access.',
-      isSystemAdmin: true,
+      error: 'Access denied. Please use the appropriate portal.',
     });
   }
 
   const existsInDatabase = !!dbUser;
   const hasProfile = existsInDatabase && !!dbUser.firstName && !!dbUser.lastName;
 
+  // Normalize response timing to prevent timing-based enumeration
+  await normalizeResponseTime(startTime);
+
   res.json({
     success: true,
     data: {
-      exists: existsInFirebase && existsInDatabase, // Both must exist for "existing user"
+      exists: existsInFirebase && existsInDatabase,
       existsInFirebase,
       existsInDatabase,
       hasProfile,
       user: dbUser || null,
     },
   });
+});
+
+// ==================== BRUTE-FORCE PROTECTION ENDPOINTS ====================
+
+// Report a failed login attempt — tracks in DB, locks account + revokes tokens after threshold
+router.post('/report-failed-login', async (req, res) => {
+  const { email } = req.body;
+  if (!email) {
+    return res.status(400).json({ success: false, error: 'Email is required' });
+  }
+
+  const normalizedEmail = email.toLowerCase().trim();
+
+  const user = await prisma.user.findFirst({
+    where: { email: normalizedEmail },
+    select: { id: true, loginAttempts: true, organizationId: true, firebaseUid: true },
+  });
+
+  if (user) {
+    const newAttempts = (user.loginAttempts || 0) + 1;
+
+    await prisma.user.update({
+      where: { id: user.id },
+      data: {
+        loginAttempts: newAttempts,
+        ...(newAttempts >= FAILED_ATTEMPT_THRESHOLD && {
+          lockedUntil: new Date(Date.now() + LOCKOUT_DURATION_MS),
+        }),
+      },
+    });
+
+    // When threshold is reached:
+    // 1. Revoke ALL Firebase refresh tokens (invalidate active sessions)
+    // 2. DISABLE the account at the Firebase identity provider level
+    //    A disabled account CANNOT authenticate — no token, no login, nothing.
+    //    This is the most secure lockout: enforced at the infrastructure level.
+    if (newAttempts >= FAILED_ATTEMPT_THRESHOLD && user.firebaseUid) {
+      try {
+        await adminAuth.revokeRefreshTokens(user.firebaseUid);
+      } catch (err) {
+        console.error('Failed to revoke refresh tokens');
+      }
+
+      try {
+        await adminAuth.updateUser(user.firebaseUid, { disabled: true });
+      } catch (err) {
+        console.error('Failed to disable Firebase account');
+      }
+    }
+
+    await logAuditEvent({
+      action: 'LOGIN',
+      entity: 'Session',
+      entityId: user.id,
+      userId: user.id,
+      organizationId: user.organizationId || undefined,
+      changes: {
+        loginMethod: 'email',
+        result: 'failed',
+        attemptCount: newAttempts,
+        accountLocked: newAttempts >= FAILED_ATTEMPT_THRESHOLD,
+      },
+      ipAddress: getClientIp(req),
+      userAgent: req.headers['user-agent'] as string,
+    });
+  }
+
+  // Always return success to prevent user enumeration
+  res.json({ success: true });
+});
+
+// Check if account is locked and requires password reset before login
+router.post('/check-login-security', async (req, res) => {
+  const { email } = req.body;
+  if (!email) {
+    return res.status(400).json({ success: false, error: 'Email is required' });
+  }
+
+  const normalizedEmail = email.toLowerCase().trim();
+
+  const user = await prisma.user.findFirst({
+    where: { email: normalizedEmail },
+    select: { id: true, loginAttempts: true, lockedUntil: true },
+  });
+
+  if (!user) {
+    return res.json({ success: true, data: { accountLocked: false } });
+  }
+
+  // Check both DB lockout AND Firebase account disabled status
+  let firebaseDisabled = false;
+  try {
+    const firebaseUser = await adminAuth.getUserByEmail(normalizedEmail);
+    firebaseDisabled = firebaseUser.disabled;
+  } catch {
+    // If Firebase lookup fails, rely on DB state only
+  }
+
+  const dbLocked =
+    user.loginAttempts >= FAILED_ATTEMPT_THRESHOLD &&
+    user.lockedUntil &&
+    new Date(user.lockedUntil) > new Date();
+
+  const accountLocked = firebaseDisabled || !!dbLocked;
+
+  res.json({
+    success: true,
+    data: {
+      accountLocked,
+      message: accountLocked
+        ? 'Your account has been locked due to multiple failed login attempts. You must reset your password to regain access.'
+        : undefined,
+    },
+  });
+});
+
+// Unlock account after password reset — called by frontend after successful password reset
+// Only clears lockout if Firebase confirms the password was recently changed
+router.post('/confirm-password-reset', async (req, res) => {
+  const { email } = req.body;
+  if (!email) {
+    return res.status(400).json({ success: false, error: 'Email is required' });
+  }
+
+  const normalizedEmail = email.toLowerCase().trim();
+
+  try {
+    // Verify via Firebase that this user's tokens were recently revoked
+    // (which happens when password is reset)
+    const firebaseUser = await adminAuth.getUserByEmail(normalizedEmail);
+    const tokensValidAfter = firebaseUser.tokensValidAfterTime;
+
+    if (!tokensValidAfter) {
+      return res.status(400).json({
+        success: false,
+        error: 'No password reset detected. Please reset your password first.',
+      });
+    }
+
+    // Check if tokens were revoked within the last 10 minutes (password was just reset)
+    const revokedAt = new Date(tokensValidAfter).getTime();
+    const tenMinutesAgo = Date.now() - 10 * 60 * 1000;
+
+    if (revokedAt < tenMinutesAgo) {
+      return res.status(400).json({
+        success: false,
+        error: 'Password reset not detected. Please reset your password to unlock your account.',
+      });
+    }
+
+    // Password was recently reset — re-enable the Firebase account and clear lockout
+    // Re-enable the account at the Firebase identity provider level
+    try {
+      await adminAuth.updateUser(firebaseUser.uid, { disabled: false });
+    } catch (err) {
+      console.error('Failed to re-enable Firebase account');
+      return res.status(500).json({ success: false, error: 'Failed to unlock account. Please try again.' });
+    }
+
+    const user = await prisma.user.findFirst({
+      where: { email: normalizedEmail },
+      select: { id: true, organizationId: true },
+    });
+
+    if (user) {
+      await prisma.user.update({
+        where: { id: user.id },
+        data: { loginAttempts: 0, lockedUntil: null },
+      });
+
+      await logAuditEvent({
+        action: 'LOGIN',
+        entity: 'Session',
+        entityId: user.id,
+        userId: user.id,
+        organizationId: user.organizationId || undefined,
+        changes: {
+          loginMethod: 'email',
+          result: 'account_unlocked_after_password_reset',
+        },
+        ipAddress: getClientIp(req),
+        userAgent: req.headers['user-agent'] as string,
+      });
+    }
+
+    res.json({
+      success: true,
+      message: 'Account unlocked. You can now log in with your new password.',
+    });
+  } catch (error) {
+    console.error('Failed to confirm password reset');
+    res.status(500).json({ success: false, error: 'Failed to verify password reset' });
+  }
+});
+
+// Report successful login — resets attempt counter
+router.post('/report-successful-login', async (req, res) => {
+  const { email } = req.body;
+  if (!email) {
+    return res.status(400).json({ success: false, error: 'Email is required' });
+  }
+
+  const normalizedEmail = email.toLowerCase().trim();
+  const user = await prisma.user.findFirst({
+    where: { email: normalizedEmail },
+    select: { id: true, loginAttempts: true },
+  });
+
+  if (user && user.loginAttempts > 0) {
+    await prisma.user.update({
+      where: { id: user.id },
+      data: { loginAttempts: 0, lockedUntil: null },
+    });
+  }
+
+  res.json({ success: true });
 });
 
 // Validate access code for admin roles (no auth required - for profile setup form)
@@ -219,7 +456,7 @@ router.post('/create-profile', authenticateFirebaseOnly, async (req: FirebaseAut
         },
       });
       finalOrganizationId = newOrg.id;
-      console.log(`Created new organization: ${newOrg.name} (ID: ${newOrg.id})`);
+      console.log('Created new organization');
 
       // Optionally create facility if name provided
       if (newFacilityName) {
@@ -246,7 +483,7 @@ router.post('/create-profile', authenticateFirebaseOnly, async (req: FirebaseAut
             timezone: 'America/New_York', // Default timezone
           },
         });
-        console.log(`Created new facility: ${newFacility.name} (ID: ${newFacility.id})`);
+        console.log('Created new facility');
       }
     }
     // SYSTEM_ADMIN can have null organization, ADMIN requires organization
@@ -362,7 +599,7 @@ router.post('/create-profile', authenticateFirebaseOnly, async (req: FirebaseAut
         },
         reportIds: updatedReportIds,
       });
-      console.log(`📤 New QA user ${user.email} auto-added to ${updatedReportIds.length} open FMIR reports`);
+      console.log('New QA user auto-added to open FMIR reports');
     }
   }
 
@@ -478,7 +715,7 @@ router.post('/send-password-reset', async (req, res) => {
     //   `,
     // });
 
-    console.log('Password reset link generated for:', email);
+    console.log('Password reset link generated');
     
     res.json({
       success: true,

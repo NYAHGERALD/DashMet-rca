@@ -7,6 +7,7 @@ import { useRouter, useSearchParams } from 'next/navigation';
 import Image from 'next/image';
 import { signInWithEmailAndPassword } from 'firebase/auth';
 import { auth } from '@/lib/firebase';
+import { getFirebaseErrorMessage } from '@/lib/firebaseErrors';
 import { useAuth } from '@/components/providers/AuthProvider';
 import api from '@/lib/api';
 import SystemAdminWarningModal from '@/components/modals/SystemAdminWarningModal';
@@ -141,12 +142,8 @@ export default function SystemAdminLoginPage() {
         setIsLocked(true);
         setLockTimer((apiError.remainingMinutes || 15) * 60);
         setError(apiError.error || 'Account locked due to too many failed attempts');
-      } else if (err.code === 'auth/user-not-found' || err.code === 'auth/wrong-password' || err.code === 'auth/invalid-credential') {
-        setError('Invalid credentials');
-      } else if (err.message) {
-        setError(err.message);
       } else {
-        setError('Authentication failed');
+        setError(getFirebaseErrorMessage(err, 'Authentication failed. Please try again.'));
       }
     }
   };

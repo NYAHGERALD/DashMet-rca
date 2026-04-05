@@ -51,6 +51,7 @@ import policyParsingRoutes from './policyParsingRoutes';
 import conflictCaseRoutes from './conflictCaseRoutes';
 import dashboardRoutes from './dashboardRoutes';
 import { authenticate } from '../middleware/auth';
+import { enumerationRateLimiter, otpRateLimiter, authRateLimiter, aiRateLimiter, masterKeyRateLimiter } from '../middleware/rateLimiter';
 import { getIncidentTranscripts } from '../controllers/transcriptController';
 
 const router = Router();
@@ -77,46 +78,44 @@ router.get('/version', (req, res) => {
 
 // Phase 1: Authentication routes
 // Phase 1.1: Firebase Authentication routes
+router.use('/firebase-auth/check-user', enumerationRateLimiter);
+router.use('/firebase-auth/validate-access-code', otpRateLimiter);
+router.use('/firebase-auth/create-profile', authRateLimiter);
 router.use('/firebase-auth', firebaseAuthRoutes);
 
-// Mobile App Authentication routes - PUBLIC, no auth required
-// Used by iOS Meeting Intelligence app for registration
+// Mobile App Authentication routes - rate limited
+router.use('/mobile/check-phone', enumerationRateLimiter);
+router.use('/mobile/check-email', enumerationRateLimiter);
+router.use('/mobile/register', authRateLimiter);
 router.use('/mobile', mobileAuthRoutes);
 
-// Mobile App Task routes - PUBLIC for now (will add auth later)
-// Used by iOS Meeting Intelligence app for task management
-router.use('/mobile/tasks', taskRoutes);
+// Mobile App Task routes - Firebase auth required
+router.use('/mobile/tasks', authenticate, taskRoutes);
 
-// Mobile App Meeting routes - PUBLIC for now (will add auth later)
-// Used by iOS Meeting Intelligence app for meeting management
-router.use('/mobile/meetings', meetingRoutes);
+// Mobile App Meeting routes - Firebase auth required
+router.use('/mobile/meetings', authenticate, meetingRoutes);
 
 // Consent & Compliance routes - PUBLIC for iOS app
 // Recording consent, policy management, audit logs
 router.use('/consent', consentRoutes);
 
-// Document OCR routes - PUBLIC for iOS app
-// Handwritten document scanning with GPT-4 Vision
-router.use('/document-ocr', documentOcrRoutes);
+// Document OCR routes - AI rate limited
+router.use('/document-ocr', aiRateLimiter, documentOcrRoutes);
 
-// Conflict Analysis routes - PUBLIC for iOS app
-// AI-powered comparison of workplace conflict statements
-router.use('/conflict-analysis', conflictAnalysisRoutes);
+// Conflict Analysis routes - AI rate limited
+router.use('/conflict-analysis', aiRateLimiter, conflictAnalysisRoutes);
 
-// Policy Matching routes - PUBLIC for iOS app
-// AI-powered matching of case details against policy sections
-router.use('/policy-matching', policyMatchingRoutes);
+// Policy Matching routes - AI rate limited
+router.use('/policy-matching', aiRateLimiter, policyMatchingRoutes);
 
-// Decision Support routes - PUBLIC for iOS app
-// AI-powered recommendations for case resolution
-router.use('/decision-support', decisionSupportRoutes);
+// Decision Support routes - AI rate limited
+router.use('/decision-support', aiRateLimiter, decisionSupportRoutes);
 
-// Action Generation routes - PUBLIC for iOS app
-// Generate documents based on selected action (coaching, counseling, warning, escalate)
-router.use('/action-generation', actionGenerationRoutes);
+// Action Generation routes - AI rate limited
+router.use('/action-generation', aiRateLimiter, actionGenerationRoutes);
 
-// AI-powered policy parsing - PUBLIC for mobile apps
-router.use('/policy-parsing', policyParsingRoutes);
+// AI-powered policy parsing - AI rate limited
+router.use('/policy-parsing', aiRateLimiter, policyParsingRoutes);
 
 // Conflict Case CRUD routes - PUBLIC for iOS app
 // Full CRUD for conflict cases with encryption
@@ -135,16 +134,14 @@ router.use('/users', userRoutes);
 // Phase 1.3: User preferences routes
 router.use('/preferences', preferencesRoutes);
 
-// AI Writing Assistant routes (Grammar & Spelling) - PUBLIC, no auth required
-// MUST be defined BEFORE root-mounted routes that use authentication
-router.use('/grammar', grammarRoutes);
+// AI Writing Assistant routes - AI rate limited
+router.use('/grammar', aiRateLimiter, grammarRoutes);
 
 // Public policy routes (Privacy/Terms/Cookie/Security)
 router.use('/policies', policyRoutes);
 
-// System Admin Authentication - PUBLIC, no auth required
-// MUST be defined early before any authenticated routes
-router.use('/system-admin-auth', systemAdminAuthRoutes);
+// System Admin Authentication - strict rate limiting
+router.use('/system-admin-auth', masterKeyRateLimiter, systemAdminAuthRoutes);
 
 // Support request routes
 router.use('/support', supportRoutes);

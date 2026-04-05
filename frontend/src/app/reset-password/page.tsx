@@ -4,8 +4,10 @@
 import { useState, useEffect, Suspense } from 'react';
 import { useRouter, useSearchParams } from 'next/navigation';
 import Link from 'next/link';
+import Image from 'next/image';
 import { confirmPasswordReset, verifyPasswordResetCode } from 'firebase/auth';
 import { auth } from '@/lib/firebase';
+import { getFirebaseErrorMessage } from '@/lib/firebaseErrors';
 import { Eye, EyeOff } from 'lucide-react';
 
 function ResetPasswordForm() {
@@ -49,13 +51,7 @@ function ResetPasswordForm() {
         setEmail(userEmail);
         setCodeValid(true);
       } catch (err: any) {
-        if (err.code === 'auth/expired-action-code') {
-          setError('This password reset link has expired. Please request a new one.');
-        } else if (err.code === 'auth/invalid-action-code') {
-          setError('This password reset link is invalid or has already been used.');
-        } else {
-          setError('Unable to verify reset link. Please try again.');
-        }
+        setError(getFirebaseErrorMessage(err, 'Unable to verify reset link. Please try again.'));
         setCodeValid(false);
       } finally {
         setVerifying(false);
@@ -118,12 +114,16 @@ function ResetPasswordForm() {
       await confirmPasswordReset(auth, oobCode!, password);
       setSuccess(true);
     } catch (err: any) {
-      if (err.code === 'auth/expired-action-code') {
-        setError('This password reset link has expired. Please request a new one.');
-      } else if (err.code === 'auth/weak-password') {
-        setError('Password is too weak. Please choose a stronger password.');
+      const errCode = err.code || '';
+      const isExpiredOrInvalid = errCode === 'auth/invalid-action-code' || errCode === 'auth/expired-action-code'
+        || (err.message && (err.message.includes('auth/invalid-action-code') || err.message.includes('auth/expired-action-code')));
+      
+      if (isExpiredOrInvalid) {
+        // Code expired or already used — show invalid link state
+        setCodeValid(false);
+        setError('This reset link has expired or was already used. Please request a new one.');
       } else {
-        setError(err.message || 'Failed to reset password. Please try again.');
+        setError(getFirebaseErrorMessage(err, 'Failed to reset password. Please try again.'));
       }
     } finally {
       setLoading(false);
@@ -255,6 +255,16 @@ function ResetPasswordForm() {
       <div className="relative z-10 w-full max-w-md">
         <div className="backdrop-blur-xl bg-white/5 rounded-2xl shadow-2xl p-6 sm:p-8 border border-white/10">
           <div className="text-center mb-8">
+            <div className="flex justify-center mb-4">
+              <div className="relative w-16 h-16">
+                <Image
+                  src="/images/logo.png"
+                  alt="DASHMET Logo"
+                  fill
+                  className="object-contain"
+                />
+              </div>
+            </div>
             <div className="mx-auto flex items-center justify-center h-16 w-16 rounded-full bg-blue-500/20 mb-4">
               <svg className="h-8 w-8 text-blue-400" fill="none" viewBox="0 0 24 24" stroke="currentColor">
                 <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 7a2 2 0 012 2m4 0a6 6 0 01-7.743 5.743L11 17H9v2H7v2H4a1 1 0 01-1-1v-2.586a1 1 0 01.293-.707l5.964-5.964A6 6 0 1121 9z" />

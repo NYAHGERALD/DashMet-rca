@@ -36,8 +36,8 @@ export const authenticateFirebaseOnly = async (
       throw new AuthenticationError('No token provided');
     }
 
-    // Verify Firebase ID token only - don't look up in PostgreSQL
-    const decodedToken = await adminAuth.verifyIdToken(token);
+    // Verify Firebase ID token only (check revocation) - don't look up in PostgreSQL
+    const decodedToken = await adminAuth.verifyIdToken(token, true);
 
     req.firebaseUser = {
       firebaseUid: decodedToken.uid,
@@ -46,14 +46,14 @@ export const authenticateFirebaseOnly = async (
     
     next();
   } catch (error: any) {
-    console.log('Firebase auth error:', error.code, error.message);
-    
     if (error.code === 'auth/id-token-expired') {
       next(new AuthenticationError('Token expired'));
+    } else if (error.code === 'auth/id-token-revoked') {
+      next(new AuthenticationError('Token revoked'));
     } else if (error.code === 'auth/argument-error') {
       next(new AuthenticationError('Invalid token format'));
     } else {
-      next(new AuthenticationError(`Firebase authentication failed: ${error.message}`));
+      next(new AuthenticationError('Authentication failed'));
     }
   }
 };
@@ -71,8 +71,8 @@ export const authenticate = async (
       throw new AuthenticationError('No token provided');
     }
 
-    // Verify Firebase ID token
-    const decodedToken = await adminAuth.verifyIdToken(token);
+    // Verify Firebase ID token (with revocation check)
+    const decodedToken = await adminAuth.verifyIdToken(token, true);
 
     // Look up user in PostgreSQL by Firebase UID first
     let user = await prisma.user.findFirst({
@@ -90,6 +90,8 @@ export const authenticate = async (
         firebaseUid: true,
         isActive: true,
         profilePicture: true,
+        loginAttempts: true,
+        lockedUntil: true,
       },
     });
 
@@ -111,12 +113,14 @@ export const authenticate = async (
           firebaseUid: true,
           isActive: true,
           profilePicture: true,
+          loginAttempts: true,
+          lockedUntil: true,
         },
       });
 
       // If found by email, link this Firebase UID to the existing account
       if (user) {
-        console.log(`Linking Firebase UID ${decodedToken.uid} to existing user ${user.email}`);
+        console.log('Linking Firebase UID to existing user account');
         await prisma.user.update({
           where: { id: user.id },
           data: { firebaseUid: decodedToken.uid },
@@ -129,29 +133,36 @@ export const authenticate = async (
       throw new AuthenticationError('User not found in database');
     }
 
+    // SERVER-SIDE LOCKOUT ENFORCEMENT
+    // If account has too many failed login attempts and is locked,
+    // reject ALL API requests until password is reset and lockout cleared.
+    // This prevents attackers who brute-forced the password from accessing data.
+    const FAILED_ATTEMPT_THRESHOLD = 5;
+    if (
+      user.loginAttempts >= FAILED_ATTEMPT_THRESHOLD &&
+      user.lockedUntil &&
+      new Date(user.lockedUntil) > new Date()
+    ) {
+      throw new AuthorizationError(
+        'Account locked due to suspicious activity. Reset your password to regain access.'
+      );
+    }
+
     req.user = user as any;
     next();
   } catch (error: any) {
-    console.log('Authentication error details:', {
-      code: error.code,
-      message: error.message,
-      hasToken: !!req.headers.authorization
-    });
-
     if (error.code === 'auth/id-token-expired') {
       next(new AuthenticationError('Token expired'));
     } else if (error.code === 'auth/argument-error') {
       next(new AuthenticationError('Invalid token format'));
     } else if (error.code === 'auth/id-token-revoked') {
       next(new AuthenticationError('Token revoked'));
-    } else if (error.code === 'auth/user-not-found') {
-      next(new AuthenticationError('Firebase user not found'));
     } else if (error.message === 'User not found in database') {
-      next(new AuthenticationError('User not found in database'));
+      next(new AuthenticationError('User not found'));
     } else if (!req.headers.authorization) {
       next(new AuthenticationError('No authentication token provided'));
     } else {
-      next(new AuthenticationError(`Authentication failed: ${error.message || 'Unknown error'}`));
+      next(new AuthenticationError('Authentication failed'));
     }
   }
 };

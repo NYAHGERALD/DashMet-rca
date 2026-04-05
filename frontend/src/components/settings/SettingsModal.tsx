@@ -4,6 +4,7 @@ import { useState, useEffect, useCallback } from 'react';
 import dynamic from 'next/dynamic';
 import { sendPasswordResetEmail } from 'firebase/auth';
 import { auth } from '@/lib/firebase';
+import { getFirebaseErrorMessage } from '@/lib/firebaseErrors';
 import { useAuth } from '@/components/providers/AuthProvider';
 import { useTheme } from '@/components/providers/ThemeProvider';
 import { useI18n } from '@/lib/i18n/I18nProvider';
@@ -173,11 +174,7 @@ export default function SettingsModal() {
       setTimeout(() => setMessage(''), 5000);
     } catch (err: any) {
       console.error('Failed to send password reset email:', err);
-      if (err.code === 'auth/too-many-requests') {
-        setError('Too many requests. Please try again later.');
-      } else {
-        setError(err.message || 'Failed to send password reset email');
-      }
+      setError(getFirebaseErrorMessage(err, 'Failed to send password reset email. Please try again.'));
     } finally {
       setPasswordLoading(false);
     }

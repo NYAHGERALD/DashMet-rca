@@ -4,7 +4,7 @@ import { authenticate } from '../middleware/auth';
 import { prisma } from '../utils/prisma';
 import { ValidationError, NotFoundError } from '../middleware/errorHandler';
 import { websocketService } from '../services/websocketService';
-import { upload, handleMulterError } from '../middleware/upload';
+import { upload, handleMulterError, validateFileContent } from '../middleware/upload';
 import { adminStorage } from '../config/firebase-admin';
 import path from 'path';
 import fs from 'fs';
@@ -2537,7 +2537,7 @@ router.get('/:incidentId/handoff-progress', asyncHandler(async (req, res) => {
 // =============================================================================
 
 // POST /api/chat/:incidentId/upload - Upload file/image/voice to chat
-router.post('/:incidentId/upload', upload.single('file'), handleMulterError, asyncHandler(async (req, res) => {
+router.post('/:incidentId/upload', upload.single('file'), handleMulterError, validateFileContent, asyncHandler(async (req, res) => {
   const { incidentId } = req.params;
   const { caption, messageType } = req.body;
   const user = (req as any).user;
@@ -2693,7 +2693,7 @@ router.post('/:incidentId/upload', upload.single('file'), handleMulterError, asy
 }));
 
 // POST /api/chat/:incidentId/upload-multiple - Upload multiple files at once
-router.post('/:incidentId/upload-multiple', upload.array('files', 10), handleMulterError, asyncHandler(async (req, res) => {
+router.post('/:incidentId/upload-multiple', upload.array('files', 10), handleMulterError, validateFileContent, asyncHandler(async (req, res) => {
   const { incidentId } = req.params;
   const { caption } = req.body;
   const user = (req as any).user;

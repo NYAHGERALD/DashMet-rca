@@ -120,3 +120,4 @@ dist/
 
 # Backup data
 backend/backups/
+SECURITY_HARDENING_ACTION_PLAN.md

@@ -211,46 +211,58 @@ function PrivilegesContent() {
   useEffect(() => {
     if (!user?.organizationId) return;
 
-    const wsUrl = process.env.NEXT_PUBLIC_WS_URL || process.env.NEXT_PUBLIC_API_URL?.replace('/api', '') || 'http://localhost:5002';
-    
-    socketRef.current = io(wsUrl, {
-      auth: {
-        userId: user.id,
-        organizationId: user.organizationId,
-      },
-    });
+    let cancelled = false;
 
-    socketRef.current.on('privilege:changed', (data: {
-      role: string;
-      featureKey: string;
-      isEnabled: boolean;
-      changedBy: string;
-      changedAt: string;
-      isRevert?: boolean;
-    }) => {
-      // Update the matrix in real-time
-      setMatrix(prev => ({
-        ...prev,
-        [data.role]: {
-          ...prev[data.role],
-          [data.featureKey]: data.isEnabled,
-        },
-      }));
+    const setupSocket = async () => {
+      const wsUrl = process.env.NEXT_PUBLIC_WS_URL || process.env.NEXT_PUBLIC_API_URL?.replace('/api', '') || 'http://localhost:5002';
 
-      // Show notification
-      const action = data.isRevert ? 'reverted' : (data.isEnabled ? 'enabled' : 'disabled');
-      setRealtimeNotification(`${data.changedBy} ${action} ${data.featureKey} for ${ROLE_CONFIG[data.role]?.label || data.role}`);
+      const firebaseUser = (await import('@/lib/firebase')).auth.currentUser;
+      const firebaseToken = firebaseUser ? await firebaseUser.getIdToken() : null;
+      if (cancelled) return;
       
-      // Refresh audit logs if viewing them
-      if (viewMode === 'logs') {
-        fetchAuditLogs();
-      }
+      socketRef.current = io(wsUrl, {
+        auth: {
+          token: firebaseToken,
+          userId: user.id,
+          organizationId: user.organizationId,
+        },
+      });
 
-      // Clear notification after 5 seconds
-      setTimeout(() => setRealtimeNotification(null), 5000);
-    });
+      socketRef.current.on('privilege:changed', (data: {
+        role: string;
+        featureKey: string;
+        isEnabled: boolean;
+        changedBy: string;
+        changedAt: string;
+        isRevert?: boolean;
+      }) => {
+        // Update the matrix in real-time
+        setMatrix(prev => ({
+          ...prev,
+          [data.role]: {
+            ...prev[data.role],
+            [data.featureKey]: data.isEnabled,
+          },
+        }));
+
+        // Show notification
+        const action = data.isRevert ? 'reverted' : (data.isEnabled ? 'enabled' : 'disabled');
+        setRealtimeNotification(`${data.changedBy} ${action} ${data.featureKey} for ${ROLE_CONFIG[data.role]?.label || data.role}`);
+        
+        // Refresh audit logs if viewing them
+        if (viewMode === 'logs') {
+          fetchAuditLogs();
+        }
+
+        // Clear notification after 5 seconds
+        setTimeout(() => setRealtimeNotification(null), 5000);
+      });
+    };
+
+    setupSocket();
 
     return () => {
+      cancelled = true;
       socketRef.current?.disconnect();
     };
   }, [user?.id, user?.organizationId, viewMode]);

@@ -2,6 +2,7 @@
 
 import React, { createContext, useContext, useEffect, useState, useCallback, useRef } from 'react';
 import { io, Socket } from 'socket.io-client';
+import { auth } from './firebase';
 
 interface ChatMessage {
   id: string;
@@ -368,7 +369,7 @@ export function WebSocketProvider({ children }: { children: React.ReactNode }) {
   // LSW completion callbacks
   const lswCompletionChangedCallbacks = useRef<Set<(data: any) => void>>(new Set());
 
-  const connect = useCallback((userId: string, organizationId: string) => {
+  const connect = useCallback(async (userId: string, organizationId: string) => {
     // Prevent multiple connection attempts
     if (socket?.connected || connectionAttempted.current) return;
     connectionAttempted.current = true;
@@ -385,9 +386,17 @@ export function WebSocketProvider({ children }: { children: React.ReactNode }) {
     backendUrl = backendUrl || 'http://localhost:5002';
     
     console.log('🔌 Connecting WebSocket to:', backendUrl);
+
+    // Get Firebase ID token for WebSocket auth
+    const firebaseUser = auth.currentUser;
+    const firebaseToken = firebaseUser ? await firebaseUser.getIdToken() : null;
+    if (!firebaseToken) {
+      console.warn('🔌 No Firebase token available, skipping WebSocket connection');
+      return;
+    }
     
     const newSocket = io(backendUrl, {
-      auth: { userId, organizationId },
+      auth: { token: firebaseToken, userId, organizationId },
       transports: ['websocket', 'polling'],
       reconnection: true,
       reconnectionAttempts: 3,  // Reduced from 5

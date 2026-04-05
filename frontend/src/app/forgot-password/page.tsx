@@ -3,8 +3,10 @@
 
 import { useState } from 'react';
 import Link from 'next/link';
+import Image from 'next/image';
 import { sendPasswordResetEmail } from 'firebase/auth';
 import { auth } from '@/lib/firebase';
+import { getFirebaseErrorMessage } from '@/lib/firebaseErrors';
 
 export default function ForgotPasswordPage() {
   const [email, setEmail] = useState('');
@@ -39,12 +41,8 @@ export default function ForgotPasswordPage() {
       if (err.code === 'auth/user-not-found') {
         // Don't reveal if user doesn't exist - still show success for security
         setSuccess(true);
-      } else if (err.code === 'auth/invalid-email') {
-        setError('Please enter a valid email address');
-      } else if (err.code === 'auth/too-many-requests') {
-        setError('Too many requests. Please wait a few minutes before trying again.');
       } else {
-        setError(err.message || 'Failed to send reset email. Please try again.');
+        setError(getFirebaseErrorMessage(err, 'Failed to send reset email. Please try again.'));
       }
     } finally {
       setLoading(false);
@@ -55,6 +53,17 @@ export default function ForgotPasswordPage() {
     <div className="min-h-screen flex items-center justify-center bg-gradient-to-br from-primary-50 to-primary-100 dark:from-gray-900 dark:to-gray-800 p-4">
       <div className="w-full max-w-md">
         <div className="bg-white dark:bg-slate-800 rounded-2xl shadow-2xl p-8 border border-gray-200 dark:border-slate-700">
+          {/* Logo */}
+          <div className="flex justify-center mb-6">
+            <div className="relative w-16 h-16">
+              <Image
+                src="/images/logo.png"
+                alt="DASHMET Logo"
+                fill
+                className="object-contain"
+              />
+            </div>
+          </div>
           {success ? (
             /* Success State */
             <div className="text-center">

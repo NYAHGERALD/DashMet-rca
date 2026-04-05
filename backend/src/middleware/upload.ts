@@ -111,3 +111,54 @@ export const uploadEvidence = upload.fields([
   { name: 'documents', maxCount: 5 },
   { name: 'voiceRecordings', maxCount: 3 },
 ]);
+
+// Magic-byte signatures for file content validation
+const MAGIC_BYTES: Record<string, number[][]> = {
+  'image/jpeg': [[0xFF, 0xD8, 0xFF]],
+  'image/png': [[0x89, 0x50, 0x4E, 0x47]],
+  'image/gif': [[0x47, 0x49, 0x46, 0x38]],
+  'image/webp': [[0x52, 0x49, 0x46, 0x46]], // RIFF header
+  'application/pdf': [[0x25, 0x50, 0x44, 0x46]], // %PDF
+  'video/mp4': [[0x00, 0x00, 0x00], [0x66, 0x74, 0x79, 0x70]], // ftyp (offset 4)
+  'audio/mpeg': [[0xFF, 0xFB], [0xFF, 0xF3], [0xFF, 0xF2], [0x49, 0x44, 0x33]], // MP3 + ID3
+};
+
+function validateMagicBytes(buffer: Buffer, mimetype: string): boolean {
+  const signatures = MAGIC_BYTES[mimetype];
+  if (!signatures) return true; // No signature to check — allow by default
+  return signatures.some(sig =>
+    sig.every((byte, i) => {
+      // MP4 ftyp signature starts at offset 4
+      const offset = mimetype === 'video/mp4' && sig[0] === 0x66 ? i + 4 : i;
+      return buffer.length > offset && buffer[offset] === byte;
+    })
+  );
+}
+
+// Middleware to validate file content matches declared MIME type
+export const validateFileContent = (req: Request, res: Response, next: NextFunction) => {
+  const files: Express.Multer.File[] = [];
+
+  if (req.file) files.push(req.file);
+  if (req.files) {
+    if (Array.isArray(req.files)) {
+      files.push(...req.files);
+    } else {
+      Object.values(req.files).forEach(arr => files.push(...arr));
+    }
+  }
+
+  for (const file of files) {
+    if (file.buffer && file.buffer.length > 0) {
+      if (!validateMagicBytes(file.buffer, file.mimetype)) {
+        return res.status(400).json({
+          success: false,
+          error: 'File content does not match its declared type.',
+          timestamp: new Date().toISOString(),
+        });
+      }
+    }
+  }
+
+  next();
+};

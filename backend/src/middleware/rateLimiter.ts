@@ -1,36 +1,114 @@
 import rateLimit from 'express-rate-limit';
+import { Request } from 'express';
 
-// Phase 0.4: Rate Limiting
+// ── Key generator: use X-Forwarded-For behind proxy, fallback to IP ──
+const getClientKey = (req: Request): string => {
+  return (req.headers['x-forwarded-for'] as string)?.split(',')[0]?.trim()
+    || req.ip
+    || 'unknown';
+};
+
+// ── Global API Rate Limiter ──
 export const rateLimiter = rateLimit({
-  windowMs: parseInt(process.env.RATE_LIMIT_WINDOW_MS || '900000'), // 15 minutes
-  max: parseInt(process.env.RATE_LIMIT_MAX_REQUESTS || (process.env.NODE_ENV === 'production' ? '100' : '10000')), // Much higher for development
-  message: {
-    success: false,
-    error: 'Rate limited, please try again later',
-  },
+  windowMs: 15 * 60 * 1000,     // 15 minutes
+  max: process.env.NODE_ENV === 'production' ? 200 : 10000,
   standardHeaders: true,
   legacyHeaders: false,
-  // Skip rate limiting for certain endpoints in development
+  keyGenerator: getClientKey,
+  message: {
+    success: false,
+    error: 'Too many requests. Please try again later.',
+  },
   skip: (req) => {
     if (process.env.NODE_ENV !== 'production') {
-      // Skip rate limiting for frequently called endpoints in development
-      const skipPaths = ['/api/firebase-auth/me', '/api/health'];
-      return skipPaths.some(path => req.path.includes(path.replace('/api', '')));
+      const skipPaths = ['/firebase-auth/me', '/health'];
+      return skipPaths.some(path => req.path.includes(path));
     }
     return false;
   },
 });
 
-// Stricter rate limit for authentication endpoints
+// ── Strict Auth Rate Limiter (Login/Register) ──
 export const authRateLimiter = rateLimit({
-  windowMs: 15 * 60 * 1000, // 15 minutes
-  max: process.env.NODE_ENV === 'production' ? 50 : 10000, // 10000 for dev (essentially disabled for testing)
-  skipFailedRequests: false, // Count all requests to prevent abuse
-  skipSuccessfulRequests: false, // Count all requests
+  windowMs: 15 * 60 * 1000,     // 15 minutes
+  max: process.env.NODE_ENV === 'production' ? 10 : 10000,
+  skipSuccessfulRequests: true,  // Only count failures
+  standardHeaders: true,
+  legacyHeaders: false,
+  keyGenerator: (req: Request) => {
+    const identifier = req.body?.email || req.body?.phone || '';
+    const ip = getClientKey(req);
+    return `${identifier}:${ip}`;
+  },
   message: {
     success: false,
-    error: {
-      message: 'Too many login attempts, please try again later.',
-    },
+    error: 'Too many authentication attempts. Please try again in 15 minutes.',
+  },
+});
+
+// ── User Enumeration Protection (check-user, check-phone, check-email) ──
+export const enumerationRateLimiter = rateLimit({
+  windowMs: 60 * 60 * 1000,     // 1 hour
+  max: process.env.NODE_ENV === 'production' ? 10 : 10000,
+  standardHeaders: true,
+  legacyHeaders: false,
+  keyGenerator: getClientKey,
+  message: {
+    success: false,
+    error: 'Too many requests. Please try again later.',
+  },
+});
+
+// ── OTP / Access Code Rate Limiter ──
+export const otpRateLimiter = rateLimit({
+  windowMs: 60 * 60 * 1000,     // 1 hour
+  max: process.env.NODE_ENV === 'production' ? 5 : 10000,
+  skipSuccessfulRequests: false,
+  standardHeaders: true,
+  legacyHeaders: false,
+  keyGenerator: getClientKey,
+  message: {
+    success: false,
+    error: 'Too many verification attempts. Please try again in 1 hour.',
+  },
+});
+
+// ── File Upload Rate Limiter ──
+export const uploadRateLimiter = rateLimit({
+  windowMs: 60 * 60 * 1000,     // 1 hour
+  max: process.env.NODE_ENV === 'production' ? 50 : 10000,
+  standardHeaders: true,
+  legacyHeaders: false,
+  keyGenerator: getClientKey,
+  message: {
+    success: false,
+    error: 'Upload limit reached. Please try again later.',
+  },
+});
+
+// ── AI/OpenAI Endpoint Rate Limiter ──
+export const aiRateLimiter = rateLimit({
+  windowMs: 60 * 1000,           // 1 minute
+  max: process.env.NODE_ENV === 'production' ? 10 : 10000,
+  standardHeaders: true,
+  legacyHeaders: false,
+  keyGenerator: getClientKey,
+  message: {
+    success: false,
+    error: 'AI processing limit reached. Please wait a moment.',
+  },
+});
+
+// ── System Admin Master Key Rate Limiter ──
+export const masterKeyRateLimiter = rateLimit({
+  windowMs: 60 * 60 * 1000,     // 1 hour
+  max: process.env.NODE_ENV === 'production' ? 3 : 10000,
+  skipSuccessfulRequests: false,
+  standardHeaders: true,
+  legacyHeaders: false,
+  keyGenerator: getClientKey,
+  message: {
+    success: false,
+    error: 'Access denied. Too many attempts.',
   },
 });

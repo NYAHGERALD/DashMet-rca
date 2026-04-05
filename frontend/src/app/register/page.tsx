@@ -7,6 +7,7 @@ import Link from 'next/link';
 import Image from 'next/image';
 import { createUserWithEmailAndPassword } from 'firebase/auth';
 import api from '@/lib/api';
+import { getFirebaseErrorMessage } from '@/lib/firebaseErrors';
 import { auth } from '@/lib/firebase';
 import { Eye, EyeOff } from 'lucide-react';
 
@@ -132,7 +133,7 @@ export default function RegisterPage() {
     } catch (err: any) {
       console.error('Registration error:', err);
       const errorMsg = err?.response?.data?.error;
-      setError(typeof errorMsg === 'string' ? errorMsg : err.message || 'Registration failed');
+      setError(typeof errorMsg === 'string' ? errorMsg : getFirebaseErrorMessage(err, 'Registration failed. Please try again.'));
     } finally {
       setLoading(false);
     }

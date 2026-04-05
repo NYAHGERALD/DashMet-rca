@@ -5,7 +5,7 @@ import { requireMinimumRole, requirePrivilege, hasPrivilege } from '../middlewar
 import { UserRole } from '@prisma/client';
 import { prisma } from '../utils/prisma';
 import { ValidationError } from '../middleware/errorHandler';
-import { uploadMultiple, handleMulterError } from '../middleware/upload';
+import { uploadMultiple, handleMulterError, validateFileContent } from '../middleware/upload';
 import { adminStorage } from '../config/firebase-admin';
 import { generateIncidentSummary } from '../services/aiService';
 import { triageIncident, applyTriageToIncident } from '../services/triageService';
@@ -1862,7 +1862,7 @@ router.post('/:id/assign', requirePrivilege('incidents.assign'), async (req: Req
 });
 
 // POST /api/incidents/:id/evidence - Upload evidence files to Firebase Storage
-router.post('/:id/evidence', uploadMultiple, async (req: Request, res: Response, next: NextFunction) => {
+router.post('/:id/evidence', uploadMultiple, handleMulterError, validateFileContent, async (req: Request, res: Response, next: NextFunction) => {
   try {
     const { id } = req.params;
     const { type, transcriptions } = req.body; // PHOTO, VIDEO, DOCUMENT, VOICE_RECORDING

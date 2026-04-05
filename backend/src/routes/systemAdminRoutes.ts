@@ -1,53 +1,92 @@
 import { Router, Response, Request } from 'express';
 import { PrismaClient } from '@prisma/client';
 import { authenticate, AuthRequest } from '../middleware/auth';
-import { auth } from '../config/firebase-admin';
+import { adminAuth } from '../config/firebase-admin';
 import crypto from 'crypto';
 import { v4 as uuidv4 } from 'uuid';
 
 const router = Router();
 const prisma = new PrismaClient();
 
-// In-memory lockout tracking (in production, use Redis)
-const loginAttempts: Map<string, { count: number; lastAttempt: Date; lockedUntil?: Date }> = new Map();
+// Persistent lockout tracking via AuditLog (survives restarts)
 const LOCKOUT_THRESHOLD = 5;
 const LOCKOUT_DURATION_MINUTES = 15;
 
-// Helper to check if account is locked
-function isAccountLocked(identifier: string): { locked: boolean; remainingMinutes?: number } {
-  const attempts = loginAttempts.get(identifier);
-  if (!attempts || !attempts.lockedUntil) return { locked: false };
+// Check if account is locked by counting recent failed attempts in AuditLog
+async function isAccountLocked(identifier: string): Promise<{ locked: boolean; remainingMinutes?: number }> {
+  const windowStart = new Date(Date.now() - LOCKOUT_DURATION_MINUTES * 60 * 1000);
   
-  const now = new Date();
-  if (now >= attempts.lockedUntil) {
-    // Lockout expired, reset
-    loginAttempts.delete(identifier);
-    return { locked: false };
+  const recentFailures = await prisma.auditLog.count({
+    where: {
+      entity: 'SYSTEM_ADMIN_AUTH',
+      action: 'UPDATE', // Failed attempts use UPDATE action
+      createdAt: { gte: windowStart },
+      changes: {
+        path: ['identifier'],
+        equals: identifier,
+      },
+    },
+  });
+  
+  if (recentFailures >= LOCKOUT_THRESHOLD) {
+    // Find the most recent failure to calculate remaining lockout time
+    const lastFailure = await prisma.auditLog.findFirst({
+      where: {
+        entity: 'SYSTEM_ADMIN_AUTH',
+        action: 'UPDATE',
+        changes: { path: ['identifier'], equals: identifier },
+      },
+      orderBy: { createdAt: 'desc' },
+    });
+    
+    if (lastFailure) {
+      const lockoutEnd = new Date(lastFailure.createdAt.getTime() + LOCKOUT_DURATION_MINUTES * 60 * 1000);
+      if (new Date() < lockoutEnd) {
+        const remainingMs = lockoutEnd.getTime() - Date.now();
+        return { locked: true, remainingMinutes: Math.ceil(remainingMs / 60000) };
+      }
+    }
   }
   
-  const remainingMs = attempts.lockedUntil.getTime() - now.getTime();
-  return { locked: true, remainingMinutes: Math.ceil(remainingMs / 60000) };
+  return { locked: false };
 }
 
-// Helper to record failed attempt
-function recordFailedAttempt(identifier: string): { isNowLocked: boolean; attemptsRemaining: number } {
-  const attempts = loginAttempts.get(identifier) || { count: 0, lastAttempt: new Date() };
-  attempts.count += 1;
-  attempts.lastAttempt = new Date();
+// Record failed attempt persistently
+async function recordFailedAttempt(identifier: string): Promise<{ isNowLocked: boolean; attemptsRemaining: number }> {
+  const windowStart = new Date(Date.now() - LOCKOUT_DURATION_MINUTES * 60 * 1000);
   
-  if (attempts.count >= LOCKOUT_THRESHOLD) {
-    attempts.lockedUntil = new Date(Date.now() + LOCKOUT_DURATION_MINUTES * 60 * 1000);
-    loginAttempts.set(identifier, attempts);
+  // Log the failed attempt
+  await prisma.auditLog.create({
+    data: {
+      id: uuidv4(),
+      action: 'UPDATE',
+      entity: 'SYSTEM_ADMIN_AUTH',
+      entityId: 'lockout-tracking',
+      changes: { identifier, eventType: 'FAILED_LOGIN_ATTEMPT' },
+    },
+  });
+  
+  // Count recent failures
+  const recentFailures = await prisma.auditLog.count({
+    where: {
+      entity: 'SYSTEM_ADMIN_AUTH',
+      action: 'UPDATE',
+      createdAt: { gte: windowStart },
+      changes: { path: ['identifier'], equals: identifier },
+    },
+  });
+  
+  if (recentFailures >= LOCKOUT_THRESHOLD) {
     return { isNowLocked: true, attemptsRemaining: 0 };
   }
   
-  loginAttempts.set(identifier, attempts);
-  return { isNowLocked: false, attemptsRemaining: LOCKOUT_THRESHOLD - attempts.count };
+  return { isNowLocked: false, attemptsRemaining: LOCKOUT_THRESHOLD - recentFailures };
 }
 
-// Helper to clear attempts on successful login
-function clearAttempts(identifier: string): void {
-  loginAttempts.delete(identifier);
+// Clear attempts on successful login (no action needed — lockout is time-windowed)
+function clearAttempts(_identifier: string): void {
+  // Time-windowed approach: old attempts naturally expire
+  // No need to delete records
 }
 
 // Helper to log security events
@@ -91,7 +130,7 @@ router.post('/verify-master-key', async (req: Request, res: Response) => {
     const identifier = `${email}:${ipAddress}`;
 
     // Check lockout
-    const lockoutStatus = isAccountLocked(identifier);
+    const lockoutStatus = await isAccountLocked(identifier);
     if (lockoutStatus.locked) {
       await logSecurityEvent('VERIFY_MASTER_KEY_LOCKED', email, false, ipAddress, userAgent, {
         remainingMinutes: lockoutStatus.remainingMinutes,
@@ -122,7 +161,7 @@ router.post('/verify-master-key', async (req: Request, res: Response) => {
                    crypto.timingSafeEqual(masterKeyBuffer, systemKeyBuffer);
 
     if (!isValid) {
-      const attemptResult = recordFailedAttempt(identifier);
+      const attemptResult = await recordFailedAttempt(identifier);
       await logSecurityEvent('VERIFY_MASTER_KEY_FAILED', email, false, ipAddress, userAgent, {
         attemptsRemaining: attemptResult.attemptsRemaining,
         isNowLocked: attemptResult.isNowLocked,
@@ -170,7 +209,7 @@ router.post('/authenticate', async (req: Request, res: Response) => {
     // Verify Firebase token first
     let decodedToken;
     try {
-      decodedToken = await auth.verifyIdToken(firebaseToken);
+      decodedToken = await adminAuth.verifyIdToken(firebaseToken, true);
     } catch (error) {
       await logSecurityEvent('AUTH_INVALID_TOKEN', 'unknown', false, ipAddress, userAgent);
       return res.status(401).json({
@@ -184,7 +223,7 @@ router.post('/authenticate', async (req: Request, res: Response) => {
     const identifier = `${email}:${ipAddress}`;
 
     // Check lockout
-    const lockoutStatus = isAccountLocked(identifier);
+    const lockoutStatus = await isAccountLocked(identifier);
     if (lockoutStatus.locked) {
       await logSecurityEvent('AUTH_LOCKED', email || 'unknown', false, ipAddress, userAgent, {
         remainingMinutes: lockoutStatus.remainingMinutes,
@@ -212,7 +251,7 @@ router.post('/authenticate', async (req: Request, res: Response) => {
                             crypto.timingSafeEqual(masterKeyBuffer, systemKeyBuffer);
 
     if (!isValidMasterKey) {
-      const attemptResult = recordFailedAttempt(identifier);
+      const attemptResult = await recordFailedAttempt(identifier);
       await logSecurityEvent('AUTH_INVALID_MASTER_KEY', email || 'unknown', false, ipAddress, userAgent);
       return res.status(401).json({
         success: false,

@@ -4,6 +4,7 @@ import { Prisma } from '@prisma/client';
 import { prisma } from '../utils/prisma';
 import { v4 as uuidv4 } from 'uuid';
 import { clearRoomFromCache } from '../routes/videoCallRoutes';
+import { adminAuth } from '../config/firebase-admin';
 
 interface ConnectedUser {
   socketId: string;
@@ -46,8 +47,14 @@ class WebSocketService {
   }
 
   private async handleConnection(socket: Socket) {
-    // Authentication - expect userId and organizationId from handshake
-    const { userId, organizationId } = socket.handshake.auth;
+    // Authentication — require a Firebase token in handshake
+    const { token, userId, organizationId } = socket.handshake.auth;
+
+    if (!token) {
+      console.log(`❌ Socket ${socket.id} rejected: missing Firebase token`);
+      socket.disconnect();
+      return;
+    }
 
     if (!userId || !organizationId) {
       console.log(`❌ Socket ${socket.id} rejected: missing auth`);
@@ -55,14 +62,30 @@ class WebSocketService {
       return;
     }
 
-    // Verify user exists
+    // Verify Firebase token (with revocation check)
+    let decodedToken;
+    try {
+      decodedToken = await adminAuth.verifyIdToken(token, true);
+    } catch (err: any) {
+      console.log(`❌ Socket ${socket.id} rejected: invalid Firebase token`);
+      socket.disconnect();
+      return;
+    }
+
+    if (!userId || !organizationId) {
+      console.log(`❌ Socket ${socket.id} rejected: missing auth`);
+      socket.disconnect();
+      return;
+    }
+
+    // Verify user exists and Firebase UID matches
     const user = await prisma.user.findUnique({
       where: { id: userId },
-      select: { id: true, organizationId: true, firstName: true, lastName: true },
+      select: { id: true, organizationId: true, firstName: true, lastName: true, firebaseUid: true },
     });
 
-    if (!user || user.organizationId !== organizationId) {
-      console.log(`❌ Socket ${socket.id} rejected: invalid user`);
+    if (!user || user.organizationId !== organizationId || user.firebaseUid !== decodedToken.uid) {
+      console.log(`❌ Socket ${socket.id} rejected: user/token mismatch`);
       socket.disconnect();
       return;
     }

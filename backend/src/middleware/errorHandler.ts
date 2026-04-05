@@ -23,11 +23,12 @@ export const errorHandler = (
   const statusCode = err.statusCode || 500;
   const message = err.message || 'Internal Server Error';
 
+  // Never expose stack traces or raw error arrays to the client
+  const safeMessage = statusCode >= 500 ? 'Internal Server Error' : message;
+
   res.status(statusCode).json({
     success: false,
-    error: message,
-    ...(process.env.NODE_ENV === 'development' && { stack: err.stack }),
-    ...(err.errors && { errors: err.errors }),
+    error: safeMessage,
     timestamp: new Date().toISOString(),
   });
 };

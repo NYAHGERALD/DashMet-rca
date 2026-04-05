@@ -110,6 +110,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
           // Check if it's a rate limit error (429) or authentication error (401)
           const isRateLimited = error?.response?.status === 429;
           const isAuthError = error?.response?.status === 401;
+          const isLockedOut = error?.response?.status === 403;
           const isNetworkError = !error?.response;
           const rawErrorMessage = error?.response?.data?.error;
           const errorMessage = typeof rawErrorMessage === 'string' ? rawErrorMessage : '';
@@ -118,7 +119,16 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
           const isUserNotFoundInDb = errorMessage.includes('User not found in database') || 
                                      errorMessage.includes('User not found');
 
-          if (isRateLimited || isNetworkError) {
+          if (isLockedOut) {
+            // Account locked due to suspicious login activity — force sign out
+            console.log('Account locked — signing out and redirecting to account-locked page');
+            setUser(null);
+            setNeedsProfileSetup(false);
+            localStorage.removeItem('firebaseToken');
+            await auth.signOut();
+            const lockedEmail = firebaseUser.email || '';
+            window.location.href = `/account-locked?email=${encodeURIComponent(lockedEmail)}`;
+          } else if (isRateLimited || isNetworkError) {
             // For rate limiting or network errors, retry with backoff
             const delay = getBackoffDelay(attempt);
             console.log(`Retrying user profile fetch in ${delay}ms...`);
