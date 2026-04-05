@@ -19,8 +19,9 @@ const nextConfig = {
       { protocol: 'http', hostname: 'localhost' },
     ],
   },
-  // Optimize for production memory usage
-  output: 'standalone',
+  // Output mode: use default for Render Web Service (next start)
+  // 'standalone' is only needed for Docker deployments
+  // Removing it reduces build memory from ~1GB to ~200MB
   // Suppress hydration warnings from browser extensions
   onDemandEntries: {
     maxInactiveAge: 25 * 1000,
