@@ -1,7 +1,7 @@
 // Phase 1.1: Firebase Client Configuration
-import { initializeApp, getApps } from 'firebase/app';
-import { getAuth, GoogleAuthProvider, OAuthProvider } from 'firebase/auth';
-import { getStorage } from 'firebase/storage';
+import { initializeApp, getApps, type FirebaseApp } from 'firebase/app';
+import { getAuth, GoogleAuthProvider, OAuthProvider, type Auth } from 'firebase/auth';
+import { getStorage, type FirebaseStorage } from 'firebase/storage';
 
 // Firebase config from environment variables (no hardcoded secrets)
 const firebaseConfig = {
@@ -14,37 +14,43 @@ const firebaseConfig = {
   measurementId: process.env.NEXT_PUBLIC_FIREBASE_MEASUREMENT_ID,
 };
 
-// Initialize Firebase (only if not already initialized)
-const app = getApps().length === 0 ? initializeApp(firebaseConfig) : getApps()[0];
+// Skip Firebase initialization during build/SSR when env vars are not available
+// This prevents prerender failures on Render where NEXT_PUBLIC_ vars aren't set at build time
+const isBuildTime = !firebaseConfig.apiKey;
 
-// Initialize Firebase Auth
-export const auth = getAuth(app);
+let app: FirebaseApp | undefined;
+let auth: Auth;
+let storage: FirebaseStorage;
+let googleProvider: GoogleAuthProvider;
+let microsoftProvider: OAuthProvider;
 
-// Initialize Google Auth Provider
-export const googleProvider = new GoogleAuthProvider();
+if (!isBuildTime) {
+  // Initialize Firebase (only if not already initialized)
+  app = getApps().length === 0 ? initializeApp(firebaseConfig) : getApps()[0];
 
-// Initialize Microsoft Auth Provider (Azure AD / Microsoft Identity)
-// Supports: Personal Microsoft accounts, Work accounts, School accounts
-export const microsoftProvider = new OAuthProvider('microsoft.com');
+  // Initialize Firebase Auth
+  auth = getAuth(app);
 
-// Configure Microsoft provider for enterprise-grade security
-// Request additional scopes for user profile information
-microsoftProvider.addScope('openid');
-microsoftProvider.addScope('profile');
-microsoftProvider.addScope('email');
-microsoftProvider.addScope('User.Read');
+  // Initialize Google Auth Provider
+  googleProvider = new GoogleAuthProvider();
 
-// Set custom OAuth parameters for Microsoft
-// 'prompt': 'select_account' - Always show account picker for multi-account support
-// This allows users to choose between personal, work, or school accounts
-microsoftProvider.setCustomParameters({
-  prompt: 'select_account',
-  // tenant: 'common' allows both personal and organizational accounts
-  // Use 'organizations' for work/school only, 'consumers' for personal only
-  tenant: 'common',
-});
+  // Initialize Microsoft Auth Provider (Azure AD / Microsoft Identity)
+  microsoftProvider = new OAuthProvider('microsoft.com');
 
-// Initialize Firebase Storage
-export const storage = getStorage(app);
+  // Configure Microsoft provider for enterprise-grade security
+  microsoftProvider.addScope('openid');
+  microsoftProvider.addScope('profile');
+  microsoftProvider.addScope('email');
+  microsoftProvider.addScope('User.Read');
 
+  microsoftProvider.setCustomParameters({
+    prompt: 'select_account',
+    tenant: 'common',
+  });
+
+  // Initialize Firebase Storage
+  storage = getStorage(app);
+}
+
+export { auth, googleProvider, microsoftProvider, storage };
 export default app;
