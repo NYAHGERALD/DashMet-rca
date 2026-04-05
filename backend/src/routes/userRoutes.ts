@@ -4,7 +4,7 @@ import { authenticate } from '../middleware/auth';
 import { requireAdmin, requireSystemAdmin, requireMinimumRole } from '../middleware/rbac';
 import { prisma } from '../utils/prisma';
 import { AuthRequest } from '../middleware/auth';
-import { adminStorage } from '../config/firebase-admin';
+import { adminStorage, adminAuth } from '../config/firebase-admin';
 import multer from 'multer';
 import { websocketService } from '../services/websocketService';
 import { logAuditFromRequest } from '../services/auditService';
@@ -618,9 +618,22 @@ router.delete(
       await tx.incident.deleteMany({ where: { createdById: id } });
       await tx.foreignMaterialIncident.deleteMany({ where: { createdById: id } });
       
-      // Finally delete the user
+      // Finally delete the user from database
       await tx.user.delete({ where: { id } });
     }, { timeout: 30000 });
+
+    // Delete user from Firebase Auth (outside transaction — DB is source of truth)
+    if (targetUser.firebaseUid) {
+      try {
+        await adminAuth.deleteUser(targetUser.firebaseUid);
+      } catch (fbErr: any) {
+        // Log but don't fail — DB deletion already succeeded
+        // auth/user-not-found means they were already removed from Firebase
+        if (fbErr.code !== 'auth/user-not-found') {
+          console.error(`Failed to delete Firebase user ${targetUser.firebaseUid}:`, fbErr.message);
+        }
+      }
+    }
 
     res.json({
       success: true,

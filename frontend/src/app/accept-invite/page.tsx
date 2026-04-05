@@ -9,6 +9,7 @@ import {
   createUserWithEmailAndPassword,
   signInWithEmailAndPassword,
   signInWithPopup,
+  signOut,
 } from 'firebase/auth';
 import { auth, googleProvider, microsoftProvider } from '@/lib/firebase';
 import { useAuth } from '@/components/providers/AuthProvider';
@@ -143,12 +144,12 @@ export default function AcceptInvitePage() {
         { headers: { Authorization: `Bearer ${idToken}` } }
       );
 
-      // 3. Refresh auth state
-      await refreshUser();
+      // 3. Sign out so user must log in with their new credentials
+      await signOut(auth);
       setStep('success');
 
-      // Redirect to dashboard after brief success message
-      setTimeout(() => router.push('/dashboard'), 2000);
+      // Redirect to login after brief success message
+      setTimeout(() => router.push('/login'), 3000);
     } catch (err: any) {
       // If Firebase account already exists, try signing in
       if (err.code === 'auth/email-already-in-use') {
@@ -333,7 +334,7 @@ export default function AcceptInvitePage() {
             <p className="text-sm text-gray-300 mb-2">
               Your account has been created successfully.
             </p>
-            <p className="text-xs text-gray-400">Redirecting to dashboard...</p>
+            <p className="text-xs text-gray-400">Redirecting to sign in...</p>
             <div className="flex items-center justify-center gap-1.5 mt-6">
               <div className="w-2 h-2 bg-green-600 rounded-full animate-bounce" style={{ animationDelay: '0ms' }} />
               <div className="w-2 h-2 bg-green-500 rounded-full animate-bounce" style={{ animationDelay: '150ms' }} />
