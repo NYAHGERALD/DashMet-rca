@@ -551,6 +551,19 @@ function PrivilegesContent() {
 
   // Toggle a user-specific override
   const toggleUserOverride = async (userId: string, featureKey: string, isEnabled: boolean) => {
+    // Block enabling admin nav links for non-admin users
+    if (isEnabled) {
+      const isAdminLink = navAdminLinks.some(d => d.key === featureKey);
+      if (isAdminLink) {
+        const user = navUsers.find(u => u.id === userId);
+        if (user && !['ADMIN', 'SYSTEM_ADMIN'].includes(user.role)) {
+          setError(`Cannot grant admin navigation access to ${user.name || user.email}. Only users with Admin or System Admin roles can access Organization Management links.`);
+          setTimeout(() => setError(null), 5000);
+          return;
+        }
+      }
+    }
+
     const savingKey = `user:${userId}:${featureKey}`;
     setNavSaving(savingKey);
     try {

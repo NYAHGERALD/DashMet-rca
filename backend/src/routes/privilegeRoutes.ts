@@ -2727,6 +2727,12 @@ router.put(
       return;
     }
 
+    // Cannot grant admin nav links to non-admin users
+    if (isEnabled && definition.category === 'Organization Management' && !['ADMIN', 'SYSTEM_ADMIN'].includes(targetUser.role)) {
+      res.status(403).json({ error: 'Cannot grant admin navigation access to non-admin users. Only Admin or System Admin roles can access Organization Management links.' });
+      return;
+    }
+
     const override = await prisma.userPrivilegeOverride.upsert({
       where: {
         userId_featureKey: { userId, featureKey },
@@ -2837,6 +2843,19 @@ router.put(
     if (userId === adminId) {
       res.status(403).json({ error: 'Cannot set privilege overrides for yourself' });
       return;
+    }
+
+    // Cannot grant admin nav links to non-admin users
+    if (!['ADMIN', 'SYSTEM_ADMIN'].includes(targetUser.role)) {
+      const adminNavOverrides = overrides.filter((o: { featureKey: string; isEnabled: boolean }) => {
+        if (!o.isEnabled) return false;
+        const def = PRIVILEGE_DEFINITIONS.find(d => d.key === o.featureKey);
+        return def?.category === 'Organization Management';
+      });
+      if (adminNavOverrides.length > 0) {
+        res.status(403).json({ error: 'Cannot grant admin navigation access to non-admin users. Only Admin or System Admin roles can access Organization Management links.' });
+        return;
+      }
     }
 
     // Apply all overrides in transaction
