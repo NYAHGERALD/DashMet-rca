@@ -2642,7 +2642,7 @@ router.get(
     // Verify target user belongs to the same organization
     const targetUser = await prisma.user.findFirst({
       where: { id: userId, organizationId: userOrgId },
-      select: { id: true, name: true, email: true, role: true },
+      select: { id: true, firstName: true, lastName: true, email: true, role: true },
     });
 
     if (!targetUser) {
@@ -2707,7 +2707,7 @@ router.put(
     // Verify target user belongs to the same organization
     const targetUser = await prisma.user.findFirst({
       where: { id: userId, organizationId: userOrgId },
-      select: { id: true, name: true, email: true, role: true },
+      select: { id: true, firstName: true, lastName: true, email: true, role: true },
     });
 
     if (!targetUser) {
@@ -2755,7 +2755,7 @@ router.put(
         previousValue: !isEnabled,
         newValue: isEnabled,
         changedById: adminId,
-        reason: `User-specific override for ${targetUser.name || targetUser.email}`,
+        reason: `User-specific override for ${targetUser.firstName} ${targetUser.lastName} (${targetUser.email})`,
       },
     });
 
@@ -2809,7 +2809,7 @@ router.put(
     // Verify target user
     const targetUser = await prisma.user.findFirst({
       where: { id: userId, organizationId: userOrgId },
-      select: { id: true, name: true, email: true, role: true },
+      select: { id: true, firstName: true, lastName: true, email: true, role: true },
     });
 
     if (!targetUser) {
@@ -2946,7 +2946,7 @@ router.post(
         previousValue: true,
         newValue: true,
         changedById: adminId,
-        reason: `Reset all user-specific overrides for ${targetUser.name || targetUser.email} (${result.count} overrides removed)`,
+        reason: `Reset all user-specific overrides for ${targetUser.firstName} ${targetUser.lastName} (${targetUser.email}) (${result.count} overrides removed)`,
       },
     });
 
@@ -2992,7 +2992,8 @@ router.get(
       where: whereClause,
       select: {
         id: true,
-        name: true,
+        firstName: true,
+        lastName: true,
         email: true,
         role: true,
         PrivilegeOverrides: {
@@ -3002,10 +3003,16 @@ router.get(
           },
         },
       },
-      orderBy: [{ role: 'asc' }, { name: 'asc' }],
+      orderBy: [{ role: 'asc' }, { firstName: 'asc' }],
     });
 
-    res.json({ success: true, data: users });
+    // Map firstName/lastName to name for frontend
+    const mapped = users.map(u => ({
+      ...u,
+      name: `${u.firstName} ${u.lastName}`.trim(),
+    }));
+
+    res.json({ success: true, data: mapped });
   })
 );
 
