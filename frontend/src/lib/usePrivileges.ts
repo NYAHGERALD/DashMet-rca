@@ -424,3 +424,81 @@ export const ANALYTICS_PRIVILEGES = {
 } as const;
 
 export type AnalyticsPrivilegeKey = typeof ANALYTICS_PRIVILEGES[keyof typeof ANALYTICS_PRIVILEGES];
+
+// ============================================================================
+// NAVIGATION Privilege Constants
+// ============================================================================
+
+export const NAV_PRIVILEGES = {
+  // Quick Navigation
+  DASHBOARD: 'nav.dashboard',
+  CREATE_INCIDENT: 'nav.create_incident',
+  MY_INCIDENTS: 'nav.my_incidents',
+  TEAM_INCIDENTS: 'nav.team_incidents',
+  PUBLIC_INCIDENTS: 'nav.public_incidents',
+  RCA: 'nav.rca',
+  CAPA: 'nav.capa',
+  REPORTS: 'nav.reports',
+  ANALYTICS: 'nav.analytics',
+  KNOWLEDGE: 'nav.knowledge',
+  WORKPLACE_REPORT: 'nav.workplace_report',
+  INVESTIGATION_REPORT: 'nav.investigation_report',
+  FMIR: 'nav.fmir',
+  SAFETY_ASSESSMENT: 'nav.safety_assessment',
+  HR: 'nav.hr',
+  BAKERY_METRICS: 'nav.bakery_metrics',
+  LSW: 'nav.lsw',
+  VACATION: 'nav.vacation',
+  MEETINGS: 'nav.meetings',
+  OPERATIONS: 'nav.operations',
+  ACTION_ITEMS: 'nav.action_items',
+  // Organization Management
+  ADMIN_ORGANIZATIONS: 'nav.admin_organizations',
+  ADMIN_FACILITIES: 'nav.admin_facilities',
+  ADMIN_DEPARTMENTS: 'nav.admin_departments',
+  ADMIN_AREAS: 'nav.admin_areas',
+  ADMIN_LINES: 'nav.admin_lines',
+  ADMIN_EQUIPMENT: 'nav.admin_equipment',
+  ADMIN_SHIFTS: 'nav.admin_shifts',
+  ADMIN_CATEGORIES: 'nav.admin_categories',
+  ADMIN_USERS: 'nav.admin_users',
+  ADMIN_INVITATIONS: 'nav.admin_invitations',
+  ADMIN_PRIVILEGES: 'nav.admin_privileges',
+  ADMIN_WORK_ORDERS: 'nav.admin_work_orders',
+  ADMIN_ENTERPRISE: 'nav.admin_enterprise',
+  ADMIN_CALENDAR: 'nav.admin_calendar',
+  ADMIN_BAKERY_SETTINGS: 'nav.admin_bakery_settings',
+  SUPPORT_INBOX: 'nav.support_inbox',
+} as const;
+
+export type NavPrivilegeKey = typeof NAV_PRIVILEGES[keyof typeof NAV_PRIVILEGES];
+
+/**
+ * Hook specifically for navigation access control.
+ * Returns a hasNavAccess function that checks nav.* privileges.
+ * Uses the same cached privilege data as usePrivileges().
+ */
+export function useNavAccess() {
+  const { hasPrivilege, loading, privileges } = usePrivileges();
+
+  const hasNavAccess = useCallback((navKey: string): boolean => {
+    return hasPrivilege(navKey);
+  }, [hasPrivilege]);
+
+  const navPrivileges = useMemo(() => {
+    if (!privileges) return {};
+    const nav: Record<string, boolean> = {};
+    for (const [key, value] of Object.entries(privileges)) {
+      if (key.startsWith('nav.')) {
+        nav[key] = value;
+      }
+    }
+    return nav;
+  }, [privileges]);
+
+  return {
+    hasNavAccess,
+    navPrivileges,
+    loading,
+  };
+}

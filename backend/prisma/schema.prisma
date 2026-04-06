@@ -1079,6 +1079,9 @@ model Organization {
   // Invitation-only registration
   Invitations                Invitation[]
 
+  // User-specific privilege overrides
+  UserPrivilegeOverrides     UserPrivilegeOverride[]
+
   @@index([name])
   @@index([signupCode])
 }
@@ -1333,6 +1336,27 @@ model RolePrivilege {
   @@index([role])
 }
 
+// Per-user privilege overrides — allows admins to grant/revoke specific
+// privileges for individual users, independent of their role defaults.
+// Priority: UserPrivilegeOverride > RolePrivilege > DefaultPrivilege
+model UserPrivilegeOverride {
+  id             String          @id @default(uuid())
+  userId         String
+  organizationId String
+  featureKey     String
+  isEnabled      Boolean
+  createdAt      DateTime        @default(now())
+  updatedAt      DateTime        @updatedAt
+  createdById    String?
+  User           User            @relation(fields: [userId], references: [id], onDelete: Cascade)
+  Organization   Organization    @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+
+  @@unique([userId, featureKey])
+  @@index([userId])
+  @@index([organizationId])
+  @@index([featureKey])
+}
+
 model SLAConfiguration {
   id                   String    @id @default(uuid())
   organizationId       String
@@ -1571,6 +1595,9 @@ model User {
   // Operations Issue Tracking
   IssuesReported                                                      MachineIssue[]                        @relation("IssueReportedBy")
   IssuesResolved                                                      MachineIssue[]                        @relation("IssueResolvedBy")
+
+  // User-specific privilege overrides
+  PrivilegeOverrides                                                  UserPrivilegeOverride[]
 
   @@index([email])
   @@index([isOnline])
@@ -2148,6 +2175,7 @@ enum FeatureModule {
   SYSTEM
   CHAT
   NOTIFICATIONS
+  NAVIGATION
 }
 
 enum IncidentStatus {

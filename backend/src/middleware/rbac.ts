@@ -269,16 +269,62 @@ const DEFAULT_PRIVILEGES: Record<string, UserRole[]> = {
   'analytics.export_reports': ['SUPERVISOR', 'QA_FOOD_SAFETY', 'QUALITY_CONTROL_MANAGER', 'CI_MANAGER', 'ADMIN', 'SYSTEM_ADMIN'],
   'analytics.ai.generate_insights': ['QA_FOOD_SAFETY', 'QUALITY_CONTROL_MANAGER', 'CI_MANAGER', 'ADMIN', 'SYSTEM_ADMIN'],
   'analytics.ai.predict_trends': ['QUALITY_CONTROL_MANAGER', 'CI_MANAGER', 'ADMIN', 'SYSTEM_ADMIN'],
+
+  // ============================================================================
+  // NAVIGATION MODULE - Quick Navigation
+  // ============================================================================
+  'nav.dashboard': ['OPERATOR', 'SUPERVISOR', 'QA_FOOD_SAFETY', 'QUALITY_CONTROL_MANAGER', 'MAINTENANCE_ENGINEERING', 'SAFETY_SECURITY_MANAGER', 'CI_MANAGER', 'ADMIN', 'SYSTEM_ADMIN'],
+  'nav.create_incident': ['OPERATOR', 'SUPERVISOR', 'QA_FOOD_SAFETY', 'QUALITY_CONTROL_MANAGER', 'MAINTENANCE_ENGINEERING', 'SAFETY_SECURITY_MANAGER', 'CI_MANAGER', 'ADMIN', 'SYSTEM_ADMIN'],
+  'nav.my_incidents': ['OPERATOR', 'SUPERVISOR', 'QA_FOOD_SAFETY', 'QUALITY_CONTROL_MANAGER', 'MAINTENANCE_ENGINEERING', 'SAFETY_SECURITY_MANAGER', 'CI_MANAGER', 'ADMIN', 'SYSTEM_ADMIN'],
+  'nav.team_incidents': ['SUPERVISOR', 'QA_FOOD_SAFETY', 'QUALITY_CONTROL_MANAGER', 'MAINTENANCE_ENGINEERING', 'SAFETY_SECURITY_MANAGER', 'CI_MANAGER', 'ADMIN', 'SYSTEM_ADMIN'],
+  'nav.public_incidents': ['OPERATOR', 'SUPERVISOR', 'QA_FOOD_SAFETY', 'QUALITY_CONTROL_MANAGER', 'MAINTENANCE_ENGINEERING', 'SAFETY_SECURITY_MANAGER', 'CI_MANAGER', 'ADMIN', 'SYSTEM_ADMIN'],
+  'nav.rca': ['SUPERVISOR', 'QA_FOOD_SAFETY', 'QUALITY_CONTROL_MANAGER', 'MAINTENANCE_ENGINEERING', 'SAFETY_SECURITY_MANAGER', 'CI_MANAGER', 'ADMIN', 'SYSTEM_ADMIN'],
+  'nav.capa': ['SUPERVISOR', 'QA_FOOD_SAFETY', 'QUALITY_CONTROL_MANAGER', 'MAINTENANCE_ENGINEERING', 'SAFETY_SECURITY_MANAGER', 'CI_MANAGER', 'ADMIN', 'SYSTEM_ADMIN'],
+  'nav.reports': ['SUPERVISOR', 'QA_FOOD_SAFETY', 'QUALITY_CONTROL_MANAGER', 'MAINTENANCE_ENGINEERING', 'SAFETY_SECURITY_MANAGER', 'CI_MANAGER', 'ADMIN', 'SYSTEM_ADMIN'],
+  'nav.analytics': ['SUPERVISOR', 'QA_FOOD_SAFETY', 'QUALITY_CONTROL_MANAGER', 'MAINTENANCE_ENGINEERING', 'SAFETY_SECURITY_MANAGER', 'CI_MANAGER', 'ADMIN', 'SYSTEM_ADMIN'],
+  'nav.knowledge': ['SUPERVISOR', 'QA_FOOD_SAFETY', 'QUALITY_CONTROL_MANAGER', 'MAINTENANCE_ENGINEERING', 'SAFETY_SECURITY_MANAGER', 'CI_MANAGER', 'ADMIN', 'SYSTEM_ADMIN'],
+  'nav.workplace_report': ['OPERATOR', 'SUPERVISOR', 'QA_FOOD_SAFETY', 'QUALITY_CONTROL_MANAGER', 'MAINTENANCE_ENGINEERING', 'SAFETY_SECURITY_MANAGER', 'CI_MANAGER', 'ADMIN', 'SYSTEM_ADMIN'],
+  'nav.investigation_report': ['OPERATOR', 'SUPERVISOR', 'QA_FOOD_SAFETY', 'QUALITY_CONTROL_MANAGER', 'MAINTENANCE_ENGINEERING', 'SAFETY_SECURITY_MANAGER', 'CI_MANAGER', 'ADMIN', 'SYSTEM_ADMIN'],
+  'nav.fmir': ['OPERATOR', 'SUPERVISOR', 'QA_FOOD_SAFETY', 'QUALITY_CONTROL_MANAGER', 'MAINTENANCE_ENGINEERING', 'SAFETY_SECURITY_MANAGER', 'CI_MANAGER', 'ADMIN', 'SYSTEM_ADMIN'],
+  'nav.safety_assessment': ['SUPERVISOR', 'QA_FOOD_SAFETY', 'QUALITY_CONTROL_MANAGER', 'MAINTENANCE_ENGINEERING', 'SAFETY_SECURITY_MANAGER', 'CI_MANAGER', 'ADMIN', 'SYSTEM_ADMIN'],
+  'nav.hr': ['SUPERVISOR', 'QA_FOOD_SAFETY', 'QUALITY_CONTROL_MANAGER', 'MAINTENANCE_ENGINEERING', 'SAFETY_SECURITY_MANAGER', 'CI_MANAGER', 'ADMIN', 'SYSTEM_ADMIN'],
+  'nav.bakery_metrics': ['OPERATOR', 'SUPERVISOR', 'QA_FOOD_SAFETY', 'QUALITY_CONTROL_MANAGER', 'MAINTENANCE_ENGINEERING', 'SAFETY_SECURITY_MANAGER', 'CI_MANAGER', 'ADMIN', 'SYSTEM_ADMIN'],
+  'nav.lsw': ['OPERATOR', 'SUPERVISOR', 'QA_FOOD_SAFETY', 'QUALITY_CONTROL_MANAGER', 'MAINTENANCE_ENGINEERING', 'SAFETY_SECURITY_MANAGER', 'CI_MANAGER', 'ADMIN', 'SYSTEM_ADMIN'],
+  'nav.vacation': ['OPERATOR', 'SUPERVISOR', 'QA_FOOD_SAFETY', 'QUALITY_CONTROL_MANAGER', 'MAINTENANCE_ENGINEERING', 'SAFETY_SECURITY_MANAGER', 'CI_MANAGER', 'ADMIN', 'SYSTEM_ADMIN'],
+  'nav.meetings': ['OPERATOR', 'SUPERVISOR', 'QA_FOOD_SAFETY', 'QUALITY_CONTROL_MANAGER', 'MAINTENANCE_ENGINEERING', 'SAFETY_SECURITY_MANAGER', 'CI_MANAGER', 'ADMIN', 'SYSTEM_ADMIN'],
+  'nav.operations': ['OPERATOR', 'SUPERVISOR', 'QA_FOOD_SAFETY', 'QUALITY_CONTROL_MANAGER', 'MAINTENANCE_ENGINEERING', 'SAFETY_SECURITY_MANAGER', 'CI_MANAGER', 'ADMIN', 'SYSTEM_ADMIN'],
+  'nav.action_items': ['OPERATOR', 'SUPERVISOR', 'QA_FOOD_SAFETY', 'QUALITY_CONTROL_MANAGER', 'MAINTENANCE_ENGINEERING', 'SAFETY_SECURITY_MANAGER', 'CI_MANAGER', 'ADMIN', 'SYSTEM_ADMIN'],
+
+  // ============================================================================
+  // NAVIGATION MODULE - Organization Management
+  // ============================================================================
+  'nav.admin_organizations': ['ADMIN', 'SYSTEM_ADMIN'],
+  'nav.admin_facilities': ['ADMIN', 'SYSTEM_ADMIN'],
+  'nav.admin_departments': ['ADMIN', 'SYSTEM_ADMIN'],
+  'nav.admin_areas': ['ADMIN', 'SYSTEM_ADMIN'],
+  'nav.admin_lines': ['ADMIN', 'SYSTEM_ADMIN'],
+  'nav.admin_equipment': ['ADMIN', 'SYSTEM_ADMIN'],
+  'nav.admin_shifts': ['ADMIN', 'SYSTEM_ADMIN'],
+  'nav.admin_categories': ['ADMIN', 'SYSTEM_ADMIN'],
+  'nav.admin_users': ['ADMIN', 'SYSTEM_ADMIN'],
+  'nav.admin_invitations': ['ADMIN', 'SYSTEM_ADMIN'],
+  'nav.admin_privileges': ['ADMIN', 'SYSTEM_ADMIN'],
+  'nav.admin_work_orders': ['ADMIN', 'SYSTEM_ADMIN'],
+  'nav.admin_enterprise': ['ADMIN', 'SYSTEM_ADMIN'],
+  'nav.admin_calendar': ['ADMIN', 'SYSTEM_ADMIN'],
+  'nav.admin_bakery_settings': ['ADMIN', 'SYSTEM_ADMIN'],
+  'nav.support_inbox': ['QUALITY_CONTROL_MANAGER', 'ADMIN', 'SYSTEM_ADMIN'],
 };
 
 /**
  * Check if a user has a specific privilege
- * First checks the database for organization-specific overrides, then falls back to defaults
+ * Priority: UserPrivilegeOverride > RolePrivilege (org override) > DefaultPrivilege
  */
 export async function hasPrivilege(
   organizationId: string,
   userRole: UserRole,
-  privilegeKey: string
+  privilegeKey: string,
+  userId?: string
 ): Promise<boolean> {
   // System admins always have all privileges
   if (userRole === 'SYSTEM_ADMIN') {
@@ -286,7 +332,19 @@ export async function hasPrivilege(
   }
 
   try {
-    // Check for organization-specific privilege override
+    // Priority 1: Check for user-specific override (highest priority)
+    if (userId) {
+      const userOverride = await prisma.userPrivilegeOverride.findUnique({
+        where: {
+          userId_featureKey: { userId, featureKey: privilegeKey },
+        },
+      });
+      if (userOverride) {
+        return userOverride.isEnabled;
+      }
+    }
+
+    // Priority 2: Check for organization-specific role override
     const privilegeOverride = await prisma.rolePrivilege.findFirst({
       where: {
         organizationId,
@@ -330,7 +388,8 @@ export function requirePrivilege(privilegeKey: string) {
     const hasAccess = await hasPrivilege(
       req.user.organizationId,
       req.user.role as UserRole,
-      privilegeKey
+      privilegeKey,
+      req.user.id
     );
 
     if (!hasAccess) {
@@ -360,7 +419,8 @@ export function requireAnyPrivilege(...privilegeKeys: string[]) {
       const hasAccess = await hasPrivilege(
         req.user.organizationId,
         req.user.role as UserRole,
-        privilegeKey
+        privilegeKey,
+        req.user.id
       );
 
       if (hasAccess) {
@@ -374,5 +434,137 @@ export function requireAnyPrivilege(...privilegeKeys: string[]) {
       message: `You do not have permission to perform this action. Required one of: ${privilegeKeys.join(', ')}`,
       privilegeKeys,
     });
+  };
+}
+
+// ============================================================================
+// NAVIGATION ACCESS CONTROL
+// ============================================================================
+
+/**
+ * Maps API route prefixes to navigation privilege keys.
+ * Used by requireNavAccess middleware to enforce server-side access control.
+ */
+const API_ROUTE_TO_NAV_KEY: Record<string, string> = {
+  '/api/dashboard': 'nav.dashboard',
+  '/api/incidents': 'nav.my_incidents',
+  '/api/rca': 'nav.rca',
+  '/api/capa': 'nav.capa',
+  '/api/reports': 'nav.reports',
+  '/api/analytics': 'nav.analytics',
+  '/api/knowledge': 'nav.knowledge',
+  '/api/workplace-reports': 'nav.workplace_report',
+  '/api/investigation-reports': 'nav.investigation_report',
+  '/api/fmir': 'nav.fmir',
+  '/api/safety-assessment': 'nav.safety_assessment',
+  '/api/hr': 'nav.hr',
+  '/api/bakery-metrics': 'nav.bakery_metrics',
+  '/api/lsw': 'nav.lsw',
+  '/api/vacation': 'nav.vacation',
+  '/api/meetings': 'nav.meetings',
+  '/api/operations': 'nav.operations',
+  '/api/action-items': 'nav.action_items',
+  '/api/organizations': 'nav.admin_organizations',
+  '/api/facilities': 'nav.admin_facilities',
+  '/api/departments': 'nav.admin_departments',
+  '/api/areas': 'nav.admin_areas',
+  '/api/lines': 'nav.admin_lines',
+  '/api/equipment': 'nav.admin_equipment',
+  '/api/shifts': 'nav.admin_shifts',
+  '/api/categories': 'nav.admin_categories',
+  '/api/users': 'nav.admin_users',
+  '/api/invitations': 'nav.admin_invitations',
+  '/api/privileges': 'nav.admin_privileges',
+  '/api/work-orders': 'nav.admin_work_orders',
+  '/api/enterprise': 'nav.admin_enterprise',
+  '/api/calendar': 'nav.admin_calendar',
+  '/api/bakery-settings': 'nav.admin_bakery_settings',
+  '/api/support': 'nav.support_inbox',
+};
+
+/**
+ * Middleware factory to require navigation access for a specific nav key.
+ * Checks the 3-tier priority: UserPrivilegeOverride > RolePrivilege > DefaultPrivilege
+ */
+export function requireNavAccess(navKey: string) {
+  return async (req: AuthRequest, res: Response, next: NextFunction) => {
+    if (!req.user) {
+      throw new ForbiddenError('Authentication required');
+    }
+
+    // SYSTEM_ADMIN always has full access
+    if (req.user.role === 'SYSTEM_ADMIN') {
+      return next();
+    }
+
+    const hasAccess = await hasPrivilege(
+      req.user.organizationId,
+      req.user.role as UserRole,
+      navKey,
+      req.user.id
+    );
+
+    if (!hasAccess) {
+      res.status(403).json({
+        success: false,
+        error: 'Navigation access denied',
+        message: 'You do not have access to this section. Contact your administrator.',
+        navKey,
+      });
+      return;
+    }
+
+    next();
+  };
+}
+
+/**
+ * Auto-detect navigation access based on request path.
+ * Use as route-level middleware to automatically enforce navigation privileges.
+ */
+export function autoRequireNavAccess() {
+  return async (req: AuthRequest, res: Response, next: NextFunction) => {
+    if (!req.user) {
+      return next(); // Let authenticate middleware handle this
+    }
+
+    // SYSTEM_ADMIN always has full access
+    if (req.user.role === 'SYSTEM_ADMIN') {
+      return next();
+    }
+
+    // Find matching nav key for this route
+    const path = req.path;
+    let navKey: string | undefined;
+    for (const [routePrefix, key] of Object.entries(API_ROUTE_TO_NAV_KEY)) {
+      if (path.startsWith(routePrefix)) {
+        navKey = key;
+        break;
+      }
+    }
+
+    // If no nav key mapped, allow access (route not nav-controlled)
+    if (!navKey) {
+      return next();
+    }
+
+    const hasAccess = await hasPrivilege(
+      req.user.organizationId,
+      req.user.role as UserRole,
+      navKey,
+      req.user.id
+    );
+
+    if (!hasAccess) {
+      res.status(403).json({
+        success: false,
+        error: 'Navigation access denied',
+        message: 'You do not have access to this section. Contact your administrator.',
+        navKey,
+      });
+      return;
+    }
+
+    next();
   };
 }

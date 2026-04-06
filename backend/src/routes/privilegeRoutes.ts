@@ -1340,6 +1340,384 @@ export const PRIVILEGE_DEFINITIONS: PrivilegeDefinition[] = [
     sortOrder: 1102,
     defaultRoles: ['SUPERVISOR', 'QA_FOOD_SAFETY', 'QUALITY_CONTROL_MANAGER', 'CI_MANAGER', 'ADMIN'],
   },
+
+  // ============================================================================
+  // NAVIGATION MODULE — Controls sidebar link visibility & page access
+  // ============================================================================
+
+  // ── Quick Navigation Links ──
+  {
+    key: 'nav.dashboard',
+    module: 'NAVIGATION',
+    action: 'VIEW',
+    displayName: 'Dashboard',
+    description: 'Access the main dashboard',
+    category: 'Quick Navigation',
+    sortOrder: 1200,
+    defaultRoles: ['OPERATOR', 'SUPERVISOR', 'QA_FOOD_SAFETY', 'QUALITY_CONTROL_MANAGER', 'MAINTENANCE_ENGINEERING', 'SAFETY_SECURITY_MANAGER', 'CI_MANAGER', 'ADMIN'],
+  },
+  {
+    key: 'nav.create_incident',
+    module: 'NAVIGATION',
+    action: 'VIEW',
+    displayName: 'Create Incident',
+    description: 'Access the create incident page',
+    category: 'Quick Navigation',
+    sortOrder: 1201,
+    defaultRoles: ['OPERATOR', 'SUPERVISOR', 'QA_FOOD_SAFETY', 'QUALITY_CONTROL_MANAGER', 'MAINTENANCE_ENGINEERING', 'SAFETY_SECURITY_MANAGER', 'CI_MANAGER', 'ADMIN'],
+  },
+  {
+    key: 'nav.my_incidents',
+    module: 'NAVIGATION',
+    action: 'VIEW',
+    displayName: 'My Incidents',
+    description: 'Access personal incident list',
+    category: 'Quick Navigation',
+    sortOrder: 1202,
+    defaultRoles: ['OPERATOR', 'SUPERVISOR', 'QA_FOOD_SAFETY', 'QUALITY_CONTROL_MANAGER', 'MAINTENANCE_ENGINEERING', 'SAFETY_SECURITY_MANAGER', 'CI_MANAGER', 'ADMIN'],
+  },
+  {
+    key: 'nav.team_incidents',
+    module: 'NAVIGATION',
+    action: 'VIEW',
+    displayName: 'Team Incidents',
+    description: 'Access team incident list',
+    category: 'Quick Navigation',
+    sortOrder: 1203,
+    defaultRoles: ['SUPERVISOR', 'QA_FOOD_SAFETY', 'QUALITY_CONTROL_MANAGER', 'MAINTENANCE_ENGINEERING', 'SAFETY_SECURITY_MANAGER', 'CI_MANAGER', 'ADMIN'],
+  },
+  {
+    key: 'nav.public_incidents',
+    module: 'NAVIGATION',
+    action: 'VIEW',
+    displayName: 'Public Incidents',
+    description: 'Access public incident list',
+    category: 'Quick Navigation',
+    sortOrder: 1204,
+    defaultRoles: ['OPERATOR', 'SUPERVISOR', 'QA_FOOD_SAFETY', 'QUALITY_CONTROL_MANAGER', 'MAINTENANCE_ENGINEERING', 'SAFETY_SECURITY_MANAGER', 'CI_MANAGER', 'ADMIN'],
+  },
+  {
+    key: 'nav.rca',
+    module: 'NAVIGATION',
+    action: 'VIEW',
+    displayName: 'RCA Workspace',
+    description: 'Access root cause analysis workspace',
+    category: 'Quick Navigation',
+    sortOrder: 1205,
+    defaultRoles: ['SUPERVISOR', 'QA_FOOD_SAFETY', 'QUALITY_CONTROL_MANAGER', 'MAINTENANCE_ENGINEERING', 'SAFETY_SECURITY_MANAGER', 'CI_MANAGER', 'ADMIN'],
+  },
+  {
+    key: 'nav.capa',
+    module: 'NAVIGATION',
+    action: 'VIEW',
+    displayName: 'CAPA Board',
+    description: 'Access corrective and preventive actions board',
+    category: 'Quick Navigation',
+    sortOrder: 1206,
+    defaultRoles: ['SUPERVISOR', 'QA_FOOD_SAFETY', 'QUALITY_CONTROL_MANAGER', 'MAINTENANCE_ENGINEERING', 'SAFETY_SECURITY_MANAGER', 'CI_MANAGER', 'ADMIN'],
+  },
+  {
+    key: 'nav.reports',
+    module: 'NAVIGATION',
+    action: 'VIEW',
+    displayName: 'Reports & Compliance',
+    description: 'Access reports and compliance dashboard',
+    category: 'Quick Navigation',
+    sortOrder: 1207,
+    defaultRoles: ['SUPERVISOR', 'QA_FOOD_SAFETY', 'QUALITY_CONTROL_MANAGER', 'MAINTENANCE_ENGINEERING', 'SAFETY_SECURITY_MANAGER', 'CI_MANAGER', 'ADMIN'],
+  },
+  {
+    key: 'nav.analytics',
+    module: 'NAVIGATION',
+    action: 'VIEW',
+    displayName: 'Analytics & Insights',
+    description: 'Access analytics dashboard',
+    category: 'Quick Navigation',
+    sortOrder: 1208,
+    defaultRoles: ['SUPERVISOR', 'QA_FOOD_SAFETY', 'QUALITY_CONTROL_MANAGER', 'MAINTENANCE_ENGINEERING', 'SAFETY_SECURITY_MANAGER', 'CI_MANAGER', 'ADMIN'],
+  },
+  {
+    key: 'nav.knowledge',
+    module: 'NAVIGATION',
+    action: 'VIEW',
+    displayName: 'Knowledge Base',
+    description: 'Access the knowledge base',
+    category: 'Quick Navigation',
+    sortOrder: 1209,
+    defaultRoles: ['SUPERVISOR', 'QA_FOOD_SAFETY', 'QUALITY_CONTROL_MANAGER', 'MAINTENANCE_ENGINEERING', 'SAFETY_SECURITY_MANAGER', 'CI_MANAGER', 'ADMIN'],
+  },
+  {
+    key: 'nav.workplace_report',
+    module: 'NAVIGATION',
+    action: 'VIEW',
+    displayName: 'Workplace Report',
+    description: 'Access workplace reports',
+    category: 'Quick Navigation',
+    sortOrder: 1210,
+    defaultRoles: ['OPERATOR', 'SUPERVISOR', 'QA_FOOD_SAFETY', 'QUALITY_CONTROL_MANAGER', 'MAINTENANCE_ENGINEERING', 'SAFETY_SECURITY_MANAGER', 'CI_MANAGER', 'ADMIN'],
+  },
+  {
+    key: 'nav.investigation_report',
+    module: 'NAVIGATION',
+    action: 'VIEW',
+    displayName: 'Investigation Report',
+    description: 'Access investigation reports',
+    category: 'Quick Navigation',
+    sortOrder: 1211,
+    defaultRoles: ['OPERATOR', 'SUPERVISOR', 'QA_FOOD_SAFETY', 'QUALITY_CONTROL_MANAGER', 'MAINTENANCE_ENGINEERING', 'SAFETY_SECURITY_MANAGER', 'CI_MANAGER', 'ADMIN'],
+  },
+  {
+    key: 'nav.fmir',
+    module: 'NAVIGATION',
+    action: 'VIEW',
+    displayName: 'Foreign Material',
+    description: 'Access foreign material incident reports',
+    category: 'Quick Navigation',
+    sortOrder: 1212,
+    defaultRoles: ['OPERATOR', 'SUPERVISOR', 'QA_FOOD_SAFETY', 'QUALITY_CONTROL_MANAGER', 'MAINTENANCE_ENGINEERING', 'SAFETY_SECURITY_MANAGER', 'CI_MANAGER', 'ADMIN'],
+  },
+  {
+    key: 'nav.safety_assessment',
+    module: 'NAVIGATION',
+    action: 'VIEW',
+    displayName: 'Safety Assessment',
+    description: 'Access workplace safety assessments',
+    category: 'Quick Navigation',
+    sortOrder: 1213,
+    defaultRoles: ['SUPERVISOR', 'QA_FOOD_SAFETY', 'QUALITY_CONTROL_MANAGER', 'MAINTENANCE_ENGINEERING', 'SAFETY_SECURITY_MANAGER', 'CI_MANAGER', 'ADMIN'],
+  },
+  {
+    key: 'nav.hr',
+    module: 'NAVIGATION',
+    action: 'VIEW',
+    displayName: 'HR Resolution',
+    description: 'Access HR conflict resolution',
+    category: 'Quick Navigation',
+    sortOrder: 1214,
+    defaultRoles: ['SUPERVISOR', 'QA_FOOD_SAFETY', 'QUALITY_CONTROL_MANAGER', 'SAFETY_SECURITY_MANAGER', 'CI_MANAGER', 'ADMIN'],
+  },
+  {
+    key: 'nav.bakery_metrics',
+    module: 'NAVIGATION',
+    action: 'VIEW',
+    displayName: 'Bakery Metrics',
+    description: 'Access bakery performance metrics',
+    category: 'Quick Navigation',
+    sortOrder: 1215,
+    defaultRoles: ['OPERATOR', 'SUPERVISOR', 'QA_FOOD_SAFETY', 'QUALITY_CONTROL_MANAGER', 'MAINTENANCE_ENGINEERING', 'SAFETY_SECURITY_MANAGER', 'CI_MANAGER', 'ADMIN'],
+  },
+  {
+    key: 'nav.lsw',
+    module: 'NAVIGATION',
+    action: 'VIEW',
+    displayName: 'Leaders Standard Work',
+    description: 'Access leader standard work boards',
+    category: 'Quick Navigation',
+    sortOrder: 1216,
+    defaultRoles: ['OPERATOR', 'SUPERVISOR', 'QA_FOOD_SAFETY', 'QUALITY_CONTROL_MANAGER', 'MAINTENANCE_ENGINEERING', 'SAFETY_SECURITY_MANAGER', 'CI_MANAGER', 'ADMIN'],
+  },
+  {
+    key: 'nav.vacation',
+    module: 'NAVIGATION',
+    action: 'VIEW',
+    displayName: 'Vacation Hub',
+    description: 'Access vacation management',
+    category: 'Quick Navigation',
+    sortOrder: 1217,
+    defaultRoles: ['OPERATOR', 'SUPERVISOR', 'QA_FOOD_SAFETY', 'QUALITY_CONTROL_MANAGER', 'MAINTENANCE_ENGINEERING', 'SAFETY_SECURITY_MANAGER', 'CI_MANAGER', 'ADMIN'],
+  },
+  {
+    key: 'nav.meetings',
+    module: 'NAVIGATION',
+    action: 'VIEW',
+    displayName: 'Meeting Intelligence',
+    description: 'Access meeting intelligence',
+    category: 'Quick Navigation',
+    sortOrder: 1218,
+    defaultRoles: ['OPERATOR', 'SUPERVISOR', 'QA_FOOD_SAFETY', 'QUALITY_CONTROL_MANAGER', 'MAINTENANCE_ENGINEERING', 'SAFETY_SECURITY_MANAGER', 'CI_MANAGER', 'ADMIN'],
+  },
+  {
+    key: 'nav.operations',
+    module: 'NAVIGATION',
+    action: 'VIEW',
+    displayName: 'Operations',
+    description: 'Access operations issue tracking',
+    category: 'Quick Navigation',
+    sortOrder: 1219,
+    defaultRoles: ['OPERATOR', 'SUPERVISOR', 'QA_FOOD_SAFETY', 'QUALITY_CONTROL_MANAGER', 'MAINTENANCE_ENGINEERING', 'SAFETY_SECURITY_MANAGER', 'CI_MANAGER', 'ADMIN'],
+  },
+  {
+    key: 'nav.action_items',
+    module: 'NAVIGATION',
+    action: 'VIEW',
+    displayName: 'My Action Items',
+    description: 'Access assigned action items',
+    category: 'Quick Navigation',
+    sortOrder: 1220,
+    defaultRoles: ['OPERATOR', 'SUPERVISOR', 'QA_FOOD_SAFETY', 'QUALITY_CONTROL_MANAGER', 'MAINTENANCE_ENGINEERING', 'SAFETY_SECURITY_MANAGER', 'CI_MANAGER', 'ADMIN'],
+  },
+
+  // ── Organization Management Links ──
+  {
+    key: 'nav.admin_organizations',
+    module: 'NAVIGATION',
+    action: 'VIEW',
+    displayName: 'Organizations',
+    description: 'Access organization management',
+    category: 'Organization Management',
+    sortOrder: 1300,
+    defaultRoles: ['ADMIN'],
+  },
+  {
+    key: 'nav.admin_facilities',
+    module: 'NAVIGATION',
+    action: 'VIEW',
+    displayName: 'Facilities',
+    description: 'Access facility management',
+    category: 'Organization Management',
+    sortOrder: 1301,
+    defaultRoles: ['ADMIN'],
+  },
+  {
+    key: 'nav.admin_departments',
+    module: 'NAVIGATION',
+    action: 'VIEW',
+    displayName: 'Departments',
+    description: 'Access department management',
+    category: 'Organization Management',
+    sortOrder: 1302,
+    defaultRoles: ['ADMIN'],
+  },
+  {
+    key: 'nav.admin_areas',
+    module: 'NAVIGATION',
+    action: 'VIEW',
+    displayName: 'Areas',
+    description: 'Access area management',
+    category: 'Organization Management',
+    sortOrder: 1303,
+    defaultRoles: ['ADMIN'],
+  },
+  {
+    key: 'nav.admin_lines',
+    module: 'NAVIGATION',
+    action: 'VIEW',
+    displayName: 'Lines',
+    description: 'Access production line management',
+    category: 'Organization Management',
+    sortOrder: 1304,
+    defaultRoles: ['ADMIN'],
+  },
+  {
+    key: 'nav.admin_equipment',
+    module: 'NAVIGATION',
+    action: 'VIEW',
+    displayName: 'Machine Registry',
+    description: 'Access machine/equipment registry',
+    category: 'Organization Management',
+    sortOrder: 1305,
+    defaultRoles: ['ADMIN'],
+  },
+  {
+    key: 'nav.admin_shifts',
+    module: 'NAVIGATION',
+    action: 'VIEW',
+    displayName: 'Shifts',
+    description: 'Access shift management',
+    category: 'Organization Management',
+    sortOrder: 1306,
+    defaultRoles: ['ADMIN'],
+  },
+  {
+    key: 'nav.admin_categories',
+    module: 'NAVIGATION',
+    action: 'VIEW',
+    displayName: 'Categories',
+    description: 'Access incident category management',
+    category: 'Organization Management',
+    sortOrder: 1307,
+    defaultRoles: ['ADMIN'],
+  },
+  {
+    key: 'nav.admin_users',
+    module: 'NAVIGATION',
+    action: 'VIEW',
+    displayName: 'User Management',
+    description: 'Access user management',
+    category: 'Organization Management',
+    sortOrder: 1308,
+    defaultRoles: ['ADMIN'],
+  },
+  {
+    key: 'nav.admin_invitations',
+    module: 'NAVIGATION',
+    action: 'VIEW',
+    displayName: 'Invitations',
+    description: 'Access invitation management',
+    category: 'Organization Management',
+    sortOrder: 1309,
+    defaultRoles: ['ADMIN'],
+  },
+  {
+    key: 'nav.admin_privileges',
+    module: 'NAVIGATION',
+    action: 'VIEW',
+    displayName: 'Role Privileges',
+    description: 'Access role privilege configuration',
+    category: 'Organization Management',
+    sortOrder: 1310,
+    defaultRoles: ['ADMIN'],
+  },
+  {
+    key: 'nav.admin_work_orders',
+    module: 'NAVIGATION',
+    action: 'VIEW',
+    displayName: 'Work Order Templates',
+    description: 'Access work order template management',
+    category: 'Organization Management',
+    sortOrder: 1311,
+    defaultRoles: ['ADMIN'],
+  },
+  {
+    key: 'nav.admin_enterprise',
+    module: 'NAVIGATION',
+    action: 'VIEW',
+    displayName: 'Enterprise',
+    description: 'Access enterprise settings',
+    category: 'Organization Management',
+    sortOrder: 1312,
+    defaultRoles: ['ADMIN'],
+  },
+  {
+    key: 'nav.admin_calendar',
+    module: 'NAVIGATION',
+    action: 'VIEW',
+    displayName: 'Calendar Year Config',
+    description: 'Access calendar year configuration',
+    category: 'Organization Management',
+    sortOrder: 1313,
+    defaultRoles: ['ADMIN'],
+  },
+  {
+    key: 'nav.admin_bakery_settings',
+    module: 'NAVIGATION',
+    action: 'VIEW',
+    displayName: 'Bakery KPI Settings',
+    description: 'Access bakery KPI settings',
+    category: 'Organization Management',
+    sortOrder: 1314,
+    defaultRoles: ['ADMIN'],
+  },
+  {
+    key: 'nav.support_inbox',
+    module: 'NAVIGATION',
+    action: 'VIEW',
+    displayName: 'Support Inbox',
+    description: 'Access support inbox',
+    category: 'Organization Management',
+    sortOrder: 1315,
+    defaultRoles: ['QUALITY_CONTROL_MANAGER', 'ADMIN'],
+  },
 ];
 
 // ============================================================================
@@ -1778,7 +2156,23 @@ router.get(
       return;
     }
 
-    // Check for organization override
+    // Priority 1: Check for user-specific override (highest priority)
+    if (userOrgId && authReq.user?.id) {
+      const userOverride = await prisma.userPrivilegeOverride.findUnique({
+        where: {
+          userId_featureKey: {
+            userId: authReq.user.id,
+            featureKey,
+          },
+        },
+      });
+      if (userOverride) {
+        res.json({ success: true, hasPrivilege: userOverride.isEnabled });
+        return;
+      }
+    }
+
+    // Priority 2: Check for organization role override
     if (userOrgId) {
       const override = await prisma.rolePrivilege.findUnique({
         where: {
@@ -1831,8 +2225,8 @@ router.get(
       return;
     }
 
-    // Get organization overrides
-    const overrides: Record<string, boolean> = {};
+    // Get organization role overrides
+    const roleOverrides: Record<string, boolean> = {};
     if (userOrgId) {
       const orgPrivileges = await prisma.rolePrivilege.findMany({
         where: {
@@ -1841,14 +2235,27 @@ router.get(
         },
       });
       for (const priv of orgPrivileges) {
-        overrides[priv.featureKey] = priv.isEnabled;
+        roleOverrides[priv.featureKey] = priv.isEnabled;
       }
     }
 
-    // Build complete privilege list
+    // Get user-specific overrides (highest priority)
+    const userOverrides: Record<string, boolean> = {};
+    if (authReq.user?.id) {
+      const userPrivileges = await prisma.userPrivilegeOverride.findMany({
+        where: { userId: authReq.user.id },
+      });
+      for (const priv of userPrivileges) {
+        userOverrides[priv.featureKey] = priv.isEnabled;
+      }
+    }
+
+    // Build complete privilege list: user override > role override > default
     for (const def of PRIVILEGE_DEFINITIONS) {
-      if (def.key in overrides) {
-        privileges[def.key] = overrides[def.key];
+      if (def.key in userOverrides) {
+        privileges[def.key] = userOverrides[def.key];
+      } else if (def.key in roleOverrides) {
+        privileges[def.key] = roleOverrides[def.key];
       } else {
         privileges[def.key] = def.defaultRoles.includes(userRole as UserRole);
       }
@@ -2201,6 +2608,404 @@ router.get(
         definitions: fmirDefinitions,
       },
     });
+  })
+);
+
+// ============================================================================
+// USER PRIVILEGE OVERRIDE ENDPOINTS
+// ============================================================================
+
+/**
+ * @route   GET /api/privileges/user-overrides/:userId
+ * @desc    Get all privilege overrides for a specific user
+ * @access  Private (ADMIN+)
+ */
+router.get(
+  '/user-overrides/:userId',
+  authenticate,
+  asyncHandler(async (req: Request, res: Response) => {
+    const authReq = req as AuthRequest;
+    const userRole = authReq.user?.role;
+    const userOrgId = authReq.user?.organizationId;
+    const { userId } = req.params;
+
+    if (!['ADMIN', 'SYSTEM_ADMIN'].includes(userRole || '')) {
+      res.status(403).json({ error: 'Access denied. Admin role required.' });
+      return;
+    }
+
+    if (!userOrgId) {
+      res.status(400).json({ error: 'Organization not found' });
+      return;
+    }
+
+    // Verify target user belongs to the same organization
+    const targetUser = await prisma.user.findFirst({
+      where: { id: userId, organizationId: userOrgId },
+      select: { id: true, name: true, email: true, role: true },
+    });
+
+    if (!targetUser) {
+      res.status(404).json({ error: 'User not found in your organization' });
+      return;
+    }
+
+    const overrides = await prisma.userPrivilegeOverride.findMany({
+      where: { userId, organizationId: userOrgId },
+      orderBy: { featureKey: 'asc' },
+    });
+
+    res.json({
+      success: true,
+      data: {
+        user: targetUser,
+        overrides,
+      },
+    });
+  })
+);
+
+/**
+ * @route   PUT /api/privileges/user-overrides/:userId
+ * @desc    Set or update a privilege override for a specific user
+ * @access  Private (ADMIN+)
+ */
+router.put(
+  '/user-overrides/:userId',
+  authenticate,
+  asyncHandler(async (req: Request, res: Response) => {
+    const authReq = req as AuthRequest;
+    const userRole = authReq.user?.role;
+    const userOrgId = authReq.user?.organizationId;
+    const adminId = authReq.user?.id;
+    const { userId } = req.params;
+    const { featureKey, isEnabled } = req.body;
+
+    if (!['ADMIN', 'SYSTEM_ADMIN'].includes(userRole || '')) {
+      res.status(403).json({ error: 'Access denied. Admin role required.' });
+      return;
+    }
+
+    if (!userOrgId || !adminId) {
+      res.status(400).json({ error: 'Organization not found' });
+      return;
+    }
+
+    // Validate inputs
+    if (!featureKey || typeof isEnabled !== 'boolean') {
+      res.status(400).json({ error: 'featureKey (string) and isEnabled (boolean) are required' });
+      return;
+    }
+
+    // Validate featureKey exists in definitions
+    const definition = PRIVILEGE_DEFINITIONS.find(d => d.key === featureKey);
+    if (!definition) {
+      res.status(400).json({ error: `Invalid feature key: ${featureKey}` });
+      return;
+    }
+
+    // Verify target user belongs to the same organization
+    const targetUser = await prisma.user.findFirst({
+      where: { id: userId, organizationId: userOrgId },
+      select: { id: true, name: true, email: true, role: true },
+    });
+
+    if (!targetUser) {
+      res.status(404).json({ error: 'User not found in your organization' });
+      return;
+    }
+
+    // Cannot override SYSTEM_ADMIN privileges
+    if (targetUser.role === 'SYSTEM_ADMIN') {
+      res.status(403).json({ error: 'Cannot override SYSTEM_ADMIN privileges' });
+      return;
+    }
+
+    // Cannot set overrides for yourself
+    if (userId === adminId) {
+      res.status(403).json({ error: 'Cannot set privilege overrides for yourself' });
+      return;
+    }
+
+    const override = await prisma.userPrivilegeOverride.upsert({
+      where: {
+        userId_featureKey: { userId, featureKey },
+      },
+      update: {
+        isEnabled,
+        updatedAt: new Date(),
+      },
+      create: {
+        userId,
+        organizationId: userOrgId,
+        featureKey,
+        isEnabled,
+        createdById: adminId,
+      },
+    });
+
+    // Log the change
+    await prisma.privilegeAuditLog.create({
+      data: {
+        organizationId: userOrgId,
+        featureKey,
+        module: definition.module as FeatureModule,
+        action: definition.action,
+        role: targetUser.role as UserRole,
+        previousValue: !isEnabled,
+        newValue: isEnabled,
+        changedById: adminId,
+        reason: `User-specific override for ${targetUser.name || targetUser.email}`,
+      },
+    });
+
+    res.json({ success: true, data: override });
+  })
+);
+
+/**
+ * @route   PUT /api/privileges/user-overrides/:userId/bulk
+ * @desc    Set multiple privilege overrides for a user at once
+ * @access  Private (ADMIN+)
+ */
+router.put(
+  '/user-overrides/:userId/bulk',
+  authenticate,
+  asyncHandler(async (req: Request, res: Response) => {
+    const authReq = req as AuthRequest;
+    const userRole = authReq.user?.role;
+    const userOrgId = authReq.user?.organizationId;
+    const adminId = authReq.user?.id;
+    const { userId } = req.params;
+    const { overrides } = req.body;
+
+    if (!['ADMIN', 'SYSTEM_ADMIN'].includes(userRole || '')) {
+      res.status(403).json({ error: 'Access denied. Admin role required.' });
+      return;
+    }
+
+    if (!userOrgId || !adminId) {
+      res.status(400).json({ error: 'Organization not found' });
+      return;
+    }
+
+    if (!Array.isArray(overrides)) {
+      res.status(400).json({ error: 'overrides must be an array of { featureKey, isEnabled }' });
+      return;
+    }
+
+    // Validate all feature keys
+    for (const o of overrides) {
+      if (!o.featureKey || typeof o.isEnabled !== 'boolean') {
+        res.status(400).json({ error: 'Each override must have featureKey (string) and isEnabled (boolean)' });
+        return;
+      }
+      if (!PRIVILEGE_DEFINITIONS.find(d => d.key === o.featureKey)) {
+        res.status(400).json({ error: `Invalid feature key: ${o.featureKey}` });
+        return;
+      }
+    }
+
+    // Verify target user
+    const targetUser = await prisma.user.findFirst({
+      where: { id: userId, organizationId: userOrgId },
+      select: { id: true, name: true, email: true, role: true },
+    });
+
+    if (!targetUser) {
+      res.status(404).json({ error: 'User not found in your organization' });
+      return;
+    }
+
+    if (targetUser.role === 'SYSTEM_ADMIN') {
+      res.status(403).json({ error: 'Cannot override SYSTEM_ADMIN privileges' });
+      return;
+    }
+
+    if (userId === adminId) {
+      res.status(403).json({ error: 'Cannot set privilege overrides for yourself' });
+      return;
+    }
+
+    // Apply all overrides in transaction
+    const results = await prisma.$transaction(
+      overrides.map((o: { featureKey: string; isEnabled: boolean }) =>
+        prisma.userPrivilegeOverride.upsert({
+          where: {
+            userId_featureKey: { userId, featureKey: o.featureKey },
+          },
+          update: { isEnabled: o.isEnabled, updatedAt: new Date() },
+          create: {
+            userId,
+            organizationId: userOrgId,
+            featureKey: o.featureKey,
+            isEnabled: o.isEnabled,
+            createdById: adminId,
+          },
+        })
+      )
+    );
+
+    res.json({ success: true, data: { count: results.length, overrides: results } });
+  })
+);
+
+/**
+ * @route   DELETE /api/privileges/user-overrides/:userId/:featureKey
+ * @desc    Remove a specific privilege override for a user
+ * @access  Private (ADMIN+)
+ */
+router.delete(
+  '/user-overrides/:userId/:featureKey',
+  authenticate,
+  asyncHandler(async (req: Request, res: Response) => {
+    const authReq = req as AuthRequest;
+    const userRole = authReq.user?.role;
+    const userOrgId = authReq.user?.organizationId;
+    const { userId, featureKey } = req.params;
+
+    if (!['ADMIN', 'SYSTEM_ADMIN'].includes(userRole || '')) {
+      res.status(403).json({ error: 'Access denied. Admin role required.' });
+      return;
+    }
+
+    if (!userOrgId) {
+      res.status(400).json({ error: 'Organization not found' });
+      return;
+    }
+
+    // Verify target user belongs to same org
+    const targetUser = await prisma.user.findFirst({
+      where: { id: userId, organizationId: userOrgId },
+    });
+
+    if (!targetUser) {
+      res.status(404).json({ error: 'User not found in your organization' });
+      return;
+    }
+
+    try {
+      await prisma.userPrivilegeOverride.delete({
+        where: {
+          userId_featureKey: { userId, featureKey },
+        },
+      });
+      res.json({ success: true, message: 'Override removed' });
+    } catch {
+      res.status(404).json({ error: 'Override not found' });
+    }
+  })
+);
+
+/**
+ * @route   POST /api/privileges/user-overrides/:userId/reset
+ * @desc    Remove all privilege overrides for a user (revert to role defaults)
+ * @access  Private (ADMIN+)
+ */
+router.post(
+  '/user-overrides/:userId/reset',
+  authenticate,
+  asyncHandler(async (req: Request, res: Response) => {
+    const authReq = req as AuthRequest;
+    const userRole = authReq.user?.role;
+    const userOrgId = authReq.user?.organizationId;
+    const adminId = authReq.user?.id;
+    const { userId } = req.params;
+
+    if (!['ADMIN', 'SYSTEM_ADMIN'].includes(userRole || '')) {
+      res.status(403).json({ error: 'Access denied. Admin role required.' });
+      return;
+    }
+
+    if (!userOrgId || !adminId) {
+      res.status(400).json({ error: 'Organization not found' });
+      return;
+    }
+
+    const targetUser = await prisma.user.findFirst({
+      where: { id: userId, organizationId: userOrgId },
+    });
+
+    if (!targetUser) {
+      res.status(404).json({ error: 'User not found in your organization' });
+      return;
+    }
+
+    const result = await prisma.userPrivilegeOverride.deleteMany({
+      where: { userId, organizationId: userOrgId },
+    });
+
+    // Log the reset
+    await prisma.privilegeAuditLog.create({
+      data: {
+        organizationId: userOrgId,
+        featureKey: 'ALL',
+        module: 'SYSTEM' as FeatureModule,
+        action: 'VIEW',
+        role: targetUser.role as UserRole,
+        previousValue: true,
+        newValue: true,
+        changedById: adminId,
+        reason: `Reset all user-specific overrides for ${targetUser.name || targetUser.email} (${result.count} overrides removed)`,
+      },
+    });
+
+    res.json({ success: true, message: `Removed ${result.count} overrides` });
+  })
+);
+
+/**
+ * @route   GET /api/privileges/users-by-role
+ * @desc    Get users grouped by role for the navigation override UI
+ * @access  Private (ADMIN+)
+ */
+router.get(
+  '/users-by-role',
+  authenticate,
+  asyncHandler(async (req: Request, res: Response) => {
+    const authReq = req as AuthRequest;
+    const userRole = authReq.user?.role;
+    const userOrgId = authReq.user?.organizationId;
+
+    if (!['ADMIN', 'SYSTEM_ADMIN'].includes(userRole || '')) {
+      res.status(403).json({ error: 'Access denied. Admin role required.' });
+      return;
+    }
+
+    if (!userOrgId) {
+      res.status(400).json({ error: 'Organization not found' });
+      return;
+    }
+
+    const { role } = req.query;
+
+    const whereClause: Record<string, unknown> = {
+      organizationId: userOrgId,
+      isActive: true,
+    };
+
+    if (role && typeof role === 'string') {
+      whereClause.role = role;
+    }
+
+    const users = await prisma.user.findMany({
+      where: whereClause,
+      select: {
+        id: true,
+        name: true,
+        email: true,
+        role: true,
+        PrivilegeOverrides: {
+          select: {
+            featureKey: true,
+            isEnabled: true,
+          },
+        },
+      },
+      orderBy: [{ role: 'asc' }, { name: 'asc' }],
+    });
+
+    res.json({ success: true, data: users });
   })
 );
 

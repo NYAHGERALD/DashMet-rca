@@ -3,6 +3,7 @@
 import { useState, useRef, useEffect, useCallback } from 'react';
 import { useAuth } from '@/components/providers/AuthProvider';
 import { useHasMinimumRole, useIsAdmin } from '@/lib/rbac';
+import { useNavAccess, NAV_PRIVILEGES } from '@/lib/usePrivileges';
 import Link from 'next/link';
 import Image from 'next/image';
 import SlidingSidebar from '@/components/ui/SlidingSidebar';
@@ -63,6 +64,7 @@ export default function AppLayout({ children }: AppLayoutProps) {
   const { openSettings } = useSettingsModal();
   const isAdmin = useIsAdmin();
   const isSupervisorPlus = useHasMinimumRole('SUPERVISOR');
+  const { hasNavAccess } = useNavAccess();
   const isSystemAdmin = user?.role === 'SYSTEM_ADMIN';
   const [showDropdown, setShowDropdown] = useState(false);
   const [showProfileModal, setShowProfileModal] = useState(false);
@@ -311,27 +313,27 @@ export default function AppLayout({ children }: AppLayoutProps) {
             { href: '/system-admin', icon: <Building2 size={18} strokeWidth={1.8} />, label: t('nav.systemAdmin') || 'System Admin Portal' },
             { icon: <Settings size={18} strokeWidth={1.8} />, label: t('nav.settings'), onClick: () => openSettings() },
           ] : [
-            { href: '/dashboard', icon: <LayoutDashboard size={18} strokeWidth={1.8} />, label: t('nav.dashboard') || 'Dashboard' },
-            { href: '/incidents/new', icon: <Plus size={18} strokeWidth={2} />, label: t('nav.createIncident') },
-            { href: '/incidents', icon: <ClipboardList size={18} strokeWidth={1.8} />, label: t('nav.myIncidents') },
-            { href: '/incidents?filter=team', icon: <UsersRound size={18} strokeWidth={1.8} />, label: t('nav.teamIncidents'), show: isSupervisorPlus },
-            { href: '/incidents?filter=public', icon: <Globe size={18} strokeWidth={1.8} />, label: t('nav.publicIncidents') },
-            { href: '/rca', icon: <Microscope size={18} strokeWidth={1.8} />, label: t('nav.rcaWorkspace'), show: isSupervisorPlus },
-            { href: '/capa', icon: <ListChecks size={18} strokeWidth={1.8} />, label: t('nav.capaBoard'), show: isSupervisorPlus },
-            { href: '/reports', icon: <TrendingUp size={18} strokeWidth={1.8} />, label: t('nav.reportsCompliance'), show: isSupervisorPlus },
-            { href: '/analytics', icon: <BarChart3 size={18} strokeWidth={1.8} />, label: t('nav.analyticsInsights'), show: isSupervisorPlus },
-            { href: '/knowledge', icon: <Library size={18} strokeWidth={1.8} />, label: t('nav.knowledgeBase'), show: isSupervisorPlus },
-            { href: '/workplace-report', icon: <FileWarning size={18} strokeWidth={1.8} />, label: t('nav.workplaceReport') },
-            { href: '/investigation-report', icon: <FileSearch size={18} strokeWidth={1.8} />, label: t('nav.investigationReport') },
-            { href: '/fmir', icon: <ShieldAlert size={18} strokeWidth={1.8} />, label: t('nav.fmir') || 'Foreign Material' },
-            { href: '/workplace-safety', icon: <ShieldCheck size={18} strokeWidth={1.8} />, label: 'Safety Assessment', show: isSupervisorPlus },
-            { href: '/hr', icon: <Gavel size={18} strokeWidth={1.8} />, label: 'HR Resolution', show: isSupervisorPlus },
-            { href: '/bakery-metrics', icon: <PieChart size={18} strokeWidth={1.8} />, label: 'Bakery Metrics' },
-            { href: '/lsw', icon: <ClipboardEdit size={18} strokeWidth={1.8} />, label: 'Leaders Standard Work' },
-            { href: '/vacation', icon: <Palmtree size={18} strokeWidth={1.8} />, label: 'Vacation Hub' },
-            { href: '/meetings', icon: <Mic size={18} strokeWidth={1.8} />, label: 'Meeting Intelligence' },
-            { href: '/operations', icon: <Wrench size={18} strokeWidth={1.8} />, label: 'Operations' },
-            { href: '/assigned-actions', icon: <Pin size={18} strokeWidth={1.8} />, label: 'My Action Items' },
+            { href: '/dashboard', icon: <LayoutDashboard size={18} strokeWidth={1.8} />, label: t('nav.dashboard') || 'Dashboard', show: hasNavAccess(NAV_PRIVILEGES.DASHBOARD) },
+            { href: '/incidents/new', icon: <Plus size={18} strokeWidth={2} />, label: t('nav.createIncident'), show: hasNavAccess(NAV_PRIVILEGES.CREATE_INCIDENT) },
+            { href: '/incidents', icon: <ClipboardList size={18} strokeWidth={1.8} />, label: t('nav.myIncidents'), show: hasNavAccess(NAV_PRIVILEGES.MY_INCIDENTS) },
+            { href: '/incidents?filter=team', icon: <UsersRound size={18} strokeWidth={1.8} />, label: t('nav.teamIncidents'), show: hasNavAccess(NAV_PRIVILEGES.TEAM_INCIDENTS) },
+            { href: '/incidents?filter=public', icon: <Globe size={18} strokeWidth={1.8} />, label: t('nav.publicIncidents'), show: hasNavAccess(NAV_PRIVILEGES.PUBLIC_INCIDENTS) },
+            { href: '/rca', icon: <Microscope size={18} strokeWidth={1.8} />, label: t('nav.rcaWorkspace'), show: hasNavAccess(NAV_PRIVILEGES.RCA) },
+            { href: '/capa', icon: <ListChecks size={18} strokeWidth={1.8} />, label: t('nav.capaBoard'), show: hasNavAccess(NAV_PRIVILEGES.CAPA) },
+            { href: '/reports', icon: <TrendingUp size={18} strokeWidth={1.8} />, label: t('nav.reportsCompliance'), show: hasNavAccess(NAV_PRIVILEGES.REPORTS) },
+            { href: '/analytics', icon: <BarChart3 size={18} strokeWidth={1.8} />, label: t('nav.analyticsInsights'), show: hasNavAccess(NAV_PRIVILEGES.ANALYTICS) },
+            { href: '/knowledge', icon: <Library size={18} strokeWidth={1.8} />, label: t('nav.knowledgeBase'), show: hasNavAccess(NAV_PRIVILEGES.KNOWLEDGE) },
+            { href: '/workplace-report', icon: <FileWarning size={18} strokeWidth={1.8} />, label: t('nav.workplaceReport'), show: hasNavAccess(NAV_PRIVILEGES.WORKPLACE_REPORT) },
+            { href: '/investigation-report', icon: <FileSearch size={18} strokeWidth={1.8} />, label: t('nav.investigationReport'), show: hasNavAccess(NAV_PRIVILEGES.INVESTIGATION_REPORT) },
+            { href: '/fmir', icon: <ShieldAlert size={18} strokeWidth={1.8} />, label: t('nav.fmir') || 'Foreign Material', show: hasNavAccess(NAV_PRIVILEGES.FMIR) },
+            { href: '/workplace-safety', icon: <ShieldCheck size={18} strokeWidth={1.8} />, label: 'Safety Assessment', show: hasNavAccess(NAV_PRIVILEGES.SAFETY_ASSESSMENT) },
+            { href: '/hr', icon: <Gavel size={18} strokeWidth={1.8} />, label: 'HR Resolution', show: hasNavAccess(NAV_PRIVILEGES.HR) },
+            { href: '/bakery-metrics', icon: <PieChart size={18} strokeWidth={1.8} />, label: 'Bakery Metrics', show: hasNavAccess(NAV_PRIVILEGES.BAKERY_METRICS) },
+            { href: '/lsw', icon: <ClipboardEdit size={18} strokeWidth={1.8} />, label: 'Leaders Standard Work', show: hasNavAccess(NAV_PRIVILEGES.LSW) },
+            { href: '/vacation', icon: <Palmtree size={18} strokeWidth={1.8} />, label: 'Vacation Hub', show: hasNavAccess(NAV_PRIVILEGES.VACATION) },
+            { href: '/meetings', icon: <Mic size={18} strokeWidth={1.8} />, label: 'Meeting Intelligence', show: hasNavAccess(NAV_PRIVILEGES.MEETINGS) },
+            { href: '/operations', icon: <Wrench size={18} strokeWidth={1.8} />, label: 'Operations', show: hasNavAccess(NAV_PRIVILEGES.OPERATIONS) },
+            { href: '/assigned-actions', icon: <Pin size={18} strokeWidth={1.8} />, label: 'My Action Items', show: hasNavAccess(NAV_PRIVILEGES.ACTION_ITEMS) },
             { icon: <Settings size={18} strokeWidth={1.8} />, label: t('nav.settings'), onClick: () => openSettings() },
           ]}
         />
@@ -354,22 +356,22 @@ export default function AppLayout({ children }: AppLayoutProps) {
               { href: '/admin/support', icon: <MailOpen size={18} strokeWidth={1.8} />, label: t('nav.supportRequests') },
               { href: '/support-inbox', icon: <MailOpen size={18} strokeWidth={1.8} />, label: 'Support Inbox' },
             ] : [
-              { href: '/admin/organizations', icon: <Building2 size={18} strokeWidth={1.8} />, label: t('nav.organizations') },
-              { href: '/admin/facilities', icon: <Factory size={18} strokeWidth={1.8} />, label: t('nav.facilities') },
-              { href: '/admin/departments', icon: <Landmark size={18} strokeWidth={1.8} />, label: t('nav.departments') },
-              { href: '/admin/areas', icon: <PackageOpen size={18} strokeWidth={1.8} />, label: t('nav.areas') },
-              { href: '/admin/lines', icon: <RefreshCw size={18} strokeWidth={1.8} />, label: t('nav.lines') },
-              { href: '/admin/equipment-registry', icon: <Cog size={18} strokeWidth={1.8} />, label: 'Machine Registry' },
-              { href: '/admin/shifts', icon: <Clock size={18} strokeWidth={1.8} />, label: t('nav.shifts') },
-              { href: '/admin/categories', icon: <Tag size={18} strokeWidth={1.8} />, label: t('nav.categories') },
-              { href: '/admin', icon: <UserCog size={18} strokeWidth={1.8} />, label: t('nav.userManagement') },
-              { href: '/admin/invitations', icon: <UserPlus size={18} strokeWidth={1.8} />, label: 'Invitations' },
-              { href: '/admin/privileges', icon: <KeyRound size={18} strokeWidth={1.8} />, label: t('nav.privileges') || 'Role Privileges' },
-              { href: '/admin/work-order-templates', icon: <ListTodo size={18} strokeWidth={1.8} />, label: 'Work Order Templates' },
-              { href: '/admin/enterprise', icon: <Shield size={18} strokeWidth={1.8} />, label: t('nav.enterprise') },
-              { href: '/admin/calendar-config', icon: <CalendarDays size={18} strokeWidth={1.8} />, label: 'Calendar Year Config' },
-              { href: '/admin/bakery-settings', icon: <Wheat size={18} strokeWidth={1.8} />, label: 'Bakery KPI Settings' },
-              { href: '/support-inbox', icon: <MailOpen size={18} strokeWidth={1.8} />, label: 'Support Inbox' },
+              { href: '/admin/organizations', icon: <Building2 size={18} strokeWidth={1.8} />, label: t('nav.organizations'), show: hasNavAccess(NAV_PRIVILEGES.ADMIN_ORGANIZATIONS) },
+              { href: '/admin/facilities', icon: <Factory size={18} strokeWidth={1.8} />, label: t('nav.facilities'), show: hasNavAccess(NAV_PRIVILEGES.ADMIN_FACILITIES) },
+              { href: '/admin/departments', icon: <Landmark size={18} strokeWidth={1.8} />, label: t('nav.departments'), show: hasNavAccess(NAV_PRIVILEGES.ADMIN_DEPARTMENTS) },
+              { href: '/admin/areas', icon: <PackageOpen size={18} strokeWidth={1.8} />, label: t('nav.areas'), show: hasNavAccess(NAV_PRIVILEGES.ADMIN_AREAS) },
+              { href: '/admin/lines', icon: <RefreshCw size={18} strokeWidth={1.8} />, label: t('nav.lines'), show: hasNavAccess(NAV_PRIVILEGES.ADMIN_LINES) },
+              { href: '/admin/equipment-registry', icon: <Cog size={18} strokeWidth={1.8} />, label: 'Machine Registry', show: hasNavAccess(NAV_PRIVILEGES.ADMIN_EQUIPMENT) },
+              { href: '/admin/shifts', icon: <Clock size={18} strokeWidth={1.8} />, label: t('nav.shifts'), show: hasNavAccess(NAV_PRIVILEGES.ADMIN_SHIFTS) },
+              { href: '/admin/categories', icon: <Tag size={18} strokeWidth={1.8} />, label: t('nav.categories'), show: hasNavAccess(NAV_PRIVILEGES.ADMIN_CATEGORIES) },
+              { href: '/admin', icon: <UserCog size={18} strokeWidth={1.8} />, label: t('nav.userManagement'), show: hasNavAccess(NAV_PRIVILEGES.ADMIN_USERS) },
+              { href: '/admin/invitations', icon: <UserPlus size={18} strokeWidth={1.8} />, label: 'Invitations', show: hasNavAccess(NAV_PRIVILEGES.ADMIN_INVITATIONS) },
+              { href: '/admin/privileges', icon: <KeyRound size={18} strokeWidth={1.8} />, label: t('nav.privileges') || 'Role Privileges', show: hasNavAccess(NAV_PRIVILEGES.ADMIN_PRIVILEGES) },
+              { href: '/admin/work-order-templates', icon: <ListTodo size={18} strokeWidth={1.8} />, label: 'Work Order Templates', show: hasNavAccess(NAV_PRIVILEGES.ADMIN_WORK_ORDERS) },
+              { href: '/admin/enterprise', icon: <Shield size={18} strokeWidth={1.8} />, label: t('nav.enterprise'), show: hasNavAccess(NAV_PRIVILEGES.ADMIN_ENTERPRISE) },
+              { href: '/admin/calendar-config', icon: <CalendarDays size={18} strokeWidth={1.8} />, label: 'Calendar Year Config', show: hasNavAccess(NAV_PRIVILEGES.ADMIN_CALENDAR) },
+              { href: '/admin/bakery-settings', icon: <Wheat size={18} strokeWidth={1.8} />, label: 'Bakery KPI Settings', show: hasNavAccess(NAV_PRIVILEGES.ADMIN_BAKERY_SETTINGS) },
+              { href: '/support-inbox', icon: <MailOpen size={18} strokeWidth={1.8} />, label: 'Support Inbox', show: hasNavAccess(NAV_PRIVILEGES.SUPPORT_INBOX) },
             ]}
           />
           </div>
@@ -435,29 +437,29 @@ export default function AppLayout({ children }: AppLayoutProps) {
                     { href: '/system-admin', icon: <Building2 size={18} strokeWidth={1.8} />, label: t('nav.systemAdmin') || 'System Admin Portal' },
                     { icon: <Settings size={18} strokeWidth={1.8} />, label: t('nav.settings'), onClick: () => { openSettings(); setMobileMenuOpen(false); } },
                   ] : [
-                    { href: '/dashboard', icon: <LayoutDashboard size={18} strokeWidth={1.8} />, label: t('nav.dashboard') || 'Dashboard' },
-                    { href: '/incidents/new', icon: <Plus size={18} strokeWidth={2} />, label: t('nav.createIncident') },
-                    { href: '/incidents', icon: <ClipboardList size={18} strokeWidth={1.8} />, label: t('nav.myIncidents') },
-                    { href: '/incidents?filter=team', icon: <UsersRound size={18} strokeWidth={1.8} />, label: t('nav.teamIncidents'), show: isSupervisorPlus },
-                    { href: '/incidents?filter=public', icon: <Globe size={18} strokeWidth={1.8} />, label: t('nav.publicIncidents') },
-                    { href: '/rca', icon: <Microscope size={18} strokeWidth={1.8} />, label: t('nav.rcaWorkspace'), show: isSupervisorPlus },
-                    { href: '/capa', icon: <ListChecks size={18} strokeWidth={1.8} />, label: t('nav.capaBoard'), show: isSupervisorPlus },
-                    { href: '/reports', icon: <TrendingUp size={18} strokeWidth={1.8} />, label: t('nav.reportsCompliance'), show: isSupervisorPlus },
-                    { href: '/analytics', icon: <BarChart3 size={18} strokeWidth={1.8} />, label: t('nav.analyticsInsights'), show: isSupervisorPlus },
-                    { href: '/knowledge', icon: <Library size={18} strokeWidth={1.8} />, label: t('nav.knowledgeBase'), show: isSupervisorPlus },
-                    { href: '/workplace-report', icon: <FileWarning size={18} strokeWidth={1.8} />, label: t('nav.workplaceReport') },
-                    { href: '/investigation-report', icon: <FileSearch size={18} strokeWidth={1.8} />, label: t('nav.investigationReport') },
-                    { href: '/fmir', icon: <ShieldAlert size={18} strokeWidth={1.8} />, label: t('nav.fmir') || 'Foreign Material' },
-                    { href: '/workplace-safety', icon: <ShieldCheck size={18} strokeWidth={1.8} />, label: 'Safety Assessment', show: isSupervisorPlus },
-                    { href: '/hr', icon: <Gavel size={18} strokeWidth={1.8} />, label: 'HR Resolution', show: isSupervisorPlus },
-                    { href: '/bakery-metrics', icon: <PieChart size={18} strokeWidth={1.8} />, label: 'Bakery Metrics' },
-                    { href: '/lsw', icon: <ClipboardEdit size={18} strokeWidth={1.8} />, label: 'Leaders Standard Work' },
-                    { href: '/vacation', icon: <Palmtree size={18} strokeWidth={1.8} />, label: 'Vacation Hub' },
-                    { href: '/meetings', icon: <Mic size={18} strokeWidth={1.8} />, label: 'Meeting Intelligence' },
-                    { href: '/operations', icon: <Wrench size={18} strokeWidth={1.8} />, label: 'Operations' },
-                    { href: '/assigned-actions', icon: <Pin size={18} strokeWidth={1.8} />, label: 'My Action Items' },
+                    { href: '/dashboard', icon: <LayoutDashboard size={18} strokeWidth={1.8} />, label: t('nav.dashboard') || 'Dashboard', show: hasNavAccess(NAV_PRIVILEGES.DASHBOARD) },
+                    { href: '/incidents/new', icon: <Plus size={18} strokeWidth={2} />, label: t('nav.createIncident'), show: hasNavAccess(NAV_PRIVILEGES.CREATE_INCIDENT) },
+                    { href: '/incidents', icon: <ClipboardList size={18} strokeWidth={1.8} />, label: t('nav.myIncidents'), show: hasNavAccess(NAV_PRIVILEGES.MY_INCIDENTS) },
+                    { href: '/incidents?filter=team', icon: <UsersRound size={18} strokeWidth={1.8} />, label: t('nav.teamIncidents'), show: hasNavAccess(NAV_PRIVILEGES.TEAM_INCIDENTS) },
+                    { href: '/incidents?filter=public', icon: <Globe size={18} strokeWidth={1.8} />, label: t('nav.publicIncidents'), show: hasNavAccess(NAV_PRIVILEGES.PUBLIC_INCIDENTS) },
+                    { href: '/rca', icon: <Microscope size={18} strokeWidth={1.8} />, label: t('nav.rcaWorkspace'), show: hasNavAccess(NAV_PRIVILEGES.RCA) },
+                    { href: '/capa', icon: <ListChecks size={18} strokeWidth={1.8} />, label: t('nav.capaBoard'), show: hasNavAccess(NAV_PRIVILEGES.CAPA) },
+                    { href: '/reports', icon: <TrendingUp size={18} strokeWidth={1.8} />, label: t('nav.reportsCompliance'), show: hasNavAccess(NAV_PRIVILEGES.REPORTS) },
+                    { href: '/analytics', icon: <BarChart3 size={18} strokeWidth={1.8} />, label: t('nav.analyticsInsights'), show: hasNavAccess(NAV_PRIVILEGES.ANALYTICS) },
+                    { href: '/knowledge', icon: <Library size={18} strokeWidth={1.8} />, label: t('nav.knowledgeBase'), show: hasNavAccess(NAV_PRIVILEGES.KNOWLEDGE) },
+                    { href: '/workplace-report', icon: <FileWarning size={18} strokeWidth={1.8} />, label: t('nav.workplaceReport'), show: hasNavAccess(NAV_PRIVILEGES.WORKPLACE_REPORT) },
+                    { href: '/investigation-report', icon: <FileSearch size={18} strokeWidth={1.8} />, label: t('nav.investigationReport'), show: hasNavAccess(NAV_PRIVILEGES.INVESTIGATION_REPORT) },
+                    { href: '/fmir', icon: <ShieldAlert size={18} strokeWidth={1.8} />, label: t('nav.fmir') || 'Foreign Material', show: hasNavAccess(NAV_PRIVILEGES.FMIR) },
+                    { href: '/workplace-safety', icon: <ShieldCheck size={18} strokeWidth={1.8} />, label: 'Safety Assessment', show: hasNavAccess(NAV_PRIVILEGES.SAFETY_ASSESSMENT) },
+                    { href: '/hr', icon: <Gavel size={18} strokeWidth={1.8} />, label: 'HR Resolution', show: hasNavAccess(NAV_PRIVILEGES.HR) },
+                    { href: '/bakery-metrics', icon: <PieChart size={18} strokeWidth={1.8} />, label: 'Bakery Metrics', show: hasNavAccess(NAV_PRIVILEGES.BAKERY_METRICS) },
+                    { href: '/lsw', icon: <ClipboardEdit size={18} strokeWidth={1.8} />, label: 'Leaders Standard Work', show: hasNavAccess(NAV_PRIVILEGES.LSW) },
+                    { href: '/vacation', icon: <Palmtree size={18} strokeWidth={1.8} />, label: 'Vacation Hub', show: hasNavAccess(NAV_PRIVILEGES.VACATION) },
+                    { href: '/meetings', icon: <Mic size={18} strokeWidth={1.8} />, label: 'Meeting Intelligence', show: hasNavAccess(NAV_PRIVILEGES.MEETINGS) },
+                    { href: '/operations', icon: <Wrench size={18} strokeWidth={1.8} />, label: 'Operations', show: hasNavAccess(NAV_PRIVILEGES.OPERATIONS) },
+                    { href: '/assigned-actions', icon: <Pin size={18} strokeWidth={1.8} />, label: 'My Action Items', show: hasNavAccess(NAV_PRIVILEGES.ACTION_ITEMS) },
                     { icon: <Settings size={18} strokeWidth={1.8} />, label: t('nav.settings'), onClick: () => { openSettings(); setMobileMenuOpen(false); } },
-                  ]).filter(link => link.show !== false).map((link, idx) => (
+                  ]).filter(link => !('show' in link) || link.show !== false).map((link, idx) => (
                     link.onClick ? (
                       <button
                         key={idx}
@@ -497,23 +499,23 @@ export default function AppLayout({ children }: AppLayoutProps) {
                     { href: '/admin/support', icon: <MailOpen size={18} strokeWidth={1.8} />, label: t('nav.supportRequests') },
                     { href: '/support-inbox', icon: <MailOpen size={18} strokeWidth={1.8} />, label: 'Support Inbox' },
                   ] : [
-                    { href: '/admin/organizations', icon: <Building2 size={18} strokeWidth={1.8} />, label: t('nav.organizations') },
-                    { href: '/admin/facilities', icon: <Factory size={18} strokeWidth={1.8} />, label: t('nav.facilities') },
-                    { href: '/admin/departments', icon: <Landmark size={18} strokeWidth={1.8} />, label: t('nav.departments') },
-                    { href: '/admin/areas', icon: <PackageOpen size={18} strokeWidth={1.8} />, label: t('nav.areas') },
-                    { href: '/admin/lines', icon: <RefreshCw size={18} strokeWidth={1.8} />, label: t('nav.lines') },
-                    { href: '/admin/equipment-registry', icon: <Cog size={18} strokeWidth={1.8} />, label: 'Machine Registry' },
-                    { href: '/admin/shifts', icon: <Clock size={18} strokeWidth={1.8} />, label: t('nav.shifts') },
-                    { href: '/admin/categories', icon: <Tag size={18} strokeWidth={1.8} />, label: t('nav.categories') },
-                    { href: '/admin', icon: <UserCog size={18} strokeWidth={1.8} />, label: t('nav.userManagement') },
-                    { href: '/admin/invitations', icon: <UserPlus size={18} strokeWidth={1.8} />, label: 'Invitations' },
-                    { href: '/admin/privileges', icon: <KeyRound size={18} strokeWidth={1.8} />, label: t('nav.privileges') || 'Role Privileges' },
-                    { href: '/admin/work-order-templates', icon: <ListTodo size={18} strokeWidth={1.8} />, label: 'Work Order Templates' },
-                    { href: '/admin/enterprise', icon: <Shield size={18} strokeWidth={1.8} />, label: t('nav.enterprise') },
-                    { href: '/admin/calendar-config', icon: <CalendarDays size={18} strokeWidth={1.8} />, label: 'Calendar Year Config' },
-                    { href: '/admin/bakery-settings', icon: <Wheat size={18} strokeWidth={1.8} />, label: 'Bakery KPI Settings' },
-                    { href: '/support-inbox', icon: <MailOpen size={18} strokeWidth={1.8} />, label: 'Support Inbox' },
-                  ]).map((link, idx) => (
+                    { href: '/admin/organizations', icon: <Building2 size={18} strokeWidth={1.8} />, label: t('nav.organizations'), show: hasNavAccess(NAV_PRIVILEGES.ADMIN_ORGANIZATIONS) },
+                    { href: '/admin/facilities', icon: <Factory size={18} strokeWidth={1.8} />, label: t('nav.facilities'), show: hasNavAccess(NAV_PRIVILEGES.ADMIN_FACILITIES) },
+                    { href: '/admin/departments', icon: <Landmark size={18} strokeWidth={1.8} />, label: t('nav.departments'), show: hasNavAccess(NAV_PRIVILEGES.ADMIN_DEPARTMENTS) },
+                    { href: '/admin/areas', icon: <PackageOpen size={18} strokeWidth={1.8} />, label: t('nav.areas'), show: hasNavAccess(NAV_PRIVILEGES.ADMIN_AREAS) },
+                    { href: '/admin/lines', icon: <RefreshCw size={18} strokeWidth={1.8} />, label: t('nav.lines'), show: hasNavAccess(NAV_PRIVILEGES.ADMIN_LINES) },
+                    { href: '/admin/equipment-registry', icon: <Cog size={18} strokeWidth={1.8} />, label: 'Machine Registry', show: hasNavAccess(NAV_PRIVILEGES.ADMIN_EQUIPMENT) },
+                    { href: '/admin/shifts', icon: <Clock size={18} strokeWidth={1.8} />, label: t('nav.shifts'), show: hasNavAccess(NAV_PRIVILEGES.ADMIN_SHIFTS) },
+                    { href: '/admin/categories', icon: <Tag size={18} strokeWidth={1.8} />, label: t('nav.categories'), show: hasNavAccess(NAV_PRIVILEGES.ADMIN_CATEGORIES) },
+                    { href: '/admin', icon: <UserCog size={18} strokeWidth={1.8} />, label: t('nav.userManagement'), show: hasNavAccess(NAV_PRIVILEGES.ADMIN_USERS) },
+                    { href: '/admin/invitations', icon: <UserPlus size={18} strokeWidth={1.8} />, label: 'Invitations', show: hasNavAccess(NAV_PRIVILEGES.ADMIN_INVITATIONS) },
+                    { href: '/admin/privileges', icon: <KeyRound size={18} strokeWidth={1.8} />, label: t('nav.privileges') || 'Role Privileges', show: hasNavAccess(NAV_PRIVILEGES.ADMIN_PRIVILEGES) },
+                    { href: '/admin/work-order-templates', icon: <ListTodo size={18} strokeWidth={1.8} />, label: 'Work Order Templates', show: hasNavAccess(NAV_PRIVILEGES.ADMIN_WORK_ORDERS) },
+                    { href: '/admin/enterprise', icon: <Shield size={18} strokeWidth={1.8} />, label: t('nav.enterprise'), show: hasNavAccess(NAV_PRIVILEGES.ADMIN_ENTERPRISE) },
+                    { href: '/admin/calendar-config', icon: <CalendarDays size={18} strokeWidth={1.8} />, label: 'Calendar Year Config', show: hasNavAccess(NAV_PRIVILEGES.ADMIN_CALENDAR) },
+                    { href: '/admin/bakery-settings', icon: <Wheat size={18} strokeWidth={1.8} />, label: 'Bakery KPI Settings', show: hasNavAccess(NAV_PRIVILEGES.ADMIN_BAKERY_SETTINGS) },
+                    { href: '/support-inbox', icon: <MailOpen size={18} strokeWidth={1.8} />, label: 'Support Inbox', show: hasNavAccess(NAV_PRIVILEGES.SUPPORT_INBOX) },
+                  ]).filter(link => !('show' in link) || link.show !== false).map((link, idx) => (
                     <Link
                       key={idx}
                       href={link.href}
