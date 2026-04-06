@@ -2,7 +2,7 @@
 // NOTE: NEXT_PUBLIC_ values are PUBLIC by design (Firebase docs confirm client keys are not secrets).
 // Security is enforced by Firebase Security Rules + backend token verification, not by hiding these.
 import { initializeApp, getApps } from 'firebase/app';
-import { getAuth, GoogleAuthProvider, OAuthProvider } from 'firebase/auth';
+import { getAuth } from 'firebase/auth';
 import { getStorage } from 'firebase/storage';
 
 // Firebase config from environment variables (baked into JS at build time by Next.js)
@@ -35,39 +35,12 @@ export function getFirebaseStorage() {
   return _storage;
 }
 
-let _googleProvider: GoogleAuthProvider | null = null;
-export function getGoogleProvider() {
-  if (!_googleProvider) _googleProvider = new GoogleAuthProvider();
-  return _googleProvider;
-}
-
-let _microsoftProvider: OAuthProvider | null = null;
-export function getMicrosoftProvider() {
-  if (!_microsoftProvider) {
-    _microsoftProvider = new OAuthProvider('microsoft.com');
-    _microsoftProvider.addScope('openid');
-    _microsoftProvider.addScope('profile');
-    _microsoftProvider.addScope('email');
-    _microsoftProvider.addScope('User.Read');
-    _microsoftProvider.setCustomParameters({
-      prompt: 'select_account',
-      tenant: 'common',
-    });
-  }
-  return _microsoftProvider;
-}
 
 // Backward-compatible named exports for existing code.
 // These use getter properties so Firebase only initializes when actually accessed at runtime.
 // During build/prerender, if these are never accessed, no crash occurs.
 export const auth = typeof window !== 'undefined' || firebaseConfig.apiKey
   ? getFirebaseAuth()
-  : (undefined as any);
-export const googleProvider = typeof window !== 'undefined' || firebaseConfig.apiKey
-  ? getGoogleProvider()
-  : (undefined as any);
-export const microsoftProvider = typeof window !== 'undefined' || firebaseConfig.apiKey
-  ? getMicrosoftProvider()
   : (undefined as any);
 export const storage = typeof window !== 'undefined' || firebaseConfig.apiKey
   ? getFirebaseStorage()
