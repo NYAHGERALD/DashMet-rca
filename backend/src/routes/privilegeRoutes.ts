@@ -2760,6 +2760,17 @@ router.put(
       description: `User-specific override for ${targetUser.firstName} ${targetUser.lastName} (${targetUser.email})`,
     });
 
+    // Real-time: notify the affected user immediately
+    websocketService.emitToUser(userId, 'privilege:changed', {
+      organizationId: userOrgId,
+      affectedUsers: [userId],
+      featureKey,
+      isEnabled,
+      changeType: 'user_override',
+      changedBy: adminId,
+      changedAt: new Date().toISOString(),
+    });
+
     res.json({ success: true, data: override });
   })
 );
@@ -2847,6 +2858,15 @@ router.put(
       )
     );
 
+    // Real-time: notify the affected user immediately
+    websocketService.emitToUser(userId, 'privilege:changed', {
+      organizationId: userOrgId,
+      affectedUsers: [userId],
+      changeType: 'user_override_bulk',
+      changedBy: adminId,
+      changedAt: new Date().toISOString(),
+    });
+
     res.json({ success: true, data: { count: results.length, overrides: results } });
   })
 );
@@ -2891,6 +2911,17 @@ router.delete(
           userId_featureKey: { userId, featureKey },
         },
       });
+
+      // Real-time: notify the affected user immediately
+      websocketService.emitToUser(userId, 'privilege:changed', {
+        organizationId: userOrgId,
+        affectedUsers: [userId],
+        featureKey,
+        changeType: 'user_override_removed',
+        changedBy: authReq.user?.id,
+        changedAt: new Date().toISOString(),
+      });
+
       res.json({ success: true, message: 'Override removed' });
     } catch {
       res.status(404).json({ error: 'Override not found' });
@@ -2950,6 +2981,15 @@ router.post(
       changedByName: `${authReq.user?.firstName || ''} ${authReq.user?.lastName || ''}`.trim(),
       changedByRole: userRole as UserRole,
       description: `Reset all user-specific overrides for ${targetUser.firstName} ${targetUser.lastName} (${targetUser.email}) (${result.count} overrides removed)`,
+    });
+
+    // Real-time: notify the affected user immediately
+    websocketService.emitToUser(userId, 'privilege:changed', {
+      organizationId: userOrgId,
+      affectedUsers: [userId],
+      changeType: 'user_override_reset',
+      changedBy: adminId,
+      changedAt: new Date().toISOString(),
     });
 
     res.json({ success: true, message: `Removed ${result.count} overrides` });

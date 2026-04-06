@@ -11,7 +11,7 @@ import NotificationCenter from '@/components/layout/NotificationCenter';
 import { ContactSupportMenuItem } from '@/components/support/ContactSupportMenuItem';
 import { useI18n } from '@/lib/i18n/I18nProvider';
 import { useSettingsModal } from '@/components/settings/SettingsModalProvider';
-import { usePathname } from 'next/navigation';
+import { usePathname, useRouter } from 'next/navigation';
 import {
   Plus,
   ClipboardList,
@@ -58,6 +58,45 @@ interface AppLayoutProps {
   children: React.ReactNode;
 }
 
+// Map pathnames to their nav privilege keys for access revocation detection
+const PATH_TO_NAV_KEY: Record<string, string> = {
+  '/dashboard': NAV_PRIVILEGES.DASHBOARD,
+  '/incidents/new': NAV_PRIVILEGES.CREATE_INCIDENT,
+  '/incidents': NAV_PRIVILEGES.MY_INCIDENTS,
+  '/rca': NAV_PRIVILEGES.RCA,
+  '/capa': NAV_PRIVILEGES.CAPA,
+  '/reports': NAV_PRIVILEGES.REPORTS,
+  '/analytics': NAV_PRIVILEGES.ANALYTICS,
+  '/knowledge': NAV_PRIVILEGES.KNOWLEDGE,
+  '/workplace-report': NAV_PRIVILEGES.WORKPLACE_REPORT,
+  '/investigation-report': NAV_PRIVILEGES.INVESTIGATION_REPORT,
+  '/fmir': NAV_PRIVILEGES.FMIR,
+  '/workplace-safety': NAV_PRIVILEGES.SAFETY_ASSESSMENT,
+  '/hr': NAV_PRIVILEGES.HR,
+  '/bakery-metrics': NAV_PRIVILEGES.BAKERY_METRICS,
+  '/lsw': NAV_PRIVILEGES.LSW,
+  '/vacation': NAV_PRIVILEGES.VACATION,
+  '/meetings': NAV_PRIVILEGES.MEETINGS,
+  '/operations': NAV_PRIVILEGES.OPERATIONS,
+  '/assigned-actions': NAV_PRIVILEGES.ACTION_ITEMS,
+  '/admin/organizations': NAV_PRIVILEGES.ADMIN_ORGANIZATIONS,
+  '/admin/facilities': NAV_PRIVILEGES.ADMIN_FACILITIES,
+  '/admin/departments': NAV_PRIVILEGES.ADMIN_DEPARTMENTS,
+  '/admin/areas': NAV_PRIVILEGES.ADMIN_AREAS,
+  '/admin/lines': NAV_PRIVILEGES.ADMIN_LINES,
+  '/admin/equipment-registry': NAV_PRIVILEGES.ADMIN_EQUIPMENT,
+  '/admin/shifts': NAV_PRIVILEGES.ADMIN_SHIFTS,
+  '/admin/categories': NAV_PRIVILEGES.ADMIN_CATEGORIES,
+  '/admin': NAV_PRIVILEGES.ADMIN_USERS,
+  '/admin/invitations': NAV_PRIVILEGES.ADMIN_INVITATIONS,
+  '/admin/privileges': NAV_PRIVILEGES.ADMIN_PRIVILEGES,
+  '/admin/work-order-templates': NAV_PRIVILEGES.ADMIN_WORK_ORDERS,
+  '/admin/enterprise': NAV_PRIVILEGES.ADMIN_ENTERPRISE,
+  '/admin/calendar-config': NAV_PRIVILEGES.ADMIN_CALENDAR,
+  '/admin/bakery-settings': NAV_PRIVILEGES.ADMIN_BAKERY_SETTINGS,
+  '/support-inbox': NAV_PRIVILEGES.SUPPORT_INBOX,
+};
+
 export default function AppLayout({ children }: AppLayoutProps) {
   const { user, logout } = useAuth();
   const { t } = useI18n();
@@ -66,13 +105,45 @@ export default function AppLayout({ children }: AppLayoutProps) {
   const isSupervisorPlus = useHasMinimumRole('SUPERVISOR');
   const { hasNavAccess } = useNavAccess();
   const isSystemAdmin = user?.role === 'SYSTEM_ADMIN';
+  const router = useRouter();
   const [showDropdown, setShowDropdown] = useState(false);
   const [showProfileModal, setShowProfileModal] = useState(false);
   const [sidebarOpen, setSidebarOpen] = useState(true);
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
   const [mobileMenuTab, setMobileMenuTab] = useState<'nav' | 'admin'>('nav');
+  const [accessRevoked, setAccessRevoked] = useState(false);
   const dropdownRef = useRef<HTMLDivElement>(null);
   const pathname = usePathname();
+  const prevAccessRef = useRef<boolean | null>(null);
+
+  // Real-time access revocation detection
+  // When privileges update via WebSocket, check if the current page is still accessible
+  useEffect(() => {
+    if (!user || isSystemAdmin || !pathname) return;
+
+    // Find the nav key for the current path (match most specific path first)
+    const sortedPaths = Object.keys(PATH_TO_NAV_KEY).sort((a, b) => b.length - a.length);
+    const matchedPath = sortedPaths.find(p => {
+      if (p === '/admin' && pathname === '/admin') return true;
+      if (p === '/admin') return false; // Don't match /admin for sub-paths
+      return pathname === p || pathname.startsWith(p + '/');
+    });
+
+    if (!matchedPath) {
+      prevAccessRef.current = null;
+      return; // Page not governed by nav privileges
+    }
+
+    const navKey = PATH_TO_NAV_KEY[matchedPath];
+    const currentAccess = hasNavAccess(navKey);
+
+    // Only trigger modal when access transitions from true → false (not on initial load)
+    if (prevAccessRef.current === true && currentAccess === false) {
+      setAccessRevoked(true);
+    }
+
+    prevAccessRef.current = currentAccess;
+  }, [hasNavAccess, pathname, user, isSystemAdmin]);
 
   // Close mobile menu on route change
   useEffect(() => {
@@ -627,6 +698,36 @@ export default function AppLayout({ children }: AppLayoutProps) {
                   </div>
                 </div>
               </div>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Access Revoked Modal — shown when admin removes user's access to current page in real-time */}
+      {accessRevoked && (
+        <div className="fixed inset-0 z-[100] flex items-center justify-center bg-black/60 backdrop-blur-sm">
+          <div className="bg-white dark:bg-gray-800 rounded-2xl shadow-2xl max-w-md w-full mx-4 overflow-hidden animate-in zoom-in-95 duration-200">
+            <div className="bg-red-50 dark:bg-red-900/20 px-6 pt-6 pb-4 text-center">
+              <div className="w-16 h-16 mx-auto rounded-full bg-red-100 dark:bg-red-900/30 flex items-center justify-center mb-3">
+                <Shield className="w-8 h-8 text-red-600 dark:text-red-400" />
+              </div>
+              <h3 className="text-lg font-bold text-red-800 dark:text-red-200">
+                Access Revoked
+              </h3>
+              <p className="mt-2 text-sm text-red-600 dark:text-red-300">
+                Your access to this page has been revoked by an administrator. You will be redirected to the dashboard.
+              </p>
+            </div>
+            <div className="px-6 py-4 text-center">
+              <button
+                onClick={() => {
+                  setAccessRevoked(false);
+                  router.push('/dashboard');
+                }}
+                className="w-full px-6 py-3 text-sm font-semibold text-white bg-primary-600 hover:bg-primary-700 rounded-xl transition-colors shadow-sm"
+              >
+                Go to Dashboard
+              </button>
             </div>
           </div>
         </div>
