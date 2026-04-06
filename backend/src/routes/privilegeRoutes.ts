@@ -2745,18 +2745,19 @@ router.put(
     });
 
     // Log the change
-    await prisma.privilegeAuditLog.create({
-      data: {
-        organizationId: userOrgId,
-        featureKey,
-        module: definition.module as FeatureModule,
-        action: definition.action,
-        role: targetUser.role as UserRole,
-        previousValue: !isEnabled,
-        newValue: isEnabled,
-        changedById: adminId,
-        reason: `User-specific override for ${targetUser.firstName} ${targetUser.lastName} (${targetUser.email})`,
-      },
+    await createAuditLog({
+      organizationId: userOrgId,
+      featureKey,
+      module: definition.module as FeatureModule,
+      action: definition.action as PrivilegeAction,
+      role: targetUser.role as UserRole,
+      previousValue: !isEnabled,
+      newValue: isEnabled,
+      changeType: isEnabled ? 'enable' : 'disable',
+      changedById: adminId,
+      changedByName: `${authReq.user?.firstName || ''} ${authReq.user?.lastName || ''}`.trim(),
+      changedByRole: userRole as UserRole,
+      description: `User-specific override for ${targetUser.firstName} ${targetUser.lastName} (${targetUser.email})`,
     });
 
     res.json({ success: true, data: override });
@@ -2936,18 +2937,19 @@ router.post(
     });
 
     // Log the reset
-    await prisma.privilegeAuditLog.create({
-      data: {
-        organizationId: userOrgId,
-        featureKey: 'ALL',
-        module: 'SYSTEM' as FeatureModule,
-        action: 'VIEW',
-        role: targetUser.role as UserRole,
-        previousValue: true,
-        newValue: true,
-        changedById: adminId,
-        reason: `Reset all user-specific overrides for ${targetUser.firstName} ${targetUser.lastName} (${targetUser.email}) (${result.count} overrides removed)`,
-      },
+    await createAuditLog({
+      organizationId: userOrgId,
+      featureKey: 'ALL',
+      module: 'SYSTEM' as FeatureModule,
+      action: 'VIEW' as PrivilegeAction,
+      role: targetUser.role as UserRole,
+      previousValue: true,
+      newValue: true,
+      changeType: 'reset',
+      changedById: adminId,
+      changedByName: `${authReq.user?.firstName || ''} ${authReq.user?.lastName || ''}`.trim(),
+      changedByRole: userRole as UserRole,
+      description: `Reset all user-specific overrides for ${targetUser.firstName} ${targetUser.lastName} (${targetUser.email}) (${result.count} overrides removed)`,
     });
 
     res.json({ success: true, message: `Removed ${result.count} overrides` });
