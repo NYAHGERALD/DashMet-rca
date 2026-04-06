@@ -221,7 +221,7 @@ function PrivilegesContent() {
   const [navUsers, setNavUsers] = useState<UserOverrideUser[]>([]);
   const [navUserLoading, setNavUserLoading] = useState(false);
   const [navSaving, setNavSaving] = useState<string | null>(null);
-  const [navExpandedUsers, setNavExpandedUsers] = useState<Set<string>>(new Set());
+  const [navSubTab, setNavSubTab] = useState<'quick' | 'admin'>('quick');
 
   // Available roles (excluding SYSTEM_ADMIN which always has full access)
   const editableRoles = Object.keys(ROLE_CONFIG).filter(r => r !== 'SYSTEM_ADMIN');
@@ -1508,14 +1508,14 @@ function PrivilegesContent() {
       {/* ===================== NAVIGATION VIEW ===================== */}
       {viewMode === 'navigation' && (
         <div className="w-full px-4 sm:px-6 lg:px-8 py-6">
-          <div className="grid grid-cols-1 lg:grid-cols-4 gap-6">
+          <div className="grid grid-cols-1 lg:grid-cols-5 gap-6">
             {/* Role Selector */}
             <div className="lg:col-span-1">
               <div className="bg-white dark:bg-gray-800 rounded-xl shadow-sm border border-gray-200 dark:border-gray-700 overflow-hidden sticky top-24">
-                <div className="p-4 border-b border-gray-200 dark:border-gray-700">
-                  <h2 className="font-semibold text-gray-900 dark:text-white flex items-center gap-2">
-                    <Users className="w-4 h-4" />
-                    Select Role
+                <div className="p-3 border-b border-gray-200 dark:border-gray-700">
+                  <h2 className="text-sm font-semibold text-gray-900 dark:text-white flex items-center gap-2">
+                    <Shield className="w-4 h-4" />
+                    Role
                   </h2>
                 </div>
                 <div className="divide-y divide-gray-100 dark:divide-gray-700">
@@ -1523,17 +1523,15 @@ function PrivilegesContent() {
                     <button
                       key={role}
                       onClick={() => setNavSelectedRole(role)}
-                      className={`w-full px-4 py-3 text-left transition-colors flex items-center justify-between ${
+                      className={`w-full px-3 py-2.5 text-left transition-colors flex items-center justify-between ${
                         navSelectedRole === role
                           ? 'bg-primary-50 dark:bg-primary-900/20 border-l-3 border-primary-500'
                           : 'hover:bg-gray-50 dark:hover:bg-gray-700/50'
                       }`}
                     >
-                      <div>
-                        <div className={`text-sm font-medium ${ROLE_CONFIG[role]?.color}`}>
-                          {ROLE_CONFIG[role]?.label || role}
-                        </div>
-                      </div>
+                      <span className={`text-sm font-medium ${ROLE_CONFIG[role]?.color}`}>
+                        {ROLE_CONFIG[role]?.label || role}
+                      </span>
                       {navSelectedRole === role && (
                         <ChevronRight className="w-4 h-4 text-primary-500" />
                       )}
@@ -1543,332 +1541,190 @@ function PrivilegesContent() {
               </div>
             </div>
 
-            {/* Navigation Links + User Overrides */}
-            <div className="lg:col-span-3 space-y-6">
-              {/* Quick Navigation Links */}
+            {/* Navigation Access Matrix */}
+            <div className="lg:col-span-4">
               <div className="bg-white dark:bg-gray-800 rounded-xl shadow-sm border border-gray-200 dark:border-gray-700 overflow-hidden">
-                <div className="p-4 border-b border-gray-200 dark:border-gray-700 flex items-center justify-between">
-                  <h3 className="font-semibold text-gray-900 dark:text-white flex items-center gap-2">
-                    🧭 Quick Navigation
-                    <span className="text-xs font-normal text-gray-500">({navQuickLinks.length} links)</span>
-                  </h3>
-                  <span className={`text-sm font-medium ${ROLE_CONFIG[navSelectedRole]?.color}`}>
-                    {ROLE_CONFIG[navSelectedRole]?.label}
-                  </span>
-                </div>
-                <div className="divide-y divide-gray-100 dark:divide-gray-700">
-                  {navQuickLinks.map(def => {
-                    const isEnabled = matrix[navSelectedRole]?.[def.key] ?? false;
-                    const isSaving = navSaving === `nav:${navSelectedRole}:${def.key}`;
-                    return (
-                      <div key={def.key} className="px-4 py-3 flex items-center justify-between hover:bg-gray-50 dark:hover:bg-gray-700/30 transition-colors">
-                        <div className="flex-1 min-w-0">
-                          <p className="text-sm font-medium text-gray-900 dark:text-white">{def.displayName}</p>
-                          <p className="text-xs text-gray-500 dark:text-gray-400">{def.description}</p>
-                        </div>
-                        <button
-                          onClick={() => toggleNavPrivilege(navSelectedRole, def.key, isEnabled)}
-                          disabled={isSaving}
-                          className={`relative inline-flex h-6 w-11 flex-shrink-0 cursor-pointer rounded-full border-2 border-transparent transition-colors duration-200 ease-in-out focus:outline-none focus:ring-2 focus:ring-primary-500 focus:ring-offset-2 ${
-                            isEnabled ? 'bg-primary-600' : 'bg-gray-200 dark:bg-gray-600'
-                          } ${isSaving ? 'opacity-50' : ''}`}
-                        >
-                          <span className={`pointer-events-none inline-block h-5 w-5 transform rounded-full bg-white shadow ring-0 transition duration-200 ease-in-out ${
-                            isEnabled ? 'translate-x-5' : 'translate-x-0'
-                          }`}>
-                            {isSaving && <Loader2 className="w-3 h-3 animate-spin text-gray-400 m-1" />}
-                          </span>
-                        </button>
-                      </div>
-                    );
-                  })}
-                </div>
-              </div>
-
-              {/* Organization Management Links */}
-              <div className="bg-white dark:bg-gray-800 rounded-xl shadow-sm border border-gray-200 dark:border-gray-700 overflow-hidden">
-                <div className="p-4 border-b border-gray-200 dark:border-gray-700 flex items-center justify-between">
-                  <h3 className="font-semibold text-gray-900 dark:text-white flex items-center gap-2">
-                    🏗️ Organization Management
-                    <span className="text-xs font-normal text-gray-500">({navAdminLinks.length} links)</span>
-                  </h3>
-                  <span className={`text-sm font-medium ${ROLE_CONFIG[navSelectedRole]?.color}`}>
-                    {ROLE_CONFIG[navSelectedRole]?.label}
-                  </span>
-                </div>
-                <div className="divide-y divide-gray-100 dark:divide-gray-700">
-                  {navAdminLinks.map(def => {
-                    const isEnabled = matrix[navSelectedRole]?.[def.key] ?? false;
-                    const isSaving = navSaving === `nav:${navSelectedRole}:${def.key}`;
-                    return (
-                      <div key={def.key} className="px-4 py-3 flex items-center justify-between hover:bg-gray-50 dark:hover:bg-gray-700/30 transition-colors">
-                        <div className="flex-1 min-w-0">
-                          <p className="text-sm font-medium text-gray-900 dark:text-white">{def.displayName}</p>
-                          <p className="text-xs text-gray-500 dark:text-gray-400">{def.description}</p>
-                        </div>
-                        <button
-                          onClick={() => toggleNavPrivilege(navSelectedRole, def.key, isEnabled)}
-                          disabled={isSaving}
-                          className={`relative inline-flex h-6 w-11 flex-shrink-0 cursor-pointer rounded-full border-2 border-transparent transition-colors duration-200 ease-in-out focus:outline-none focus:ring-2 focus:ring-primary-500 focus:ring-offset-2 ${
-                            isEnabled ? 'bg-primary-600' : 'bg-gray-200 dark:bg-gray-600'
-                          } ${isSaving ? 'opacity-50' : ''}`}
-                        >
-                          <span className={`pointer-events-none inline-block h-5 w-5 transform rounded-full bg-white shadow ring-0 transition duration-200 ease-in-out ${
-                            isEnabled ? 'translate-x-5' : 'translate-x-0'
-                          }`}>
-                            {isSaving && <Loader2 className="w-3 h-3 animate-spin text-gray-400 m-1" />}
-                          </span>
-                        </button>
-                      </div>
-                    );
-                  })}
-                </div>
-              </div>
-
-              {/* Users with this Role */}
-              <div className="bg-white dark:bg-gray-800 rounded-xl shadow-sm border border-gray-200 dark:border-gray-700 overflow-hidden">
-                <div className="p-4 border-b border-gray-200 dark:border-gray-700 flex items-center justify-between">
-                  <h3 className="font-semibold text-gray-900 dark:text-white flex items-center gap-2">
-                    <UserCog className="w-4 h-4" />
-                    Users with {ROLE_CONFIG[navSelectedRole]?.label} Role
-                    {!navUserLoading && (
-                      <span className="text-xs font-normal text-gray-500">({navUsers.length} users)</span>
-                    )}
-                  </h3>
-                  <p className="text-xs text-gray-500 dark:text-gray-400">
-                    Click a user to override their navigation access
-                  </p>
-                </div>
-
-                {navUserLoading ? (
-                  <div className="flex items-center justify-center py-8">
-                    <Loader2 className="w-6 h-6 animate-spin text-primary-500" />
-                  </div>
-                ) : navUsers.length === 0 ? (
-                  <div className="p-8 text-center">
-                    <Users className="w-10 h-10 text-gray-300 dark:text-gray-600 mx-auto mb-2" />
-                    <p className="text-sm text-gray-500 dark:text-gray-400">
-                      No active users with the {ROLE_CONFIG[navSelectedRole]?.label} role
+                {/* Header with sub-tabs */}
+                <div className="px-4 py-3 border-b border-gray-200 dark:border-gray-700 flex flex-wrap items-center justify-between gap-3">
+                  <div>
+                    <h2 className="text-base font-semibold text-gray-900 dark:text-white">
+                      Navigation Access — <span className={ROLE_CONFIG[navSelectedRole]?.color}>{ROLE_CONFIG[navSelectedRole]?.label}</span>
+                      {!navUserLoading && navUsers.length > 0 && (
+                        <span className="text-xs font-normal text-gray-500 ml-2">({navUsers.length} user{navUsers.length !== 1 ? 's' : ''})</span>
+                      )}
+                    </h2>
+                    <p className="text-xs text-gray-500 dark:text-gray-400 mt-0.5">
+                      Set role defaults and per-user overrides. Amber = user override active.
                     </p>
                   </div>
-                ) : (
-                  <div className="divide-y divide-gray-100 dark:divide-gray-700">
-                    {navUsers.map(u => {
-                      const isExpanded = navExpandedUsers.has(u.id);
-                      const overrideCount = u.PrivilegeOverrides.length;
-                      
-                      return (
-                        <div key={u.id}>
-                          {/* User Row — clickable to expand */}
-                          <button
-                            onClick={() => {
-                              setNavExpandedUsers(prev => {
-                                const next = new Set(prev);
-                                if (next.has(u.id)) {
-                                  next.delete(u.id);
-                                } else {
-                                  next.add(u.id);
-                                }
-                                return next;
-                              });
-                            }}
-                            className={`w-full px-4 py-3 flex items-center justify-between text-left hover:bg-gray-50 dark:hover:bg-gray-700/30 transition-colors ${
-                              isExpanded ? 'bg-gray-50 dark:bg-gray-700/20' : ''
-                            }`}
-                          >
-                            <div className="flex items-center gap-3">
-                              {/* Avatar */}
-                              <div className="w-8 h-8 rounded-full bg-primary-100 dark:bg-primary-900/30 flex items-center justify-center text-primary-700 dark:text-primary-300 text-xs font-bold flex-shrink-0">
-                                {(u.name || u.email).charAt(0).toUpperCase()}
-                              </div>
-                              <div>
-                                <p className="text-sm font-medium text-gray-900 dark:text-white">
-                                  {u.name || 'Unnamed User'}
-                                </p>
-                                <p className="text-xs text-gray-500 dark:text-gray-400">{u.email}</p>
-                              </div>
-                            </div>
-                            <div className="flex items-center gap-2">
-                              {overrideCount > 0 && (
-                                <span className="inline-flex items-center px-2 py-0.5 rounded-full text-[10px] font-semibold bg-amber-100 dark:bg-amber-900/30 text-amber-700 dark:text-amber-400">
-                                  {overrideCount} override{overrideCount !== 1 ? 's' : ''}
-                                </span>
-                              )}
-                              {isExpanded ? (
-                                <ChevronDown className="w-4 h-4 text-gray-400" />
-                              ) : (
-                                <ChevronRight className="w-4 h-4 text-gray-400" />
-                              )}
-                            </div>
-                          </button>
+                  <div className="flex bg-gray-100 dark:bg-gray-700 rounded-lg p-0.5 text-sm">
+                    <button
+                      onClick={() => setNavSubTab('quick')}
+                      className={`px-3 py-1.5 rounded-md font-medium transition-colors ${
+                        navSubTab === 'quick'
+                          ? 'bg-white dark:bg-gray-600 shadow-sm text-gray-900 dark:text-white'
+                          : 'text-gray-500 dark:text-gray-400 hover:text-gray-700 dark:hover:text-gray-200'
+                      }`}
+                    >
+                      Quick Nav ({navQuickLinks.length})
+                    </button>
+                    <button
+                      onClick={() => setNavSubTab('admin')}
+                      className={`px-3 py-1.5 rounded-md font-medium transition-colors ${
+                        navSubTab === 'admin'
+                          ? 'bg-white dark:bg-gray-600 shadow-sm text-gray-900 dark:text-white'
+                          : 'text-gray-500 dark:text-gray-400 hover:text-gray-700 dark:hover:text-gray-200'
+                      }`}
+                    >
+                      Admin ({navAdminLinks.length})
+                    </button>
+                  </div>
+                </div>
 
-                          {/* Expanded: Nav link toggles for this user */}
-                          {isExpanded && (
-                            <div className="bg-gray-50/50 dark:bg-gray-800/50 border-t border-gray-200 dark:border-gray-700">
-                              {/* Header with reset */}
-                              <div className="px-4 py-2 flex items-center justify-between border-b border-gray-200/50 dark:border-gray-700/50">
-                                <p className="text-xs text-gray-500 dark:text-gray-400">
-                                  Toggle switches below to override nav access for <strong>{u.name || u.email}</strong>. 
-                                  Amber ring = user override (differs from role default).
-                                </p>
-                                {overrideCount > 0 && (
-                                  <button
-                                    onClick={() => resetUserOverrides(u.id)}
-                                    disabled={navSaving === `reset:${u.id}`}
-                                    className="flex items-center gap-1 text-xs font-medium text-amber-600 dark:text-amber-400 hover:bg-amber-50 dark:hover:bg-amber-900/20 px-2 py-1 rounded-lg transition-colors flex-shrink-0"
-                                  >
-                                    {navSaving === `reset:${u.id}` ? (
-                                      <Loader2 className="w-3 h-3 animate-spin" />
-                                    ) : (
-                                      <RotateCcw className="w-3 h-3" />
-                                    )}
-                                    Reset All
-                                  </button>
+                {/* Matrix Table */}
+                {navUserLoading ? (
+                  <div className="flex items-center justify-center py-12">
+                    <Loader2 className="w-6 h-6 animate-spin text-primary-500" />
+                  </div>
+                ) : (
+                  <div className="overflow-x-auto">
+                    <table className="w-full text-sm">
+                      <thead>
+                        <tr className="border-b border-gray-200 dark:border-gray-700 bg-gray-50 dark:bg-gray-700/30">
+                          <th className="sticky left-0 z-10 bg-gray-50 dark:bg-gray-700/30 px-4 py-2 text-left text-xs font-semibold text-gray-500 dark:text-gray-400 uppercase tracking-wider min-w-[180px]">
+                            Link
+                          </th>
+                          <th className="px-3 py-2 text-center text-xs font-semibold text-gray-500 dark:text-gray-400 uppercase tracking-wider whitespace-nowrap border-l border-r border-gray-200 dark:border-gray-700 min-w-[90px]">
+                            All {ROLE_CONFIG[navSelectedRole]?.label?.split(' ')[0] || navSelectedRole}
+                          </th>
+                          {navUsers.map(u => (
+                            <th key={u.id} className="px-2 py-2 text-center min-w-[60px]">
+                              <div className="flex flex-col items-center gap-0.5" title={`${u.name || u.email}\n${u.email}`}>
+                                <div className="w-7 h-7 rounded-full bg-primary-100 dark:bg-primary-900/30 text-primary-700 dark:text-primary-300 text-[10px] font-bold flex items-center justify-center">
+                                  {(u.name || u.email).charAt(0).toUpperCase()}
+                                </div>
+                                <span className="text-[10px] font-medium text-gray-600 dark:text-gray-400 truncate max-w-[64px]">
+                                  {(u.name || '').split(' ')[0] || u.email.split('@')[0]}
+                                </span>
+                                {u.PrivilegeOverrides.length > 0 && (
+                                  <span className="text-[9px] text-amber-600 dark:text-amber-400 font-semibold">
+                                    {u.PrivilegeOverrides.length} ovr
+                                  </span>
                                 )}
                               </div>
+                            </th>
+                          ))}
+                        </tr>
+                      </thead>
+                      <tbody className="divide-y divide-gray-100 dark:divide-gray-700/50">
+                        {(navSubTab === 'quick' ? navQuickLinks : navAdminLinks).map(def => {
+                          const roleEnabled = matrix[navSelectedRole]?.[def.key] ?? false;
+                          const isRoleSaving = navSaving === `nav:${navSelectedRole}:${def.key}`;
 
-                              {/* Quick Navigation section */}
-                              {navQuickLinks.length > 0 && (
-                                <div>
-                                  <div className="px-4 py-1.5 bg-gray-100/80 dark:bg-gray-700/40">
-                                    <p className="text-[10px] font-semibold text-gray-500 dark:text-gray-400 uppercase tracking-wider">Quick Navigation</p>
-                                  </div>
-                                  <div className="divide-y divide-gray-100/50 dark:divide-gray-700/50">
-                                    {navQuickLinks.map(def => {
-                                      const { value, isOverridden } = getUserEffectiveNav(u.id, def.key);
-                                      const isSaving = navSaving === `user:${u.id}:${def.key}`;
+                          return (
+                            <tr key={def.key} className="hover:bg-gray-50/50 dark:hover:bg-gray-700/20 transition-colors">
+                              {/* Link name */}
+                              <td className="sticky left-0 z-10 bg-white dark:bg-gray-800 px-4 py-2.5 border-r border-gray-100 dark:border-gray-700/50">
+                                <span className="text-sm font-medium text-gray-900 dark:text-white">{def.displayName}</span>
+                              </td>
 
-                                      return (
-                                        <div key={def.key} className={`px-4 py-2 flex items-center justify-between ${isOverridden ? 'bg-amber-50/40 dark:bg-amber-900/10' : ''}`}>
-                                          <div className="flex-1 min-w-0 flex items-center gap-2">
-                                            <p className="text-xs text-gray-800 dark:text-gray-200">{def.displayName}</p>
-                                            {isOverridden && (
-                                              <span className="inline-flex items-center px-1 py-0 rounded text-[9px] font-bold bg-amber-100 dark:bg-amber-900/30 text-amber-700 dark:text-amber-400">
-                                                OVERRIDE
-                                              </span>
-                                            )}
-                                          </div>
-                                          <div className="flex items-center gap-1.5">
-                                            {isOverridden && (
-                                              <button
-                                                onClick={() => removeUserOverride(u.id, def.key)}
-                                                disabled={isSaving}
-                                                className="text-gray-400 hover:text-red-500 transition-colors"
-                                                title="Remove override (revert to role default)"
-                                              >
-                                                <X className="w-3 h-3" />
-                                              </button>
-                                            )}
-                                            <button
-                                              onClick={() => toggleUserOverride(u.id, def.key, !value)}
-                                              disabled={isSaving}
-                                              className={`relative inline-flex h-4 w-8 flex-shrink-0 cursor-pointer rounded-full border-2 border-transparent transition-colors duration-200 ease-in-out focus:outline-none ${
-                                                value ? 'bg-primary-600' : 'bg-gray-300 dark:bg-gray-600'
-                                              } ${isSaving ? 'opacity-50' : ''} ${isOverridden ? 'ring-1.5 ring-amber-300 dark:ring-amber-600' : ''}`}
-                                              title={value ? 'Visible' : 'Hidden'}
-                                            >
-                                              <span className={`pointer-events-none inline-block h-3 w-3 transform rounded-full bg-white shadow transition duration-200 ease-in-out ${
-                                                value ? 'translate-x-4' : 'translate-x-0'
-                                              }`}>
-                                                {isSaving && <Loader2 className="w-2 h-2 animate-spin text-gray-400 m-0.5" />}
-                                              </span>
-                                            </button>
-                                          </div>
-                                        </div>
-                                      );
-                                    })}
-                                  </div>
+                              {/* Role default toggle */}
+                              <td className="px-3 py-2.5 text-center border-r border-gray-200 dark:border-gray-700">
+                                <div className="flex items-center justify-center">
+                                  <button
+                                    onClick={() => toggleNavPrivilege(navSelectedRole, def.key, roleEnabled)}
+                                    disabled={isRoleSaving}
+                                    className={`relative inline-flex h-5 w-9 flex-shrink-0 cursor-pointer rounded-full border-2 border-transparent transition-colors duration-200 ease-in-out focus:outline-none ${
+                                      roleEnabled ? 'bg-primary-600' : 'bg-gray-300 dark:bg-gray-600'
+                                    } ${isRoleSaving ? 'opacity-50' : ''}`}
+                                    title={roleEnabled ? 'Enabled for all' : 'Disabled for all'}
+                                  >
+                                    <span className={`pointer-events-none inline-block h-4 w-4 transform rounded-full bg-white shadow transition duration-200 ease-in-out ${
+                                      roleEnabled ? 'translate-x-4' : 'translate-x-0'
+                                    }`}>
+                                      {isRoleSaving && <Loader2 className="w-2.5 h-2.5 animate-spin text-gray-400 m-[3px]" />}
+                                    </span>
+                                  </button>
                                 </div>
-                              )}
+                              </td>
 
-                              {/* Organization Management section */}
-                              {navAdminLinks.length > 0 && (
-                                <div>
-                                  <div className="px-4 py-1.5 bg-gray-100/80 dark:bg-gray-700/40">
-                                    <p className="text-[10px] font-semibold text-gray-500 dark:text-gray-400 uppercase tracking-wider">Organization Management</p>
-                                  </div>
-                                  <div className="divide-y divide-gray-100/50 dark:divide-gray-700/50">
-                                    {navAdminLinks.map(def => {
-                                      const { value, isOverridden } = getUserEffectiveNav(u.id, def.key);
-                                      const isSaving = navSaving === `user:${u.id}:${def.key}`;
+                              {/* Per-user cells */}
+                              {navUsers.map(u => {
+                                const { value, isOverridden } = getUserEffectiveNav(u.id, def.key);
+                                const isSaving = navSaving === `user:${u.id}:${def.key}`;
 
-                                      return (
-                                        <div key={def.key} className={`px-4 py-2 flex items-center justify-between ${isOverridden ? 'bg-amber-50/40 dark:bg-amber-900/10' : ''}`}>
-                                          <div className="flex-1 min-w-0 flex items-center gap-2">
-                                            <p className="text-xs text-gray-800 dark:text-gray-200">{def.displayName}</p>
-                                            {isOverridden && (
-                                              <span className="inline-flex items-center px-1 py-0 rounded text-[9px] font-bold bg-amber-100 dark:bg-amber-900/30 text-amber-700 dark:text-amber-400">
-                                                OVERRIDE
-                                              </span>
-                                            )}
-                                          </div>
-                                          <div className="flex items-center gap-1.5">
-                                            {isOverridden && (
-                                              <button
-                                                onClick={() => removeUserOverride(u.id, def.key)}
-                                                disabled={isSaving}
-                                                className="text-gray-400 hover:text-red-500 transition-colors"
-                                                title="Remove override (revert to role default)"
-                                              >
-                                                <X className="w-3 h-3" />
-                                              </button>
-                                            )}
-                                            <button
-                                              onClick={() => toggleUserOverride(u.id, def.key, !value)}
-                                              disabled={isSaving}
-                                              className={`relative inline-flex h-4 w-8 flex-shrink-0 cursor-pointer rounded-full border-2 border-transparent transition-colors duration-200 ease-in-out focus:outline-none ${
-                                                value ? 'bg-primary-600' : 'bg-gray-300 dark:bg-gray-600'
-                                              } ${isSaving ? 'opacity-50' : ''} ${isOverridden ? 'ring-1.5 ring-amber-300 dark:ring-amber-600' : ''}`}
-                                              title={value ? 'Visible' : 'Hidden'}
-                                            >
-                                              <span className={`pointer-events-none inline-block h-3 w-3 transform rounded-full bg-white shadow transition duration-200 ease-in-out ${
-                                                value ? 'translate-x-4' : 'translate-x-0'
-                                              }`}>
-                                                {isSaving && <Loader2 className="w-2 h-2 animate-spin text-gray-400 m-0.5" />}
-                                              </span>
-                                            </button>
-                                          </div>
-                                        </div>
-                                      );
-                                    })}
-                                  </div>
-                                </div>
-                              )}
-                            </div>
-                          )}
-                        </div>
-                      );
-                    })}
+                                return (
+                                  <td key={u.id} className={`px-2 py-2.5 text-center ${isOverridden ? 'bg-amber-50/60 dark:bg-amber-900/10' : ''}`}>
+                                    <div className="flex items-center justify-center group relative">
+                                      <button
+                                        onClick={() => toggleUserOverride(u.id, def.key, !value)}
+                                        disabled={isSaving}
+                                        className={`relative inline-flex h-4 w-7 flex-shrink-0 cursor-pointer rounded-full transition-colors duration-200 ease-in-out focus:outline-none ${
+                                          value ? 'bg-green-500' : 'bg-gray-300 dark:bg-gray-600'
+                                        } ${isSaving ? 'opacity-50' : ''} ${
+                                          isOverridden ? 'ring-2 ring-amber-400 dark:ring-amber-500 ring-offset-1 dark:ring-offset-gray-800' : 'opacity-50'
+                                        }`}
+                                        title={isOverridden
+                                          ? `Override: ${value ? 'Granted' : 'Denied'} — click to toggle, hover X to remove`
+                                          : `Following role default: ${value ? 'Visible' : 'Hidden'} — click to create override`
+                                        }
+                                      >
+                                        <span className={`pointer-events-none inline-block h-3 w-3 mt-[1px] ml-[1px] transform rounded-full bg-white shadow transition duration-200 ease-in-out ${
+                                          value ? 'translate-x-3' : 'translate-x-0'
+                                        }`}>
+                                          {isSaving && <Loader2 className="w-2 h-2 animate-spin text-gray-400" />}
+                                        </span>
+                                      </button>
+                                      {isOverridden && (
+                                        <button
+                                          onClick={(e) => { e.stopPropagation(); removeUserOverride(u.id, def.key); }}
+                                          disabled={isSaving}
+                                          className="absolute -top-1 -right-1 opacity-0 group-hover:opacity-100 bg-white dark:bg-gray-800 rounded-full shadow-sm border border-gray-200 dark:border-gray-600 text-gray-400 hover:text-red-500 hover:border-red-300 transition-all p-0.5"
+                                          title="Remove override (revert to role default)"
+                                        >
+                                          <X className="w-2.5 h-2.5" />
+                                        </button>
+                                      )}
+                                    </div>
+                                  </td>
+                                );
+                              })}
+                            </tr>
+                          );
+                        })}
+                      </tbody>
+                    </table>
                   </div>
                 )}
 
-                {/* Legend */}
-                {navUsers.length > 0 && (
-                  <div className="px-4 py-3 border-t border-gray-200 dark:border-gray-700 bg-gray-50/50 dark:bg-gray-700/20">
-                    <div className="flex flex-wrap items-center gap-4 text-xs text-gray-500 dark:text-gray-400">
-                      <div className="flex items-center gap-1.5">
-                        <div className="w-3 h-3 rounded bg-amber-100 dark:bg-amber-900/30 border border-amber-300 dark:border-amber-600" />
-                        <span>User override active</span>
+                {/* Legend + Stats */}
+                <div className="px-4 py-2.5 border-t border-gray-200 dark:border-gray-700 bg-gray-50/50 dark:bg-gray-700/20 flex flex-wrap items-center justify-between gap-3">
+                  <div className="flex flex-wrap items-center gap-4 text-xs text-gray-500 dark:text-gray-400">
+                    <div className="flex items-center gap-1.5">
+                      <div className="relative inline-flex h-3 w-5 rounded-full bg-green-500 ring-1.5 ring-amber-400 ring-offset-1">
+                        <span className="inline-block h-2 w-2 translate-x-2.5 translate-y-0.5 rounded-full bg-white" />
                       </div>
-                      <div className="flex items-center gap-1.5">
-                        <div className="relative inline-flex h-3 w-6 rounded-full bg-primary-600">
-                          <span className="inline-block h-2 w-2 translate-x-3.5 translate-y-0.5 rounded-full bg-white" />
-                        </div>
-                        <span>Visible</span>
+                      <span>User override</span>
+                    </div>
+                    <div className="flex items-center gap-1.5">
+                      <div className="relative inline-flex h-3 w-5 rounded-full bg-green-500 opacity-50">
+                        <span className="inline-block h-2 w-2 translate-x-2.5 translate-y-0.5 rounded-full bg-white" />
                       </div>
-                      <div className="flex items-center gap-1.5">
-                        <div className="relative inline-flex h-3 w-6 rounded-full bg-gray-300 dark:bg-gray-600">
-                          <span className="inline-block h-2 w-2 translate-x-0.5 translate-y-0.5 rounded-full bg-white" />
-                        </div>
-                        <span>Hidden</span>
+                      <span>Following role default</span>
+                    </div>
+                    <div className="flex items-center gap-1.5">
+                      <div className="w-4 h-4 rounded-full border border-gray-200 dark:border-gray-600 flex items-center justify-center">
+                        <X className="w-2.5 h-2.5 text-gray-400" />
                       </div>
-                      <div className="flex items-center gap-1.5">
-                        <X className="w-3 h-3" />
-                        <span>Remove override (revert to role default)</span>
-                      </div>
+                      <span>Remove override (hover)</span>
                     </div>
                   </div>
-                )}
+                  {navUsers.some(u => u.PrivilegeOverrides.length > 0) && (
+                    <span className="text-xs font-medium text-amber-600 dark:text-amber-400">
+                      {navUsers.reduce((sum, u) => sum + u.PrivilegeOverrides.length, 0)} total override{navUsers.reduce((sum, u) => sum + u.PrivilegeOverrides.length, 0) !== 1 ? 's' : ''} active
+                    </span>
+                  )}
+                </div>
               </div>
             </div>
           </div>
