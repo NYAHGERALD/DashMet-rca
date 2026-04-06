@@ -528,6 +528,16 @@ function PrivilegesContent() {
 
   // Toggle a navigation privilege for a role
   const toggleNavPrivilege = async (role: string, featureKey: string, currentValue: boolean) => {
+    // Block enabling admin nav links for non-admin roles
+    if (!currentValue) { // toggling ON
+      const isAdminLink = navAdminLinks.some(d => d.key === featureKey);
+      if (isAdminLink && !['ADMIN', 'SYSTEM_ADMIN'].includes(role)) {
+        setError(`Cannot grant admin navigation access to ${ROLE_CONFIG[role]?.label || role}. Only Admin or System Admin roles can access Organization Management links.`);
+        setTimeout(() => setError(null), 5000);
+        return;
+      }
+    }
+
     const savingKey = `nav:${role}:${featureKey}`;
     setNavSaving(savingKey);
     try {

@@ -1876,6 +1876,12 @@ router.put(
       return;
     }
 
+    // Cannot grant admin nav links to non-admin roles
+    if (isEnabled && definition.category === 'Organization Management' && !['ADMIN', 'SYSTEM_ADMIN'].includes(role)) {
+      res.status(403).json({ error: 'Cannot grant admin navigation access to non-admin roles. Only Admin or System Admin roles can access Organization Management links.' });
+      return;
+    }
+
     // Get current value for audit log
     const existingPrivilege = await prisma.rolePrivilege.findUnique({
       where: {
@@ -2010,6 +2016,19 @@ router.put(
     if (role === 'SYSTEM_ADMIN') {
       res.status(403).json({ error: 'Cannot modify SYSTEM_ADMIN privileges' });
       return;
+    }
+
+    // Cannot grant admin nav links to non-admin roles
+    if (!['ADMIN', 'SYSTEM_ADMIN'].includes(role)) {
+      const adminNavPrivileges = privileges.filter(({ featureKey, isEnabled }: { featureKey: string; isEnabled: boolean }) => {
+        if (!isEnabled) return false;
+        const def = PRIVILEGE_DEFINITIONS.find(d => d.key === featureKey);
+        return def?.category === 'Organization Management';
+      });
+      if (adminNavPrivileges.length > 0) {
+        res.status(403).json({ error: 'Cannot grant admin navigation access to non-admin roles. Only Admin or System Admin roles can access Organization Management links.' });
+        return;
+      }
     }
 
     const results = [];
