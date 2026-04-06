@@ -25,6 +25,12 @@ const CACHE_DURATION = 5 * 60 * 1000; // 5 minutes
 // Global version counter to force re-renders across all hook instances
 let privilegeVersion = 0;
 
+// Global listeners for cross-instance cache sync
+const cacheUpdateListeners = new Set<() => void>();
+function notifyCacheUpdate() {
+  cacheUpdateListeners.forEach(cb => cb());
+}
+
 /**
  * Hook to fetch and check user privileges
  * Caches privileges for performance
@@ -39,7 +45,7 @@ export function usePrivileges() {
   const [version, setVersion] = useState(privilegeVersion);
   const isFetching = useRef(false);
   
-  // Keep a ref to the latest user for use in callbacks
+  // Keep refs to latest values for use in stable callbacks
   const userRef = useRef(user);
   useEffect(() => {
     userRef.current = user;
@@ -84,6 +90,9 @@ export function usePrivileges() {
       // Update both privileges and version to ensure re-render
       setPrivileges({ ...newPrivileges }); // Create new object to trigger re-render
       setVersion(privilegeVersion);
+      
+      // Notify ALL other hook instances to sync from the updated cache
+      notifyCacheUpdate();
     } catch (err: any) {
       console.error('Failed to fetch privileges:', err);
       setError(err.response?.data?.error || 'Failed to load privileges');
@@ -95,16 +104,36 @@ export function usePrivileges() {
     }
   }, [user]);
 
+  // Keep a ref so the stable WebSocket callback always uses the latest fetchPrivileges
+  const fetchPrivilegesRef = useRef(fetchPrivileges);
+  useEffect(() => {
+    fetchPrivilegesRef.current = fetchPrivileges;
+  }, [fetchPrivileges]);
+
   // Fetch on mount and when user changes
   useEffect(() => {
     fetchPrivileges();
   }, [fetchPrivileges]);
 
-  // Listen for real-time privilege changes via WebSocket
+  // Cross-instance cache sync: when another instance fetches new privileges,
+  // this instance picks up the updated cache without making its own API call
   useEffect(() => {
-    if (!onPrivilegeChanged || !user) return;
+    const syncFromCache = () => {
+      if (privilegeCache) {
+        setPrivileges({ ...privilegeCache });
+        setVersion(privilegeVersion);
+      }
+    };
+    cacheUpdateListeners.add(syncFromCache);
+    return () => { cacheUpdateListeners.delete(syncFromCache); };
+  }, []);
 
-    console.log('🔐 Setting up privilege change listener for user:', user.id, 'role:', user.role);
+  // Listen for real-time privilege changes via WebSocket
+  // Uses refs so the callback is STABLE — registered once, never re-subscribed
+  useEffect(() => {
+    if (!onPrivilegeChanged) return;
+
+    console.log('🔐 Setting up privilege change listener');
 
     const unsubscribe = onPrivilegeChanged((data: { 
       organizationId: string; 
@@ -133,21 +162,38 @@ export function usePrivileges() {
         (data.affectedUsers && data.affectedUsers.includes(currentUser.id));
       
       if (affectsCurrentUser) {
-        console.log('🔐 Privilege change affects current user (role:', currentUser.role, ', id:', currentUser.id, ') - refreshing privileges in real-time');
+        console.log('🔐 Privilege change affects current user — refreshing NOW');
         
         // Invalidate cache immediately
         privilegeCache = null;
         cacheTimestamp = 0;
         
-        // Force refresh privileges
-        fetchPrivileges(true);
+        // Force refresh using the latest fetchPrivileges via ref
+        fetchPrivilegesRef.current(true);
       } else {
-        console.log('🔐 Privilege change does not affect current user (role:', currentUser.role, ') - expected roles:', data.affectedRoles);
+        console.log('🔐 Privilege change does not affect current user (role:', currentUser.role, ')');
       }
     });
 
     return unsubscribe;
-  }, [onPrivilegeChanged, fetchPrivileges, user]);
+  }, [onPrivilegeChanged]); // Only depends on onPrivilegeChanged (stable useCallback([]))
+
+  // Fallback: refresh privileges when user returns to the tab
+  // Catches any missed WebSocket events (connection drops, race conditions, etc.)
+  useEffect(() => {
+    const handleVisibilityChange = () => {
+      if (document.visibilityState === 'visible' && userRef.current) {
+        // Only refresh if cache is stale (older than 30 seconds)
+        const staleThreshold = 30 * 1000;
+        if (!cacheTimestamp || Date.now() - cacheTimestamp > staleThreshold) {
+          console.log('🔐 Tab focused + stale cache — refreshing privileges');
+          fetchPrivilegesRef.current(true);
+        }
+      }
+    };
+    document.addEventListener('visibilitychange', handleVisibilityChange);
+    return () => document.removeEventListener('visibilitychange', handleVisibilityChange);
+  }, []);
 
   /**
    * Check if user has a specific privilege
