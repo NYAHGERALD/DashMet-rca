@@ -219,9 +219,9 @@ function PrivilegesContent() {
   // Navigation view state
   const [navSelectedRole, setNavSelectedRole] = useState<string>('OPERATOR');
   const [navUsers, setNavUsers] = useState<UserOverrideUser[]>([]);
-  const [navSelectedUser, setNavSelectedUser] = useState<string>('');
   const [navUserLoading, setNavUserLoading] = useState(false);
   const [navSaving, setNavSaving] = useState<string | null>(null);
+  const [navExpandedUsers, setNavExpandedUsers] = useState<Set<string>>(new Set());
 
   // Available roles (excluding SYSTEM_ADMIN which always has full access)
   const editableRoles = Object.keys(ROLE_CONFIG).filter(r => r !== 'SYSTEM_ADMIN');
@@ -523,7 +523,6 @@ function PrivilegesContent() {
   useEffect(() => {
     if (viewMode === 'navigation' && navSelectedRole) {
       fetchNavUsers(navSelectedRole);
-      setNavSelectedUser('');
     }
   }, [viewMode, navSelectedRole, fetchNavUsers]);
 
@@ -1626,137 +1625,250 @@ function PrivilegesContent() {
                 </div>
               </div>
 
-              {/* User-Specific Overrides */}
+              {/* Users with this Role */}
               <div className="bg-white dark:bg-gray-800 rounded-xl shadow-sm border border-gray-200 dark:border-gray-700 overflow-hidden">
-                <div className="p-4 border-b border-gray-200 dark:border-gray-700">
+                <div className="p-4 border-b border-gray-200 dark:border-gray-700 flex items-center justify-between">
                   <h3 className="font-semibold text-gray-900 dark:text-white flex items-center gap-2">
                     <UserCog className="w-4 h-4" />
-                    User-Specific Overrides
-                    <span className="text-xs font-normal text-gray-500">
-                      Override navigation for individual users within {ROLE_CONFIG[navSelectedRole]?.label}
-                    </span>
+                    Users with {ROLE_CONFIG[navSelectedRole]?.label} Role
+                    {!navUserLoading && (
+                      <span className="text-xs font-normal text-gray-500">({navUsers.length} users)</span>
+                    )}
                   </h3>
+                  <p className="text-xs text-gray-500 dark:text-gray-400">
+                    Click a user to override their navigation access
+                  </p>
                 </div>
-                <div className="p-4">
-                  {/* User Selector */}
-                  {navUserLoading ? (
-                    <div className="flex items-center justify-center py-4">
-                      <Loader2 className="w-6 h-6 animate-spin text-primary-500" />
-                    </div>
-                  ) : navUsers.length === 0 ? (
-                    <p className="text-sm text-gray-500 dark:text-gray-400 text-center py-4">
+
+                {navUserLoading ? (
+                  <div className="flex items-center justify-center py-8">
+                    <Loader2 className="w-6 h-6 animate-spin text-primary-500" />
+                  </div>
+                ) : navUsers.length === 0 ? (
+                  <div className="p-8 text-center">
+                    <Users className="w-10 h-10 text-gray-300 dark:text-gray-600 mx-auto mb-2" />
+                    <p className="text-sm text-gray-500 dark:text-gray-400">
                       No active users with the {ROLE_CONFIG[navSelectedRole]?.label} role
                     </p>
-                  ) : (
-                    <>
-                      <div className="mb-4">
-                        <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">
-                          Select User
-                        </label>
-                        <select
-                          value={navSelectedUser}
-                          onChange={(e) => setNavSelectedUser(e.target.value)}
-                          className="w-full px-3 py-2 bg-gray-50 dark:bg-gray-700 border border-gray-200 dark:border-gray-600 rounded-lg text-sm focus:ring-2 focus:ring-primary-500"
-                        >
-                          <option value="">— Select a user —</option>
-                          {navUsers.map(u => (
-                            <option key={u.id} value={u.id}>
-                              {u.name || u.email} {u.PrivilegeOverrides.length > 0 ? `(${u.PrivilegeOverrides.length} overrides)` : ''}
-                            </option>
-                          ))}
-                        </select>
-                      </div>
-
-                      {navSelectedUser && (() => {
-                        const selectedUser = navUsers.find(u => u.id === navSelectedUser);
-                        if (!selectedUser) return null;
-                        const hasOverrides = selectedUser.PrivilegeOverrides.length > 0;
-
-                        return (
-                          <div>
-                            <div className="flex items-center justify-between mb-3">
-                              <p className="text-sm text-gray-600 dark:text-gray-400">
-                                Showing overrides for <strong>{selectedUser.name || selectedUser.email}</strong>
-                              </p>
-                              {hasOverrides && (
-                                <button
-                                  onClick={() => resetUserOverrides(navSelectedUser)}
-                                  disabled={navSaving === `reset:${navSelectedUser}`}
-                                  className="flex items-center gap-1.5 text-xs font-medium text-amber-600 dark:text-amber-400 hover:bg-amber-50 dark:hover:bg-amber-900/20 px-2 py-1 rounded-lg transition-colors"
-                                >
-                                  {navSaving === `reset:${navSelectedUser}` ? (
-                                    <Loader2 className="w-3 h-3 animate-spin" />
-                                  ) : (
-                                    <RotateCcw className="w-3 h-3" />
-                                  )}
-                                  Reset All Overrides
-                                </button>
+                  </div>
+                ) : (
+                  <div className="divide-y divide-gray-100 dark:divide-gray-700">
+                    {navUsers.map(u => {
+                      const isExpanded = navExpandedUsers.has(u.id);
+                      const overrideCount = u.PrivilegeOverrides.length;
+                      
+                      return (
+                        <div key={u.id}>
+                          {/* User Row — clickable to expand */}
+                          <button
+                            onClick={() => {
+                              setNavExpandedUsers(prev => {
+                                const next = new Set(prev);
+                                if (next.has(u.id)) {
+                                  next.delete(u.id);
+                                } else {
+                                  next.add(u.id);
+                                }
+                                return next;
+                              });
+                            }}
+                            className={`w-full px-4 py-3 flex items-center justify-between text-left hover:bg-gray-50 dark:hover:bg-gray-700/30 transition-colors ${
+                              isExpanded ? 'bg-gray-50 dark:bg-gray-700/20' : ''
+                            }`}
+                          >
+                            <div className="flex items-center gap-3">
+                              {/* Avatar */}
+                              <div className="w-8 h-8 rounded-full bg-primary-100 dark:bg-primary-900/30 flex items-center justify-center text-primary-700 dark:text-primary-300 text-xs font-bold flex-shrink-0">
+                                {(u.name || u.email).charAt(0).toUpperCase()}
+                              </div>
+                              <div>
+                                <p className="text-sm font-medium text-gray-900 dark:text-white">
+                                  {u.name || 'Unnamed User'}
+                                </p>
+                                <p className="text-xs text-gray-500 dark:text-gray-400">{u.email}</p>
+                              </div>
+                            </div>
+                            <div className="flex items-center gap-2">
+                              {overrideCount > 0 && (
+                                <span className="inline-flex items-center px-2 py-0.5 rounded-full text-[10px] font-semibold bg-amber-100 dark:bg-amber-900/30 text-amber-700 dark:text-amber-400">
+                                  {overrideCount} override{overrideCount !== 1 ? 's' : ''}
+                                </span>
+                              )}
+                              {isExpanded ? (
+                                <ChevronDown className="w-4 h-4 text-gray-400" />
+                              ) : (
+                                <ChevronRight className="w-4 h-4 text-gray-400" />
                               )}
                             </div>
+                          </button>
 
-                            {/* User Nav Links */}
-                            <div className="border border-gray-200 dark:border-gray-700 rounded-lg divide-y divide-gray-100 dark:divide-gray-700">
-                              {[...navQuickLinks, ...navAdminLinks].map(def => {
-                                const { value, isOverridden } = getUserEffectiveNav(navSelectedUser, def.key);
-                                const isSaving = navSaving === `user:${navSelectedUser}:${def.key}`;
-                                const roleDefault = matrix[navSelectedRole]?.[def.key] ?? false;
+                          {/* Expanded: Nav link toggles for this user */}
+                          {isExpanded && (
+                            <div className="bg-gray-50/50 dark:bg-gray-800/50 border-t border-gray-200 dark:border-gray-700">
+                              {/* Header with reset */}
+                              <div className="px-4 py-2 flex items-center justify-between border-b border-gray-200/50 dark:border-gray-700/50">
+                                <p className="text-xs text-gray-500 dark:text-gray-400">
+                                  Toggle switches below to override nav access for <strong>{u.name || u.email}</strong>. 
+                                  Amber ring = user override (differs from role default).
+                                </p>
+                                {overrideCount > 0 && (
+                                  <button
+                                    onClick={() => resetUserOverrides(u.id)}
+                                    disabled={navSaving === `reset:${u.id}`}
+                                    className="flex items-center gap-1 text-xs font-medium text-amber-600 dark:text-amber-400 hover:bg-amber-50 dark:hover:bg-amber-900/20 px-2 py-1 rounded-lg transition-colors flex-shrink-0"
+                                  >
+                                    {navSaving === `reset:${u.id}` ? (
+                                      <Loader2 className="w-3 h-3 animate-spin" />
+                                    ) : (
+                                      <RotateCcw className="w-3 h-3" />
+                                    )}
+                                    Reset All
+                                  </button>
+                                )}
+                              </div>
 
-                                return (
-                                  <div key={def.key} className={`px-4 py-2.5 flex items-center justify-between ${isOverridden ? 'bg-amber-50/50 dark:bg-amber-900/10' : ''}`}>
-                                    <div className="flex-1 min-w-0 flex items-center gap-2">
-                                      <p className="text-sm text-gray-900 dark:text-white">{def.displayName}</p>
-                                      {isOverridden && (
-                                        <span className="inline-flex items-center px-1.5 py-0.5 rounded text-[10px] font-medium bg-amber-100 dark:bg-amber-900/30 text-amber-700 dark:text-amber-400">
-                                          OVERRIDE
-                                        </span>
-                                      )}
-                                    </div>
-                                    <div className="flex items-center gap-2">
-                                      {isOverridden && (
-                                        <button
-                                          onClick={() => removeUserOverride(navSelectedUser, def.key)}
-                                          disabled={isSaving}
-                                          className="text-xs text-gray-500 hover:text-red-500 transition-colors"
-                                          title="Remove override (revert to role default)"
-                                        >
-                                          <X className="w-3.5 h-3.5" />
-                                        </button>
-                                      )}
-                                      <button
-                                        onClick={() => toggleUserOverride(navSelectedUser, def.key, !value)}
-                                        disabled={isSaving}
-                                        className={`relative inline-flex h-5 w-9 flex-shrink-0 cursor-pointer rounded-full border-2 border-transparent transition-colors duration-200 ease-in-out focus:outline-none ${
-                                          value ? 'bg-primary-600' : 'bg-gray-200 dark:bg-gray-600'
-                                        } ${isSaving ? 'opacity-50' : ''} ${isOverridden ? 'ring-2 ring-amber-300 dark:ring-amber-600' : ''}`}
-                                      >
-                                        <span className={`pointer-events-none inline-block h-4 w-4 transform rounded-full bg-white shadow ring-0 transition duration-200 ease-in-out ${
-                                          value ? 'translate-x-4' : 'translate-x-0'
-                                        }`}>
-                                          {isSaving && <Loader2 className="w-2.5 h-2.5 animate-spin text-gray-400 m-0.5" />}
-                                        </span>
-                                      </button>
-                                    </div>
+                              {/* Quick Navigation section */}
+                              {navQuickLinks.length > 0 && (
+                                <div>
+                                  <div className="px-4 py-1.5 bg-gray-100/80 dark:bg-gray-700/40">
+                                    <p className="text-[10px] font-semibold text-gray-500 dark:text-gray-400 uppercase tracking-wider">Quick Navigation</p>
                                   </div>
-                                );
-                              })}
-                            </div>
+                                  <div className="divide-y divide-gray-100/50 dark:divide-gray-700/50">
+                                    {navQuickLinks.map(def => {
+                                      const { value, isOverridden } = getUserEffectiveNav(u.id, def.key);
+                                      const isSaving = navSaving === `user:${u.id}:${def.key}`;
 
-                            <div className="mt-3 flex items-center gap-3 text-xs text-gray-500 dark:text-gray-400">
-                              <div className="flex items-center gap-1">
-                                <div className="w-3 h-3 rounded bg-amber-100 dark:bg-amber-900/30 border border-amber-300 dark:border-amber-600" />
-                                <span>User override (differs from role default)</span>
-                              </div>
-                              <div className="flex items-center gap-1">
-                                <X className="w-3 h-3" />
-                                <span>Remove override</span>
-                              </div>
+                                      return (
+                                        <div key={def.key} className={`px-4 py-2 flex items-center justify-between ${isOverridden ? 'bg-amber-50/40 dark:bg-amber-900/10' : ''}`}>
+                                          <div className="flex-1 min-w-0 flex items-center gap-2">
+                                            <p className="text-xs text-gray-800 dark:text-gray-200">{def.displayName}</p>
+                                            {isOverridden && (
+                                              <span className="inline-flex items-center px-1 py-0 rounded text-[9px] font-bold bg-amber-100 dark:bg-amber-900/30 text-amber-700 dark:text-amber-400">
+                                                OVERRIDE
+                                              </span>
+                                            )}
+                                          </div>
+                                          <div className="flex items-center gap-1.5">
+                                            {isOverridden && (
+                                              <button
+                                                onClick={() => removeUserOverride(u.id, def.key)}
+                                                disabled={isSaving}
+                                                className="text-gray-400 hover:text-red-500 transition-colors"
+                                                title="Remove override (revert to role default)"
+                                              >
+                                                <X className="w-3 h-3" />
+                                              </button>
+                                            )}
+                                            <button
+                                              onClick={() => toggleUserOverride(u.id, def.key, !value)}
+                                              disabled={isSaving}
+                                              className={`relative inline-flex h-4 w-8 flex-shrink-0 cursor-pointer rounded-full border-2 border-transparent transition-colors duration-200 ease-in-out focus:outline-none ${
+                                                value ? 'bg-primary-600' : 'bg-gray-300 dark:bg-gray-600'
+                                              } ${isSaving ? 'opacity-50' : ''} ${isOverridden ? 'ring-1.5 ring-amber-300 dark:ring-amber-600' : ''}`}
+                                              title={value ? 'Visible' : 'Hidden'}
+                                            >
+                                              <span className={`pointer-events-none inline-block h-3 w-3 transform rounded-full bg-white shadow transition duration-200 ease-in-out ${
+                                                value ? 'translate-x-4' : 'translate-x-0'
+                                              }`}>
+                                                {isSaving && <Loader2 className="w-2 h-2 animate-spin text-gray-400 m-0.5" />}
+                                              </span>
+                                            </button>
+                                          </div>
+                                        </div>
+                                      );
+                                    })}
+                                  </div>
+                                </div>
+                              )}
+
+                              {/* Organization Management section */}
+                              {navAdminLinks.length > 0 && (
+                                <div>
+                                  <div className="px-4 py-1.5 bg-gray-100/80 dark:bg-gray-700/40">
+                                    <p className="text-[10px] font-semibold text-gray-500 dark:text-gray-400 uppercase tracking-wider">Organization Management</p>
+                                  </div>
+                                  <div className="divide-y divide-gray-100/50 dark:divide-gray-700/50">
+                                    {navAdminLinks.map(def => {
+                                      const { value, isOverridden } = getUserEffectiveNav(u.id, def.key);
+                                      const isSaving = navSaving === `user:${u.id}:${def.key}`;
+
+                                      return (
+                                        <div key={def.key} className={`px-4 py-2 flex items-center justify-between ${isOverridden ? 'bg-amber-50/40 dark:bg-amber-900/10' : ''}`}>
+                                          <div className="flex-1 min-w-0 flex items-center gap-2">
+                                            <p className="text-xs text-gray-800 dark:text-gray-200">{def.displayName}</p>
+                                            {isOverridden && (
+                                              <span className="inline-flex items-center px-1 py-0 rounded text-[9px] font-bold bg-amber-100 dark:bg-amber-900/30 text-amber-700 dark:text-amber-400">
+                                                OVERRIDE
+                                              </span>
+                                            )}
+                                          </div>
+                                          <div className="flex items-center gap-1.5">
+                                            {isOverridden && (
+                                              <button
+                                                onClick={() => removeUserOverride(u.id, def.key)}
+                                                disabled={isSaving}
+                                                className="text-gray-400 hover:text-red-500 transition-colors"
+                                                title="Remove override (revert to role default)"
+                                              >
+                                                <X className="w-3 h-3" />
+                                              </button>
+                                            )}
+                                            <button
+                                              onClick={() => toggleUserOverride(u.id, def.key, !value)}
+                                              disabled={isSaving}
+                                              className={`relative inline-flex h-4 w-8 flex-shrink-0 cursor-pointer rounded-full border-2 border-transparent transition-colors duration-200 ease-in-out focus:outline-none ${
+                                                value ? 'bg-primary-600' : 'bg-gray-300 dark:bg-gray-600'
+                                              } ${isSaving ? 'opacity-50' : ''} ${isOverridden ? 'ring-1.5 ring-amber-300 dark:ring-amber-600' : ''}`}
+                                              title={value ? 'Visible' : 'Hidden'}
+                                            >
+                                              <span className={`pointer-events-none inline-block h-3 w-3 transform rounded-full bg-white shadow transition duration-200 ease-in-out ${
+                                                value ? 'translate-x-4' : 'translate-x-0'
+                                              }`}>
+                                                {isSaving && <Loader2 className="w-2 h-2 animate-spin text-gray-400 m-0.5" />}
+                                              </span>
+                                            </button>
+                                          </div>
+                                        </div>
+                                      );
+                                    })}
+                                  </div>
+                                </div>
+                              )}
                             </div>
-                          </div>
-                        );
-                      })()}
-                    </>
-                  )}
-                </div>
+                          )}
+                        </div>
+                      );
+                    })}
+                  </div>
+                )}
+
+                {/* Legend */}
+                {navUsers.length > 0 && (
+                  <div className="px-4 py-3 border-t border-gray-200 dark:border-gray-700 bg-gray-50/50 dark:bg-gray-700/20">
+                    <div className="flex flex-wrap items-center gap-4 text-xs text-gray-500 dark:text-gray-400">
+                      <div className="flex items-center gap-1.5">
+                        <div className="w-3 h-3 rounded bg-amber-100 dark:bg-amber-900/30 border border-amber-300 dark:border-amber-600" />
+                        <span>User override active</span>
+                      </div>
+                      <div className="flex items-center gap-1.5">
+                        <div className="relative inline-flex h-3 w-6 rounded-full bg-primary-600">
+                          <span className="inline-block h-2 w-2 translate-x-3.5 translate-y-0.5 rounded-full bg-white" />
+                        </div>
+                        <span>Visible</span>
+                      </div>
+                      <div className="flex items-center gap-1.5">
+                        <div className="relative inline-flex h-3 w-6 rounded-full bg-gray-300 dark:bg-gray-600">
+                          <span className="inline-block h-2 w-2 translate-x-0.5 translate-y-0.5 rounded-full bg-white" />
+                        </div>
+                        <span>Hidden</span>
+                      </div>
+                      <div className="flex items-center gap-1.5">
+                        <X className="w-3 h-3" />
+                        <span>Remove override (revert to role default)</span>
+                      </div>
+                    </div>
+                  </div>
+                )}
               </div>
             </div>
           </div>
