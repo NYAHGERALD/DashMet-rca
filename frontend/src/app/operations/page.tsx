@@ -39,6 +39,8 @@ import {
   Maximize2,
   Minimize2,
   GripHorizontal,
+  Calendar,
+  Hourglass,
 } from 'lucide-react';
 import { format } from 'date-fns';
 
@@ -2173,6 +2175,39 @@ export default function OperationsPage() {
                     </div>
                   </div>
                 </div>
+
+                {/* ── Incident Timing ── */}
+                {(selectedIssue.weekNumber != null || selectedIssue.DayOfWeek || selectedIssue.startTime || selectedIssue.totalMinutesLost != null) && (
+                  <div>
+                    <h4 className="text-xs font-semibold text-gray-500 dark:text-gray-400 uppercase mb-2">Incident Timing</h4>
+                    <div className="grid grid-cols-2 sm:grid-cols-4 gap-2">
+                      {selectedIssue.weekNumber != null && (
+                        <div className="bg-gray-50 dark:bg-gray-700/50 rounded-lg p-2.5">
+                          <p className="text-[10px] text-gray-500 dark:text-gray-400 uppercase">Week</p>
+                          <p className="text-sm font-medium text-gray-900 dark:text-white flex items-center gap-1"><Calendar className="w-3.5 h-3.5 text-gray-400" />Week {selectedIssue.weekNumber}</p>
+                        </div>
+                      )}
+                      {selectedIssue.DayOfWeek && (
+                        <div className="bg-gray-50 dark:bg-gray-700/50 rounded-lg p-2.5">
+                          <p className="text-[10px] text-gray-500 dark:text-gray-400 uppercase">Day</p>
+                          <p className="text-sm font-medium text-gray-900 dark:text-white flex items-center gap-1"><Calendar className="w-3.5 h-3.5 text-gray-400" />{selectedIssue.DayOfWeek.dayName}</p>
+                        </div>
+                      )}
+                      {selectedIssue.startTime && (
+                        <div className="bg-gray-50 dark:bg-gray-700/50 rounded-lg p-2.5">
+                          <p className="text-[10px] text-gray-500 dark:text-gray-400 uppercase">Start Time</p>
+                          <p className="text-sm font-medium text-gray-900 dark:text-white flex items-center gap-1"><Clock className="w-3.5 h-3.5 text-gray-400" />{selectedIssue.startTime}</p>
+                        </div>
+                      )}
+                      {selectedIssue.totalMinutesLost != null && (
+                        <div className="bg-gray-50 dark:bg-gray-700/50 rounded-lg p-2.5">
+                          <p className="text-[10px] text-gray-500 dark:text-gray-400 uppercase">Minutes Lost</p>
+                          <p className="text-sm font-medium text-gray-900 dark:text-white flex items-center gap-1"><Hourglass className="w-3.5 h-3.5 text-gray-400" />{selectedIssue.totalMinutesLost} min</p>
+                        </div>
+                      )}
+                    </div>
+                  </div>
+                )}
 
                 {/* ── Equipment & Component ── */}
                 {(selectedIssue.Equipment || selectedIssue.Component) && (
