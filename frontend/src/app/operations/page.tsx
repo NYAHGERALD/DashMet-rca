@@ -69,6 +69,10 @@ interface MachineIssue {
   Shift?: { id: string; name: string; startTime?: string; endTime?: string };
   Equipment?: { id: string; name: string; assetTag?: string; manufacturer?: string; model?: string; photos?: { url: string; name: string }[] };
   Component?: { id: string; name: string; partNumber?: string; manufacturer?: string; photos?: { url: string; name: string }[] };
+  DayOfWeek?: { id: string; dayName: string; dayOrder: number };
+  weekNumber?: number;
+  startTime?: string;
+  totalMinutesLost?: number;
   ReportedBy?: { id: string; firstName: string; lastName: string; email?: string };
   ResolvedBy?: { id: string; firstName: string; lastName: string };
 }
@@ -115,6 +119,9 @@ export default function OperationsPage() {
   const [shifts, setShifts] = useState<Shift[]>([]);
   const [equipment, setEquipment] = useState<Equipment[]>([]);
   const [components, setComponents] = useState<ComponentItem[]>([]);
+  const [daysOfWeek, setDaysOfWeek] = useState<{ id: string; dayName: string; dayOrder: number }[]>([]);
+  const [availableWeeks, setAvailableWeeks] = useState<{ weekNumber: number; label: string; startDate: string; endDate: string; isCurrent: boolean }[]>([]);
+  const [currentWeek, setCurrentWeek] = useState<number | null>(null);
   const [loading, setLoading] = useState(true);
   const [loadingMsgIdx, setLoadingMsgIdx] = useState(0);
   const loadingMessages = useMemo(() => ['Hang tight...', 'Fetching your results...', 'Loading issues...', 'Almost there...', 'Gathering data...'], []);
@@ -196,6 +203,10 @@ export default function OperationsPage() {
   const [formShift, setFormShift] = useState('');
   const [formEquipment, setFormEquipment] = useState('');
   const [formComponent, setFormComponent] = useState('');
+  const [formWeek, setFormWeek] = useState('');
+  const [formDay, setFormDay] = useState('');
+  const [formStartTime, setFormStartTime] = useState('');
+  const [formMinutesLost, setFormMinutesLost] = useState('');
 
   // ─── Quality Issue checkboxes ───────────────────────────────────────────────
   const [qualityAddEquipment, setQualityAddEquipment] = useState(false);
@@ -500,8 +511,10 @@ export default function OperationsPage() {
       api.get('/facilities/shifts'),
       api.get('/equipment'),
       api.get('/equipment/components/all'),
+      api.get('/operations/days-of-week'),
+      api.get('/operations/weeks'),
     ]);
-    const [deptRes, areaRes, lineRes, shiftRes, equipRes, compRes] = results;
+    const [deptRes, areaRes, lineRes, shiftRes, equipRes, compRes, daysRes, weeksRes] = results;
 
     if (deptRes.status === 'fulfilled') {
       const depts = deptRes.value.data?.data?.departments || deptRes.value.data?.departments || [];
@@ -531,6 +544,15 @@ export default function OperationsPage() {
     if (compRes.status === 'fulfilled') {
       const c = compRes.value.data?.data?.components || compRes.value.data?.components || [];
       setComponents(c);
+    }
+    if (daysRes.status === 'fulfilled') {
+      const d = daysRes.value.data?.data || [];
+      setDaysOfWeek(d);
+    }
+    if (weeksRes.status === 'fulfilled') {
+      const w = weeksRes.value.data?.data || [];
+      setAvailableWeeks(w);
+      setCurrentWeek(weeksRes.value.data?.currentWeek || null);
     }
   }, []);
 
@@ -636,6 +658,10 @@ export default function OperationsPage() {
       setFormShift(issueToEdit.Shift?.id || '');
       setFormEquipment(issueToEdit.Equipment?.id || '');
       setFormComponent(issueToEdit.Component?.id || '');
+      setFormWeek(issueToEdit.weekNumber != null ? String(issueToEdit.weekNumber) : '');
+      setFormDay(issueToEdit.DayOfWeek?.id || '');
+      setFormStartTime(issueToEdit.startTime || '');
+      setFormMinutesLost(issueToEdit.totalMinutesLost != null ? String(issueToEdit.totalMinutesLost) : '');
       // For Quality issues being edited, enable checkboxes if equipment/component were set
       if (issueToEdit.type === 'QUALITY') {
         setQualityAddEquipment(!!issueToEdit.Equipment?.id);
@@ -656,6 +682,10 @@ export default function OperationsPage() {
       setFormShift('');
       setFormEquipment('');
       setFormComponent('');
+      setFormWeek(currentWeek != null ? String(currentWeek) : '');
+      setFormDay('');
+      setFormStartTime('');
+      setFormMinutesLost('');
       setQualityAddEquipment(false);
       setQualityAddComponent(false);
     }
@@ -686,6 +716,10 @@ export default function OperationsPage() {
           shiftId: formShift || null,
           equipmentId: formEquipment || null,
           componentId: formComponent || null,
+          weekNumber: formWeek ? parseInt(formWeek, 10) : null,
+          dayOfWeekId: formDay || null,
+          startTime: formStartTime || null,
+          totalMinutesLost: formMinutesLost ? parseInt(formMinutesLost, 10) : null,
         });
         issueId = editingIssue.id;
         setSuccess('Issue updated successfully');
@@ -702,6 +736,10 @@ export default function OperationsPage() {
           shiftId: formShift || null,
           equipmentId: formEquipment || null,
           componentId: formComponent || null,
+          weekNumber: formWeek ? parseInt(formWeek, 10) : null,
+          dayOfWeekId: formDay || null,
+          startTime: formStartTime || null,
+          totalMinutesLost: formMinutesLost ? parseInt(formMinutesLost, 10) : null,
         });
         issueId = res.data?.data?.id;
         setSuccess('Issue reported successfully');
@@ -1818,6 +1856,62 @@ export default function OperationsPage() {
                       <option value="">{isShiftDisabled ? 'Select Department first' : 'Select Shift'}</option>
                       {shifts.map(s => <option key={s.id} value={s.id}>{s.name}</option>)}
                     </select>
+                  </div>
+                </div>
+
+                {/* Week / Day / Start Time / Minutes Lost */}
+                <div className="grid grid-cols-2 gap-3">
+                  <div>
+                    <label className="block text-xs font-medium text-gray-700 dark:text-gray-300 mb-1">Week</label>
+                    <select
+                      value={formWeek}
+                      onChange={(e) => setFormWeek(e.target.value)}
+                      className="w-full px-2.5 py-2 text-sm rounded-lg border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-700 text-gray-900 dark:text-white"
+                      title="Select Week"
+                    >
+                      <option value="">Select Week</option>
+                      {availableWeeks.map(w => (
+                        <option key={w.weekNumber} value={w.weekNumber}>
+                          {w.label} ({w.startDate} – {w.endDate}){w.isCurrent ? ' ★' : ''}
+                        </option>
+                      ))}
+                    </select>
+                  </div>
+                  <div>
+                    <label className="block text-xs font-medium text-gray-700 dark:text-gray-300 mb-1">Day</label>
+                    <select
+                      value={formDay}
+                      onChange={(e) => setFormDay(e.target.value)}
+                      className="w-full px-2.5 py-2 text-sm rounded-lg border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-700 text-gray-900 dark:text-white"
+                      title="Select Day"
+                    >
+                      <option value="">Select Day</option>
+                      {daysOfWeek.map(d => (
+                        <option key={d.id} value={d.id}>{d.dayName}</option>
+                      ))}
+                    </select>
+                  </div>
+                  <div>
+                    <label className="block text-xs font-medium text-gray-700 dark:text-gray-300 mb-1">Start Time of Incident</label>
+                    <input
+                      type="time"
+                      value={formStartTime}
+                      onChange={(e) => setFormStartTime(e.target.value)}
+                      className="w-full px-2.5 py-2 text-sm rounded-lg border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-700 text-gray-900 dark:text-white"
+                      title="Start Time of Incident"
+                    />
+                  </div>
+                  <div>
+                    <label className="block text-xs font-medium text-gray-700 dark:text-gray-300 mb-1">Total Minutes Lost</label>
+                    <input
+                      type="number"
+                      min="0"
+                      value={formMinutesLost}
+                      onChange={(e) => setFormMinutesLost(e.target.value)}
+                      placeholder="0"
+                      className="w-full px-2.5 py-2 text-sm rounded-lg border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-700 text-gray-900 dark:text-white"
+                      title="Total Minutes Lost"
+                    />
                   </div>
                 </div>
 

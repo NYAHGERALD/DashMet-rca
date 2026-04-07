@@ -61,6 +61,7 @@ router.get('/issues', async (req: any, res: Response, next: NextFunction) => {
         Shift: { select: { id: true, name: true, startTime: true, endTime: true } },
         Equipment: { select: { id: true, name: true, assetTag: true } },
         Component: { select: { id: true, name: true, partNumber: true } },
+        DayOfWeek: { select: { id: true, dayName: true, dayOrder: true } },
         ReportedBy: { select: { id: true, firstName: true, lastName: true, email: true } },
         ResolvedBy: { select: { id: true, firstName: true, lastName: true, email: true } },
       },
@@ -86,6 +87,7 @@ router.get('/issues/:id', async (req: any, res: Response, next: NextFunction) =>
         Shift: { select: { id: true, name: true, startTime: true, endTime: true } },
         Equipment: { select: { id: true, name: true, assetTag: true, manufacturer: true, model: true, photos: true } },
         Component: { select: { id: true, name: true, partNumber: true, manufacturer: true, photos: true } },
+        DayOfWeek: { select: { id: true, dayName: true, dayOrder: true } },
         ReportedBy: { select: { id: true, firstName: true, lastName: true, email: true } },
         ResolvedBy: { select: { id: true, firstName: true, lastName: true, email: true } },
       },
@@ -101,7 +103,7 @@ router.get('/issues/:id', async (req: any, res: Response, next: NextFunction) =>
 
 router.post('/issues', async (req: any, res: Response, next: NextFunction) => {
   try {
-    const { type, title, description, priority, departmentId, areaId, lineId, shiftId, equipmentId, componentId } = req.body;
+    const { type, title, description, priority, departmentId, areaId, lineId, shiftId, equipmentId, componentId, weekNumber, dayOfWeekId, startTime, totalMinutesLost } = req.body;
 
     if (!type || !title || !description || !departmentId) {
       return res.status(400).json({ success: false, error: 'type, title, description, and departmentId are required' });
@@ -122,6 +124,10 @@ router.post('/issues', async (req: any, res: Response, next: NextFunction) => {
         shiftId: shiftId || null,
         equipmentId: equipmentId || null,
         componentId: componentId || null,
+        weekNumber: weekNumber != null ? parseInt(weekNumber, 10) : null,
+        dayOfWeekId: dayOfWeekId || null,
+        startTime: startTime || null,
+        totalMinutesLost: totalMinutesLost != null ? parseInt(totalMinutesLost, 10) : null,
         reportedById: req.user.id,
         organizationId: req.user.organizationId,
       },
@@ -132,6 +138,7 @@ router.post('/issues', async (req: any, res: Response, next: NextFunction) => {
         Shift: { select: { id: true, name: true } },
         Equipment: { select: { id: true, name: true, assetTag: true } },
         Component: { select: { id: true, name: true, partNumber: true } },
+        DayOfWeek: { select: { id: true, dayName: true, dayOrder: true } },
         ReportedBy: { select: { id: true, firstName: true, lastName: true } },
       },
     });
@@ -149,7 +156,7 @@ router.patch('/issues/:id', async (req: any, res: Response, next: NextFunction) 
     const existing = await prisma.machineIssue.findUnique({ where: { id: req.params.id } });
     if (!existing) return res.status(404).json({ success: false, error: 'Issue not found' });
 
-    const { title, description, type, priority, status, departmentId, areaId, lineId, shiftId, equipmentId, componentId, resolution } = req.body;
+    const { title, description, type, priority, status, departmentId, areaId, lineId, shiftId, equipmentId, componentId, resolution, weekNumber, dayOfWeekId, startTime, totalMinutesLost } = req.body;
 
     const data: any = {};
     if (title !== undefined) data.title = title;
@@ -163,6 +170,10 @@ router.patch('/issues/:id', async (req: any, res: Response, next: NextFunction) 
     if (equipmentId !== undefined) data.equipmentId = equipmentId || null;
     if (componentId !== undefined) data.componentId = componentId || null;
     if (resolution !== undefined) data.resolution = resolution;
+    if (weekNumber !== undefined) data.weekNumber = weekNumber != null ? parseInt(weekNumber, 10) : null;
+    if (dayOfWeekId !== undefined) data.dayOfWeekId = dayOfWeekId || null;
+    if (startTime !== undefined) data.startTime = startTime || null;
+    if (totalMinutesLost !== undefined) data.totalMinutesLost = totalMinutesLost != null ? parseInt(totalMinutesLost, 10) : null;
 
     if (status !== undefined) {
       data.status = status;
@@ -182,6 +193,7 @@ router.patch('/issues/:id', async (req: any, res: Response, next: NextFunction) 
         Shift: { select: { id: true, name: true } },
         Equipment: { select: { id: true, name: true, assetTag: true } },
         Component: { select: { id: true, name: true, partNumber: true } },
+        DayOfWeek: { select: { id: true, dayName: true, dayOrder: true } },
         ReportedBy: { select: { id: true, firstName: true, lastName: true } },
         ResolvedBy: { select: { id: true, firstName: true, lastName: true } },
       },
@@ -343,6 +355,70 @@ router.get('/stats', async (req: any, res: Response, next: NextFunction) => {
       success: true,
       data: { total, open, inProgress, resolved, byType, byPriority },
     });
+  } catch (err) {
+    next(err);
+  }
+});
+
+// ─── GET /operations/days-of-week — List active days for organization ───────────
+
+router.get('/days-of-week', async (req: any, res: Response, next: NextFunction) => {
+  try {
+    const days = await prisma.dayOfWeek.findMany({
+      where: {
+        organizationId: req.user.organizationId,
+        isActive: true,
+      },
+      orderBy: { dayOrder: 'asc' },
+      select: { id: true, dayName: true, dayOrder: true, isActive: true },
+    });
+
+    res.json({ success: true, data: days });
+  } catch (err) {
+    next(err);
+  }
+});
+
+// ─── GET /operations/weeks — List weeks for current calendar year ───────────────
+
+router.get('/weeks', async (req: any, res: Response, next: NextFunction) => {
+  try {
+    const org = await prisma.organization.findUnique({
+      where: { id: req.user.organizationId },
+      select: { calendarYearStartMonth: true, calendarYearStartDay: true },
+    });
+
+    const startMonth = org?.calendarYearStartMonth || 1;
+    const startDay = org?.calendarYearStartDay || 1;
+    const now = new Date();
+    const currentYear = now.getFullYear();
+
+    // Determine calendar year start date
+    let yearStart = new Date(currentYear, startMonth - 1, startDay);
+    if (yearStart > now) {
+      yearStart = new Date(currentYear - 1, startMonth - 1, startDay);
+    }
+
+    // Calculate total weeks from yearStart to now + a few weeks ahead
+    const msPerWeek = 7 * 24 * 60 * 60 * 1000;
+    const elapsed = now.getTime() - yearStart.getTime();
+    const currentWeek = Math.ceil(elapsed / msPerWeek) || 1;
+    const totalWeeks = Math.min(currentWeek + 2, 53); // show up to 2 weeks ahead
+
+    const weeks = [];
+    for (let w = 1; w <= totalWeeks; w++) {
+      const weekStart = new Date(yearStart.getTime() + (w - 1) * msPerWeek);
+      const weekEnd = new Date(weekStart.getTime() + 6 * 24 * 60 * 60 * 1000);
+      weeks.push({
+        weekNumber: w,
+        label: `Week ${w}`,
+        startDate: weekStart.toISOString().split('T')[0],
+        endDate: weekEnd.toISOString().split('T')[0],
+        isCurrent: w === currentWeek,
+      });
+    }
+
+    res.json({ success: true, data: weeks, currentWeek });
   } catch (err) {
     next(err);
   }

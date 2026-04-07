@@ -335,6 +335,7 @@ model Department {
   Task                      Task[]
 
   // LSW Relations
+  DaysOfWeek                DayOfWeek[]
   LswBoards                 LswBoard[]                  @relation("LswBoardDepartment")
   LswDailyTasks             LswDailyTask[]              @relation("LswDailyTaskDepartment")
   LswTodoItems              LswTodoItem[]               @relation("LswTodoItemDepartment")
@@ -501,6 +502,7 @@ model Facility {
 
   // LSW Relations
   LswBoards                 LswBoard[]
+  DaysOfWeek                DayOfWeek[]
   LswDailyTasks             LswDailyTask[]             @relation("LswDailyTaskFacility")
   LswFrequencyTasks         LswFrequencyTask[]         @relation("LswFrequencyTaskFacility")
   LswProjects               LswProject[]               @relation("LswProjectFacility")
@@ -973,12 +975,16 @@ model MachineIssue {
   lineId        String?
   shiftId       String?
   equipmentId   String?
-  componentId   String?
-  resolution    String?
-  resolvedAt    DateTime?
-  resolvedById  String?
-  reportedById  String
-  organizationId String
+  componentId     String?
+  weekNumber      Int?
+  dayOfWeekId     String?
+  startTime       String?
+  totalMinutesLost Int?
+  resolution      String?
+  resolvedAt      DateTime?
+  resolvedById    String?
+  reportedById    String
+  organizationId  String
   createdAt     DateTime      @default(now())
   updatedAt     DateTime      @updatedAt
 
@@ -988,6 +994,7 @@ model MachineIssue {
   Shift         Shift?        @relation(fields: [shiftId], references: [id])
   Equipment     Equipment?    @relation(fields: [equipmentId], references: [id])
   Component     EquipmentComponent? @relation(fields: [componentId], references: [id])
+  DayOfWeek     DayOfWeek?    @relation(fields: [dayOfWeekId], references: [id])
   ReportedBy    User          @relation("IssueReportedBy", fields: [reportedById], references: [id])
   ResolvedBy    User?         @relation("IssueResolvedBy", fields: [resolvedById], references: [id])
   Organization  Organization  @relation(fields: [organizationId], references: [id], onDelete: Cascade)
@@ -998,6 +1005,7 @@ model MachineIssue {
   @@index([shiftId])
   @@index([equipmentId])
   @@index([componentId])
+  @@index([dayOfWeekId])
   @@index([organizationId])
   @@index([status])
   @@index([type])
@@ -1075,6 +1083,7 @@ model Organization {
 
   // Operations Issue Tracking
   MachineIssue               MachineIssue[]
+  DaysOfWeek                 DayOfWeek[]
 
   // Invitation-only registration
   Invitations                Invitation[]
@@ -4058,4 +4067,29 @@ model VacationNotification {
   @@index([organizationId])
   @@index([isRead])
   @@map("vacation_notifications")
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// DayOfWeek: Admin-managed working days per Organization/Facility/Department
+// ─────────────────────────────────────────────────────────────────────────────
+model DayOfWeek {
+  id               String        @id @default(uuid())
+  dayName          String        // e.g. "Monday", "Tuesday", etc.
+  dayOrder         Int           // 1=Monday, 2=Tuesday, ... 7=Sunday
+  isActive         Boolean       @default(true)
+  organizationId   String
+  facilityId       String?
+  departmentId     String?
+  createdAt        DateTime      @default(now())
+  updatedAt        DateTime      @updatedAt
+
+  Organization     Organization  @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  Facility         Facility?     @relation(fields: [facilityId], references: [id], onDelete: Cascade)
+  Department       Department?   @relation(fields: [departmentId], references: [id], onDelete: Cascade)
+  MachineIssues    MachineIssue[]
+
+  @@index([organizationId])
+  @@index([facilityId])
+  @@index([departmentId])
+  @@index([organizationId, dayOrder])
 }
