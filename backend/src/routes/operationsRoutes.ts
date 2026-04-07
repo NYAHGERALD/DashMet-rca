@@ -418,7 +418,7 @@ router.get('/weeks', async (req: any, res: Response, next: NextFunction) => {
       });
     }
 
-    res.json({ success: true, data: weeks, currentWeek });
+    res.json({ success: true, data: weeks.reverse(), currentWeek });
   } catch (err) {
     next(err);
   }
