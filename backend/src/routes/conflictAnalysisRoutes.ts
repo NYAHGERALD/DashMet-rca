@@ -1,5 +1,6 @@
 import { Router, Request, Response } from 'express';
 import OpenAI from 'openai';
+import { sanitizeForPrompt, sanitizeForSystemPrompt, wrapUserContent, detectPromptInjection } from '../utils/promptSanitizer';
 
 const router = Router();
 
@@ -101,12 +102,19 @@ router.post('/compare', async (req: Request, res: Response) => {
     }
     
     // Use the cleaned/translated text if available, otherwise original
-    const textA = complaintA.translatedText || complaintA.cleanedText || complaintA.originalText;
-    const textB = complaintB.translatedText || complaintB.cleanedText || complaintB.originalText;
+    // Sanitize all user-provided text to prevent prompt injection
+    const textA = sanitizeForPrompt(
+      complaintA.translatedText || complaintA.cleanedText || complaintA.originalText,
+      { maxLength: 2000, context: 'complaint-A-text' }
+    );
+    const textB = sanitizeForPrompt(
+      complaintB.translatedText || complaintB.cleanedText || complaintB.originalText,
+      { maxLength: 2000, context: 'complaint-B-text' }
+    );
     
-    // Get employee names for personalized analysis
-    const nameA = complaintA.employeeName;
-    const nameB = complaintB.employeeName;
+    // Get employee names for personalized analysis (strict sanitization for names)
+    const nameA = sanitizeForSystemPrompt(complaintA.employeeName, { maxLength: 100, context: 'employee-name-A' });
+    const nameB = sanitizeForSystemPrompt(complaintB.employeeName, { maxLength: 100, context: 'employee-name-B' });
     
     // Track what additional evidence we have
     const hasWitnesses = witnessStatements && witnessStatements.length > 0;
@@ -121,8 +129,8 @@ router.post('/compare', async (req: Request, res: Response) => {
 WITNESS ACCOUNTS (${witnessStatements.length} statement${witnessStatements.length > 1 ? 's' : ''})
 ═══════════════════════════════════════════════════════════════
 ${witnessStatements.map((w, i) => 
-        `WITNESS ${i+1}: ${w.witnessName}
-Statement: "${w.text}"`
+        `WITNESS ${i+1}: ${sanitizeForSystemPrompt(w.witnessName, { maxLength: 100, context: 'witness-name' })}
+Statement: ${wrapUserContent(sanitizeForPrompt(w.text, { maxLength: 1500, context: 'witness-statement' }), 'witness_statement')}`
       ).join('\n\n')}
 
 IMPORTANT: You MUST analyze these witness statements and incorporate their perspectives into your analysis. Consider:
@@ -139,8 +147,8 @@ IMPORTANT: You MUST analyze these witness statements and incorporate their persp
                           h.type === 'counseling_record' ? 'Counseling Record' :
                           h.type === 'warning_document' ? 'Written Warning' : 'Prior Record';
         const dateStr = h.documentDate ? ` (${h.documentDate})` : '';
-        const employeeStr = h.employeeName ? ` involving ${h.employeeName}` : '';
-        return `📄 ${typeLabel}${dateStr}${employeeStr}:\n${h.summary}`;
+        const employeeStr = h.employeeName ? ` involving ${sanitizeForSystemPrompt(h.employeeName, { maxLength: 100, context: 'history-employee' })}` : '';
+        return `📄 ${typeLabel}${dateStr}${employeeStr}:\n${sanitizeForPrompt(h.summary, { maxLength: 1000, context: 'prior-history-summary' })}`;
       }).join('\n\n');
       priorHistoryContext = `\n\n═══════════════════════════════════════════════════════════════
 PRIOR HISTORY/RECORDS (${priorHistory.length} document${priorHistory.length > 1 ? 's' : ''})
@@ -227,10 +235,10 @@ INCIDENT DETAILS:
 - Department: ${caseDetails.department}
 
 STATEMENT FROM ${nameA.toUpperCase()}:
-"${textA}"
+${wrapUserContent(textA, 'employee_statement_A')}
 
 STATEMENT FROM ${nameB.toUpperCase()}:
-"${textB}"${witnessContext}${priorHistoryContext}${evidenceInstruction}
+${wrapUserContent(textB, 'employee_statement_B')}${witnessContext}${priorHistoryContext}${evidenceInstruction}
 
 Please provide your analysis in JSON format. Remember to use "${nameA}" and "${nameB}" by name throughout - never use generic terms like "Party A" or "Party B".${witnessInstruction}${priorHistoryInstruction}
 

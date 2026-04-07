@@ -8,6 +8,7 @@
  */
 
 import OpenAI from 'openai';
+import { sanitizeForPrompt, wrapUserContent } from '../utils/promptSanitizer';
 
 // Lazy initialization of OpenAI client
 function getOpenAIClient(): OpenAI | null {
@@ -143,7 +144,7 @@ IMPORTANT:
       model: process.env.AI_MODEL || 'gpt-4o',
       messages: [
         { role: 'system', content: systemPrompt },
-        { role: 'user', content: `Analyze this text:\n\n"${text}"` },
+        { role: 'user', content: `Analyze this text:\n\n${wrapUserContent(sanitizeForPrompt(text, { maxLength: 5000, context: 'grammar-text' }), 'text_to_analyze')}` },
       ],
       temperature: 0.3,
       max_completion_tokens: 2000,
@@ -369,11 +370,11 @@ export async function getSuggestions(
         {
           role: 'system',
           content: `${typeInstructions[suggestionType]}.
-Context (full text): "${text}"
+Context (full text): ${wrapUserContent(sanitizeForPrompt(text, { maxLength: 3000, context: 'suggestion-context' }), 'context')}
 Return a JSON array of 3 suggestions: ["suggestion1", "suggestion2", "suggestion3"]
 Return ONLY the JSON array.`,
         },
-        { role: 'user', content: `Selected text: "${selectedText}"` },
+        { role: 'user', content: `Selected text: ${wrapUserContent(sanitizeForPrompt(selectedText, { maxLength: 1000, context: 'selected-text' }), 'selected_text')}` },
       ],
       temperature: 0.6,
       max_completion_tokens: 500,

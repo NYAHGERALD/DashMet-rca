@@ -2,6 +2,7 @@
 // Uses OpenAI GPT-4 to convert raw incident descriptions into professional summaries
 
 import OpenAI from 'openai';
+import { sanitizeForPrompt, sanitizeForSystemPrompt, wrapUserContent } from '../utils/promptSanitizer';
 
 // Lazy initialization of OpenAI client with proper timeout configuration
 let openaiClient: OpenAI | null = null;
@@ -221,7 +222,7 @@ IMPORTANT: Reply with ONLY the improved text. No explanations or extra words.`,
         },
         {
           role: 'user',
-          content: `Rewrite this to be clear and easy to read:\n\n"${text}"`,
+          content: `Rewrite this to be clear and easy to read:\n\n${wrapUserContent(sanitizeForPrompt(text, { maxLength: 3000, context: 'enhance-incident-text' }), 'text_to_improve')}`,
         },
       ],
       temperature: 0.4,
@@ -331,7 +332,7 @@ IMPORTANT: Reply with ONLY the improved text. No explanations, quotes, or extra 
         },
         {
           role: 'user',
-          content: `Improve this ${isDeficiency ? 'deficiency description' : isCorrectiveAction ? 'corrective action' : 'text'}:\n\n${text}`,
+          content: `Improve this ${isDeficiency ? 'deficiency description' : isCorrectiveAction ? 'corrective action' : 'text'}:\n\n${sanitizeForPrompt(text, { maxLength: 3000, context: 'enhance-safety-text' })}`,
         },
       ],
       temperature: 0.3,
@@ -1753,14 +1754,14 @@ OUTPUT FORMAT (JSON only):
         {
           role: 'user',
           content: `Incident Type: ${incident.type === 'WORKPLACE_SAFETY' ? 'Workplace Safety (Injury)' : incident.type === 'FOOD_SAFETY' ? 'Food Safety/Quality' : 'Machine & Equipment'}
-Incident: ${incident.description}
-Category: ${incident.categoryName || 'N/A'}
-${incident.aiSummary ? `AI Analysis: ${incident.aiSummary.substring(0, 500)}` : ''}
+Incident: ${sanitizeForPrompt(incident.description, { maxLength: 1000, context: '5why-incident' })}
+Category: ${sanitizeForPrompt(incident.categoryName || 'N/A', { maxLength: 100, context: '5why-category' })}
+${incident.aiSummary ? `AI Analysis: ${sanitizeForPrompt(incident.aiSummary.substring(0, 500), { maxLength: 500, context: '5why-summary' })}` : ''}
 
 Previous steps:
-${stepsContext}
+${sanitizeForPrompt(stepsContext, { maxLength: 3000, context: '5why-steps' })}
 
-Current step ${currentStep} answer: ${currentAnswer}
+Current step ${currentStep} answer: ${sanitizeForPrompt(currentAnswer, { maxLength: 1000, context: '5why-current-answer' })}
 
 Provide the next why question and suggested answer. Remember to focus on ${incident.type === 'WORKPLACE_SAFETY' ? 'why the injury/harm occurred' : incident.type === 'FOOD_SAFETY' ? 'why the contamination/defect occurred' : 'why the equipment failure occurred'}.`,
         },
@@ -1820,7 +1821,7 @@ export async function generateAIFishboneCategorySuggestions(
       messages: [
         {
           role: 'system',
-          content: `You are an RCA specialist. Suggest potential causes for the "${categoryName}" category in a Fishbone diagram. Focus on specific, actionable causes relevant to the incident.
+          content: `You are an RCA specialist. Suggest potential causes for the "${sanitizeForSystemPrompt(categoryName, { maxLength: 100, context: 'fishbone-category' })}" category in a Fishbone diagram. Focus on specific, actionable causes relevant to the incident.
 
 OUTPUT FORMAT (JSON only):
 {
@@ -1833,14 +1834,14 @@ OUTPUT FORMAT (JSON only):
         },
         {
           role: 'user',
-          content: `Incident: ${incident.description}
-Type: ${incident.type}
-Severity: ${incident.severity || 'N/A'}
-Category: ${incident.categoryName || 'N/A'}
-Location: ${incident.facilityName || 'N/A'} - ${incident.areaName || 'N/A'}
+          content: `Incident: ${sanitizeForPrompt(incident.description, { maxLength: 1000, context: 'fishbone-incident' })}
+Type: ${sanitizeForPrompt(incident.type, { maxLength: 100, context: 'incident-type' })}
+Severity: ${sanitizeForPrompt(incident.severity || 'N/A', { maxLength: 50, context: 'severity' })}
+Category: ${sanitizeForPrompt(incident.categoryName || 'N/A', { maxLength: 100, context: 'category' })}
+Location: ${sanitizeForPrompt(incident.facilityName || 'N/A', { maxLength: 100, context: 'facility' })} - ${sanitizeForPrompt(incident.areaName || 'N/A', { maxLength: 100, context: 'area' })}
 
-Fishbone category: ${categoryName}
-Existing causes: ${existingCauses.length > 0 ? existingCauses.join(', ') : 'None yet'}
+Fishbone category: ${sanitizeForSystemPrompt(categoryName, { maxLength: 100, context: 'fishbone-cat' })}
+Existing causes: ${existingCauses.length > 0 ? sanitizeForPrompt(existingCauses.join(', '), { maxLength: 500, context: 'existing-causes' }) : 'None yet'}
 
 Suggest 3-5 additional potential causes for this category, avoiding duplicates.`,
         },
@@ -1917,14 +1918,14 @@ OUTPUT FORMAT (JSON only):
         },
         {
           role: 'user',
-          content: `Problem Statement: "${problem}"
+          content: `Problem Statement: "${sanitizeForPrompt(problem, { maxLength: 1000, context: 'fishbone-problem' })}"
 ${incidentContext ? `
 Additional Context:
-- Incident Type: ${incidentContext.type}
-- Category: ${incidentContext.categoryName || 'Not specified'}
-- Facility: ${incidentContext.facilityName || 'Not specified'}
-- Area: ${incidentContext.areaName || 'Not specified'}
-- Severity: ${incidentContext.severity || 'Not specified'}
+- Incident Type: ${sanitizeForPrompt(incidentContext.type, { maxLength: 100, context: 'context-type' })}
+- Category: ${sanitizeForPrompt(incidentContext.categoryName || 'Not specified', { maxLength: 100, context: 'context-category' })}
+- Facility: ${sanitizeForPrompt(incidentContext.facilityName || 'Not specified', { maxLength: 100, context: 'context-facility' })}
+- Area: ${sanitizeForPrompt(incidentContext.areaName || 'Not specified', { maxLength: 100, context: 'context-area' })}
+- Severity: ${sanitizeForPrompt(incidentContext.severity || 'Not specified', { maxLength: 50, context: 'context-severity' })}
 ` : ''}
 
 Evaluate this problem statement and determine if it's suitable for a Fishbone analysis.`,
@@ -2209,15 +2210,15 @@ OUTPUT FORMAT (JSON only):
         {
           role: 'user',
           content: `=== VALIDATION REQUEST ===
-Original Problem (THE SPECIFIC INCIDENT): ${params.problem}
-Incident Type: ${params.incidentType}
-Incident Description: ${params.incidentDescription}
-Initial Cause (Category: ${params.categoryName}): ${params.causeText}
+Original Problem (THE SPECIFIC INCIDENT): ${sanitizeForPrompt(params.problem, { maxLength: 1000, context: 'validation-problem' })}
+Incident Type: ${sanitizeForPrompt(params.incidentType, { maxLength: 100, context: 'validation-type' })}
+Incident Description: ${sanitizeForPrompt(params.incidentDescription, { maxLength: 1000, context: 'validation-desc' })}
+Initial Cause (Category: ${sanitizeForPrompt(params.categoryName, { maxLength: 100, context: 'validation-category' })}): ${sanitizeForPrompt(params.causeText, { maxLength: 500, context: 'validation-cause' })}
 
 === USER'S EDITED 5 WHYS ===
-${stepsText}
+${sanitizeForPrompt(stepsText, { maxLength: 3000, context: 'validation-steps' })}
 
-User's Root Cause: ${params.editedRootCause}
+User's Root Cause: ${sanitizeForPrompt(params.editedRootCause, { maxLength: 1000, context: 'validation-root-cause' })}
 
 VALIDATE: 
 1. Is the logic chain valid?
@@ -2337,15 +2338,15 @@ OUTPUT FORMAT (JSON only):
         {
           role: 'user',
           content: `=== VALIDATION REQUEST ===
-Original Problem: ${params.problem}
-Incident Type: ${params.incidentType}
-Incident Description: ${params.incidentDescription}
-Initial Cause (Category: ${params.categoryName}): ${params.causeText}
+Original Problem: ${sanitizeForPrompt(params.problem, { maxLength: 1000, context: 'manual-validation-problem' })}
+Incident Type: ${sanitizeForPrompt(params.incidentType, { maxLength: 100, context: 'manual-validation-type' })}
+Incident Description: ${sanitizeForPrompt(params.incidentDescription, { maxLength: 1000, context: 'manual-validation-desc' })}
+Initial Cause (Category: ${sanitizeForPrompt(params.categoryName, { maxLength: 100, context: 'manual-validation-category' })}): ${sanitizeForPrompt(params.causeText, { maxLength: 500, context: 'manual-validation-cause' })}
 
 === USER'S MANUAL 5 WHYS ANALYSIS ===
-${stepsText}
+${sanitizeForPrompt(stepsText, { maxLength: 3000, context: 'manual-validation-steps' })}
 
-User's Root Cause: ${params.rootCause}
+User's Root Cause: ${sanitizeForPrompt(params.rootCause, { maxLength: 1000, context: 'manual-validation-root' })}
 
 Please validate this analysis. Check for:
 1. Spelling and grammar errors
@@ -4104,8 +4105,8 @@ For each issue, provide:
 
 **FORM CONTEXT**
 - Form Section: ${params.formTab === 'incident-report' ? 'Incident Report (Initial Documentation)' : 'Incident Investigation (Leader/Supervisor Assessment)'}
-- Incident Category: ${params.incidentCategory}
-- Incident Description: ${params.incidentDescription}
+- Incident Category: ${sanitizeForPrompt(params.incidentCategory, { maxLength: 200, context: 'form-category' })}
+- Incident Description: ${sanitizeForPrompt(params.incidentDescription, { maxLength: 1000, context: 'form-desc' })}
 
 **FIELD DATA FOR ANALYSIS**
 ${fieldStatuses.map(f => `• ${f.label} [${f.name}]: ${f.value}
@@ -4265,7 +4266,7 @@ COACHING PRINCIPLES:
 INCIDENT CONTEXT:
 - Incident Type: ${params.incidentType || 'Not specified'}
 - Category: ${params.categoryName || 'Not specified'}
-- Description: ${params.incidentDescription || 'Not provided'}
+- Description: ${sanitizeForPrompt(params.incidentDescription || 'Not provided', { maxLength: 1000, context: 'coaching-desc' })}
 - Current Step: ${stepContext}
 - Selected Method: ${params.selectedMethod || 'Not specified'}
 ${progressContext ? `\nCURRENT PROGRESS:${progressContext}` : ''}
@@ -4288,7 +4289,7 @@ OUTPUT FORMAT (JSON):
           role: 'user',
           content: `Please provide comprehensive, tailored RCA coaching guidance for the "${stepContext}" step.
 
-Incident Description: "${params.incidentDescription}"
+Incident Description: "${sanitizeForPrompt(params.incidentDescription, { maxLength: 1000, context: 'coaching-guidance-desc' })}"
 
 Make your guidance:
 1. Specific to this incident (not generic)

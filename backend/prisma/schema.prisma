@@ -3858,6 +3858,33 @@ model BakeryTrackerActivityLog {
 }
 
 // ═══════════════════════════════════════════════════════════════════════════════
+// BAKERY OPERATIONAL DAILY REPORTS (Saved to DB)
+// ═══════════════════════════════════════════════════════════════════════════════
+
+model BakeryDailyReport {
+  id              String   @id @default(uuid())
+  weekName        String   @db.VarChar(100)
+  dayOfWeek       String   @db.VarChar(20)
+  reportData      Json     // Full AI-generated report payload
+  rawMetrics      Json?    // _rawMetrics snapshot at generation time
+  metaData        Json?    // _meta info (model, generatedAt, etc.)
+  aiModel         String?  @db.VarChar(50)
+  tokenUsage      Int?
+  durationMs      Int?
+  generatedBy     String   @db.VarChar(255)
+  generatedByUserId String? @db.VarChar(255)
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
+
+  @@unique([weekName, dayOfWeek])
+  @@index([weekName])
+  @@index([dayOfWeek])
+  @@index([generatedByUserId])
+  @@index([createdAt])
+  @@map("bakery_daily_reports")
+}
+
+// ═══════════════════════════════════════════════════════════════════════════════
 // BAKERY AI INSIGHTS CACHE & LOGS
 // ═══════════════════════════════════════════════════════════════════════════════
 

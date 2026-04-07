@@ -3,6 +3,7 @@
 // Uses OpenAI GPT-4 Vision for image analysis and text extraction for documents
 
 import OpenAI from 'openai';
+import { sanitizeForPrompt, sanitizeForSystemPrompt, wrapUserContent } from '../utils/promptSanitizer';
 import axios from 'axios';
 
 // Lazy load pdf-parse to avoid DOMMatrix error on import
@@ -122,7 +123,7 @@ For each observation, note its potential relevance to the reported incident.`
           content: [
             {
               type: 'text',
-              text: `INCIDENT CONTEXT:\n${incidentContext}\n\nAnalyze this image as evidence for the incident described above. Provide:\n\n1. KEY FINDINGS: List specific observations relevant to the incident (bullet points)\n2. VISUAL ELEMENTS: Describe what is depicted (equipment, areas, conditions, people/PPE if visible)\n3. RISK INDICATORS: Identify any safety hazards, compliance issues, or concerning conditions\n4. EVIDENCE VALUE: How this image supports or contradicts the incident narrative\n5. BRIEF SUMMARY: 2-3 sentence professional summary of the image evidence\n\nBe specific and factual. Do not speculate beyond what is visible.`
+              text: `INCIDENT CONTEXT:\n${wrapUserContent(sanitizeForPrompt(incidentContext, { maxLength: 2000, context: 'image-incident-context' }), 'incident_context')}\n\nAnalyze this image as evidence for the incident described above. Provide:\n\n1. KEY FINDINGS: List specific observations relevant to the incident (bullet points)\n2. VISUAL ELEMENTS: Describe what is depicted (equipment, areas, conditions, people/PPE if visible)\n3. RISK INDICATORS: Identify any safety hazards, compliance issues, or concerning conditions\n4. EVIDENCE VALUE: How this image supports or contradicts the incident narrative\n5. BRIEF SUMMARY: 2-3 sentence professional summary of the image evidence\n\nBe specific and factual. Do not speculate beyond what is visible.`
             },
             {
               type: 'image_url',
@@ -241,7 +242,7 @@ async function analyzePDF(
         },
         {
           role: 'user',
-          content: `INCIDENT CONTEXT:\n${incidentContext}\n\nDOCUMENT CONTENT:\n${extractedText}\n\nAnalyze this document as evidence. Identify:\n1. KEY INFORMATION: Relevant facts, dates, names, procedures mentioned\n2. COMPLIANCE INDICATORS: Any references to standards, regulations, SOPs\n3. EVIDENCE VALUE: How this document relates to the incident\n4. RISK FACTORS: Any warnings, violations, or concerns documented\n5. BRIEF SUMMARY: 2-3 sentence summary of the document's relevance\n\nBe concise and factual.`
+          content: `INCIDENT CONTEXT:\n${wrapUserContent(sanitizeForPrompt(incidentContext, { maxLength: 2000, context: 'pdf-incident-context' }), 'incident_context')}\n\nDOCUMENT CONTENT:\n${wrapUserContent(sanitizeForPrompt(extractedText, { maxLength: 10000, context: 'pdf-extracted-text' }), 'document_content')}\n\nAnalyze this document as evidence. Identify:\n1. KEY INFORMATION: Relevant facts, dates, names, procedures mentioned\n2. COMPLIANCE INDICATORS: Any references to standards, regulations, SOPs\n3. EVIDENCE VALUE: How this document relates to the incident\n4. RISK FACTORS: Any warnings, violations, or concerns documented\n5. BRIEF SUMMARY: 2-3 sentence summary of the document's relevance\n\nBe concise and factual.`
         }
       ],
       max_completion_tokens: 800,
@@ -426,14 +427,14 @@ ${incidentData.additionalContext ? `ADDITIONAL CONTEXT: ${incidentData.additiona
     try {
       const consolidationPrompt = `
 INCIDENT CONTEXT:
-${incidentContext}
+${wrapUserContent(sanitizeForPrompt(incidentContext, { maxLength: 2000, context: 'consolidation-context' }), 'incident_context')}
 
 ATTACHMENT ANALYSIS FINDINGS:
 ${attachmentAnalyses.map(a => `
---- ${a.filename} (${a.type}) ---
+--- ${sanitizeForPrompt(a.filename, { maxLength: 200, context: 'attachment-name' })} (${a.type}) ---
 Status: ${a.analysisStatus}
-Findings: ${a.findings.join('; ')}
-Summary: ${a.summary}
+Findings: ${sanitizeForPrompt(a.findings.join('; '), { maxLength: 1000, context: 'attachment-findings' })}
+Summary: ${sanitizeForPrompt(a.summary, { maxLength: 500, context: 'attachment-summary' })}
 `).join('\n')}
 
 Based on the incident description and the attachment analyses above, provide:

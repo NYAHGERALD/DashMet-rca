@@ -52,6 +52,7 @@ import conflictCaseRoutes from './conflictCaseRoutes';
 import dashboardRoutes from './dashboardRoutes';
 import { authenticate } from '../middleware/auth';
 import { rateLimiter, enumerationRateLimiter, otpRateLimiter, authRateLimiter, aiRateLimiter, masterKeyRateLimiter, passwordResetRateLimiter } from '../middleware/rateLimiter';
+import { promptInjectionDetector } from '../middleware/promptInjectionDetector';
 import { getIncidentTranscripts } from '../controllers/transcriptController';
 
 const router = Router();
@@ -101,22 +102,22 @@ router.use('/mobile/meetings', authenticate, meetingRoutes);
 router.use('/consent', rateLimiter, consentRoutes);
 
 // Document OCR routes - AI rate limited
-router.use('/document-ocr', aiRateLimiter, documentOcrRoutes);
+router.use('/document-ocr', aiRateLimiter, promptInjectionDetector, documentOcrRoutes);
 
 // Conflict Analysis routes - AI rate limited
-router.use('/conflict-analysis', aiRateLimiter, conflictAnalysisRoutes);
+router.use('/conflict-analysis', aiRateLimiter, promptInjectionDetector, conflictAnalysisRoutes);
 
 // Policy Matching routes - AI rate limited
-router.use('/policy-matching', aiRateLimiter, policyMatchingRoutes);
+router.use('/policy-matching', aiRateLimiter, promptInjectionDetector, policyMatchingRoutes);
 
 // Decision Support routes - AI rate limited
-router.use('/decision-support', aiRateLimiter, decisionSupportRoutes);
+router.use('/decision-support', aiRateLimiter, promptInjectionDetector, decisionSupportRoutes);
 
 // Action Generation routes - AI rate limited
-router.use('/action-generation', aiRateLimiter, actionGenerationRoutes);
+router.use('/action-generation', aiRateLimiter, promptInjectionDetector, actionGenerationRoutes);
 
 // AI-powered policy parsing - AI rate limited
-router.use('/policy-parsing', aiRateLimiter, policyParsingRoutes);
+router.use('/policy-parsing', aiRateLimiter, promptInjectionDetector, policyParsingRoutes);
 
 // Conflict Case CRUD routes - Firebase auth required (enforced in route file)
 // Full CRUD for conflict cases with encryption
@@ -136,7 +137,7 @@ router.use('/users', userRoutes);
 router.use('/preferences', preferencesRoutes);
 
 // AI Writing Assistant routes - AI rate limited
-router.use('/grammar', aiRateLimiter, grammarRoutes);
+router.use('/grammar', aiRateLimiter, promptInjectionDetector, grammarRoutes);
 
 // Public policy routes (Privacy/Terms/Cookie/Security)
 router.use('/policies', rateLimiter, policyRoutes);
@@ -155,7 +156,7 @@ router.use('/invitations', rateLimiter, invitationRoutes);
 // MUST be defined BEFORE root-mounted routes (departmentRoutes/facilityRoutes)
 // which use router.use(authenticate) and would intercept all paths
 import bakeryMetricsRoutes from './bakeryMetricsRoutes';
-router.use('/bakery-metrics', rateLimiter, bakeryMetricsRoutes);
+router.use('/bakery-metrics', rateLimiter, promptInjectionDetector, bakeryMetricsRoutes);
 
 // Phase 2.1: Organization routes
 router.use('/organizations', organizationRoutes);

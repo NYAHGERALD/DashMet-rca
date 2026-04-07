@@ -3,6 +3,7 @@ import { PrismaClient } from '@prisma/client';
 import bakeryMetricsService from '../services/bakeryMetricsService';
 import bakeryAdminService from '../services/bakeryAdminService';
 import { generateAiInsights, getCachedInsight, saveInsight, logInsightAction, getInsightLogs } from '../services/bakeryAiInsightsService';
+import { generateOperationalDailyReport, getSavedDailyReport, saveDailyReport } from '../services/operationalDailyReportService';
 import { authenticate, AuthRequest } from '../middleware/auth';
 import { requireAdmin } from '../middleware/rbac';
 
@@ -876,6 +877,142 @@ router.get('/four-month-avg-ytd', async (req: Request, res: Response) => {
   } catch (error: any) {
     console.error('Error fetching four-month average YTD:', error);
     res.status(500).json({ success: false, error: error.message });
+  }
+});
+
+// ─────────────────────────────────────────────────────────────────────────────
+// GET /api/bakery-metrics/operational-daily-report
+// Check if a saved report exists for a given week + day
+// Query: ?weekName=string&dayOfWeek=string
+// ─────────────────────────────────────────────────────────────────────────────
+const VALID_DAYS_ROUTE = ['Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday', 'Sunday'];
+const WEEK_NAME_ROUTE_PATTERN = /^[A-Za-z0-9\s\-_()]{1,100}$/;
+
+router.get('/operational-daily-report', authenticate, async (req: AuthRequest, res: Response) => {
+  try {
+    const user = req.user;
+    if (!user) {
+      return res.status(401).json({ success: false, error: 'Authentication required.' });
+    }
+
+    const weekName = req.query.weekName as string;
+    const dayOfWeek = req.query.dayOfWeek as string;
+
+    if (!weekName || !WEEK_NAME_ROUTE_PATTERN.test(weekName)) {
+      return res.status(400).json({ success: false, error: 'Valid weekName is required.' });
+    }
+    if (!dayOfWeek || !VALID_DAYS_ROUTE.includes(dayOfWeek)) {
+      return res.status(400).json({ success: false, error: 'Valid dayOfWeek is required.' });
+    }
+
+    const saved = await getSavedDailyReport(weekName, dayOfWeek);
+
+    if (!saved) {
+      return res.json({ success: true, exists: false });
+    }
+
+    res.json({ success: true, exists: true, ...saved });
+  } catch (error: any) {
+    console.error('[OpsDailyReport] Error checking saved report:', error);
+    res.status(500).json({ success: false, error: 'Failed to check for saved report.' });
+  }
+});
+
+// ─────────────────────────────────────────────────────────────────────────────
+// POST /api/bakery-metrics/operational-daily-report
+// Generates a comprehensive AI-powered daily operational report and saves it
+// Body: { weekName: string, dayOfWeek: string, regenerate?: boolean }
+// ─────────────────────────────────────────────────────────────────────────────
+router.post('/operational-daily-report', authenticate, async (req: AuthRequest, res: Response) => {
+  try {
+    const user = req.user;
+    if (!user) {
+      return res.status(401).json({ success: false, error: 'Authentication required.' });
+    }
+
+    const { weekName, dayOfWeek, regenerate } = req.body;
+
+    // Strict input validation
+    if (!weekName || typeof weekName !== 'string') {
+      return res.status(400).json({ success: false, error: 'weekName is required.' });
+    }
+    if (!dayOfWeek || typeof dayOfWeek !== 'string') {
+      return res.status(400).json({ success: false, error: 'dayOfWeek is required.' });
+    }
+    if (!WEEK_NAME_ROUTE_PATTERN.test(weekName)) {
+      return res.status(400).json({ success: false, error: 'Invalid week name format.' });
+    }
+    if (!VALID_DAYS_ROUTE.includes(dayOfWeek)) {
+      return res.status(400).json({ success: false, error: 'dayOfWeek must be Monday through Sunday.' });
+    }
+
+    const organizationId = user.organizationId;
+    if (!organizationId) {
+      return res.status(400).json({ success: false, error: 'User organization not found.' });
+    }
+
+    const ipAddress = (req.headers['x-forwarded-for'] as string) || req.socket.remoteAddress || undefined;
+    const userAgent = req.headers['user-agent'] || undefined;
+    const userName = `${user.firstName} ${user.lastName}`;
+
+    // If not regenerating, check if a saved report exists
+    if (!regenerate) {
+      const saved = await getSavedDailyReport(weekName, dayOfWeek);
+      if (saved) {
+        console.log(`[OpsDailyReport] Returning saved report for ${dayOfWeek} (${weekName})`);
+        return res.json({ ...saved, source: 'database' });
+      }
+    }
+
+    console.log(`[OpsDailyReport] ${regenerate ? 'Regenerating' : 'Generating'} report by ${userName} — ${dayOfWeek} (${weekName})`);
+
+    const result = await generateOperationalDailyReport(weekName, dayOfWeek, organizationId);
+
+    // Log action regardless of success
+    try {
+      await prisma.bakeryAiInsightLog.create({
+        data: {
+          weekName: weekName,
+          action: regenerate ? 'DAILY_REPORT_REGENERATED' : 'DAILY_REPORT',
+          aiModel: process.env.AI_MODEL || 'gpt-4o',
+          tokenUsage: result.tokenUsage || null,
+          durationMs: result.durationMs || null,
+          userId: user.id,
+          userName,
+          ipAddress: ipAddress || null,
+          userAgent: userAgent || null,
+          success: result.success,
+          errorMsg: result.error || null,
+        },
+      });
+    } catch (logErr: any) {
+      console.error('[OpsDailyReport] Failed to log action:', logErr.message);
+    }
+
+    if (!result.success) {
+      return res.status(422).json(result);
+    }
+
+    // Save the generated report to the database
+    try {
+      await saveDailyReport(
+        weekName,
+        dayOfWeek,
+        result.data as Record<string, unknown>,
+        user.id,
+        userName,
+        result.tokenUsage,
+        result.durationMs,
+      );
+    } catch (saveErr: any) {
+      console.error('[OpsDailyReport] Failed to save report:', saveErr.message);
+      // Still return the report even if save fails
+    }
+
+    res.json({ ...result, source: 'generated' });
+  } catch (error: any) {
+    console.error('[OpsDailyReport] Unhandled error:', error);
+    res.status(500).json({ success: false, error: 'Internal error generating report.' });
   }
 });
 

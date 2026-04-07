@@ -5,6 +5,7 @@
 
 import { ActionType, IncidentType } from '@prisma/client';
 import OpenAI from 'openai';
+import { sanitizeForPrompt } from '../utils/promptSanitizer';
 
 // Lazy initialization of OpenAI client
 function getOpenAIClient(): OpenAI | null {
@@ -90,8 +91,8 @@ Respond in JSON format:
         {
           role: 'user',
           content: `Analyze this ${actionType} action:
-Title: ${title}
-Description: ${description}`,
+Title: ${sanitizeForPrompt(title, { maxLength: 500, context: 'capa-title' })}
+Description: ${sanitizeForPrompt(description, { maxLength: 2000, context: 'capa-description' })}`,
         },
       ],
       temperature: 0.3,
@@ -328,10 +329,10 @@ Keep suggestions friendly and helpful, not critical or overwhelming. 2-4 suggest
         },
         {
           role: 'user',
-          content: `Help me improve this ${actionType === 'CORRECTIVE' ? 'fix-it' : 'prevention'} action for a ${incidentType === 'FOOD_SAFETY' ? 'food safety' : 'workplace'} issue (${categoryName}):
+          content: `Help me improve this ${actionType === 'CORRECTIVE' ? 'fix-it' : 'prevention'} action for a ${incidentType === 'FOOD_SAFETY' ? 'food safety' : 'workplace'} issue (${sanitizeForPrompt(categoryName, { maxLength: 100, context: 'capa-category' })}):
 
-Action: ${title}
-Details: ${description}`,
+Action: ${sanitizeForPrompt(title, { maxLength: 500, context: 'capa-improve-title' })}
+Details: ${sanitizeForPrompt(description, { maxLength: 2000, context: 'capa-improve-desc' })}`,
         },
       ],
       temperature: 0.4,

@@ -13,6 +13,7 @@
 
 import OpenAI from 'openai';
 import { Readable } from 'stream';
+import { sanitizeForPrompt, wrapUserContent } from '../utils/promptSanitizer';
 
 // Lazy initialization of OpenAI client
 let openaiClient: OpenAI | null = null;
@@ -125,19 +126,19 @@ Write as if you are briefing someone who was absent and needs to understand ever
   const userPrompt = `Please analyze this meeting and create a professional narrative summary:
 
 **Meeting Details:**
-- Title: ${input.meetingTitle}
-- Type: ${input.meetingType}
+- Title: ${sanitizeForPrompt(input.meetingTitle, { maxLength: 200, context: 'meeting-title' })}
+- Type: ${sanitizeForPrompt(input.meetingType, { maxLength: 100, context: 'meeting-type' })}
 - Date: ${formattedDate}
-- Time: ${input.meetingTime}
+- Time: ${sanitizeForPrompt(input.meetingTime, { maxLength: 50, context: 'meeting-time' })}
 ${durationText ? `- Duration: ${durationText}` : ''}
 ${input.participantCount ? `- Participants: ${input.participantCount}` : ''}
-${input.language ? `- Language: ${input.language}` : ''}
+${input.language ? `- Language: ${sanitizeForPrompt(input.language, { maxLength: 50, context: 'language' })}` : ''}
 
 **Meeting Transcript:**
-${input.transcript}
+${wrapUserContent(sanitizeForPrompt(input.transcript, { maxLength: 30000, context: 'meeting-transcript' }), 'transcript')}
 
-${input.existingSummary?.overview ? `\n**Existing Overview:**\n${input.existingSummary.overview}` : ''}
-${input.existingSummary?.keyPoints?.length ? `\n**Previously Identified Key Points:**\n${input.existingSummary.keyPoints.join('\n')}` : ''}
+${input.existingSummary?.overview ? `\n**Existing Overview:**\n${sanitizeForPrompt(input.existingSummary.overview, { maxLength: 2000, context: 'existing-overview' })}` : ''}
+${input.existingSummary?.keyPoints?.length ? `\n**Previously Identified Key Points:**\n${input.existingSummary.keyPoints.map(kp => sanitizeForPrompt(kp, { maxLength: 500, context: 'key-point' })).join('\n')}` : ''}
 
 Please respond in the following JSON format:
 {

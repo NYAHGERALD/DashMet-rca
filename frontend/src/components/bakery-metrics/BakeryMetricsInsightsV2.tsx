@@ -647,8 +647,23 @@ export default function BakeryMetricsInsights() {
         if (res.data.weeks.length > 0 && !weekFilter) {
           setWeekFilter(res.data.default_week || res.data.weeks[0]);
         }
+        return;
       }
-    } catch { /* use empty */ }
+    } catch (err: any) {
+      console.error('[AI Insights] week-options failed, trying fallback:', err?.message);
+    }
+    // Fallback: use /bakery-metrics/weeks endpoint
+    try {
+      const res = await api.get('/bakery-metrics/weeks');
+      const weeks = res.data?.weeks || res.data || [];
+      const weekNames = weeks.map((w: any) => w.sheet_name || w.sheetName || w).filter(Boolean);
+      if (weekNames.length > 0) {
+        setWeekOptions(weekNames);
+        if (!weekFilter) setWeekFilter(weekNames[0]);
+      }
+    } catch (err2: any) {
+      console.error('[AI Insights] weeks fallback also failed:', err2?.message);
+    }
   }, [weekFilter]);
 
   // ─── Load Cached Insights (GET — no GPT call) ─────────────────────────

@@ -9,8 +9,9 @@ import BakeryMetricsForm from '@/components/bakery-metrics/BakeryMetricsForm';
 import BakeryMetricsReport from '@/components/bakery-metrics/BakeryMetricsReport';
 import BakeryMetricsInsights from '@/components/bakery-metrics/BakeryMetricsInsightsV2';
 import BakeryDashboardOverview from '@/components/bakery-metrics/BakeryDashboardOverview';
+import BakeryOperationalDailyReport from '@/components/bakery-metrics/BakeryOperationalDailyReport';
 
-type Tab = 'dashboard' | 'report' | 'insights';
+type Tab = 'dashboard' | 'report' | 'insights' | 'daily-report';
 
 export default function BakeryMetricsPage() {
   const router = useRouter();
@@ -129,6 +130,7 @@ export default function BakeryMetricsPage() {
     { id: 'dashboard', label: 'Dashboard Overview', icon: LayoutDashboard },
     { id: 'report', label: 'View Reports', icon: FileBarChart },
     { id: 'insights', label: 'AI Insights', icon: Sparkles },
+    { id: 'daily-report', label: 'Operational Daily Reports', icon: ClipboardList },
   ];
 
   return (
@@ -333,6 +335,10 @@ export default function BakeryMetricsPage() {
 
           {activeTab === 'insights' && (
             <BakeryMetricsInsights />
+          )}
+
+          {activeTab === 'daily-report' && (
+            <BakeryOperationalDailyReport />
           )}
         </div>
 

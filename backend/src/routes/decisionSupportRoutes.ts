@@ -1,5 +1,6 @@
 import { Router, Request, Response } from 'express';
 import OpenAI from 'openai';
+import { sanitizeForPrompt, sanitizeForSystemPrompt, wrapUserContent, detectPromptInjection } from '../utils/promptSanitizer';
 
 const router = Router();
 
@@ -102,10 +103,16 @@ async function generateForOneEmployee(
 }> {
   const idPrefix = `emp${employeeIndex + 1}`;
 
+  // Sanitize all user-provided data before prompt inclusion
+  const safeName = sanitizeForSystemPrompt(employeeName, { maxLength: 100, context: 'employee-name' });
+  const safeOtherName = sanitizeForSystemPrompt(otherEmployeeName, { maxLength: 100, context: 'other-employee-name' });
+  const safeStatement = sanitizeForPrompt(employeeStatement, { maxLength: 2000, context: 'employee-statement' });
+  const safeOtherStatement = sanitizeForPrompt(otherEmployeeStatement, { maxLength: 2000, context: 'other-employee-statement' });
+
   const systemPrompt = `You are a senior HR Director with 25+ years of experience in employee relations, workplace investigations, and conflict resolution.
 
-You are evaluating ONE specific employee: ${employeeName}.
-You must ONLY generate recommendations for ${employeeName}. Do NOT mention the other employee in recommendation titles or descriptions.
+You are evaluating ONE specific employee: ${safeName}.
+You must ONLY generate recommendations for ${safeName}. Do NOT mention the other employee in recommendation titles or descriptions.
 
 RECOMMENDATION TYPES (least to most severe):
 1. COACHING – Informal guidance. Use for minor/first issues.
@@ -117,33 +124,33 @@ PRINCIPLES:
 - NEVER suggest termination
 - DO NOT determine guilt
 - ALWAYS consider proportionality
-- Every recommendation title, description, and rationale must refer ONLY to ${employeeName}
-- Do NOT mention "${otherEmployeeName}" in any recommendation field`;
+- Every recommendation title, description, and rationale must refer ONLY to ${safeName}
+- Do NOT mention "${safeOtherName}" in any recommendation field`;
 
-  const userPrompt = `Evaluate ${employeeName}'s role in this workplace incident and provide 2-3 recommendation options for the supervisor.
+  const userPrompt = `Evaluate ${safeName}'s role in this workplace incident and provide 2-3 recommendation options for the supervisor.
 
 INCIDENT:
-- Type: ${caseDetails.caseType}
-- Date: ${caseDetails.incidentDate}
-- Location: ${caseDetails.location}
-- Department: ${caseDetails.department}
+- Type: ${sanitizeForPrompt(caseDetails.caseType, { maxLength: 200, context: 'case-type' })}
+- Date: ${sanitizeForPrompt(caseDetails.incidentDate, { maxLength: 50, context: 'incident-date' })}
+- Location: ${sanitizeForPrompt(caseDetails.location, { maxLength: 200, context: 'location' })}
+- Department: ${sanitizeForPrompt(caseDetails.department, { maxLength: 200, context: 'department' })}
 
-${employeeName.toUpperCase()}'S STATEMENT:
-"${employeeStatement}"
+${safeName.toUpperCase()}'S STATEMENT:
+${wrapUserContent(safeStatement, 'employee_statement')}
 
-THE OTHER PARTY (${otherEmployeeName.toUpperCase()}'s STATEMENT — for context only):
-"${otherEmployeeStatement}"${sharedContext}
+THE OTHER PARTY (${safeOtherName.toUpperCase()}'s STATEMENT — for context only):
+${wrapUserContent(safeOtherStatement, 'other_statement')}${sharedContext}
 
 Respond in JSON:
 {
-  "assessment": "1-2 sentences about ${employeeName}'s specific behavior in this incident",
+  "assessment": "1-2 sentences about ${safeName}'s specific behavior in this incident",
   "recommendations": [
     {
       "id": "${idPrefix}_option_a",
       "type": "coaching|counseling|warning|escalate",
-      "title": "Action title mentioning ONLY ${employeeName}",
-      "description": "2-3 sentences about this action for ${employeeName} specifically",
-      "rationale": "3-4 sentences why this is appropriate for ${employeeName}'s behavior",
+      "title": "Action title mentioning ONLY ${safeName}",
+      "description": "2-3 sentences about this action for ${safeName} specifically",
+      "rationale": "3-4 sentences why this is appropriate for ${safeName}'s behavior",
       "riskLevel": "low|moderate|high|critical",
       "riskExplanation": "1-2 sentences about risk",
       "nextSteps": ["Step 1", "Step 2", "Step 3"],
@@ -156,8 +163,8 @@ Respond in JSON:
 
 RULES:
 - Generate 2-3 options ordered least to most severe
-- Every field must be about ${employeeName} ONLY
-- Do NOT reference "${otherEmployeeName}" in titles, descriptions, or rationale
+- Every field must be about ${safeName} ONLY
+- Do NOT reference "${safeOtherName}" in titles, descriptions, or rationale
 - Confidence between 0.5-1.0`;
 
   const completion = await openai.chat.completions.create({
@@ -304,13 +311,16 @@ ${policyMatches.slice(0, 4).map(p =>
     }
 
     // Generate supervisor guidance with a lightweight call
-    let supervisorGuidance = `Each employee's situation should be assessed on its own merits. Consider ${complaintA.employeeName}'s and ${complaintB.employeeName}'s individual roles and behaviors separately when making your decisions.`;
+    // Sanitize names for guidance prompt
+    const safeNameA = sanitizeForSystemPrompt(complaintA.employeeName, { maxLength: 100, context: 'guidance-name-A' });
+    const safeNameB = sanitizeForSystemPrompt(complaintB.employeeName, { maxLength: 100, context: 'guidance-name-B' });
+    let supervisorGuidance = `Each employee's situation should be assessed on its own merits. Consider ${safeNameA}'s and ${safeNameB}'s individual roles and behaviors separately when making your decisions.`;
     try {
       const guidanceCompletion = await openai.chat.completions.create({
         model: 'gpt-4o',
         messages: [
           { role: 'system', content: 'You are a senior HR advisor. Write a brief professional paragraph (3-4 sentences) advising a supervisor on how to approach decisions for two employees independently in a workplace conflict. Be concise.' },
-          { role: 'user', content: `The employees are ${complaintA.employeeName} and ${complaintB.employeeName}. Incident type: ${caseDetails.caseType}. ${resultA.assessment} ${resultB.assessment}` }
+          { role: 'user', content: `The employees are ${safeNameA} and ${safeNameB}. Incident type: ${sanitizeForPrompt(caseDetails.caseType, { maxLength: 200, context: 'case-type' })}. ${sanitizeForPrompt(resultA.assessment, { maxLength: 500, context: 'assessment-A' })} ${sanitizeForPrompt(resultB.assessment, { maxLength: 500, context: 'assessment-B' })}` }
         ],
         max_tokens: 300,
         temperature: 0.3

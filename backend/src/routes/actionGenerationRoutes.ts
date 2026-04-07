@@ -1,5 +1,6 @@
 import { Router, Request, Response } from 'express';
 import OpenAI from 'openai';
+import { sanitizeForPrompt, sanitizeForSystemPrompt, wrapUserContent } from '../utils/promptSanitizer';
 
 const router = Router();
 
@@ -179,9 +180,14 @@ router.post('/generate', async (req: Request, res: Response) => {
       ? targetEmployeeNames
       : allEmployeeNames;
     
-    // Format names for display
-    const targetNamesForTitle = effectiveTargetNames.join(' and ');
-    const targetNamesArray = JSON.stringify(effectiveTargetNames);
+    // Sanitize names and text for prompt inclusion
+    const safeTargetNames = effectiveTargetNames.map(n => sanitizeForSystemPrompt(n, { maxLength: 100, context: 'target-employee' }));
+    const targetNamesForTitle = safeTargetNames.join(' and ');
+    const targetNamesArray = JSON.stringify(safeTargetNames);
+    const safeNameA = sanitizeForSystemPrompt(complaintA.employeeName, { maxLength: 100, context: 'employee-A' });
+    const safeNameB = sanitizeForSystemPrompt(complaintB.employeeName, { maxLength: 100, context: 'employee-B' });
+    const safeTextA = sanitizeForPrompt(complaintA.text, { maxLength: 800, context: 'complaint-A' });
+    const safeTextB = sanitizeForPrompt(complaintB.text, { maxLength: 800, context: 'complaint-B' });
 
     const openai = getOpenAIClient();
     if (!openai) {
@@ -195,33 +201,33 @@ router.post('/generate', async (req: Request, res: Response) => {
     let analysisContext = '';
     if (analysisResult) {
       analysisContext = `\n\nANALYSIS FINDINGS:
-Key Contradictions: ${analysisResult.contradictions.slice(0, 3).join('; ')}
-Agreement Points: ${analysisResult.agreementPoints.slice(0, 3).join('; ')}
-Summary: ${analysisResult.neutralSummary.substring(0, 500)}`;
+Key Contradictions: ${sanitizeForPrompt(analysisResult.contradictions.slice(0, 3).join('; '), { maxLength: 500, context: 'contradictions' })}
+Agreement Points: ${sanitizeForPrompt(analysisResult.agreementPoints.slice(0, 3).join('; '), { maxLength: 500, context: 'agreement-points' })}
+Summary: ${sanitizeForPrompt(analysisResult.neutralSummary.substring(0, 500), { maxLength: 500, context: 'analysis-summary' })}`;
     }
 
     let policyContext = '';
     if (policyMatches && policyMatches.length > 0) {
       policyContext = `\n\nRELEVANT POLICY SECTIONS:
 ${policyMatches.slice(0, 4).map(p =>
-        `- Section ${p.sectionNumber}: ${p.sectionTitle} - ${p.relevanceExplanation.substring(0, 150)}`
+        `- Section ${sanitizeForPrompt(p.sectionNumber, { maxLength: 20, context: 'section-num' })}: ${sanitizeForPrompt(p.sectionTitle, { maxLength: 100, context: 'section-title' })} - ${sanitizeForPrompt(p.relevanceExplanation.substring(0, 150), { maxLength: 150, context: 'relevance' })}`
       ).join('\n')}`;
     }
 
     const baseContext = `CASE DETAILS:
-- Case Number: ${caseDetails.caseNumber}
-- Type: ${caseDetails.caseType}
-- Date: ${caseDetails.incidentDate}
-- Location: ${caseDetails.location}
-- Department: ${caseDetails.department}
+- Case Number: ${sanitizeForPrompt(caseDetails.caseNumber, { maxLength: 50, context: 'case-number' })}
+- Type: ${sanitizeForPrompt(caseDetails.caseType, { maxLength: 200, context: 'case-type' })}
+- Date: ${sanitizeForPrompt(caseDetails.incidentDate, { maxLength: 50, context: 'incident-date' })}
+- Location: ${sanitizeForPrompt(caseDetails.location, { maxLength: 200, context: 'location' })}
+- Department: ${sanitizeForPrompt(caseDetails.department, { maxLength: 200, context: 'department' })}
 
-${complaintA.employeeName.toUpperCase()}'S STATEMENT:
-"${complaintA.text.substring(0, 800)}"
+${safeNameA.toUpperCase()}'S STATEMENT:
+${wrapUserContent(safeTextA, 'employee_statement_A')}
 
-${complaintB.employeeName.toUpperCase()}'S STATEMENT:
-"${complaintB.text.substring(0, 800)}"${analysisContext}${policyContext}
+${safeNameB.toUpperCase()}'S STATEMENT:
+${wrapUserContent(safeTextB, 'employee_statement_B')}${analysisContext}${policyContext}
 
-${recommendationRationale ? `RECOMMENDATION RATIONALE:\n${recommendationRationale}\n` : ''}`;
+${recommendationRationale ? `RECOMMENDATION RATIONALE:\n${sanitizeForPrompt(recommendationRationale, { maxLength: 1000, context: 'rationale' })}\n` : ''}`;
 
     let systemPrompt = '';
     let userPrompt = '';

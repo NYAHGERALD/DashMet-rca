@@ -2,6 +2,7 @@
 // Uses OpenAI GPT-4 for dynamic UI text translation
 
 import OpenAI from 'openai';
+import { sanitizeForPrompt } from '../utils/promptSanitizer';
 
 // Lazy initialization of OpenAI client
 function getOpenAIClient(): OpenAI | null {
@@ -116,7 +117,7 @@ Rules:
         },
         {
           role: 'user',
-          content: text,
+          content: sanitizeForPrompt(text, { maxLength: 5000, context: 'translation-text' }),
         },
       ],
       temperature: 0.3, // Lower temperature for consistent translations
@@ -193,7 +194,7 @@ export async function translateBatch(
 
     // Format texts for batch translation
     const numberedTexts = toTranslate
-      .map((text, index) => `[${index + 1}] ${text}`)
+      .map((text, index) => `[${index + 1}] ${sanitizeForPrompt(text, { maxLength: 1000, context: 'batch-translation-text' })}`)
       .join('\n');
 
     const completion = await openai.chat.completions.create({

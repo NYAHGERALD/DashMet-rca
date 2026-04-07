@@ -11,6 +11,7 @@
  * - Preserves original words exactly - only adds formatting
  */
 import OpenAI from 'openai';
+import { sanitizeForPrompt } from '../utils/promptSanitizer';
 
 const openai = new OpenAI({
   apiKey: process.env.OPENAI_API_KEY,
@@ -114,7 +115,7 @@ export async function detectAndFormatSpeakers(
         },
         {
           role: 'user',
-          content: `Process this transcript:\n\n${trimmedTranscript}`,
+          content: `Process this transcript:\n\n${sanitizeForPrompt(trimmedTranscript, { maxLength: 15000, context: 'speaker-detection-transcript' })}`,
         },
       ],
       temperature: 0.1, // Low temperature for consistent formatting

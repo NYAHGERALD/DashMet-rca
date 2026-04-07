@@ -1,5 +1,6 @@
 import { Router, Request, Response } from 'express';
 import OpenAI from 'openai';
+import { sanitizeForPrompt, sanitizeForSystemPrompt, wrapUserContent } from '../utils/promptSanitizer';
 
 const router = Router();
 
@@ -112,7 +113,7 @@ router.post('/match', async (req: Request, res: Response) => {
     let witnessContext = '';
     if (witnessStatements && witnessStatements.length > 0) {
       witnessContext = `\n\nWITNESS ACCOUNTS:\n${witnessStatements.map(w =>
-        `${w.witnessName}: "${w.text}"`
+        `${sanitizeForSystemPrompt(w.witnessName, { maxLength: 100, context: 'witness-name' })}: ${wrapUserContent(sanitizeForPrompt(w.text, { maxLength: 1500, context: 'witness-text' }), 'witness_statement')}`
       ).join('\n')}`;
     }
 
@@ -123,9 +124,9 @@ router.post('/match', async (req: Request, res: Response) => {
       const agreementPoints = analysisResult.agreementPoints || [];
       const summary = analysisResult.neutralSummary || '';
       analysisContext = `\n\nPREVIOUS ANALYSIS FINDINGS:
-Key Contradictions: ${contradictions.slice(0, 3).join('; ')}
-Agreement Points: ${agreementPoints.slice(0, 3).join('; ')}
-Summary: ${summary.substring(0, 500)}`;
+Key Contradictions: ${sanitizeForPrompt(contradictions.slice(0, 3).join('; '), { maxLength: 500, context: 'contradictions' })}
+Agreement Points: ${sanitizeForPrompt(agreementPoints.slice(0, 3).join('; '), { maxLength: 500, context: 'agreements' })}
+Summary: ${sanitizeForPrompt(summary.substring(0, 500), { maxLength: 500, context: 'analysis-summary' })}`;
     }
 
     // Format policy sections for the prompt
@@ -171,19 +172,22 @@ IMPORTANT BOUNDARIES:
 - You present findings as guidance, not conclusions
 - You remain completely neutral and objective`;
 
+    const safeNameA = sanitizeForSystemPrompt(complaintA.employeeName, { maxLength: 100, context: 'employee-A' });
+    const safeNameB = sanitizeForSystemPrompt(complaintB.employeeName, { maxLength: 100, context: 'employee-B' });
+
     const userPrompt = `Please analyze this workplace incident and identify which policy sections may be relevant.
 
 INCIDENT DETAILS:
-- Type: ${caseDetails.caseType}
-- Date: ${caseDetails.incidentDate}
-- Location: ${caseDetails.location}
-- Department: ${caseDetails.department}
+- Type: ${sanitizeForPrompt(caseDetails.caseType, { maxLength: 200, context: 'case-type' })}
+- Date: ${sanitizeForPrompt(caseDetails.incidentDate, { maxLength: 50, context: 'date' })}
+- Location: ${sanitizeForPrompt(caseDetails.location, { maxLength: 200, context: 'location' })}
+- Department: ${sanitizeForPrompt(caseDetails.department, { maxLength: 200, context: 'department' })}
 
-${complaintA.employeeName.toUpperCase()}'S STATEMENT:
-"${complaintA.text}"
+${safeNameA.toUpperCase()}'S STATEMENT:
+${wrapUserContent(sanitizeForPrompt(complaintA.text, { maxLength: 2000, context: 'complaint-A' }), 'employee_statement_A')}
 
-${complaintB.employeeName.toUpperCase()}'S STATEMENT:
-"${complaintB.text}"${witnessContext}${analysisContext}
+${safeNameB.toUpperCase()}'S STATEMENT:
+${wrapUserContent(sanitizeForPrompt(complaintB.text, { maxLength: 2000, context: 'complaint-B' }), 'employee_statement_B')}${witnessContext}${analysisContext}
 
 COMPANY POLICY SECTIONS TO CONSIDER:
 ${policySectionsText}
@@ -200,7 +204,7 @@ Respond in JSON format:
       "sectionId": "the section's ID",
       "sectionNumber": "the section number (e.g., '3.2')",
       "sectionTitle": "the section title",
-      "relevanceExplanation": "A 2-3 sentence professional explanation of why this section may be relevant. Use ${complaintA.employeeName} and ${complaintB.employeeName}'s names. Focus on behaviors described, not accusations. Start with 'This section may be relevant because...'",
+      "relevanceExplanation": "A 2-3 sentence professional explanation of why this section may be relevant. Use ${safeNameA} and ${safeNameB}'s names. Focus on behaviors described, not accusations. Start with 'This section may be relevant because...'",
       "matchConfidence": 0.85,
       "keyPhrases": ["specific phrases from statements that relate to this policy"]
     }

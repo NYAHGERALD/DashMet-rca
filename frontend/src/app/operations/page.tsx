@@ -209,6 +209,19 @@ export default function OperationsPage() {
   const [formDay, setFormDay] = useState('');
   const [formStartTime, setFormStartTime] = useState('');
   const [formMinutesLost, setFormMinutesLost] = useState('');
+  const [weekDropdownOpen, setWeekDropdownOpen] = useState(false);
+  const weekDropdownRef = useRef<HTMLDivElement>(null);
+
+  // Close week dropdown on click outside
+  useEffect(() => {
+    const handleClickOutside = (e: MouseEvent) => {
+      if (weekDropdownRef.current && !weekDropdownRef.current.contains(e.target as Node)) {
+        setWeekDropdownOpen(false);
+      }
+    };
+    document.addEventListener('mousedown', handleClickOutside);
+    return () => document.removeEventListener('mousedown', handleClickOutside);
+  }, []);
 
   // ─── Quality Issue checkboxes ───────────────────────────────────────────────
   const [qualityAddEquipment, setQualityAddEquipment] = useState(false);
@@ -1865,19 +1878,43 @@ export default function OperationsPage() {
                 <div className="grid grid-cols-2 gap-3">
                   <div>
                     <label className="block text-xs font-medium text-gray-700 dark:text-gray-300 mb-1">Week</label>
-                    <select
-                      value={formWeek}
-                      onChange={(e) => setFormWeek(e.target.value)}
-                      className="w-full px-2.5 py-2 text-sm rounded-lg border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-700 text-gray-900 dark:text-white"
-                      title="Select Week"
-                    >
-                      <option value="">Select Week</option>
-                      {availableWeeks.map(w => (
-                        <option key={w.weekNumber} value={w.weekNumber}>
-                          {w.label} ({w.startDate} – {w.endDate}){w.isCurrent ? ' ★' : ''}
-                        </option>
-                      ))}
-                    </select>
+                    <div className="relative" ref={weekDropdownRef}>
+                      <button
+                        type="button"
+                        onClick={() => setWeekDropdownOpen(!weekDropdownOpen)}
+                        className="w-full flex items-center justify-between px-2.5 py-2 text-sm rounded-lg border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-700 text-gray-900 dark:text-white text-left"
+                      >
+                        <span className="truncate">
+                          {formWeek ? (availableWeeks.find(w => String(w.weekNumber) === formWeek)?.label || 'Select Week') + (availableWeeks.find(w => String(w.weekNumber) === formWeek)?.isCurrent ? ' ★' : '') : 'Select Week'}
+                        </span>
+                        <svg className={`w-4 h-4 text-gray-400 flex-shrink-0 ml-1 transition-transform ${weekDropdownOpen ? 'rotate-180' : ''}`} fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 9l-7 7-7-7" /></svg>
+                      </button>
+                      {weekDropdownOpen && (
+                        <div className="absolute z-50 mt-1 w-full bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-600 rounded-lg shadow-lg max-h-48 overflow-y-auto">
+                          <button
+                            type="button"
+                            onClick={() => { setFormWeek(''); setWeekDropdownOpen(false); }}
+                            className={`w-full text-left px-2.5 py-2 text-sm hover:bg-blue-50 dark:hover:bg-blue-900/20 ${!formWeek ? 'bg-blue-50 dark:bg-blue-900/30 text-blue-700 dark:text-blue-300 font-medium' : 'text-gray-500 dark:text-gray-400'}`}
+                          >
+                            Select Week
+                          </button>
+                          {availableWeeks.map(w => (
+                            <button
+                              key={w.weekNumber}
+                              type="button"
+                              onClick={() => { setFormWeek(String(w.weekNumber)); setWeekDropdownOpen(false); }}
+                              className={`w-full text-left px-2.5 py-2 text-sm hover:bg-blue-50 dark:hover:bg-blue-900/20 transition-colors ${
+                                formWeek === String(w.weekNumber)
+                                  ? 'bg-blue-50 dark:bg-blue-900/30 text-blue-700 dark:text-blue-300 font-medium'
+                                  : 'text-gray-700 dark:text-gray-300'
+                              }`}
+                            >
+                              {w.label}{w.isCurrent ? ' ★' : ''}
+                            </button>
+                          ))}
+                        </div>
+                      )}
+                    </div>
                   </div>
                   <div>
                     <label className="block text-xs font-medium text-gray-700 dark:text-gray-300 mb-1">Day</label>

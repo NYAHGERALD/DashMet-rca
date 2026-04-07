@@ -379,10 +379,11 @@ router.get('/days-of-week', async (req: any, res: Response, next: NextFunction) 
   }
 });
 
-// ─── GET /operations/weeks — List weeks for current calendar year ───────────────
+// ─── GET /operations/weeks — List weeks from database (BakeryWeeklySheet) ───────
 
 router.get('/weeks', async (req: any, res: Response, next: NextFunction) => {
   try {
+    // Get org calendar year start settings
     const org = await prisma.organization.findUnique({
       where: { id: req.user.organizationId },
       select: { calendarYearStartMonth: true, calendarYearStartDay: true },
@@ -393,32 +394,45 @@ router.get('/weeks', async (req: any, res: Response, next: NextFunction) => {
     const now = new Date();
     const currentYear = now.getFullYear();
 
-    // Determine calendar year start date
+    // Determine current calendar year start date
     let yearStart = new Date(currentYear, startMonth - 1, startDay);
     if (yearStart > now) {
       yearStart = new Date(currentYear - 1, startMonth - 1, startDay);
     }
 
-    // Calculate total weeks from yearStart to now + a few weeks ahead
-    const msPerWeek = 7 * 24 * 60 * 60 * 1000;
-    const elapsed = now.getTime() - yearStart.getTime();
-    const currentWeek = Math.ceil(elapsed / msPerWeek) || 1;
-    const totalWeeks = Math.min(currentWeek + 2, 53); // show up to 2 weeks ahead
+    // Filter DB weeks: only those within the current calendar year
+    const dbWeeks = await prisma.bakeryWeeklySheet.findMany({
+      where: {
+        isActive: true,
+        weekStart: { gte: yearStart },
+      },
+      orderBy: { weekStart: 'asc' },
+    });
 
-    const weeks = [];
-    for (let w = 1; w <= totalWeeks; w++) {
-      const weekStart = new Date(yearStart.getTime() + (w - 1) * msPerWeek);
-      const weekEnd = new Date(weekStart.getTime() + 6 * 24 * 60 * 60 * 1000);
-      weeks.push({
-        weekNumber: w,
-        label: `Week ${w}`,
+    // Sequential numbering: week 1, 2, 3... based on chronological order
+    const weeksAsc = dbWeeks.map((w, index) => {
+      const weekStart = new Date(w.weekStart);
+      const weekEnd = new Date(w.weekEnd);
+      const endPlusOne = new Date(weekEnd.getTime() + 24 * 60 * 60 * 1000);
+      const isCurrent = now >= weekStart && now < endPlusOne;
+      const weekNumber = index + 1;
+
+      return {
+        weekNumber,
+        label: w.sheetName,
         startDate: weekStart.toISOString().split('T')[0],
         endDate: weekEnd.toISOString().split('T')[0],
-        isCurrent: w === currentWeek,
-      });
-    }
+        isCurrent,
+      };
+    });
 
-    res.json({ success: true, data: weeks.reverse(), currentWeek });
+    // Return newest first for the dropdown
+    const weeks = weeksAsc.reverse();
+
+    const currentWeekEntry = weeks.find(w => w.isCurrent);
+    const currentWeek = currentWeekEntry?.weekNumber || (weeks.length > 0 ? weeks[0].weekNumber : 1);
+
+    res.json({ success: true, data: weeks, currentWeek });
   } catch (err) {
     next(err);
   }
