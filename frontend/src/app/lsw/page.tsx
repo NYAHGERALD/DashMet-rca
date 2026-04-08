@@ -1,6 +1,6 @@
 'use client';
 
-import { useState, useEffect, useRef, useCallback } from 'react';
+import { useState, useEffect, useRef, useCallback, Fragment } from 'react';
 import { useAuth } from '@/components/providers/AuthProvider';
 import { useWebSocket } from '@/lib/websocket';
 import ProtectedRoute from '@/components/auth/ProtectedRoute';
@@ -343,12 +343,32 @@ function LSWContent() {
   // Get week offset indicator
   const weekOffset = getWeekOffsetText(currentWeek, currentYear, calendarConfig);
 
+  // Inline task editing state
+  const [editingTaskId, setEditingTaskId] = useState<string | null>(null);
+  const [editingValues, setEditingValues] = useState<{ task: string; minutes: number; time: string } | null>(null);
+  const taskNameInputRef = useRef<HTMLTextAreaElement>(null);
+
+  // Drag-and-drop reorder state
+  const [dragTaskId, setDragTaskId] = useState<string | null>(null);
+  const [dragOverTaskId, setDragOverTaskId] = useState<string | null>(null);
+  const [droppedTaskId, setDroppedTaskId] = useState<string | null>(null);
+
+  // Todo drag-and-drop reorder state
+  const [dragTodoId, setDragTodoId] = useState<string | null>(null);
+  const [dragOverTodoId, setDragOverTodoId] = useState<string | null>(null);
+  const [droppedTodoId, setDroppedTodoId] = useState<string | null>(null);
+
   // Modal states
-  const [showAddTaskModal, setShowAddTaskModal] = useState(false);
   const [showDeleteModal, setShowDeleteModal] = useState(false);
   const [deleteTarget, setDeleteTarget] = useState<{ projectId: string; updateIndex: number } | null>(null);
-  const [showAddProjectModal, setShowAddProjectModal] = useState(false);
   const [todoTab, setTodoTab] = useState<'today' | 'thisWeek'>('today');
+  
+  // Inline project editing state
+  const [editingProjectId, setEditingProjectId] = useState<string | null>(null);
+  const [editingProjectName, setEditingProjectName] = useState('');
+  const projectNameInputRef = useRef<HTMLInputElement>(null);
+  // Project style editing (collapsible per project)
+  const [styleProjectId, setStyleProjectId] = useState<string | null>(null);
   
   // Context menu states
   const [contextMenu, setContextMenu] = useState<{
@@ -363,42 +383,30 @@ function LSWContent() {
   const [showDeleteProjectModal, setShowDeleteProjectModal] = useState(false);
   const [selectedProjectId, setSelectedProjectId] = useState<string | null>(null);
   const [selectedUpdateIndex, setSelectedUpdateIndex] = useState<number | null>(null);
-  const [showAddFollowUpModal, setShowAddFollowUpModal] = useState(false);
-  const [newFollowUp, setNewFollowUp] = useState({
-    task: '',
-    dueDate: new Date().toISOString().split('T')[0],
-    responsible: '',
-    comments: ''
-  });
-  const [showAddTriggerModal, setShowAddTriggerModal] = useState(false);
-  const [newTrigger, setNewTrigger] = useState({
-    trigger: '',
-    eventDate: '',
-    comments: ''
-  });
-  const [showAddTodoModal, setShowAddTodoModal] = useState(false);
-  const [newTodoItem, setNewTodoItem] = useState({
-    task: '',
-    dueDate: ''
-  });
-  const [showAddMeetingRailModal, setShowAddMeetingRailModal] = useState(false);
-  const [newMeetingRail, setNewMeetingRail] = useState({
-    rail: '',
-    dueDate: new Date().toISOString().split('T')[0]
-  });
-  const [showAddScheduledTaskModal, setShowAddScheduledTaskModal] = useState(false);
-  const [newScheduledTask, setNewScheduledTask] = useState({
-    task: '',
-    minutes: 60,
-    dueDate: new Date().toISOString().split('T')[0],
-    frequency: 'biweekly' as 'biweekly' | 'monthly' | 'quarterly' | 'annually'
-  });
-  const [showAddGoalModal, setShowAddGoalModal] = useState(false);
-  const [newGoal, setNewGoal] = useState({
-    objective: '',
-    dueDate: '',
-    progress: 0
-  });
+  // Inline follow-up editing state
+  const [editingFollowUpId, setEditingFollowUpId] = useState<string | null>(null);
+  const [editingFollowUpValues, setEditingFollowUpValues] = useState<{ task: string; dueDate: string; responsible: string; comments: string } | null>(null);
+  const followUpTaskInputRef = useRef<HTMLInputElement>(null);
+  // Inline trigger editing state
+  const [editingTriggerId, setEditingTriggerId] = useState<string | null>(null);
+  const [editingTriggerValues, setEditingTriggerValues] = useState<{ trigger: string; eventDate: string; comments: string } | null>(null);
+  const triggerInputRef = useRef<HTMLInputElement>(null);
+  // Inline todo editing state
+  const [editingTodoId, setEditingTodoId] = useState<string | null>(null);
+  const [editingTodoValues, setEditingTodoValues] = useState<{ task: string; dueDate: string } | null>(null);
+  const todoInputRef = useRef<HTMLInputElement>(null);
+  // Inline meeting rail editing state
+  const [editingRailId, setEditingRailId] = useState<string | null>(null);
+  const [editingRailValues, setEditingRailValues] = useState<{ rail: string; dueDate: string } | null>(null);
+  const railInputRef = useRef<HTMLInputElement>(null);
+  // Inline scheduled task editing state
+  const [editingFreqTaskId, setEditingFreqTaskId] = useState<string | null>(null);
+  const [editingFreqTaskValues, setEditingFreqTaskValues] = useState<{ task: string; minutes: number; dueDate: string } | null>(null);
+  const freqTaskInputRef = useRef<HTMLInputElement>(null);
+  // Inline goal editing state
+  const [editingGoalInlineId, setEditingGoalInlineId] = useState<string | null>(null);
+  const [editingGoalValues, setEditingGoalValues] = useState<{ objective: string; dueDate: string } | null>(null);
+  const goalInputRef = useRef<HTMLInputElement>(null);
   const [editingGoalId, setEditingGoalId] = useState<string | null>(null);
   
   // Live clock state
@@ -427,70 +435,347 @@ function LSWContent() {
     updateCellColor: '#10b981',
     updateCellColorIntensity: 10
   });
-  const [newTask, setNewTask] = useState({
-    task: '',
-    minutes: 15,
-    time: '08:00',
-    days: { M: true, T: true, W: true, H: true, F: true, S1: false, S2: false }
-  });
 
-  // Add task handler
+  // Add project handler - creates empty row inline
+  const handleAddProject = async () => {
+    try {
+      const created = await createLswProject({
+        name: '',
+        initialUpdateText: '',
+        fontColor: '#1f2937',
+        fontFamily: 'Inter',
+        fontBold: false,
+        fontItalic: false,
+        cellColor: '#3b82f6',
+        cellColorIntensity: 20,
+        defaultUpdateFontColor: '#4b5563',
+        defaultUpdateFontItalic: false,
+        defaultUpdateCellColor: '#10b981',
+        defaultUpdateCellColorIntensity: 10,
+      });
+      setProjects(prev => [...prev, mapProjectFromDb(created)]);
+      setEditingProjectId(created.id);
+      setEditingProjectName('');
+      setTimeout(() => projectNameInputRef.current?.focus(), 50);
+    } catch (e) { console.error('Failed to add project:', e); }
+  };
+
+  // Start inline editing project name
+  const handleStartProjectEdit = (project: Project) => {
+    setEditingProjectId(project.id);
+    setEditingProjectName(project.name);
+    setTimeout(() => projectNameInputRef.current?.focus(), 50);
+  };
+
+  // Save inline project name edit
+  const handleProjectNameSave = async () => {
+    if (!editingProjectId) return;
+    const project = projects.find(p => p.id === editingProjectId);
+    if (!project) { setEditingProjectId(null); return; }
+
+    // If name is empty, delete the project
+    if (!editingProjectName.trim()) {
+      setProjects(prev => prev.filter(p => p.id !== editingProjectId));
+      deleteLswProject(editingProjectId).catch(e => console.error('Failed to delete empty project:', e));
+      setEditingProjectId(null);
+      setEditingProjectName('');
+      return;
+    }
+
+    if (project.name !== editingProjectName) {
+      try {
+        await updateLswProject(editingProjectId, { name: editingProjectName } as Partial<LswProject>);
+        setProjects(prev => prev.map(p => p.id === editingProjectId ? { ...p, name: editingProjectName } : p));
+      } catch (e) { console.error('Failed to update project name:', e); }
+    }
+    setEditingProjectId(null);
+    setEditingProjectName('');
+  };
+
+  // Follow-up inline editing handlers
+  const handleAddFollowUp = async () => {
+    try {
+      const created = await createLswFollowUp({
+        task: '',
+        dueDate: new Date().toISOString().split('T')[0],
+        responsibleName: '',
+        comments: '',
+      });
+      const mapped = mapFollowUpFromDb(created);
+      setFollowUps(prev => [...prev, mapped]);
+      setEditingFollowUpId(mapped.id);
+      setEditingFollowUpValues({ task: '', dueDate: mapped.dueDate, responsible: '', comments: '' });
+      setTimeout(() => followUpTaskInputRef.current?.focus(), 50);
+    } catch (e) { console.error('Failed to add follow-up:', e); }
+  };
+
+  const handleStartFollowUpEdit = (followUp: FollowUp, field?: 'task' | 'dueDate' | 'responsible' | 'comments') => {
+    setEditingFollowUpId(followUp.id);
+    setEditingFollowUpValues({ task: followUp.task, dueDate: followUp.dueDate, responsible: followUp.responsible, comments: followUp.comments });
+    if (field === 'task') {
+      setTimeout(() => followUpTaskInputRef.current?.focus(), 50);
+    }
+  };
+
+  const handleFollowUpInlineSave = async () => {
+    if (!editingFollowUpId || !editingFollowUpValues) return;
+    const followUp = followUps.find(f => f.id === editingFollowUpId);
+    if (!followUp) { setEditingFollowUpId(null); setEditingFollowUpValues(null); return; }
+
+    // If task name is empty, delete the row
+    if (!editingFollowUpValues.task.trim()) {
+      setFollowUps(prev => prev.filter(f => f.id !== editingFollowUpId));
+      deleteLswFollowUp(editingFollowUpId).catch(e => console.error('Failed to delete empty follow-up:', e));
+      setEditingFollowUpId(null);
+      setEditingFollowUpValues(null);
+      return;
+    }
+
+    const changed = followUp.task !== editingFollowUpValues.task || followUp.dueDate !== editingFollowUpValues.dueDate || followUp.responsible !== editingFollowUpValues.responsible || followUp.comments !== editingFollowUpValues.comments;
+    if (changed) {
+      try {
+        await updateLswFollowUp(editingFollowUpId, {
+          task: editingFollowUpValues.task,
+          dueDate: editingFollowUpValues.dueDate,
+          responsibleName: editingFollowUpValues.responsible,
+          comments: editingFollowUpValues.comments,
+        } as any);
+        setFollowUps(prev => prev.map(f => f.id === editingFollowUpId ? { ...f, ...editingFollowUpValues } : f));
+      } catch (e) { console.error('Failed to update follow-up:', e); }
+    }
+    setEditingFollowUpId(null);
+    setEditingFollowUpValues(null);
+  };
+
+  // RCA Trigger inline editing handlers
+  const handleAddTrigger = async () => {
+    try {
+      const created = await createLswRcaTrigger({
+        trigger: '',
+        eventDate: undefined,
+        comments: undefined,
+      });
+      const mapped = mapTriggerFromDb(created);
+      setRcaTriggers(prev => [...prev, mapped]);
+      setEditingTriggerId(mapped.id);
+      setEditingTriggerValues({ trigger: '', eventDate: '', comments: '' });
+      setTimeout(() => triggerInputRef.current?.focus(), 50);
+    } catch (e) { console.error('Failed to add trigger:', e); }
+  };
+
+  const handleStartTriggerEdit = (trigger: RCATrigger, field?: 'trigger' | 'eventDate' | 'comments') => {
+    setEditingTriggerId(trigger.id);
+    setEditingTriggerValues({ trigger: trigger.trigger, eventDate: trigger.eventDate, comments: trigger.comments });
+    if (field === 'trigger') {
+      setTimeout(() => triggerInputRef.current?.focus(), 50);
+    }
+  };
+
+  const handleTriggerInlineSave = async () => {
+    if (!editingTriggerId || !editingTriggerValues) return;
+    const trigger = rcaTriggers.find(t => t.id === editingTriggerId);
+    if (!trigger) { setEditingTriggerId(null); setEditingTriggerValues(null); return; }
+
+    // If trigger text is empty, delete the row
+    if (!editingTriggerValues.trigger.trim()) {
+      setRcaTriggers(prev => prev.filter(t => t.id !== editingTriggerId));
+      deleteLswRcaTrigger(editingTriggerId).catch(e => console.error('Failed to delete empty trigger:', e));
+      setEditingTriggerId(null);
+      setEditingTriggerValues(null);
+      return;
+    }
+
+    const changed = trigger.trigger !== editingTriggerValues.trigger || trigger.eventDate !== editingTriggerValues.eventDate || trigger.comments !== editingTriggerValues.comments;
+    if (changed) {
+      try {
+        await updateLswRcaTrigger(editingTriggerId, {
+          trigger: editingTriggerValues.trigger,
+          eventDate: editingTriggerValues.eventDate || null,
+          comments: editingTriggerValues.comments || null,
+        } as any);
+        setRcaTriggers(prev => prev.map(t => t.id === editingTriggerId ? { ...t, ...editingTriggerValues } : t));
+      } catch (e) { console.error('Failed to update trigger:', e); }
+    }
+    setEditingTriggerId(null);
+    setEditingTriggerValues(null);
+  };
+
+  // Scheduled task (frequency) inline editing handlers
+  const handleAddFreqTask = async (frequency: 'biweekly' | 'monthly' | 'quarterly' | 'annually') => {
+    try {
+      const created = await createLswFrequencyTask({
+        task: '',
+        minutes: 60,
+        dueDate: new Date().toISOString().split('T')[0],
+        frequency: FREQ_UI_TO_DB[frequency],
+        weekNumber: currentWeek,
+        year: currentYear,
+      });
+      const mapped = mapFreqTaskFromDb(created);
+      setFrequencyTasks(prev => [...prev, mapped]);
+      setEditingFreqTaskId(mapped.id);
+      setEditingFreqTaskValues({ task: '', minutes: 60, dueDate: mapped.dueDate });
+      setTimeout(() => freqTaskInputRef.current?.focus(), 50);
+    } catch (e) { console.error('Failed to add scheduled task:', e); }
+  };
+
+  const handleStartFreqTaskEdit = (task: FrequencyTask, field?: 'task' | 'minutes' | 'dueDate') => {
+    setEditingFreqTaskId(task.id);
+    setEditingFreqTaskValues({ task: task.task, minutes: task.minutes, dueDate: task.dueDate });
+    if (field === 'task') {
+      setTimeout(() => freqTaskInputRef.current?.focus(), 50);
+    }
+  };
+
+  const handleFreqTaskInlineSave = async () => {
+    if (!editingFreqTaskId || !editingFreqTaskValues) return;
+    const task = frequencyTasks.find(t => t.id === editingFreqTaskId);
+    if (!task) { setEditingFreqTaskId(null); setEditingFreqTaskValues(null); return; }
+
+    if (!editingFreqTaskValues.task.trim()) {
+      setFrequencyTasks(prev => prev.filter(t => t.id !== editingFreqTaskId));
+      deleteLswFrequencyTask(editingFreqTaskId).catch(e => console.error('Failed to delete empty freq task:', e));
+      setEditingFreqTaskId(null);
+      setEditingFreqTaskValues(null);
+      return;
+    }
+
+    const changed = task.task !== editingFreqTaskValues.task || task.minutes !== editingFreqTaskValues.minutes || task.dueDate !== editingFreqTaskValues.dueDate;
+    if (changed) {
+      try {
+        await updateLswFrequencyTask(editingFreqTaskId, {
+          task: editingFreqTaskValues.task,
+          minutes: editingFreqTaskValues.minutes,
+          dueDate: editingFreqTaskValues.dueDate,
+        } as any);
+        setFrequencyTasks(prev => prev.map(t => t.id === editingFreqTaskId ? { ...t, ...editingFreqTaskValues } : t));
+      } catch (e) { console.error('Failed to update freq task:', e); }
+    }
+    setEditingFreqTaskId(null);
+    setEditingFreqTaskValues(null);
+  };
+
   const handleAddTask = async () => {
-    if (!newTask.task.trim()) return;
     try {
       const created = await createLswDailyTask({
-        task: newTask.task,
-        minutes: newTask.minutes,
-        time: newTask.time,
-        monday: newTask.days.M,
-        tuesday: newTask.days.T,
-        wednesday: newTask.days.W,
-        thursday: newTask.days.H,
-        friday: newTask.days.F,
-        saturday: newTask.days.S1,
-        sunday: newTask.days.S2,
+        task: '',
+        minutes: 0,
+        time: '00:00',
+        monday: false,
+        tuesday: false,
+        wednesday: false,
+        thursday: false,
+        friday: false,
+        saturday: false,
+        sunday: false,
       });
-      setDailyTasks(prev => [...prev, mapDailyTaskFromDb(created)]);
-      setNewTask({ task: '', minutes: 15, time: '08:00', days: { M: true, T: true, W: true, H: true, F: true, S1: false, S2: false } });
-      setShowAddTaskModal(false);
+      const mapped = mapDailyTaskFromDb(created);
+      setDailyTasks(prev => [...prev, mapped]);
+      setEditingTaskId(mapped.id);
+      setEditingValues({ task: '', minutes: 0, time: '00:00' });
+      // Focus the task name input after render
+      setTimeout(() => taskNameInputRef.current?.focus(), 50);
     } catch (e) { console.error('Failed to add daily task:', e); }
   };
 
-  // Add project handler
-  const handleAddProject = async () => {
-    if (!newProject.name.trim()) return;
-    try {
-      const created = await createLswProject({
-        name: newProject.name,
-        initialUpdateText: newProject.update.trim() || '',
-        fontColor: newProject.fontColor,
-        fontFamily: newProject.fontFamily,
-        fontBold: newProject.fontBold,
-        fontItalic: newProject.fontItalic,
-        cellColor: newProject.cellColor,
-        cellColorIntensity: newProject.cellColorIntensity,
-        defaultUpdateFontColor: newProject.updateFontColor,
-        defaultUpdateFontItalic: newProject.updateFontItalic,
-        defaultUpdateCellColor: newProject.updateCellColor,
-        defaultUpdateCellColorIntensity: newProject.updateCellColorIntensity,
-      });
-      setProjects(prev => [...prev, mapProjectFromDb(created)]);
-      setNewProject({ 
-        name: '', 
-        update: '', 
-        fontColor: '#1f2937', 
-        fontFamily: 'Inter', 
-        fontBold: false, 
-        fontItalic: false, 
-        cellColor: '#3b82f6', 
-        cellColorIntensity: 20,
-        updateFontColor: '#4b5563',
-        updateFontItalic: false,
-        updateCellColor: '#10b981',
-        updateCellColorIntensity: 10
-      });
-      setShowAddProjectModal(false);
-    } catch (e) { console.error('Failed to add project:', e); }
+  // Start inline editing an existing task
+  const handleStartEdit = (task: DailyTask, field?: 'task' | 'minutes' | 'time') => {
+    setEditingTaskId(task.id);
+    setEditingValues({ task: task.task, minutes: task.minutes, time: task.time });
+    if (field === 'task') {
+      setTimeout(() => taskNameInputRef.current?.focus(), 50);
+    }
+  };
+
+  // Save inline edits
+  const handleInlineSave = async () => {
+    if (!editingTaskId || !editingValues) return;
+    const task = dailyTasks.find(t => t.id === editingTaskId);
+    if (!task) { setEditingTaskId(null); setEditingValues(null); return; }
+
+    // If task name is empty, delete the row
+    if (!editingValues.task.trim()) {
+      setDailyTasks(prev => prev.filter(t => t.id !== editingTaskId));
+      deleteLswDailyTask(editingTaskId).catch(e => console.error('Failed to delete empty task:', e));
+      setEditingTaskId(null);
+      setEditingValues(null);
+      return;
+    }
+
+    const changed = task.task !== editingValues.task || task.minutes !== editingValues.minutes || task.time !== editingValues.time;
+    if (changed) {
+      try {
+        await updateLswDailyTask(editingTaskId, {
+          task: editingValues.task,
+          minutes: editingValues.minutes,
+          time: editingValues.time,
+        });
+        setDailyTasks(prev => prev.map(t => t.id === editingTaskId ? { ...t, task: editingValues.task, minutes: editingValues.minutes, time: editingValues.time } : t));
+      } catch (e) { console.error('Failed to update task:', e); }
+    }
+    setEditingTaskId(null);
+    setEditingValues(null);
+  };
+
+  // Drag-and-drop handlers for task reorder
+  const handleDragStart = (e: React.DragEvent<HTMLTableRowElement>, taskId: string) => {
+    setDragTaskId(taskId);
+    e.dataTransfer.effectAllowed = 'move';
+    e.dataTransfer.setData('text/plain', taskId);
+    // Make the drag image slightly transparent
+    if (e.currentTarget) {
+      e.currentTarget.style.opacity = '0.4';
+    }
+  };
+
+  const handleDragEnd = (e: React.DragEvent<HTMLTableRowElement>) => {
+    e.currentTarget.style.opacity = '1';
+    setDragTaskId(null);
+    setDragOverTaskId(null);
+  };
+
+  const handleDragOver = (e: React.DragEvent<HTMLTableRowElement>, taskId: string) => {
+    e.preventDefault();
+    e.dataTransfer.dropEffect = 'move';
+    if (dragTaskId && taskId !== dragTaskId) {
+      setDragOverTaskId(taskId);
+    }
+  };
+
+  const handleDragLeave = () => {
+    setDragOverTaskId(null);
+  };
+
+  const handleDrop = async (e: React.DragEvent<HTMLTableRowElement>, targetTaskId: string) => {
+    e.preventDefault();
+    const sourceTaskId = e.dataTransfer.getData('text/plain');
+    if (!sourceTaskId || sourceTaskId === targetTaskId) {
+      setDragTaskId(null);
+      setDragOverTaskId(null);
+      return;
+    }
+
+    const oldTasks = [...dailyTasks];
+    const sourceIndex = oldTasks.findIndex(t => t.id === sourceTaskId);
+    const targetIndex = oldTasks.findIndex(t => t.id === targetTaskId);
+    if (sourceIndex === -1 || targetIndex === -1) return;
+
+    // Reorder
+    const [moved] = oldTasks.splice(sourceIndex, 1);
+    oldTasks.splice(targetIndex, 0, moved);
+    setDailyTasks(oldTasks);
+
+    // Trigger bounce animation on dropped item
+    setDroppedTaskId(sourceTaskId);
+    setTimeout(() => setDroppedTaskId(null), 500);
+
+    setDragTaskId(null);
+    setDragOverTaskId(null);
+
+    // Persist new sort order
+    oldTasks.forEach((task, idx) => {
+      updateLswDailyTask(task.id, { sortOrder: idx } as Partial<LswDailyTask>).catch(e => console.error('Failed to update sort order:', e));
+    });
   };
 
   // State for all sections (populated from database via useEffect)
@@ -743,6 +1028,115 @@ function LSWContent() {
     };
   }, [user, configReady, loadLswData]);
 
+  // Todo inline editing handlers
+  const handleAddTodo = async () => {
+    try {
+      const created = await createLswTodoItem({
+        task: '',
+        dueDate: undefined,
+        weekNumber: currentWeek,
+        year: currentYear,
+      });
+      const mapped = mapTodoFromDb(created);
+      setTodoItems(prev => [...prev, mapped]);
+      setEditingTodoId(mapped.id);
+      setEditingTodoValues({ task: '', dueDate: '' });
+      setTimeout(() => todoInputRef.current?.focus(), 50);
+    } catch (e) { console.error('Failed to add todo:', e); }
+  };
+
+  const handleStartTodoEdit = (item: ToDoItem, field?: 'task' | 'dueDate') => {
+    setEditingTodoId(item.id);
+    setEditingTodoValues({ task: item.task, dueDate: item.dueDate || '' });
+    if (field === 'task') {
+      setTimeout(() => todoInputRef.current?.focus(), 50);
+    }
+  };
+
+  const handleTodoInlineSave = async () => {
+    if (!editingTodoId || !editingTodoValues) return;
+    const item = todoItems.find(t => t.id === editingTodoId);
+    if (!item) { setEditingTodoId(null); setEditingTodoValues(null); return; }
+
+    if (!editingTodoValues.task.trim()) {
+      setTodoItems(prev => prev.filter(t => t.id !== editingTodoId));
+      deleteLswTodoItem(editingTodoId).catch(e => console.error('Failed to delete empty todo:', e));
+      setEditingTodoId(null);
+      setEditingTodoValues(null);
+      return;
+    }
+
+    const changed = item.task !== editingTodoValues.task || (item.dueDate || '') !== editingTodoValues.dueDate;
+    if (changed) {
+      try {
+        await updateLswTodoItem(editingTodoId, {
+          task: editingTodoValues.task,
+          dueDate: editingTodoValues.dueDate || null,
+        } as any);
+        setTodoItems(prev => prev.map(t => t.id === editingTodoId ? { ...t, task: editingTodoValues.task, dueDate: editingTodoValues.dueDate || undefined } : t));
+      } catch (e) { console.error('Failed to update todo:', e); }
+    }
+    setEditingTodoId(null);
+    setEditingTodoValues(null);
+  };
+
+  // Todo drag-and-drop handlers
+  const handleTodoDragStart = (e: React.DragEvent<HTMLDivElement>, todoId: string) => {
+    setDragTodoId(todoId);
+    e.dataTransfer.effectAllowed = 'move';
+    e.dataTransfer.setData('text/plain', todoId);
+    if (e.currentTarget) {
+      e.currentTarget.style.opacity = '0.4';
+    }
+  };
+
+  const handleTodoDragEnd = (e: React.DragEvent<HTMLDivElement>) => {
+    e.currentTarget.style.opacity = '1';
+    setDragTodoId(null);
+    setDragOverTodoId(null);
+  };
+
+  const handleTodoDragOver = (e: React.DragEvent<HTMLDivElement>, todoId: string) => {
+    e.preventDefault();
+    e.dataTransfer.dropEffect = 'move';
+    if (dragTodoId && todoId !== dragTodoId) {
+      setDragOverTodoId(todoId);
+    }
+  };
+
+  const handleTodoDragLeave = () => {
+    setDragOverTodoId(null);
+  };
+
+  const handleTodoDrop = async (e: React.DragEvent<HTMLDivElement>, targetTodoId: string) => {
+    e.preventDefault();
+    const sourceTodoId = e.dataTransfer.getData('text/plain');
+    if (!sourceTodoId || sourceTodoId === targetTodoId) {
+      setDragTodoId(null);
+      setDragOverTodoId(null);
+      return;
+    }
+
+    const oldItems = [...todoItems];
+    const sourceIndex = oldItems.findIndex(t => t.id === sourceTodoId);
+    const targetIndex = oldItems.findIndex(t => t.id === targetTodoId);
+    if (sourceIndex === -1 || targetIndex === -1) return;
+
+    const [moved] = oldItems.splice(sourceIndex, 1);
+    oldItems.splice(targetIndex, 0, moved);
+    setTodoItems(oldItems);
+
+    setDroppedTodoId(sourceTodoId);
+    setTimeout(() => setDroppedTodoId(null), 500);
+
+    setDragTodoId(null);
+    setDragOverTodoId(null);
+
+    oldItems.forEach((item, idx) => {
+      updateLswTodoItem(item.id, { sortOrder: idx } as any).catch(e => console.error('Failed to update todo sort order:', e));
+    });
+  };
+
   // Toggle todo item - API-backed
   const toggleTodo = async (id: string) => {
     const item = todoItems.find(t => t.id === id);
@@ -752,6 +1146,109 @@ function LSWContent() {
       items.map(it => it.id === id ? { ...it, completed: newCompleted } : it)
     );
     try { await updateLswTodoItem(id, { completed: newCompleted } as any); } catch (e) { console.error('Failed to toggle todo:', e); }
+  };
+
+  // Meeting rail inline editing handlers
+  const handleAddRail = async () => {
+    try {
+      const created = await createLswMeetingRail({
+        rail: '',
+        dueDate: new Date().toISOString().split('T')[0],
+        weekNumber: currentWeek,
+        year: currentYear,
+      });
+      const mapped = mapMeetingRailFromDb(created);
+      setMeetingRails(prev => [...prev, mapped]);
+      setEditingRailId(mapped.id);
+      setEditingRailValues({ rail: '', dueDate: mapped.dueDate });
+      setTimeout(() => railInputRef.current?.focus(), 50);
+    } catch (e) { console.error('Failed to add meeting rail:', e); }
+  };
+
+  const handleStartRailEdit = (rail: MeetingRail, field?: 'rail' | 'dueDate') => {
+    setEditingRailId(rail.id);
+    setEditingRailValues({ rail: rail.rail, dueDate: rail.dueDate });
+    if (field === 'rail') {
+      setTimeout(() => railInputRef.current?.focus(), 50);
+    }
+  };
+
+  const handleRailInlineSave = async () => {
+    if (!editingRailId || !editingRailValues) return;
+    const rail = meetingRails.find(r => r.id === editingRailId);
+    if (!rail) { setEditingRailId(null); setEditingRailValues(null); return; }
+
+    if (!editingRailValues.rail.trim()) {
+      setMeetingRails(prev => prev.filter(r => r.id !== editingRailId));
+      deleteLswMeetingRail(editingRailId).catch(e => console.error('Failed to delete empty rail:', e));
+      setEditingRailId(null);
+      setEditingRailValues(null);
+      return;
+    }
+
+    const changed = rail.rail !== editingRailValues.rail || rail.dueDate !== editingRailValues.dueDate;
+    if (changed) {
+      try {
+        await updateLswMeetingRail(editingRailId, {
+          rail: editingRailValues.rail,
+          dueDate: editingRailValues.dueDate,
+        } as any);
+        setMeetingRails(prev => prev.map(r => r.id === editingRailId ? { ...r, rail: editingRailValues.rail, dueDate: editingRailValues.dueDate } : r));
+      } catch (e) { console.error('Failed to update rail:', e); }
+    }
+    setEditingRailId(null);
+    setEditingRailValues(null);
+  };
+
+  // Goal inline editing handlers
+  const handleAddGoal = async () => {
+    try {
+      const created = await createLswPersonalGoal({
+        objective: '',
+        dueDate: new Date().toISOString().split('T')[0],
+        progress: 0,
+      });
+      const mapped = mapGoalFromDb(created);
+      setPersonalGoals(prev => [...prev, mapped]);
+      setEditingGoalInlineId(mapped.id);
+      setEditingGoalValues({ objective: '', dueDate: mapped.dueDate });
+      setTimeout(() => goalInputRef.current?.focus(), 50);
+    } catch (e) { console.error('Failed to add goal:', e); }
+  };
+
+  const handleStartGoalEdit = (goal: PersonalGoal, field?: 'objective' | 'dueDate') => {
+    setEditingGoalInlineId(goal.id);
+    setEditingGoalValues({ objective: goal.objective, dueDate: goal.dueDate });
+    if (field === 'objective') {
+      setTimeout(() => goalInputRef.current?.focus(), 50);
+    }
+  };
+
+  const handleGoalInlineSave = async () => {
+    if (!editingGoalInlineId || !editingGoalValues) return;
+    const goal = personalGoals.find(g => g.id === editingGoalInlineId);
+    if (!goal) { setEditingGoalInlineId(null); setEditingGoalValues(null); return; }
+
+    if (!editingGoalValues.objective.trim()) {
+      setPersonalGoals(prev => prev.filter(g => g.id !== editingGoalInlineId));
+      deleteLswPersonalGoal(editingGoalInlineId).catch(e => console.error('Failed to delete empty goal:', e));
+      setEditingGoalInlineId(null);
+      setEditingGoalValues(null);
+      return;
+    }
+
+    const changed = goal.objective !== editingGoalValues.objective || goal.dueDate !== editingGoalValues.dueDate;
+    if (changed) {
+      try {
+        await updateLswPersonalGoal(editingGoalInlineId, {
+          objective: editingGoalValues.objective,
+          dueDate: editingGoalValues.dueDate,
+        } as any);
+        setPersonalGoals(prev => prev.map(g => g.id === editingGoalInlineId ? { ...g, objective: editingGoalValues.objective, dueDate: editingGoalValues.dueDate } : g));
+      } catch (e) { console.error('Failed to update goal:', e); }
+    }
+    setEditingGoalInlineId(null);
+    setEditingGoalValues(null);
   };
 
   // Toggle meeting rail - API-backed
@@ -1075,24 +1572,85 @@ function LSWContent() {
                 )}
               </button>
 
-              {/* Notification Bell */}
+              {/* Notification Bell + Dropdown */}
               {(() => {
                 const overdue = getOverdueTasks();
                 return (
-                  <button
-                    onClick={() => setShowOverdueModal(true)}
-                    className="relative p-2 rounded-lg hover:bg-gray-100 dark:hover:bg-gray-800 transition-colors"
-                    title={overdue.totalCount > 0 ? `${overdue.totalCount} overdue task(s)` : 'No overdue tasks'}
-                  >
-                    <svg className="w-5 h-5 text-gray-600 dark:text-gray-300" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 17h5l-1.405-1.405A2.032 2.032 0 0118 14.158V11a6.002 6.002 0 00-4-5.659V5a2 2 0 10-4 0v.341C7.67 6.165 6 8.388 6 11v3.159c0 .538-.214 1.055-.595 1.436L4 17h5m6 0v1a3 3 0 11-6 0v-1m6 0H9" />
-                    </svg>
-                    {overdue.totalCount > 0 && (
-                      <span className="absolute -top-0.5 -right-0.5 min-w-[18px] h-[18px] flex items-center justify-center px-1 text-[10px] font-bold text-white bg-red-500 rounded-full shadow-sm animate-pulse">
-                        {overdue.totalCount}
-                      </span>
+                  <div className="relative">
+                    <button
+                      onClick={() => setShowOverdueModal(prev => !prev)}
+                      className="relative p-2 rounded-lg hover:bg-gray-100 dark:hover:bg-gray-800 transition-colors"
+                      title={overdue.totalCount > 0 ? `${overdue.totalCount} overdue task(s)` : 'No overdue tasks'}
+                    >
+                      <svg className="w-5 h-5 text-gray-600 dark:text-gray-300" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 17h5l-1.405-1.405A2.032 2.032 0 0118 14.158V11a6.002 6.002 0 00-4-5.659V5a2 2 0 10-4 0v.341C7.67 6.165 6 8.388 6 11v3.159c0 .538-.214 1.055-.595 1.436L4 17h5m6 0v1a3 3 0 11-6 0v-1m6 0H9" />
+                      </svg>
+                      {overdue.totalCount > 0 && (
+                        <span className="absolute -top-0.5 -right-0.5 min-w-[18px] h-[18px] flex items-center justify-center px-1 text-[10px] font-bold text-white bg-red-500 rounded-full shadow-sm animate-pulse">
+                          {overdue.totalCount}
+                        </span>
+                      )}
+                    </button>
+                    {showOverdueModal && (
+                      <>
+                        <div className="fixed inset-0 z-40" onClick={() => setShowOverdueModal(false)} />
+                        <div className="absolute right-0 top-full mt-2 z-50 w-[380px] bg-white dark:bg-gray-800 rounded-2xl shadow-2xl border border-gray-200 dark:border-gray-700 overflow-hidden animate-fade-in">
+                          {/* Header */}
+                          <div className="flex items-center justify-between px-4 py-3 bg-gradient-to-r from-amber-50 to-orange-50 dark:from-amber-900/30 dark:to-orange-900/30 border-b border-amber-200 dark:border-amber-700/50">
+                            <div className="flex items-center gap-2">
+                              <span className="text-lg">🔔</span>
+                              <h3 className="text-sm font-bold text-amber-800 dark:text-amber-200">Task Notifications</h3>
+                            </div>
+                            <button
+                              onClick={() => setShowOverdueModal(false)}
+                              className="p-1 rounded-lg hover:bg-amber-200/50 dark:hover:bg-amber-800/50 transition-colors"
+                            >
+                              <svg className="w-4 h-4 text-amber-700 dark:text-amber-300" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
+                              </svg>
+                            </button>
+                          </div>
+                          {/* Body */}
+                          <div className="px-4 py-3 max-h-[50vh] overflow-y-auto">
+                            {overdue.totalCount === 0 ? (
+                              <div className="text-center py-6">
+                                <span className="text-3xl block mb-2">✅</span>
+                                <p className="text-sm font-semibold text-gray-700 dark:text-gray-300">All caught up!</p>
+                                <p className="text-xs text-gray-500 dark:text-gray-400 mt-1">No overdue tasks or meetings.</p>
+                              </div>
+                            ) : (
+                              <>
+                                <div className="bg-amber-50 dark:bg-amber-900/20 border border-amber-200 dark:border-amber-700/50 rounded-xl p-3 mb-3">
+                                  <p className="text-xs font-semibold text-amber-800 dark:text-amber-200">
+                                    ⚠️ You have {overdue.totalCount} unchecked task/meeting{overdue.totalCount !== 1 ? 's' : ''} past their scheduled time
+                                  </p>
+                                  <p className="text-[11px] text-amber-700 dark:text-amber-300 mt-1">
+                                    Please check your tasks/meetings if they were already completed. If not, try to complete all your tasks and attend your meetings on time.
+                                  </p>
+                                </div>
+                                <div className="space-y-2">
+                                  {overdue.tasks.map(task => (
+                                    <div key={task.taskId} className="flex items-start gap-3 p-3 rounded-xl bg-gray-50 dark:bg-gray-700/50 border border-gray-100 dark:border-gray-600/50">
+                                      <span className="text-lg flex-shrink-0">🕐</span>
+                                      <div className="min-w-0">
+                                        <p className="text-sm font-semibold text-gray-800 dark:text-gray-200">{task.task}</p>
+                                        <div className="flex items-center gap-2 mt-1">
+                                          <span className="text-xs text-gray-500 dark:text-gray-400">Scheduled: {task.time}</span>
+                                          <span className="text-[10px] px-2 py-0.5 rounded-full bg-red-100 dark:bg-red-900/30 text-red-700 dark:text-red-300 font-medium">
+                                            {task.overdueDays.join(', ')}
+                                          </span>
+                                        </div>
+                                      </div>
+                                    </div>
+                                  ))}
+                                </div>
+                              </>
+                            )}
+                          </div>
+                        </div>
+                      </>
                     )}
-                  </button>
+                  </div>
                 );
               })()}
             </div>
@@ -1250,6 +1808,7 @@ function LSWContent() {
                 <table className="w-full">
                   <thead>
                     <tr className="bg-blue-100 dark:bg-blue-900/30">
+                      <th className="w-8"></th>
                       <th className="px-4 py-3 text-left text-xs font-bold text-gray-600 dark:text-gray-300 uppercase tracking-wide w-16">Min</th>
                       <th className="px-4 py-3 text-left text-xs font-bold text-gray-600 dark:text-gray-300 uppercase tracking-wide">Task/Meeting</th>
                       <th className="px-4 py-3 text-center text-xs font-bold text-gray-600 dark:text-gray-300 uppercase tracking-wide w-16">Time</th>
@@ -1269,11 +1828,96 @@ function LSWContent() {
                     </tr>
                   </thead>
                   <tbody className="divide-y divide-gray-200 dark:divide-gray-700">
-                    {dailyTasks.map((task) => (
-                      <tr key={task.id} className="hover:bg-gray-50 dark:hover:bg-gray-800/50 transition-colors group">
-                        <td className="px-4 py-3 text-sm text-gray-600 dark:text-gray-300">{task.minutes}</td>
-                        <td className="px-4 py-3 text-sm font-medium text-gray-800 dark:text-white">{task.task}</td>
-                        <td className="px-4 py-3 text-sm text-center text-gray-600 dark:text-gray-300">{task.time}</td>
+                    {dailyTasks.map((task) => {
+                      const isEditing = editingTaskId === task.id;
+                      const isDragging = dragTaskId === task.id;
+                      const isDragOver = dragOverTaskId === task.id;
+                      const isDropped = droppedTaskId === task.id;
+                      return (
+                      <tr
+                        key={task.id}
+                        draggable={!isEditing}
+                        onDragStart={(e) => handleDragStart(e, task.id)}
+                        onDragEnd={handleDragEnd}
+                        onDragOver={(e) => handleDragOver(e, task.id)}
+                        onDragLeave={handleDragLeave}
+                        onDrop={(e) => handleDrop(e, task.id)}
+                        className={`transition-all duration-200 group ${
+                          isDragging
+                            ? 'opacity-40 scale-[0.98] bg-emerald-50 dark:bg-emerald-900/20'
+                            : isDragOver
+                              ? 'bg-emerald-100 dark:bg-emerald-900/40 border-t-2 border-emerald-500 scale-[1.01] shadow-md'
+                              : isDropped
+                                ? 'animate-drop-bounce bg-emerald-50 dark:bg-emerald-900/20'
+                                : 'hover:bg-gray-50 dark:hover:bg-gray-800/50'
+                        }`}
+                        style={isDropped ? { animation: 'dropBounce 0.5s cubic-bezier(0.34, 1.56, 0.64, 1)' } : undefined}
+                      >
+                        <td className="px-1 py-1 text-center w-8">
+                          <div
+                            className={`cursor-grab active:cursor-grabbing p-1 rounded text-gray-300 dark:text-gray-600 hover:text-gray-500 dark:hover:text-gray-400 hover:bg-gray-100 dark:hover:bg-gray-700 transition-colors ${isDragging ? 'cursor-grabbing' : ''}`}
+                            title="Drag to reorder"
+                          >
+                            <svg className="w-4 h-4" fill="currentColor" viewBox="0 0 24 24">
+                              <circle cx="9" cy="6" r="1.5" />
+                              <circle cx="15" cy="6" r="1.5" />
+                              <circle cx="9" cy="12" r="1.5" />
+                              <circle cx="15" cy="12" r="1.5" />
+                              <circle cx="9" cy="18" r="1.5" />
+                              <circle cx="15" cy="18" r="1.5" />
+                            </svg>
+                          </div>
+                        </td>
+                        <td className="px-4 py-1 text-sm text-gray-600 dark:text-gray-300 w-16">
+                          {isEditing ? (
+                            <input
+                              type="number"
+                              min="0"
+                              max="480"
+                              value={editingValues?.minutes ?? 0}
+                              onChange={(e) => setEditingValues(prev => prev ? { ...prev, minutes: Math.max(0, parseInt(e.target.value) || 0) } : prev)}
+                              onBlur={handleInlineSave}
+                              onKeyDown={(e) => { if (e.key === 'Enter') { e.preventDefault(); handleInlineSave(); } }}
+                              className="w-14 px-1 py-1 text-sm text-center rounded border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-700 text-gray-800 dark:text-white focus:ring-2 focus:ring-emerald-500 focus:border-emerald-500"
+                            />
+                          ) : (
+                            <span onClick={() => handleStartEdit(task, 'minutes')} className="cursor-pointer hover:text-emerald-600 dark:hover:text-emerald-400 min-w-[2ch] inline-block">{task.minutes || '00'}</span>
+                          )}
+                        </td>
+                        <td className="px-4 py-1 text-sm font-medium text-gray-800 dark:text-white">
+                          {isEditing ? (
+                            <textarea
+                              ref={taskNameInputRef}
+                              value={editingValues?.task ?? ''}
+                              onChange={(e) => {
+                                setEditingValues(prev => prev ? { ...prev, task: e.target.value } : prev);
+                                e.target.style.height = 'auto';
+                                e.target.style.height = Math.min(e.target.scrollHeight, 120) + 'px';
+                              }}
+                              onBlur={handleInlineSave}
+                              onKeyDown={(e) => { if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); handleInlineSave(); } }}
+                              placeholder="Enter task name..."
+                              rows={1}
+                              className="w-full px-2 py-1 text-sm rounded border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-700 text-gray-800 dark:text-white placeholder-gray-400 focus:ring-2 focus:ring-emerald-500 focus:border-emerald-500 resize-none overflow-y-auto max-h-[120px]"
+                            />
+                          ) : (
+                            <span onClick={() => handleStartEdit(task, 'task')} className="cursor-pointer hover:text-emerald-600 dark:hover:text-emerald-400">{task.task || <span className="text-gray-400 italic">Enter task name...</span>}</span>
+                          )}
+                        </td>
+                        <td className="px-4 py-1 text-sm text-center text-gray-600 dark:text-gray-300 w-16">
+                          {isEditing ? (
+                            <input
+                              type="time"
+                              value={editingValues?.time ?? '00:00'}
+                              onChange={(e) => setEditingValues(prev => prev ? { ...prev, time: e.target.value } : prev)}
+                              onBlur={handleInlineSave}
+                              onKeyDown={(e) => { if (e.key === 'Enter') { e.preventDefault(); handleInlineSave(); } }}
+                              className="w-24 px-1 py-1 text-sm text-center rounded border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-700 text-gray-800 dark:text-white focus:ring-2 focus:ring-emerald-500 focus:border-emerald-500"
+                            />
+                          ) : (
+                            <span onClick={() => handleStartEdit(task, 'time')} className="cursor-pointer hover:text-emerald-600 dark:hover:text-emerald-400">{task.time || '00:00'}</span>
+                          )}
+                        </td>
                         {getVisibleDays().map((day) => {
                           const earlyDone = isEarlyCompleted(task.id, day);
                           return (
@@ -1329,14 +1973,15 @@ function LSWContent() {
                           </button>
                         </td>
                       </tr>
-                    ))}
+                      );
+                    })}
 
                   </tbody>
                 </table>
               </div>
               <div className="px-5 py-3 bg-gray-50 dark:bg-gray-900/50 border-t border-gray-200/50 dark:border-gray-700/50">
                 <button 
-                  onClick={() => setShowAddTaskModal(true)}
+                  onClick={handleAddTask}
                   className="text-sm text-emerald-600 dark:text-emerald-400 hover:text-emerald-700 dark:hover:text-emerald-300 font-medium flex items-center gap-1"
                 >
                   <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
@@ -1356,12 +2001,12 @@ function LSWContent() {
                 </h2>
               </div>
               <div className="overflow-x-auto">
-                <table className="w-full">
+                <table className="w-full table-fixed">
                   <thead>
                     <tr className="bg-blue-100 dark:bg-blue-900/30">
                       <th className="w-10"></th>
                       <th className="px-4 py-3 text-left text-xs font-semibold text-blue-700 dark:text-blue-300 uppercase tracking-wide w-12">#</th>
-                      <th className="px-4 py-3 text-left text-xs font-semibold text-blue-700 dark:text-blue-300 uppercase tracking-wide border-r border-blue-300 dark:border-blue-600">Project</th>
+                      <th className="px-4 py-3 text-left text-xs font-semibold text-blue-700 dark:text-blue-300 uppercase tracking-wide border-r border-blue-300 dark:border-blue-600 w-[40%]">Project</th>
                       <th className="px-4 py-3 text-left text-xs font-semibold text-blue-700 dark:text-blue-300 uppercase tracking-wide">Update</th>
                     </tr>
                   </thead>
@@ -1379,21 +2024,34 @@ function LSWContent() {
                       const cellBg = project.cellColor && typeof project.cellColorIntensity === 'number'
                         ? hexToRgba(project.cellColor, project.cellColorIntensity) 
                         : undefined;
+                      const isEditingThisProject = editingProjectId === project.id;
+                      const isStyleOpen = styleProjectId === project.id;
                       return (
+                      <Fragment key={project.id}>
                       <tr 
-                        key={project.id} 
                         className="transition-colors align-top"
                       >
                         <td className="pl-2 py-3">
-                          <button
-                            onClick={() => { setProjects(prev => prev.filter(p => p.id !== project.id)); deleteLswProject(project.id).catch(e => console.error('Failed to delete project:', e)); }}
-                            className="w-6 h-6 flex items-center justify-center rounded-full text-red-400 hover:text-red-600 hover:bg-red-50 dark:hover:bg-red-900/20 transition-colors"
-                            title="Delete project"
-                          >
-                            <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
-                            </svg>
-                          </button>
+                          <div className="flex flex-col items-center gap-1">
+                            <button
+                              onClick={() => { setProjects(prev => prev.filter(p => p.id !== project.id)); deleteLswProject(project.id).catch(e => console.error('Failed to delete project:', e)); }}
+                              className="w-6 h-6 flex items-center justify-center rounded-full text-red-400 hover:text-red-600 hover:bg-red-50 dark:hover:bg-red-900/20 transition-colors"
+                              title="Delete project"
+                            >
+                              <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
+                              </svg>
+                            </button>
+                            <button
+                              onClick={() => setStyleProjectId(isStyleOpen ? null : project.id)}
+                              className={`w-6 h-6 flex items-center justify-center rounded-full transition-colors ${isStyleOpen ? 'text-blue-600 bg-blue-50 dark:bg-blue-900/30' : 'text-gray-400 hover:text-blue-500 hover:bg-blue-50 dark:hover:bg-blue-900/20'}`}
+                              title="Row style settings"
+                            >
+                              <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M7 21a4 4 0 01-4-4V5a2 2 0 012-2h4a2 2 0 012 2v12a4 4 0 01-4 4zm0 0h12a2 2 0 002-2v-4a2 2 0 00-2-2h-2.343M11 7.343l1.657-1.657a2 2 0 012.828 0l2.829 2.829a2 2 0 010 2.828l-8.486 8.485M7 17h.01" />
+                              </svg>
+                            </button>
+                          </div>
                         </td>
                         <td className="px-4 py-3">
                           <div className="w-7 h-7 rounded-full bg-gradient-to-br from-blue-500 to-indigo-600 flex items-center justify-center text-white font-bold text-xs">
@@ -1401,7 +2059,7 @@ function LSWContent() {
                           </div>
                         </td>
                         <td 
-                          className="px-4 py-3 text-sm border-r border-gray-300 dark:border-gray-600 cursor-context-menu"
+                          className="px-4 py-3 text-sm border-r border-gray-300 dark:border-gray-600 break-all"
                           style={{ 
                             backgroundColor: cellBg,
                             color: project.fontColor || '#1f2937', 
@@ -1411,7 +2069,31 @@ function LSWContent() {
                           }}
                           onContextMenu={(e) => handleProjectContextMenu(e, project.id)}
                         >
-                          {project.name}
+                          {isEditingThisProject ? (
+                            <input
+                              ref={projectNameInputRef}
+                              type="text"
+                              value={editingProjectName}
+                              onChange={(e) => setEditingProjectName(e.target.value)}
+                              onBlur={handleProjectNameSave}
+                              onKeyDown={(e) => { if (e.key === 'Enter') { e.preventDefault(); handleProjectNameSave(); } }}
+                              placeholder="Enter project name..."
+                              className="w-full px-2 py-1 text-sm rounded border border-blue-300 dark:border-blue-600 bg-white dark:bg-gray-700 focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
+                              style={{ 
+                                color: project.fontColor || '#1f2937',
+                                fontFamily: project.fontFamily || 'Inter',
+                                fontWeight: project.fontBold ? 'bold' : 'normal',
+                                fontStyle: project.fontItalic ? 'italic' : 'normal'
+                              }}
+                            />
+                          ) : (
+                            <span 
+                              onClick={() => handleStartProjectEdit(project)} 
+                              className="cursor-pointer hover:opacity-70 transition-opacity whitespace-pre-wrap break-all"
+                            >
+                              {project.name || <span className="text-gray-400 italic font-normal">Enter project name...</span>}
+                            </span>
+                          )}
                         </td>
                         <td className="p-0">
                           <div className="divide-y divide-gray-200 dark:divide-gray-600">
@@ -1468,6 +2150,147 @@ function LSWContent() {
                           </div>
                         </td>
                       </tr>
+                      {/* Collapsible Style Settings Row */}
+                      {isStyleOpen && (
+                        <tr key={`${project.id}-style`}>
+                          <td colSpan={4} className="p-0">
+                            <div className="px-4 py-3 bg-gray-50 dark:bg-gray-800 border-b border-gray-200 dark:border-gray-700">
+                              <div className="grid grid-cols-2 gap-4">
+                                {/* Project Column Style */}
+                                <div className="p-3 rounded-xl bg-white dark:bg-gray-700/50 border border-gray-200 dark:border-gray-600">
+                                  <h4 className="text-sm font-semibold text-gray-700 dark:text-gray-300 mb-3 flex items-center gap-2">
+                                    <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M7 21a4 4 0 01-4-4V5a2 2 0 012-2h4a2 2 0 012 2v12a4 4 0 01-4 4zm0 0h12a2 2 0 002-2v-4a2 2 0 00-2-2h-2.343M11 7.343l1.657-1.657a2 2 0 012.828 0l2.829 2.829a2 2 0 010 2.828l-8.486 8.485M7 17h.01" />
+                                    </svg>
+                                    Project Column Style
+                                  </h4>
+                                  <div className="space-y-3">
+                                    {/* Font Color */}
+                                    <div>
+                                      <label className="block text-xs font-medium text-gray-600 dark:text-gray-400 mb-1.5">Font Color</label>
+                                      <div className="flex items-center gap-2">
+                                        <input type="color" value={project.fontColor || '#1f2937'}
+                                          onChange={(e) => { const c = e.target.value; setProjects(prev => prev.map(p => p.id === project.id ? { ...p, fontColor: c } : p)); updateLswProject(project.id, { fontColor: c } as any).catch(err => console.error(err)); }}
+                                          className="w-8 h-8 rounded-lg border border-gray-300 dark:border-gray-500 cursor-pointer bg-transparent" />
+                                        <div className="flex-1 flex flex-wrap gap-1">
+                                          {['#1f2937', '#dc2626', '#16a34a', '#2563eb', '#7c3aed'].map(color => (
+                                            <button key={color} onClick={() => { setProjects(prev => prev.map(p => p.id === project.id ? { ...p, fontColor: color } : p)); updateLswProject(project.id, { fontColor: color } as any).catch(err => console.error(err)); }}
+                                              className={`w-5 h-5 rounded-full border-2 transition-all ${project.fontColor === color ? 'border-blue-500 scale-110' : 'border-transparent hover:scale-105'}`}
+                                              style={{ backgroundColor: color }} />
+                                          ))}
+                                        </div>
+                                      </div>
+                                    </div>
+                                    {/* Font Style */}
+                                    <div>
+                                      <label className="block text-xs font-medium text-gray-600 dark:text-gray-400 mb-1.5">Font Style</label>
+                                      <div className="flex gap-2">
+                                        <select value={project.fontFamily || 'Inter'}
+                                          onChange={(e) => { const f = e.target.value; setProjects(prev => prev.map(p => p.id === project.id ? { ...p, fontFamily: f } : p)); updateLswProject(project.id, { fontFamily: f } as any).catch(err => console.error(err)); }}
+                                          className="flex-1 px-2 py-1.5 rounded-lg border border-gray-200 dark:border-gray-600 bg-white dark:bg-gray-600 text-gray-700 dark:text-gray-200 text-xs focus:ring-2 focus:ring-blue-500"
+                                          style={{ fontFamily: project.fontFamily || 'Inter' }}>
+                                          <option value="Inter">Inter</option>
+                                          <option value="Arial, sans-serif">Arial</option>
+                                          <option value="Georgia, serif">Georgia</option>
+                                          <option value="Verdana, sans-serif">Verdana</option>
+                                        </select>
+                                        <button type="button" onClick={() => { const v = !project.fontBold; setProjects(prev => prev.map(p => p.id === project.id ? { ...p, fontBold: v } : p)); updateLswProject(project.id, { fontBold: v } as any).catch(err => console.error(err)); }}
+                                          className={`w-8 h-8 rounded-lg border-2 flex items-center justify-center text-sm transition-all ${project.fontBold ? 'bg-blue-500 border-blue-500 text-white' : 'border-gray-300 dark:border-gray-500 text-gray-600 dark:text-gray-300'}`}>
+                                          <span className="font-bold">B</span>
+                                        </button>
+                                        <button type="button" onClick={() => { const v = !project.fontItalic; setProjects(prev => prev.map(p => p.id === project.id ? { ...p, fontItalic: v } : p)); updateLswProject(project.id, { fontItalic: v } as any).catch(err => console.error(err)); }}
+                                          className={`w-8 h-8 rounded-lg border-2 flex items-center justify-center text-sm transition-all ${project.fontItalic ? 'bg-blue-500 border-blue-500 text-white' : 'border-gray-300 dark:border-gray-500 text-gray-600 dark:text-gray-300'}`}>
+                                          <span className="italic">I</span>
+                                        </button>
+                                      </div>
+                                    </div>
+                                    {/* Cell Color */}
+                                    <div>
+                                      <label className="block text-xs font-medium text-gray-600 dark:text-gray-400 mb-1.5">Cell Background</label>
+                                      <div className="flex items-center gap-2">
+                                        <input type="color" value={project.cellColor || '#3b82f6'}
+                                          onChange={(e) => { const c = e.target.value; setProjects(prev => prev.map(p => p.id === project.id ? { ...p, cellColor: c } : p)); updateLswProject(project.id, { cellColor: c } as any).catch(err => console.error(err)); }}
+                                          className="w-8 h-8 rounded-lg border border-gray-300 dark:border-gray-500 cursor-pointer bg-transparent" />
+                                        <div className="flex-1 flex flex-wrap gap-1">
+                                          {['#3b82f6', '#22c55e', '#eab308', '#ef4444', '#a855f7'].map(color => (
+                                            <button key={color} onClick={() => { setProjects(prev => prev.map(p => p.id === project.id ? { ...p, cellColor: color } : p)); updateLswProject(project.id, { cellColor: color } as any).catch(err => console.error(err)); }}
+                                              className={`w-5 h-5 rounded-full border-2 transition-all ${project.cellColor === color ? 'border-blue-500 scale-110' : 'border-transparent hover:scale-105'}`}
+                                              style={{ backgroundColor: color }} />
+                                          ))}
+                                        </div>
+                                      </div>
+                                      <div className="mt-2 flex items-center gap-2">
+                                        <span className="text-[10px] text-gray-400">Light</span>
+                                        <input type="range" min="0" max="100" value={project.cellColorIntensity ?? 20}
+                                          onChange={(e) => { const v = parseInt(e.target.value); setProjects(prev => prev.map(p => p.id === project.id ? { ...p, cellColorIntensity: v } : p)); updateLswProject(project.id, { cellColorIntensity: v } as any).catch(err => console.error(err)); }}
+                                          className="flex-1 h-1.5 rounded-full appearance-none cursor-pointer"
+                                          style={{ background: `linear-gradient(to right, transparent 0%, ${project.cellColor || '#3b82f6'} 100%)` }} />
+                                        <span className="text-[10px] text-gray-400">{project.cellColorIntensity ?? 20}%</span>
+                                      </div>
+                                    </div>
+                                  </div>
+                                </div>
+                                {/* Update Column Style */}
+                                <div className="p-3 rounded-xl bg-emerald-50 dark:bg-emerald-900/20 border border-emerald-200 dark:border-emerald-700">
+                                  <h4 className="text-sm font-semibold text-gray-700 dark:text-gray-300 mb-3 flex items-center gap-2">
+                                    <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M11 5H6a2 2 0 00-2 2v11a2 2 0 002 2h11a2 2 0 002-2v-5m-1.414-9.414a2 2 0 112.828 2.828L11.828 15H9v-2.828l8.586-8.586z" />
+                                    </svg>
+                                    Update Column Style
+                                  </h4>
+                                  <div className="space-y-3">
+                                    {/* Font Color & Italic */}
+                                    <div>
+                                      <label className="block text-xs font-medium text-gray-600 dark:text-gray-400 mb-1.5">Font Color</label>
+                                      <div className="flex items-center gap-2">
+                                        <input type="color" value={project.defaultUpdateFontColor || '#4b5563'}
+                                          onChange={(e) => { const c = e.target.value; setProjects(prev => prev.map(p => p.id === project.id ? { ...p, defaultUpdateFontColor: c } : p)); updateLswProject(project.id, { defaultUpdateFontColor: c } as any).catch(err => console.error(err)); }}
+                                          className="w-8 h-8 rounded-lg border border-gray-300 dark:border-gray-500 cursor-pointer bg-transparent" />
+                                        <div className="flex-1 flex flex-wrap gap-1">
+                                          {['#4b5563', '#dc2626', '#16a34a', '#2563eb', '#7c3aed'].map(color => (
+                                            <button key={color} onClick={() => { setProjects(prev => prev.map(p => p.id === project.id ? { ...p, defaultUpdateFontColor: color } : p)); updateLswProject(project.id, { defaultUpdateFontColor: color } as any).catch(err => console.error(err)); }}
+                                              className={`w-5 h-5 rounded-full border-2 transition-all ${project.defaultUpdateFontColor === color ? 'border-emerald-500 scale-110' : 'border-transparent hover:scale-105'}`}
+                                              style={{ backgroundColor: color }} />
+                                          ))}
+                                        </div>
+                                        <button type="button" onClick={() => { const v = !project.defaultUpdateFontItalic; setProjects(prev => prev.map(p => p.id === project.id ? { ...p, defaultUpdateFontItalic: v } : p)); updateLswProject(project.id, { defaultUpdateFontItalic: v } as any).catch(err => console.error(err)); }}
+                                          className={`w-8 h-8 rounded-lg border-2 flex items-center justify-center text-sm transition-all flex-shrink-0 ${project.defaultUpdateFontItalic ? 'bg-emerald-500 border-emerald-500 text-white' : 'border-gray-300 dark:border-gray-500 text-gray-600 dark:text-gray-300'}`}>
+                                          <span className="italic">I</span>
+                                        </button>
+                                      </div>
+                                    </div>
+                                    {/* Cell Color */}
+                                    <div>
+                                      <label className="block text-xs font-medium text-gray-600 dark:text-gray-400 mb-1.5">Cell Background</label>
+                                      <div className="flex items-center gap-2">
+                                        <input type="color" value={project.defaultUpdateCellColor || '#10b981'}
+                                          onChange={(e) => { const c = e.target.value; setProjects(prev => prev.map(p => p.id === project.id ? { ...p, defaultUpdateCellColor: c } : p)); updateLswProject(project.id, { defaultUpdateCellColor: c } as any).catch(err => console.error(err)); }}
+                                          className="w-8 h-8 rounded-lg border border-gray-300 dark:border-gray-500 cursor-pointer bg-transparent" />
+                                        <div className="flex-1 flex flex-wrap gap-1">
+                                          {['#10b981', '#3b82f6', '#eab308', '#ef4444', '#a855f7'].map(color => (
+                                            <button key={color} onClick={() => { setProjects(prev => prev.map(p => p.id === project.id ? { ...p, defaultUpdateCellColor: color } : p)); updateLswProject(project.id, { defaultUpdateCellColor: color } as any).catch(err => console.error(err)); }}
+                                              className={`w-5 h-5 rounded-full border-2 transition-all ${project.defaultUpdateCellColor === color ? 'border-emerald-500 scale-110' : 'border-transparent hover:scale-105'}`}
+                                              style={{ backgroundColor: color }} />
+                                          ))}
+                                        </div>
+                                      </div>
+                                      <div className="mt-2 flex items-center gap-2">
+                                        <span className="text-[10px] text-gray-400">Light</span>
+                                        <input type="range" min="0" max="100" value={project.defaultUpdateCellColorIntensity ?? 10}
+                                          onChange={(e) => { const v = parseInt(e.target.value); setProjects(prev => prev.map(p => p.id === project.id ? { ...p, defaultUpdateCellColorIntensity: v } : p)); updateLswProject(project.id, { defaultUpdateCellColorIntensity: v } as any).catch(err => console.error(err)); }}
+                                          className="flex-1 h-1.5 rounded-full appearance-none cursor-pointer"
+                                          style={{ background: `linear-gradient(to right, transparent 0%, ${project.defaultUpdateCellColor || '#10b981'} 100%)` }} />
+                                        <span className="text-[10px] text-gray-400">{project.defaultUpdateCellColorIntensity ?? 10}%</span>
+                                      </div>
+                                    </div>
+                                  </div>
+                                </div>
+                              </div>
+                            </div>
+                          </td>
+                        </tr>
+                      )}
+                      </Fragment>
                     );
                     })}
                   </tbody>
@@ -1475,7 +2298,7 @@ function LSWContent() {
               </div>
               <div className="px-5 py-3 bg-gray-50 dark:bg-gray-900/50 border-t border-gray-200/50 dark:border-gray-700/50">
                 <button
-                  onClick={() => setShowAddProjectModal(true)}
+                  onClick={handleAddProject}
                   className="text-sm text-blue-600 dark:text-blue-400 hover:text-blue-700 dark:hover:text-blue-300 font-medium flex items-center gap-1"
                 >
                   <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
@@ -1519,33 +2342,95 @@ function LSWContent() {
                             </svg>
                           </button>
                         </td>
-                        <td className="px-4 py-3 text-sm font-medium text-gray-800 dark:text-white border-r border-gray-300 dark:border-gray-600">{followUp.task}</td>
-                        <td className="px-4 py-3 text-sm text-gray-600 dark:text-gray-300 border-r border-gray-300 dark:border-gray-600">
-                          <span className={`px-2 py-1 rounded-full text-xs font-medium ${
-                            new Date(followUp.dueDate) < new Date()
-                              ? 'bg-red-100 text-red-700 dark:bg-red-900/30 dark:text-red-400'
-                              : new Date(followUp.dueDate) < new Date(Date.now() + 3 * 24 * 60 * 60 * 1000)
-                              ? 'bg-amber-100 text-amber-700 dark:bg-amber-900/30 dark:text-amber-400'
-                              : 'bg-gray-100 text-gray-700 dark:bg-gray-700 dark:text-gray-300'
-                          }`}>
-                            {new Date(followUp.dueDate).toLocaleDateString('en-US', { month: 'short', day: 'numeric' })}
-                          </span>
+                        {/* Follow Up Task - inline editable */}
+                        <td className="px-4 py-2 border-r border-gray-300 dark:border-gray-600">
+                          {editingFollowUpId === followUp.id ? (
+                            <input
+                              ref={followUpTaskInputRef}
+                              type="text"
+                              value={editingFollowUpValues?.task ?? ''}
+                              onChange={(e) => setEditingFollowUpValues(prev => prev ? { ...prev, task: e.target.value } : prev)}
+                              onBlur={handleFollowUpInlineSave}
+                              onKeyDown={(e) => { if (e.key === 'Enter') { e.preventDefault(); handleFollowUpInlineSave(); } if (e.key === 'Escape') { setEditingFollowUpId(null); setEditingFollowUpValues(null); } }}
+                              placeholder="Enter follow up..."
+                              className="w-full px-2 py-1 text-sm font-medium text-gray-800 dark:text-white bg-transparent border border-amber-400 dark:border-amber-500 focus:ring-1 focus:ring-amber-400 dark:focus:ring-amber-500 rounded transition-colors"
+                            />
+                          ) : (
+                            <span
+                              onClick={() => handleStartFollowUpEdit(followUp, 'task')}
+                              className="block w-full px-2 py-1 text-sm font-medium text-gray-800 dark:text-white cursor-text border border-transparent hover:border-gray-300 dark:hover:border-gray-600 rounded transition-colors whitespace-pre-wrap break-words"
+                            >
+                              {followUp.task || <span className="text-gray-400 italic">Click to edit...</span>}
+                            </span>
+                          )}
                         </td>
-                        <td className="px-4 py-3 text-sm text-gray-600 dark:text-gray-300 border-r border-gray-300 dark:border-gray-600">{followUp.responsible}</td>
+                        {/* Due Date - inline editable */}
+                        <td className="px-4 py-2 border-r border-gray-300 dark:border-gray-600">
+                          {editingFollowUpId === followUp.id ? (
+                            <input
+                              type="date"
+                              value={editingFollowUpValues?.dueDate ?? ''}
+                              onChange={(e) => setEditingFollowUpValues(prev => prev ? { ...prev, dueDate: e.target.value } : prev)}
+                              onBlur={handleFollowUpInlineSave}
+                              onKeyDown={(e) => { if (e.key === 'Enter') { e.preventDefault(); handleFollowUpInlineSave(); } if (e.key === 'Escape') { setEditingFollowUpId(null); setEditingFollowUpValues(null); } }}
+                              className="w-full px-2 py-1 text-sm text-gray-600 dark:text-gray-300 bg-transparent border border-amber-400 dark:border-amber-500 focus:ring-1 focus:ring-amber-400 dark:focus:ring-amber-500 rounded transition-colors"
+                            />
+                          ) : (
+                            <span
+                              onClick={() => handleStartFollowUpEdit(followUp)}
+                              className={`inline-block px-2 py-1 rounded-full text-xs font-medium cursor-pointer ${
+                                new Date(followUp.dueDate) < new Date()
+                                  ? 'bg-red-100 text-red-700 dark:bg-red-900/30 dark:text-red-400'
+                                  : new Date(followUp.dueDate) < new Date(Date.now() + 3 * 24 * 60 * 60 * 1000)
+                                  ? 'bg-amber-100 text-amber-700 dark:bg-amber-900/30 dark:text-amber-400'
+                                  : 'bg-gray-100 text-gray-700 dark:bg-gray-700 dark:text-gray-300'
+                              } whitespace-nowrap`}
+                            >
+                              {followUp.dueDate ? new Date(followUp.dueDate).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' }) : 'Set date'}
+                            </span>
+                          )}
+                        </td>
+                        {/* Responsible - inline editable */}
+                        <td className="px-4 py-2 border-r border-gray-300 dark:border-gray-600">
+                          {editingFollowUpId === followUp.id ? (
+                            <input
+                              type="text"
+                              value={editingFollowUpValues?.responsible ?? ''}
+                              onChange={(e) => setEditingFollowUpValues(prev => prev ? { ...prev, responsible: e.target.value } : prev)}
+                              onBlur={handleFollowUpInlineSave}
+                              onKeyDown={(e) => { if (e.key === 'Enter') { e.preventDefault(); handleFollowUpInlineSave(); } if (e.key === 'Escape') { setEditingFollowUpId(null); setEditingFollowUpValues(null); } }}
+                              placeholder="Responsible..."
+                              className="w-full px-2 py-1 text-sm text-gray-600 dark:text-gray-300 bg-transparent border border-amber-400 dark:border-amber-500 focus:ring-1 focus:ring-amber-400 dark:focus:ring-amber-500 rounded transition-colors"
+                            />
+                          ) : (
+                            <span
+                              onClick={() => handleStartFollowUpEdit(followUp)}
+                              className="block w-full px-2 py-1 text-sm text-gray-600 dark:text-gray-300 cursor-text border border-transparent hover:border-gray-300 dark:hover:border-gray-600 rounded transition-colors"
+                            >
+                              {followUp.responsible || <span className="text-gray-400 italic">Click to edit...</span>}
+                            </span>
+                          )}
+                        </td>
+                        {/* Comments - always inline editable (preserve existing behavior) */}
                         <td className="px-4 py-2 border-l border-gray-300 dark:border-gray-600">
                           <textarea
-                            value={followUp.comments}
+                            value={editingFollowUpId === followUp.id ? (editingFollowUpValues?.comments ?? '') : followUp.comments}
                             onChange={(e) => {
                               const val = e.target.value;
-                              setFollowUps(ups =>
-                                ups.map(u =>
-                                  u.id === followUp.id ? { ...u, comments: val } : u
-                                )
-                              );
+                              if (editingFollowUpId === followUp.id) {
+                                setEditingFollowUpValues(prev => prev ? { ...prev, comments: val } : prev);
+                              } else {
+                                setFollowUps(ups => ups.map(u => u.id === followUp.id ? { ...u, comments: val } : u));
+                              }
                             }}
                             onBlur={() => {
-                              updateLswFollowUp(followUp.id, { comments: followUp.comments } as any).catch(e => console.error('Failed to update comment:', e));
+                              if (editingFollowUpId === followUp.id) {
+                                handleFollowUpInlineSave();
+                              } else {
+                                updateLswFollowUp(followUp.id, { comments: followUp.comments } as any).catch(e => console.error('Failed to update comment:', e));
+                              }
                             }}
+                            onKeyDown={(e) => { if (e.key === 'Escape') { setEditingFollowUpId(null); setEditingFollowUpValues(null); } }}
                             placeholder="Add comment..."
                             rows={1}
                             className="w-full min-w-[200px] px-2 py-1 text-sm text-gray-600 dark:text-gray-300 bg-transparent border border-transparent hover:border-gray-300 dark:hover:border-gray-600 focus:border-amber-400 dark:focus:border-amber-500 focus:ring-1 focus:ring-amber-400 dark:focus:ring-amber-500 rounded resize-none overflow-hidden transition-colors"
@@ -1564,7 +2449,7 @@ function LSWContent() {
               </div>
               <div className="px-5 py-3 bg-gray-50 dark:bg-gray-900/50 border-t border-gray-200/50 dark:border-gray-700/50">
                 <button 
-                  onClick={() => setShowAddFollowUpModal(true)}
+                  onClick={handleAddFollowUp}
                   className="text-sm text-amber-600 dark:text-amber-400 hover:text-amber-700 dark:hover:text-amber-300 font-medium flex items-center gap-1"
                 >
                   <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
@@ -1584,44 +2469,115 @@ function LSWContent() {
                 </h2>
               </div>
               <div className="overflow-x-auto">
-                <table className="w-full">
+                <table className="w-full table-fixed">
                   <thead>
                     <tr className="bg-blue-100 dark:bg-blue-900/30">
-                      <th className="px-4 py-3 text-left text-xs font-bold text-gray-600 dark:text-gray-300 uppercase tracking-wide">RCA Event Trigger</th>
+                      <th className="w-16"></th>
+                      <th className="px-4 py-3 text-left text-xs font-bold text-gray-600 dark:text-gray-300 uppercase tracking-wide w-[40%]">RCA Event Trigger</th>
                       <th className="px-4 py-3 text-left text-xs font-bold text-gray-600 dark:text-gray-300 uppercase tracking-wide w-32">Event Date</th>
                       <th className="px-4 py-3 text-left text-xs font-bold text-gray-600 dark:text-gray-300 uppercase tracking-wide">Comments/Notes</th>
-                      <th className="px-4 py-3 text-center text-xs font-bold text-gray-600 dark:text-gray-300 uppercase tracking-wide w-16">Action</th>
                     </tr>
                   </thead>
                   <tbody className="divide-y divide-gray-200 dark:divide-gray-700">
                     {rcaTriggers.map((trigger) => (
-                      <tr key={trigger.id} className="hover:bg-gray-50 dark:hover:bg-gray-800/50 transition-colors">
-                        <td className="px-4 py-3">
-                          <span className="text-sm font-medium text-gray-800 dark:text-white">{trigger.trigger}</span>
+                      <tr key={trigger.id} className="hover:bg-gray-50 dark:hover:bg-gray-800/50 transition-colors group">
+                        {/* Action buttons: delete + add row */}
+                        <td className="pl-2 py-2">
+                          <div className="flex items-center gap-0.5">
+                            <button
+                              onClick={() => { setRcaTriggers(prev => prev.filter(t => t.id !== trigger.id)); deleteLswRcaTrigger(trigger.id).catch(e => console.error('Failed to delete trigger:', e)); }}
+                              className="w-6 h-6 flex items-center justify-center rounded-full text-red-400 hover:text-red-600 hover:bg-red-50 dark:hover:bg-red-900/20 transition-colors"
+                              title="Delete trigger"
+                            >
+                              <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
+                              </svg>
+                            </button>
+                            <button
+                              onClick={handleAddTrigger}
+                              className="w-6 h-6 flex items-center justify-center rounded-full text-red-400 hover:text-red-600 hover:bg-red-50 dark:hover:bg-red-900/20 transition-colors opacity-0 group-hover:opacity-100"
+                              title="Add trigger below"
+                            >
+                              <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 4v16m8-8H4" />
+                              </svg>
+                            </button>
+                          </div>
                         </td>
-                        <td className="px-4 py-3">
-                          <span className="text-sm text-gray-600 dark:text-gray-400">
-                            {trigger.eventDate 
-                              ? new Date(trigger.eventDate).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' })
-                              : '—'
-                            }
-                          </span>
+                        {/* RCA Event Trigger - inline editable */}
+                        <td className="px-4 py-2 break-all">
+                          {editingTriggerId === trigger.id ? (
+                            <input
+                              ref={triggerInputRef}
+                              type="text"
+                              value={editingTriggerValues?.trigger ?? ''}
+                              onChange={(e) => setEditingTriggerValues(prev => prev ? { ...prev, trigger: e.target.value } : prev)}
+                              onBlur={handleTriggerInlineSave}
+                              onKeyDown={(e) => { if (e.key === 'Enter') { e.preventDefault(); handleTriggerInlineSave(); } if (e.key === 'Escape') { setEditingTriggerId(null); setEditingTriggerValues(null); } }}
+                              placeholder="Enter trigger..."
+                              className="w-full px-2 py-1 text-sm font-medium text-gray-800 dark:text-white bg-transparent border border-red-400 dark:border-red-500 focus:ring-1 focus:ring-red-400 dark:focus:ring-red-500 rounded transition-colors"
+                            />
+                          ) : (
+                            <span
+                              onClick={() => handleStartTriggerEdit(trigger, 'trigger')}
+                              className="block w-full px-2 py-1 text-sm font-medium text-gray-800 dark:text-white cursor-text border border-transparent hover:border-gray-300 dark:hover:border-gray-600 rounded transition-colors whitespace-pre-wrap break-all"
+                            >
+                              {trigger.trigger || <span className="text-gray-400 italic">Click to edit...</span>}
+                            </span>
+                          )}
                         </td>
-                        <td className="px-4 py-3">
-                          <span className="text-sm text-gray-600 dark:text-gray-400">
-                            {trigger.comments || '—'}
-                          </span>
+                        {/* Event Date - inline editable */}
+                        <td className="px-4 py-2">
+                          {editingTriggerId === trigger.id ? (
+                            <input
+                              type="date"
+                              value={editingTriggerValues?.eventDate ?? ''}
+                              onChange={(e) => setEditingTriggerValues(prev => prev ? { ...prev, eventDate: e.target.value } : prev)}
+                              onBlur={handleTriggerInlineSave}
+                              onKeyDown={(e) => { if (e.key === 'Enter') { e.preventDefault(); handleTriggerInlineSave(); } if (e.key === 'Escape') { setEditingTriggerId(null); setEditingTriggerValues(null); } }}
+                              className="w-full px-2 py-1 text-sm text-gray-600 dark:text-gray-300 bg-transparent border border-red-400 dark:border-red-500 focus:ring-1 focus:ring-red-400 dark:focus:ring-red-500 rounded transition-colors"
+                            />
+                          ) : (
+                            <span
+                              onClick={() => handleStartTriggerEdit(trigger)}
+                              className="block w-full px-2 py-1 text-sm text-gray-600 dark:text-gray-400 cursor-pointer border border-transparent hover:border-gray-300 dark:hover:border-gray-600 rounded transition-colors"
+                            >
+                              {trigger.eventDate 
+                                ? new Date(trigger.eventDate).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' })
+                                : <span className="text-gray-400 italic">Set date...</span>
+                              }
+                            </span>
+                          )}
                         </td>
-                        <td className="px-4 py-3 text-center">
-                          <button
-                            onClick={() => { setRcaTriggers(prev => prev.filter(t => t.id !== trigger.id)); deleteLswRcaTrigger(trigger.id).catch(e => console.error('Failed to delete trigger:', e)); }}
-                            className="p-1.5 rounded-lg text-gray-400 hover:text-red-500 hover:bg-red-50 dark:hover:bg-red-900/30 transition-colors"
-                            title="Delete trigger"
-                          >
-                            <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
-                            </svg>
-                          </button>
+                        {/* Comments - inline editable */}
+                        <td className="px-4 py-2">
+                          <textarea
+                            value={editingTriggerId === trigger.id ? (editingTriggerValues?.comments ?? '') : trigger.comments}
+                            onChange={(e) => {
+                              const val = e.target.value;
+                              if (editingTriggerId === trigger.id) {
+                                setEditingTriggerValues(prev => prev ? { ...prev, comments: val } : prev);
+                              } else {
+                                setRcaTriggers(prev => prev.map(t => t.id === trigger.id ? { ...t, comments: val } : t));
+                              }
+                            }}
+                            onBlur={() => {
+                              if (editingTriggerId === trigger.id) {
+                                handleTriggerInlineSave();
+                              } else {
+                                updateLswRcaTrigger(trigger.id, { comments: trigger.comments } as any).catch(e => console.error('Failed to update comment:', e));
+                              }
+                            }}
+                            onKeyDown={(e) => { if (e.key === 'Escape') { setEditingTriggerId(null); setEditingTriggerValues(null); } }}
+                            placeholder="Add comment..."
+                            rows={1}
+                            className="w-full min-w-[200px] px-2 py-1 text-sm text-gray-600 dark:text-gray-300 bg-transparent border border-transparent hover:border-gray-300 dark:hover:border-gray-600 focus:border-red-400 dark:focus:border-red-500 focus:ring-1 focus:ring-red-400 dark:focus:ring-red-500 rounded resize-none overflow-hidden transition-colors whitespace-pre-wrap break-words"
+                            onInput={(e) => {
+                              const target = e.target as HTMLTextAreaElement;
+                              target.style.height = 'auto';
+                              target.style.height = target.scrollHeight + 'px';
+                            }}
+                          />
                         </td>
                       </tr>
                     ))}
@@ -1630,7 +2586,7 @@ function LSWContent() {
               </div>
               <div className="px-5 py-3 bg-gray-50 dark:bg-gray-900/50 border-t border-gray-200/50 dark:border-gray-700/50">
                 <button 
-                  onClick={() => setShowAddTriggerModal(true)}
+                  onClick={handleAddTrigger}
                   className="text-sm text-red-600 dark:text-red-400 hover:text-red-700 dark:hover:text-red-300 font-medium flex items-center gap-1"
                 >
                   <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
@@ -1648,161 +2604,111 @@ function LSWContent() {
                   <span className="text-xl">📆</span>
                   Scheduled Tasks/Meetings
                 </h2>
-                <button
-                  onClick={() => setShowAddScheduledTaskModal(true)}
-                  className="px-3 py-1.5 text-sm font-medium text-white bg-violet-500 hover:bg-violet-600 rounded-lg transition-colors flex items-center gap-1"
-                >
-                  <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 4v16m8-8H4" />
-                  </svg>
-                  Add
-                </button>
               </div>
               <div className="divide-y divide-gray-200 dark:divide-gray-700">
-                {/* Bi-Weekly */}
-                <div className="py-3">
-                  <h3 className="text-xs font-semibold text-blue-800 dark:text-blue-200 uppercase tracking-wide mb-0 px-4 py-2 bg-blue-100 dark:bg-blue-900/50">Bi-Weekly (Standard Tasks/Meetings)</h3>
-                  <table className="w-full">
-                    <thead>
-                      <tr className="text-xs text-blue-700 dark:text-blue-300 bg-blue-50 dark:bg-blue-900/30">
-                        <th className="px-4 py-1.5 text-left w-12 border-r border-gray-300 dark:border-gray-600">Min</th>
-                        <th className="px-1 py-1.5 text-left">Task/Meeting</th>
-                        <th className="px-4 py-1.5 text-right whitespace-nowrap w-20 border-l border-gray-300 dark:border-gray-600">Due Date</th>
-                        <th className="w-8"></th>
-                      </tr>
-                    </thead>
-                    <tbody>
-                      {frequencyTasks.filter(t => t.frequency === 'biweekly').map(task => (
-                        <tr key={task.id} className="text-sm hover:bg-gray-50 dark:hover:bg-gray-700/30 border-b border-gray-300 dark:border-gray-600">
-                          <td className="px-1 py-2 text-gray-500 dark:text-gray-400 border-r border-gray-300 dark:border-gray-600">{task.minutes}</td>
-                          <td className="px-1 py-2 text-gray-700 dark:text-gray-300">{task.task}</td>
-                          <td className="px-1 py-2 text-right text-gray-500 dark:text-gray-400 text-xs w-20 border-l border-gray-300 dark:border-gray-600">
-                            {new Date(task.dueDate).toLocaleDateString('en-US', { month: 'short', day: 'numeric' })}
-                          </td>
-                          <td className="px-1 py-2 text-center">
-                            <button
-                              onClick={() => { setFrequencyTasks(prev => prev.filter(t => t.id !== task.id)); deleteLswFrequencyTask(task.id).catch(e => console.error('Failed to delete freq task:', e)); }}
-                              className="text-gray-400 hover:text-red-500 dark:hover:text-red-400 transition-colors"
-                              title="Delete task"
-                            >
-                              <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
-                              </svg>
-                            </button>
-                          </td>
-                        </tr>
-                      ))}
-                    </tbody>
-                  </table>
-                </div>
-                {/* Monthly */}
-                <div className="py-3">
-                  <h3 className="text-xs font-semibold text-blue-800 dark:text-blue-200 uppercase tracking-wide mb-0 px-4 py-2 bg-blue-100 dark:bg-blue-900/50">Monthly (Standard Tasks/Meetings)</h3>
-                  <table className="w-full">
-                    <thead>
-                      <tr className="text-xs text-blue-700 dark:text-blue-300 bg-blue-50 dark:bg-blue-900/30">
-                        <th className="px-4 py-1.5 text-left w-12 border-r border-gray-300 dark:border-gray-600">Min</th>
-                        <th className="px-1 py-1.5 text-left">Task/Meeting</th>
-                        <th className="px-4 py-1.5 text-right whitespace-nowrap w-20 border-l border-gray-300 dark:border-gray-600">Due Date</th>
-                        <th className="w-8"></th>
-                      </tr>
-                    </thead>
-                    <tbody>
-                      {frequencyTasks.filter(t => t.frequency === 'monthly').map(task => (
-                        <tr key={task.id} className="text-sm hover:bg-gray-50 dark:hover:bg-gray-700/30 border-b border-gray-300 dark:border-gray-600">
-                          <td className="px-1 py-2 text-gray-500 dark:text-gray-400 border-r border-gray-300 dark:border-gray-600">{task.minutes}</td>
-                          <td className="px-1 py-2 text-gray-700 dark:text-gray-300">{task.task}</td>
-                          <td className="px-1 py-2 text-right text-gray-500 dark:text-gray-400 text-xs w-20 border-l border-gray-300 dark:border-gray-600">
-                            {new Date(task.dueDate).toLocaleDateString('en-US', { month: 'short', day: 'numeric' })}
-                          </td>
-                          <td className="px-1 py-2 text-center">
-                            <button
-                              onClick={() => { setFrequencyTasks(prev => prev.filter(t => t.id !== task.id)); deleteLswFrequencyTask(task.id).catch(e => console.error('Failed to delete freq task:', e)); }}
-                              className="text-gray-400 hover:text-red-500 dark:hover:text-red-400 transition-colors"
-                              title="Delete task"
-                            >
-                              <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
-                              </svg>
-                            </button>
-                          </td>
-                        </tr>
-                      ))}
-                    </tbody>
-                  </table>
-                </div>
-                {/* Quarterly */}
-                <div className="py-3">
-                  <h3 className="text-xs font-semibold text-blue-800 dark:text-blue-200 uppercase tracking-wide mb-0 px-4 py-2 bg-blue-100 dark:bg-blue-900/50">Quarterly (Standard Tasks/Meetings)</h3>
-                  <table className="w-full">
-                    <thead>
-                      <tr className="text-xs text-blue-700 dark:text-blue-300 bg-blue-50 dark:bg-blue-900/30">
-                        <th className="px-4 py-1.5 text-left w-12 border-r border-gray-300 dark:border-gray-600">Min</th>
-                        <th className="px-1 py-1.5 text-left">Task/Meeting</th>
-                        <th className="px-4 py-1.5 text-right whitespace-nowrap w-20 border-l border-gray-300 dark:border-gray-600">Due Date</th>
-                        <th className="w-8"></th>
-                      </tr>
-                    </thead>
-                    <tbody>
-                      {frequencyTasks.filter(t => t.frequency === 'quarterly').map(task => (
-                        <tr key={task.id} className="text-sm hover:bg-gray-50 dark:hover:bg-gray-700/30 border-b border-gray-300 dark:border-gray-600">
-                          <td className="px-1 py-2 text-gray-500 dark:text-gray-400 border-r border-gray-300 dark:border-gray-600">{task.minutes}</td>
-                          <td className="px-1 py-2 text-gray-700 dark:text-gray-300">{task.task}</td>
-                          <td className="px-1 py-2 text-right text-gray-500 dark:text-gray-400 text-xs w-20 border-l border-gray-300 dark:border-gray-600">
-                            {new Date(task.dueDate).toLocaleDateString('en-US', { month: 'short', day: 'numeric' })}
-                          </td>
-                          <td className="px-1 py-2 text-center">
-                            <button
-                              onClick={() => { setFrequencyTasks(prev => prev.filter(t => t.id !== task.id)); deleteLswFrequencyTask(task.id).catch(e => console.error('Failed to delete freq task:', e)); }}
-                              className="text-gray-400 hover:text-red-500 dark:hover:text-red-400 transition-colors"
-                              title="Delete task"
-                            >
-                              <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
-                              </svg>
-                            </button>
-                          </td>
-                        </tr>
-                      ))}
-                    </tbody>
-                  </table>
-                </div>
-                {/* Annually */}
-                <div className="py-3">
-                  <h3 className="text-xs font-semibold text-blue-800 dark:text-blue-200 uppercase tracking-wide mb-0 px-4 py-2 bg-blue-100 dark:bg-blue-900/50">Annually (Standard Tasks/Meetings)</h3>
-                  <table className="w-full">
-                    <thead>
-                      <tr className="text-xs text-blue-700 dark:text-blue-300 bg-blue-50 dark:bg-blue-900/30">
-                        <th className="px-4 py-1.5 text-left w-12 border-r border-gray-300 dark:border-gray-600">Min</th>
-                        <th className="px-1 py-1.5 text-left">Task/Meeting</th>
-                        <th className="px-4 py-1.5 text-right whitespace-nowrap w-20 border-l border-gray-300 dark:border-gray-600">Due Date</th>
-                        <th className="w-8"></th>
-                      </tr>
-                    </thead>
-                    <tbody>
-                      {frequencyTasks.filter(t => t.frequency === 'annually').map(task => (
-                        <tr key={task.id} className="text-sm hover:bg-gray-50 dark:hover:bg-gray-700/30 border-b border-gray-300 dark:border-gray-600">
-                          <td className="px-1 py-2 text-gray-500 dark:text-gray-400 border-r border-gray-300 dark:border-gray-600">{task.minutes}</td>
-                          <td className="px-1 py-2 text-gray-700 dark:text-gray-300">{task.task}</td>
-                          <td className="px-1 py-2 text-right text-gray-500 dark:text-gray-400 text-xs w-20 border-l border-gray-300 dark:border-gray-600">
-                            {new Date(task.dueDate).toLocaleDateString('en-US', { month: 'short', day: 'numeric' })}
-                          </td>
-                          <td className="px-1 py-2 text-center">
-                            <button
-                              onClick={() => { setFrequencyTasks(prev => prev.filter(t => t.id !== task.id)); deleteLswFrequencyTask(task.id).catch(e => console.error('Failed to delete freq task:', e)); }}
-                              className="text-gray-400 hover:text-red-500 dark:hover:text-red-400 transition-colors"
-                              title="Delete task"
-                            >
-                              <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
-                              </svg>
-                            </button>
-                          </td>
-                        </tr>
-                      ))}
-                    </tbody>
-                  </table>
-                </div>
+                {(['biweekly', 'monthly', 'quarterly', 'annually'] as const).map(freq => {
+                  const label = freq === 'biweekly' ? 'Bi-Weekly' : freq === 'monthly' ? 'Monthly' : freq === 'quarterly' ? 'Quarterly' : 'Annually';
+                  const tasksForFreq = frequencyTasks.filter(t => t.frequency === freq);
+                  return (
+                    <div key={freq} className="py-3">
+                      <div className="flex items-center justify-between px-4 py-2 bg-blue-100 dark:bg-blue-900/50">
+                        <h3 className="text-xs font-semibold text-blue-800 dark:text-blue-200 uppercase tracking-wide">{label} (Standard Tasks/Meetings)</h3>
+                        <button
+                          onClick={() => handleAddFreqTask(freq)}
+                          className="text-blue-600 hover:text-blue-800 dark:text-blue-300 dark:hover:text-blue-100 transition-colors"
+                          title={`Add ${label} task`}
+                        >
+                          <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 4v16m8-8H4" /></svg>
+                        </button>
+                      </div>
+                      <table className="w-full table-fixed">
+                        <thead>
+                          <tr className="text-xs text-blue-700 dark:text-blue-300 bg-blue-50 dark:bg-blue-900/30">
+                            <th className="px-4 py-1.5 text-left w-12 border-r border-gray-300 dark:border-gray-600">Min</th>
+                            <th className="px-1 py-1.5 text-left">Task/Meeting</th>
+                            <th className="px-4 py-1.5 text-right whitespace-nowrap w-24 border-l border-gray-300 dark:border-gray-600">Due Date</th>
+                            <th className="w-14"></th>
+                          </tr>
+                        </thead>
+                        <tbody>
+                          {tasksForFreq.map(task => (
+                            <tr key={task.id} className="group text-sm hover:bg-gray-50 dark:hover:bg-gray-700/30 border-b border-gray-300 dark:border-gray-600">
+                              {/* Minutes */}
+                              <td className="px-1 py-2 text-gray-500 dark:text-gray-400 border-r border-gray-300 dark:border-gray-600">
+                                {editingFreqTaskId === task.id ? (
+                                  <input
+                                    type="number"
+                                    value={editingFreqTaskValues?.minutes ?? ''}
+                                    onChange={e => setEditingFreqTaskValues(prev => prev ? { ...prev, minutes: parseInt(e.target.value) || 0 } : prev)}
+                                    onBlur={handleFreqTaskInlineSave}
+                                    onKeyDown={e => { if (e.key === 'Enter') handleFreqTaskInlineSave(); if (e.key === 'Escape') { setEditingFreqTaskId(null); setEditingFreqTaskValues(null); } }}
+                                    className="w-full bg-transparent border-b border-blue-400 focus:outline-none text-sm px-0"
+                                    min="0"
+                                  />
+                                ) : (
+                                  <span onClick={() => handleStartFreqTaskEdit(task, 'minutes')} className="cursor-pointer">{task.minutes}</span>
+                                )}
+                              </td>
+                              {/* Task/Meeting */}
+                              <td className="px-1 py-2 text-gray-700 dark:text-gray-300 whitespace-pre-wrap break-words">
+                                {editingFreqTaskId === task.id ? (
+                                  <input
+                                    ref={freqTaskInputRef}
+                                    type="text"
+                                    value={editingFreqTaskValues?.task ?? ''}
+                                    onChange={e => setEditingFreqTaskValues(prev => prev ? { ...prev, task: e.target.value } : prev)}
+                                    onBlur={handleFreqTaskInlineSave}
+                                    onKeyDown={e => { if (e.key === 'Enter') handleFreqTaskInlineSave(); if (e.key === 'Escape') { setEditingFreqTaskId(null); setEditingFreqTaskValues(null); } }}
+                                    className="w-full bg-transparent border-b border-blue-400 focus:outline-none text-sm px-0"
+                                    placeholder="Task/Meeting name..."
+                                  />
+                                ) : (
+                                  <span onClick={() => handleStartFreqTaskEdit(task, 'task')} className="cursor-pointer whitespace-pre-wrap break-words">{task.task}</span>
+                                )}
+                              </td>
+                              {/* Due Date */}
+                              <td className="px-1 py-2 text-right text-gray-500 dark:text-gray-400 text-xs border-l border-gray-300 dark:border-gray-600">
+                                {editingFreqTaskId === task.id ? (
+                                  <input
+                                    type="date"
+                                    value={editingFreqTaskValues?.dueDate ?? ''}
+                                    onChange={e => setEditingFreqTaskValues(prev => prev ? { ...prev, dueDate: e.target.value } : prev)}
+                                    onBlur={handleFreqTaskInlineSave}
+                                    onKeyDown={e => { if (e.key === 'Enter') handleFreqTaskInlineSave(); if (e.key === 'Escape') { setEditingFreqTaskId(null); setEditingFreqTaskValues(null); } }}
+                                    className="w-full bg-transparent border-b border-blue-400 focus:outline-none text-xs px-0"
+                                  />
+                                ) : (
+                                  <span onClick={() => handleStartFreqTaskEdit(task, 'dueDate')} className="cursor-pointer">
+                                    {new Date(task.dueDate).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' })}
+                                  </span>
+                                )}
+                              </td>
+                              {/* Actions */}
+                              <td className="px-1 py-2 text-center">
+                                <div className="flex items-center justify-center gap-1">
+                                  <button
+                                    onClick={() => handleAddFreqTask(freq)}
+                                    className="text-gray-400 hover:text-blue-500 dark:hover:text-blue-400 transition-colors opacity-0 group-hover:opacity-100"
+                                    title="Add task below"
+                                  >
+                                    <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 4v16m8-8H4" /></svg>
+                                  </button>
+                                  <button
+                                    onClick={() => { setFrequencyTasks(prev => prev.filter(t => t.id !== task.id)); deleteLswFrequencyTask(task.id).catch(e => console.error('Failed to delete freq task:', e)); }}
+                                    className="text-gray-400 hover:text-red-500 dark:hover:text-red-400 transition-colors"
+                                    title="Delete task"
+                                  >
+                                    <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" /></svg>
+                                  </button>
+                                </div>
+                              </td>
+                            </tr>
+                          ))}
+                        </tbody>
+                      </table>
+                    </div>
+                  );
+                })}
               </div>
             </div>
           </div>
@@ -1828,19 +2734,7 @@ function LSWContent() {
                 </div>
               </div>
               <div className="divide-y divide-gray-200 dark:divide-gray-700 max-h-[400px] overflow-y-auto">
-                {[...todoItems]
-                  .sort((a, b) => {
-                    // Items without time go to the end
-                    if (!a.dueDate && !b.dueDate) return 0;
-                    if (!a.dueDate) return 1;
-                    if (!b.dueDate) return -1;
-                    // Sort by time (earlier first)
-                    const [aHours, aMinutes] = a.dueDate.split(':').map(Number);
-                    const [bHours, bMinutes] = b.dueDate.split(':').map(Number);
-                    const aTime = aHours * 60 + aMinutes;
-                    const bTime = bHours * 60 + bMinutes;
-                    return aTime - bTime;
-                  })
+                {todoItems
                   .map((item) => {
                     const isPastDue = item.dueDate && !item.completed && (() => {
                       const [hours, minutes] = item.dueDate.split(':').map(Number);
@@ -1849,28 +2743,61 @@ function LSWContent() {
                       return currentTime > dueTime;
                     })();
                     const isUpcoming = item.dueDate && !item.completed && !isPastDue;
+                    const isEditing = editingTodoId === item.id;
+                    const isTodoDragging = dragTodoId === item.id;
+                    const isTodoDragOver = dragOverTodoId === item.id;
+                    const isTodoDropped = droppedTodoId === item.id;
                     
                     return (
                   <div
                     key={item.id}
-                    className={`px-5 py-3 transition-colors cursor-pointer ${
-                      item.completed
-                        ? 'bg-gray-50 dark:bg-gray-800/30 hover:bg-gray-100 dark:hover:bg-gray-800/50'
-                        : isPastDue
-                          ? 'bg-yellow-50 dark:bg-yellow-900/20 hover:bg-yellow-100 dark:hover:bg-yellow-900/30'
-                          : isUpcoming
-                            ? 'bg-green-50 dark:bg-green-900/20 hover:bg-green-100 dark:hover:bg-green-900/30'
-                            : 'hover:bg-gray-50 dark:hover:bg-gray-800/50'
+                    draggable={!isEditing}
+                    onDragStart={(e) => handleTodoDragStart(e, item.id)}
+                    onDragEnd={handleTodoDragEnd}
+                    onDragOver={(e) => handleTodoDragOver(e, item.id)}
+                    onDragLeave={handleTodoDragLeave}
+                    onDrop={(e) => handleTodoDrop(e, item.id)}
+                    className={`group px-5 py-3 transition-all duration-200 ${
+                      isTodoDragging
+                        ? 'opacity-40 scale-[0.98] bg-blue-50 dark:bg-blue-900/20'
+                        : isTodoDragOver
+                          ? 'bg-blue-100 dark:bg-blue-900/40 border-t-2 border-blue-500 scale-[1.01] shadow-md'
+                          : isTodoDropped
+                            ? 'animate-drop-bounce bg-blue-50 dark:bg-blue-900/20'
+                            : item.completed
+                              ? 'bg-gray-50 dark:bg-gray-800/30 hover:bg-gray-100 dark:hover:bg-gray-800/50'
+                              : isPastDue
+                                ? 'bg-yellow-50 dark:bg-yellow-900/20 hover:bg-yellow-100 dark:hover:bg-yellow-900/30'
+                                : isUpcoming
+                                  ? 'bg-green-50 dark:bg-green-900/20 hover:bg-green-100 dark:hover:bg-green-900/30'
+                                  : 'hover:bg-gray-50 dark:hover:bg-gray-800/50'
                     }`}
-                    onClick={() => toggleTodo(item.id)}
+                    style={isTodoDropped ? { animation: 'dropBounce 0.5s cubic-bezier(0.34, 1.56, 0.64, 1)' } : undefined}
                   >
                     <div className="flex items-start gap-3">
+                      {/* Drag handle */}
+                      <div
+                        className={`flex-shrink-0 cursor-grab active:cursor-grabbing p-1 rounded text-gray-300 dark:text-gray-600 hover:text-gray-500 dark:hover:text-gray-400 hover:bg-gray-100 dark:hover:bg-gray-700 transition-colors mt-0.5 ${isTodoDragging ? 'cursor-grabbing' : ''}`}
+                        title="Drag to reorder"
+                      >
+                        <svg className="w-4 h-4" fill="currentColor" viewBox="0 0 24 24">
+                          <circle cx="9" cy="6" r="1.5" />
+                          <circle cx="15" cy="6" r="1.5" />
+                          <circle cx="9" cy="12" r="1.5" />
+                          <circle cx="15" cy="12" r="1.5" />
+                          <circle cx="9" cy="18" r="1.5" />
+                          <circle cx="15" cy="18" r="1.5" />
+                        </svg>
+                      </div>
                       {/* Checkbox - fixed width */}
-                      <div className={`flex-shrink-0 w-5 h-5 mt-0.5 rounded-full border-2 flex items-center justify-center transition-colors ${
-                        item.completed
-                          ? 'bg-emerald-500 border-emerald-500'
-                          : 'border-gray-300 dark:border-gray-600'
-                      }`}>
+                      <div
+                        className={`flex-shrink-0 w-5 h-5 mt-0.5 rounded-full border-2 flex items-center justify-center transition-colors cursor-pointer ${
+                          item.completed
+                            ? 'bg-emerald-500 border-emerald-500'
+                            : 'border-gray-300 dark:border-gray-600'
+                        }`}
+                        onClick={() => toggleTodo(item.id)}
+                      >
                         {item.completed && (
                           <svg className="w-3 h-3 text-white" fill="none" viewBox="0 0 24 24" stroke="currentColor">
                             <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={3} d="M5 13l4 4L19 7" />
@@ -1879,34 +2806,64 @@ function LSWContent() {
                       </div>
                       {/* Task text - flexible, wraps */}
                       <div className="flex-1 min-w-0 relative">
-                        <span className={`text-sm break-words ${
-                          item.completed
-                            ? 'text-gray-300 dark:text-gray-600 line-through'
-                            : 'text-gray-800 dark:text-white'
-                        }`}>
-                          {item.task}
-                        </span>
-                        {item.completed && (
-                          <span className="absolute inset-0 flex items-center justify-center">
-                            <span className="bg-emerald-500 text-white text-xs px-3 py-1 rounded-full font-medium shadow-md">
-                              ✓ Great, Item is Completed! • {currentTime.toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit', hour12: true })}
+                        {isEditing ? (
+                          <input
+                            ref={todoInputRef}
+                            type="text"
+                            value={editingTodoValues?.task ?? ''}
+                            onChange={e => setEditingTodoValues(prev => prev ? { ...prev, task: e.target.value } : prev)}
+                            onBlur={handleTodoInlineSave}
+                            onKeyDown={e => { if (e.key === 'Enter') handleTodoInlineSave(); if (e.key === 'Escape') { setEditingTodoId(null); setEditingTodoValues(null); } }}
+                            className="w-full bg-transparent border-b border-blue-400 focus:outline-none text-sm px-0"
+                            placeholder="Task description..."
+                          />
+                        ) : (
+                          <>
+                            <span
+                              className={`text-sm whitespace-pre-wrap break-words cursor-pointer ${
+                                item.completed
+                                  ? 'text-gray-300 dark:text-gray-600 line-through'
+                                  : 'text-gray-800 dark:text-white'
+                              }`}
+                              onClick={() => handleStartTodoEdit(item, 'task')}
+                            >
+                              {item.task}
                             </span>
-                          </span>
+                            {item.completed && (
+                              <span className="absolute inset-0 flex items-center justify-center">
+                                <span className="bg-emerald-500 text-white text-xs px-3 py-1 rounded-full font-medium shadow-md">
+                                  ✓ Great, Item is Completed! • {currentTime.toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit', hour12: true })}
+                                </span>
+                              </span>
+                            )}
+                          </>
                         )}
                       </div>
-                      {/* Badges and delete - fixed, no shrink */}
+                      {/* Badges and actions - fixed, no shrink */}
                       <div className="flex-shrink-0 flex items-center gap-2">
                         {isPastDue && (
                           <span className="text-xs px-2 py-1 rounded-lg bg-red-100 dark:bg-red-900/30 text-red-600 dark:text-red-400 font-medium whitespace-nowrap">
                             ⚠️ Past Due
                           </span>
                         )}
-                        {item.dueDate && (
-                          <span className={`text-xs px-2 py-1 rounded-lg whitespace-nowrap ${
-                            item.completed
-                              ? 'bg-gray-100 dark:bg-gray-700 text-gray-400 dark:text-gray-500'
-                              : 'bg-blue-50 dark:bg-blue-900/30 text-blue-600 dark:text-blue-400'
-                          }`}>
+                        {isEditing ? (
+                          <input
+                            type="time"
+                            value={editingTodoValues?.dueDate ?? ''}
+                            onChange={e => setEditingTodoValues(prev => prev ? { ...prev, dueDate: e.target.value } : prev)}
+                            onBlur={handleTodoInlineSave}
+                            onKeyDown={e => { if (e.key === 'Enter') handleTodoInlineSave(); if (e.key === 'Escape') { setEditingTodoId(null); setEditingTodoValues(null); } }}
+                            className="bg-transparent border-b border-blue-400 focus:outline-none text-xs px-0 w-24"
+                          />
+                        ) : item.dueDate ? (
+                          <span
+                            className={`text-xs px-2 py-1 rounded-lg whitespace-nowrap cursor-pointer ${
+                              item.completed
+                                ? 'bg-gray-100 dark:bg-gray-700 text-gray-400 dark:text-gray-500'
+                                : 'bg-blue-50 dark:bg-blue-900/30 text-blue-600 dark:text-blue-400'
+                            }`}
+                            onClick={() => handleStartTodoEdit(item, 'dueDate')}
+                          >
                             🕐 {(() => {
                               const [hours, minutes] = item.dueDate.split(':').map(Number);
                               const period = hours >= 12 ? 'PM' : 'AM';
@@ -1914,7 +2871,26 @@ function LSWContent() {
                               return `${hour12}:${minutes.toString().padStart(2, '0')} ${period}`;
                             })()}
                           </span>
+                        ) : (
+                          <span
+                            className="text-xs px-2 py-1 rounded-lg whitespace-nowrap cursor-pointer text-gray-400 dark:text-gray-500 hover:text-blue-500 dark:hover:text-blue-400 hover:bg-blue-50 dark:hover:bg-blue-900/30 transition-colors"
+                            onClick={() => handleStartTodoEdit(item, 'dueDate')}
+                          >
+                            🕐 Set time
+                          </span>
                         )}
+                        <button
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            handleAddTodo();
+                          }}
+                          className="flex-shrink-0 p-1 text-gray-400 hover:text-blue-500 dark:hover:text-blue-400 transition-colors opacity-0 group-hover:opacity-100"
+                          title="Add item"
+                        >
+                          <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 4v16m8-8H4" />
+                          </svg>
+                        </button>
                         <button
                           onClick={(e) => {
                             e.stopPropagation();
@@ -1935,7 +2911,7 @@ function LSWContent() {
               </div>
               <div className="px-5 py-3 bg-gray-50 dark:bg-gray-900/50 border-t border-gray-200/50 dark:border-gray-700/50">
                 <button 
-                  onClick={() => setShowAddTodoModal(true)}
+                  onClick={() => handleAddTodo()}
                   className="text-sm text-blue-600 dark:text-blue-400 hover:text-blue-700 dark:hover:text-blue-300 font-medium flex items-center gap-1"
                 >
                   <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
@@ -1955,35 +2931,81 @@ function LSWContent() {
                 </h2>
               </div>
               <div className="divide-y divide-gray-200 dark:divide-gray-700">
-                {meetingRails.map((rail) => (
+                {meetingRails.map((rail) => {
+                  const isRailEditing = editingRailId === rail.id;
+                  return (
                   <div
                     key={rail.id}
-                    className="px-5 py-3 hover:bg-gray-50 dark:hover:bg-gray-800/50 transition-colors cursor-pointer"
-                    onClick={() => toggleMeetingRail(rail.id)}
+                    className="group px-5 py-3 hover:bg-gray-50 dark:hover:bg-gray-800/50 transition-colors"
                   >
-                    <div className="flex items-center justify-between">
-                      <div className="flex items-center gap-3">
-                        <div className={`w-5 h-5 rounded border-2 flex items-center justify-center transition-colors ${
-                          rail.completed
-                            ? 'bg-purple-500 border-purple-500'
-                            : 'border-gray-300 dark:border-gray-600'
-                        }`}>
+                    <div className="flex items-center justify-between gap-2">
+                      <div className="flex items-center gap-3 flex-1 min-w-0">
+                        <div
+                          className={`flex-shrink-0 w-5 h-5 rounded border-2 flex items-center justify-center transition-colors cursor-pointer ${
+                            rail.completed
+                              ? 'bg-purple-500 border-purple-500'
+                              : 'border-gray-300 dark:border-gray-600'
+                          }`}
+                          onClick={() => toggleMeetingRail(rail.id)}
+                        >
                           {rail.completed && (
                             <svg className="w-3 h-3 text-white" fill="none" viewBox="0 0 24 24" stroke="currentColor">
                               <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={3} d="M5 13l4 4L19 7" />
                             </svg>
                           )}
                         </div>
-                        <span className={`text-sm ${
-                          rail.completed ? 'text-gray-400 dark:text-gray-500 line-through' : 'text-gray-800 dark:text-white'
-                        }`}>
-                          {rail.rail}
-                        </span>
+                        {isRailEditing ? (
+                          <input
+                            ref={railInputRef}
+                            type="text"
+                            value={editingRailValues?.rail ?? ''}
+                            onChange={e => setEditingRailValues(prev => prev ? { ...prev, rail: e.target.value } : prev)}
+                            onBlur={handleRailInlineSave}
+                            onKeyDown={e => { if (e.key === 'Enter') handleRailInlineSave(); if (e.key === 'Escape') { setEditingRailId(null); setEditingRailValues(null); } }}
+                            className="flex-1 bg-transparent border-b border-purple-400 focus:outline-none text-sm px-0"
+                            placeholder="Meeting rail name..."
+                          />
+                        ) : (
+                          <span
+                            className={`text-sm whitespace-pre-wrap break-words cursor-pointer ${
+                              rail.completed ? 'text-gray-400 dark:text-gray-500 line-through' : 'text-gray-800 dark:text-white'
+                            }`}
+                            onClick={() => handleStartRailEdit(rail, 'rail')}
+                          >
+                            {rail.rail}
+                          </span>
+                        )}
                       </div>
-                      <div className="flex items-center gap-2">
-                        <span className="text-xs text-gray-500 dark:text-gray-400">
-                          {new Date(rail.dueDate).toLocaleDateString('en-US', { month: 'short', day: 'numeric' })}
-                        </span>
+                      <div className="flex-shrink-0 flex items-center gap-2">
+                        {isRailEditing ? (
+                          <input
+                            type="date"
+                            value={editingRailValues?.dueDate ?? ''}
+                            onChange={e => setEditingRailValues(prev => prev ? { ...prev, dueDate: e.target.value } : prev)}
+                            onBlur={handleRailInlineSave}
+                            onKeyDown={e => { if (e.key === 'Enter') handleRailInlineSave(); if (e.key === 'Escape') { setEditingRailId(null); setEditingRailValues(null); } }}
+                            className="bg-transparent border-b border-purple-400 focus:outline-none text-xs px-0 w-28"
+                          />
+                        ) : (
+                          <span
+                            className="text-xs text-gray-500 dark:text-gray-400 cursor-pointer whitespace-nowrap"
+                            onClick={() => handleStartRailEdit(rail, 'dueDate')}
+                          >
+                            {new Date(rail.dueDate).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' })}
+                          </span>
+                        )}
+                        <button
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            handleAddRail();
+                          }}
+                          className="p-1 text-gray-400 hover:text-purple-500 dark:hover:text-purple-400 transition-colors opacity-0 group-hover:opacity-100"
+                          title="Add rail"
+                        >
+                          <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 4v16m8-8H4" />
+                          </svg>
+                        </button>
                         <button
                           onClick={(e) => {
                             e.stopPropagation();
@@ -1999,11 +3021,12 @@ function LSWContent() {
                       </div>
                     </div>
                   </div>
-                ))}
+                  );
+                })}
               </div>
               <div className="px-5 py-3 bg-gray-50 dark:bg-gray-900/50 border-t border-gray-200/50 dark:border-gray-700/50">
                 <button 
-                  onClick={() => setShowAddMeetingRailModal(true)}
+                  onClick={() => handleAddRail()}
                   className="text-sm text-purple-600 dark:text-purple-400 hover:text-purple-700 dark:hover:text-purple-300 font-medium flex items-center gap-1"
                 >
                   <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
@@ -2064,18 +3087,65 @@ function LSWContent() {
                 </h2>
               </div>
               <div className="divide-y divide-gray-200 dark:divide-gray-700">
-                {personalGoals.map((goal) => (
+                {personalGoals.map((goal) => {
+                  const isGoalEditing = editingGoalInlineId === goal.id;
+                  return (
                   <div 
                     key={goal.id} 
-                    className="px-5 py-4 cursor-pointer hover:bg-gray-50 dark:hover:bg-gray-700/30 transition-colors"
-                    onClick={() => setEditingGoalId(editingGoalId === goal.id ? null : goal.id)}
+                    className="group px-5 py-4 hover:bg-gray-50 dark:hover:bg-gray-700/30 transition-colors"
                   >
-                    <div className="flex items-start justify-between mb-2">
-                      <span className="text-sm font-medium text-gray-800 dark:text-white">{goal.objective}</span>
-                      <div className="flex items-center gap-2 ml-2">
-                        <span className="text-xs text-gray-500 dark:text-gray-400 whitespace-nowrap">
-                          {new Date(goal.dueDate).toLocaleDateString('en-US', { month: 'short', day: 'numeric' })}
-                        </span>
+                    <div className="flex items-start justify-between mb-2 gap-2">
+                      <div className="flex-1 min-w-0">
+                        {isGoalEditing ? (
+                          <input
+                            ref={goalInputRef}
+                            type="text"
+                            value={editingGoalValues?.objective ?? ''}
+                            onChange={e => setEditingGoalValues(prev => prev ? { ...prev, objective: e.target.value } : prev)}
+                            onBlur={handleGoalInlineSave}
+                            onKeyDown={e => { if (e.key === 'Enter') handleGoalInlineSave(); if (e.key === 'Escape') { setEditingGoalInlineId(null); setEditingGoalValues(null); } }}
+                            className="w-full bg-transparent border-b border-rose-400 focus:outline-none text-sm font-medium px-0"
+                            placeholder="Objective description..."
+                          />
+                        ) : (
+                          <span
+                            className="text-sm font-medium text-gray-800 dark:text-white whitespace-pre-wrap break-words cursor-pointer"
+                            onClick={() => handleStartGoalEdit(goal, 'objective')}
+                          >
+                            {goal.objective}
+                          </span>
+                        )}
+                      </div>
+                      <div className="flex-shrink-0 flex items-center gap-2">
+                        {isGoalEditing ? (
+                          <input
+                            type="date"
+                            value={editingGoalValues?.dueDate ?? ''}
+                            onChange={e => setEditingGoalValues(prev => prev ? { ...prev, dueDate: e.target.value } : prev)}
+                            onBlur={handleGoalInlineSave}
+                            onKeyDown={e => { if (e.key === 'Enter') handleGoalInlineSave(); if (e.key === 'Escape') { setEditingGoalInlineId(null); setEditingGoalValues(null); } }}
+                            className="bg-transparent border-b border-rose-400 focus:outline-none text-xs px-0 w-28"
+                          />
+                        ) : (
+                          <span
+                            className="text-xs text-gray-500 dark:text-gray-400 whitespace-nowrap cursor-pointer"
+                            onClick={() => handleStartGoalEdit(goal, 'dueDate')}
+                          >
+                            {new Date(goal.dueDate).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' })}
+                          </span>
+                        )}
+                        <button
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            handleAddGoal();
+                          }}
+                          className="p-1 text-gray-400 hover:text-rose-500 dark:hover:text-rose-400 transition-colors opacity-0 group-hover:opacity-100"
+                          title="Add goal"
+                        >
+                          <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 4v16m8-8H4" />
+                          </svg>
+                        </button>
                         <button
                           onClick={(e) => {
                             e.stopPropagation();
@@ -2094,47 +3164,46 @@ function LSWContent() {
                     <div className="flex items-center gap-3">
                       <div className="flex-1 h-2 bg-gray-200 dark:bg-gray-700 rounded-full overflow-hidden">
                         <div
-                          className="h-full bg-gradient-to-r from-rose-500 to-pink-500 rounded-full transition-all duration-500"
-                          style={{ width: `${goal.progress}%` }}
+                          className="h-full rounded-full transition-all duration-500"
+                          style={{ width: `${goal.progress}%`, background: goal.progress < 50 ? '#ef4444' : goal.progress < 80 ? '#3b82f6' : '#22c55e' }}
                         />
                       </div>
-                      <span className="text-xs font-medium text-gray-600 dark:text-gray-400">{goal.progress}%</span>
+                      {editingGoalId === goal.id ? (
+                        <input
+                          type="number"
+                          min={0}
+                          max={100}
+                          autoFocus
+                          defaultValue={goal.progress}
+                          onBlur={(e) => {
+                            const val = Math.min(100, Math.max(0, parseInt(e.target.value) || 0));
+                            setPersonalGoals(prev => prev.map(g => g.id === goal.id ? { ...g, progress: val } : g));
+                            updateLswPersonalGoal(goal.id, { progress: val } as any).catch(err => console.error('Failed to update progress:', err));
+                            setEditingGoalId(null);
+                          }}
+                          onKeyDown={(e) => {
+                            if (e.key === 'Enter') (e.target as HTMLInputElement).blur();
+                            if (e.key === 'Escape') setEditingGoalId(null);
+                          }}
+                          className="w-12 text-xs font-medium text-rose-600 dark:text-rose-400 bg-transparent border-b border-rose-400 focus:outline-none text-right [appearance:textfield] [&::-webkit-outer-spin-button]:appearance-none [&::-webkit-inner-spin-button]:appearance-none"
+                        />
+                      ) : (
+                        <span
+                          className="text-xs font-medium text-gray-600 dark:text-gray-400 cursor-pointer hover:text-rose-500 transition-colors"
+                          onClick={() => setEditingGoalId(goal.id)}
+                          title="Click to edit progress"
+                        >
+                          {goal.progress}%
+                        </span>
+                      )}
                     </div>
-                    {editingGoalId === goal.id && (
-                      <div className="mt-3 pt-3 border-t border-gray-100 dark:border-gray-700" onClick={(e) => e.stopPropagation()}>
-                        <label className="block text-xs font-medium text-gray-500 dark:text-gray-400 mb-1.5">
-                          Adjust Progress
-                        </label>
-                        <div className="flex items-center gap-3">
-                          <input
-                            type="range"
-                            min="0"
-                            max="100"
-                            value={goal.progress}
-                            onChange={(e) => {
-                              const newProgress = parseInt(e.target.value);
-                              setPersonalGoals(prev => prev.map(g => 
-                                g.id === goal.id ? { ...g, progress: newProgress } : g
-                              ));
-                            }}
-                            onMouseUp={() => {
-                              updateLswPersonalGoal(goal.id, { progress: goal.progress } as any).catch(e => console.error('Failed to update progress:', e));
-                            }}
-                            onTouchEnd={() => {
-                              updateLswPersonalGoal(goal.id, { progress: goal.progress } as any).catch(e => console.error('Failed to update progress:', e));
-                            }}
-                            className="flex-1 h-2 bg-gray-200 dark:bg-gray-700 rounded-lg appearance-none cursor-pointer accent-rose-500"
-                          />
-                          <span className="text-sm font-semibold text-rose-600 dark:text-rose-400 w-10 text-right">{goal.progress}%</span>
-                        </div>
-                      </div>
-                    )}
                   </div>
-                ))}
+                  );
+                })}
               </div>
               <div className="px-5 py-3 bg-gray-50 dark:bg-gray-900/50 border-t border-gray-200/50 dark:border-gray-700/50">
                 <button
-                  onClick={() => setShowAddGoalModal(true)}
+                  onClick={() => handleAddGoal()}
                   className="text-sm text-rose-600 dark:text-rose-400 hover:text-rose-700 dark:hover:text-rose-300 font-medium flex items-center gap-1"
                 >
                   <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
@@ -2147,129 +3216,6 @@ function LSWContent() {
           </div>
         </div>
       </main>
-
-      {/* Add Task Modal */}
-      {showAddTaskModal && (
-        <div className="fixed inset-0 z-50 overflow-y-auto">
-          {/* Backdrop */}
-          <div 
-            className="fixed inset-0 bg-black/60 backdrop-blur-sm transition-opacity"
-            onClick={() => setShowAddTaskModal(false)}
-          />
-          
-          {/* Modal */}
-          <div className="flex min-h-full items-center justify-center p-4">
-            <div className="relative w-full max-w-xl max-h-[90vh] flex flex-col transform overflow-hidden rounded-2xl bg-white dark:bg-gray-800 shadow-2xl transition-all">
-              {/* Header */}
-              <div className="relative bg-gradient-to-r from-emerald-500 to-teal-600 px-6 py-5">
-                <div className="absolute inset-0 bg-[url('data:image/svg+xml;base64,PHN2ZyB3aWR0aD0iNjAiIGhlaWdodD0iNjAiIHZpZXdCb3g9IjAgMCA2MCA2MCIgeG1sbnM9Imh0dHA6Ly93d3cudzMub3JnLzIwMDAvc3ZnIj48ZyBmaWxsPSJub25lIiBmaWxsLXJ1bGU9ImV2ZW5vZGQiPjxwYXRoIGQ9Ik0zNiAxOGMtOS45NDEgMC0xOCA4LjA1OS0xOCAxOHM4LjA1OSAxOCAxOCAxOCAxOC04LjA1OSAxOC0xOC04LjA1OS0xOC0xOC0xOHptMCAzMmMtNy43MzIgMC0xNC02LjI2OC0xNC0xNHM2LjI2OC0xNCAxNC0xNCAxNCA2LjI2OCAxNCAxNC02LjI2OCAxNC0xNCAxNHoiIGZpbGw9IiNmZmYiIGZpbGwtb3BhY2l0eT0iLjA1Ii8+PC9nPjwvc3ZnPg==')] opacity-30" />
-                <div className="relative">
-                  <h3 className="text-xl font-bold text-white flex items-center gap-3">
-                    <div className="w-10 h-10 rounded-xl bg-white/20 flex items-center justify-center">
-                      <svg className="w-5 h-5 text-white" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 6v6m0 0v6m0-6h6m-6 0H6" />
-                      </svg>
-                    </div>
-                    Add Daily Task
-                  </h3>
-                  <p className="text-emerald-100 text-sm mt-1">Schedule a new recurring task or meeting</p>
-                </div>
-                <button
-                  onClick={() => setShowAddTaskModal(false)}
-                  className="absolute top-4 right-4 p-2 rounded-lg bg-white/10 hover:bg-white/20 transition-colors"
-                >
-                  <svg className="w-5 h-5 text-white" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
-                  </svg>
-                </button>
-              </div>
-              
-              {/* Content */}
-              <div className="px-6 py-5 space-y-5 overflow-y-auto flex-1">
-                {/* Task Name */}
-                <div>
-                  <label className="block text-sm font-semibold text-gray-700 dark:text-gray-300 mb-2">
-                    Task / Meeting Name <span className="text-red-500">*</span>
-                  </label>
-                  <textarea
-                    value={newTask.task}
-                    onChange={(e) => {
-                      setNewTask(prev => ({ ...prev, task: e.target.value }));
-                      e.target.style.height = 'auto';
-                      e.target.style.height = Math.min(e.target.scrollHeight, 200) + 'px';
-                    }}
-                    placeholder="e.g., Morning Production Review"
-                    rows={1}
-                    className="w-full px-4 py-3 rounded-xl border border-gray-200 dark:border-gray-600 bg-gray-50 dark:bg-gray-700 text-gray-800 dark:text-white placeholder-gray-400 focus:ring-2 focus:ring-emerald-500 focus:border-transparent transition-all resize-none overflow-y-auto max-h-[200px]"
-                  />
-                </div>
-
-                {/* Time and Duration Row */}
-                <div className="grid grid-cols-2 gap-4">
-                  <div>
-                    <label className="block text-sm font-semibold text-gray-700 dark:text-gray-300 mb-2">
-                      Start Time <span className="text-red-500">*</span>
-                    </label>
-                    <input
-                      type="time"
-                      value={newTask.time}
-                      onChange={(e) => setNewTask(prev => ({ ...prev, time: e.target.value }))}
-                      className="w-full px-4 py-3 rounded-xl border border-gray-200 dark:border-gray-600 bg-gray-50 dark:bg-gray-700 text-gray-800 dark:text-white focus:ring-2 focus:ring-emerald-500 focus:border-transparent transition-all"
-                    />
-                  </div>
-                  <div>
-                    <label className="block text-sm font-semibold text-gray-700 dark:text-gray-300 mb-2">
-                      Duration (minutes) <span className="text-red-500">*</span>
-                    </label>
-                    <div className="flex gap-2">
-                      <input
-                        type="number"
-                        min="1"
-                        max="480"
-                        value={newTask.minutes}
-                        onChange={(e) => setNewTask(prev => ({ ...prev, minutes: Math.max(1, parseInt(e.target.value) || 1) }))}
-                        className="w-20 px-3 py-3 rounded-xl border border-gray-200 dark:border-gray-600 bg-gray-50 dark:bg-gray-700 text-gray-800 dark:text-white text-center focus:ring-2 focus:ring-emerald-500 focus:border-transparent transition-all"
-                      />
-                      <select
-                        value={[15, 30, 45, 60].includes(newTask.minutes) ? newTask.minutes : ''}
-                        onChange={(e) => e.target.value && setNewTask(prev => ({ ...prev, minutes: parseInt(e.target.value) }))}
-                        className="flex-1 px-3 py-3 rounded-xl border border-gray-200 dark:border-gray-600 bg-gray-50 dark:bg-gray-700 text-gray-800 dark:text-white focus:ring-2 focus:ring-emerald-500 focus:border-transparent transition-all"
-                      >
-                        <option value="">Quick select...</option>
-                        <option value="15">15 min</option>
-                        <option value="30">30 min</option>
-                        <option value="45">45 min</option>
-                        <option value="60">1 hour</option>
-                      </select>
-                    </div>
-                  </div>
-                </div>
-
-              </div>
-              
-              {/* Footer */}
-              <div className="px-6 py-4 bg-gray-50 dark:bg-gray-900/50 border-t border-gray-200 dark:border-gray-700 flex items-center justify-end gap-3">
-                <button
-                  onClick={() => setShowAddTaskModal(false)}
-                  className="px-5 py-2.5 text-sm font-medium text-gray-600 dark:text-gray-300 hover:bg-gray-100 dark:hover:bg-gray-700 rounded-xl transition-colors"
-                >
-                  Cancel
-                </button>
-                <button
-                  onClick={handleAddTask}
-                  disabled={!newTask.task.trim()}
-                  className="px-5 py-2.5 text-sm font-medium text-white bg-gradient-to-r from-emerald-500 to-teal-600 hover:from-emerald-600 hover:to-teal-700 rounded-xl shadow-lg shadow-emerald-500/25 transition-all disabled:opacity-50 disabled:cursor-not-allowed disabled:shadow-none flex items-center gap-2"
-                >
-                  <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 4v16m8-8H4" />
-                  </svg>
-                  Add Task
-                </button>
-              </div>
-            </div>
-          </div>
-        </div>
-      )}
 
       {/* Delete Confirmation Modal */}
       {showDeleteModal && deleteTarget && (
@@ -2349,331 +3295,6 @@ function LSWContent() {
                     <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" />
                   </svg>
                   Confirm Delete
-                </button>
-              </div>
-            </div>
-          </div>
-        </div>
-      )}
-
-      {/* Add Project Modal */}
-      {showAddProjectModal && (
-        <div className="fixed inset-0 z-50 overflow-y-auto">
-          {/* Backdrop */}
-          <div 
-            className="fixed inset-0 bg-black/60 backdrop-blur-sm transition-opacity"
-            onClick={() => setShowAddProjectModal(false)}
-          />
-          
-          {/* Modal */}
-          <div className="flex min-h-full items-center justify-center p-4">
-            <div className="relative w-full max-w-3xl max-h-[80vh] flex flex-col transform overflow-hidden rounded-2xl bg-white dark:bg-gray-800 shadow-2xl transition-all">
-              {/* Header */}
-              <div className="relative bg-gradient-to-r from-blue-500 to-indigo-600 px-6 py-4">
-                <div className="absolute inset-0 bg-[url('data:image/svg+xml;base64,PHN2ZyB3aWR0aD0iNjAiIGhlaWdodD0iNjAiIHZpZXdCb3g9IjAgMCA2MCA2MCIgeG1sbnM9Imh0dHA6Ly93d3cudzMub3JnLzIwMDAvc3ZnIj48ZyBmaWxsPSJub25lIiBmaWxsLXJ1bGU9ImV2ZW5vZGQiPjxwYXRoIGQ9Ik0zNiAxOGMtOS45NDEgMC0xOCA4LjA1OS0xOCAxOHM4LjA1OSAxOCAxOCAxOCAxOC04LjA1OSAxOC0xOC04LjA1OS0xOC0xOC0xOHptMCAzMmMtNy43MzIgMC0xNC02LjI2OC0xNC0xNHM2LjI2OC0xNCAxNC0xNCAxNCA2LjI2OCAxNCAxNC02LjI2OCAxNC0xNCAxNHoiIGZpbGw9IiNmZmYiIGZpbGwtb3BhY2l0eT0iLjA1Ii8+PC9nPjwvc3ZnPg==')] opacity-30" />
-                <div className="relative">
-                  <h3 className="text-xl font-bold text-white flex items-center gap-3">
-                    <div className="w-10 h-10 rounded-xl bg-white/20 flex items-center justify-center">
-                      <svg className="w-5 h-5 text-white" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 5H7a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2V7a2 2 0 00-2-2h-2M9 5a2 2 0 002 2h2a2 2 0 002-2M9 5a2 2 0 012-2h2a2 2 0 012 2" />
-                      </svg>
-                    </div>
-                    Add New Project
-                  </h3>
-                  <p className="text-blue-100 text-sm mt-1">Create a new improvement project to track</p>
-                </div>
-                <button
-                  onClick={() => setShowAddProjectModal(false)}
-                  className="absolute top-4 right-4 p-2 rounded-lg bg-white/10 hover:bg-white/20 transition-colors"
-                >
-                  <svg className="w-5 h-5 text-white" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
-                  </svg>
-                </button>
-              </div>
-              
-              {/* Content */}
-              <div className="px-6 py-4 space-y-4 overflow-y-auto flex-1">
-                {/* Project Title */}
-                <div>
-                  <label className="block text-sm font-semibold text-gray-700 dark:text-gray-300 mb-1.5">
-                    Project Title <span className="text-red-500">*</span>
-                  </label>
-                  <input
-                    type="text"
-                    value={newProject.name}
-                    onChange={(e) => setNewProject(prev => ({ ...prev, name: e.target.value }))}
-                    placeholder="e.g., Line Efficiency Improvement"
-                    className="w-full px-3 py-2 rounded-xl border border-gray-200 dark:border-gray-600 bg-gray-50 dark:bg-gray-700 text-gray-800 dark:text-white placeholder-gray-400 focus:ring-2 focus:ring-blue-500 focus:border-transparent transition-all"
-                    style={{ color: newProject.fontColor, fontFamily: newProject.fontFamily }}
-                  />
-                </div>
-
-                {/* Initial Update (Optional) */}
-                <div>
-                  <label className="block text-sm font-semibold text-gray-700 dark:text-gray-300 mb-1.5">
-                    Initial Update <span className="text-gray-400 font-normal">(Optional)</span>
-                  </label>
-                  <textarea
-                    value={newProject.update}
-                    onChange={(e) => {
-                      setNewProject(prev => ({ ...prev, update: e.target.value }));
-                      e.target.style.height = 'auto';
-                      e.target.style.height = Math.min(e.target.scrollHeight, 100) + 'px';
-                    }}
-                    placeholder="e.g., Phase 1 kickoff meeting scheduled"
-                    rows={1}
-                    className="w-full px-3 py-2 rounded-xl border border-gray-200 dark:border-gray-600 bg-gray-50 dark:bg-gray-700 text-gray-800 dark:text-white placeholder-gray-400 focus:ring-2 focus:ring-blue-500 focus:border-transparent transition-all resize-none overflow-y-auto max-h-[100px]"
-                  />
-                </div>
-
-                {/* Two Column Layout for Style Sections */}
-                <div className="grid grid-cols-2 gap-4">
-                  {/* Project Display Style */}
-                  <div className="p-3 rounded-xl bg-gray-50 dark:bg-gray-700/50 border border-gray-200 dark:border-gray-600">
-                    <h4 className="text-sm font-semibold text-gray-700 dark:text-gray-300 mb-3 flex items-center gap-2">
-                      <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M7 21a4 4 0 01-4-4V5a2 2 0 012-2h4a2 2 0 012 2v12a4 4 0 01-4 4zm0 0h12a2 2 0 002-2v-4a2 2 0 00-2-2h-2.343M11 7.343l1.657-1.657a2 2 0 012.828 0l2.829 2.829a2 2 0 010 2.828l-8.486 8.485M7 17h.01" />
-                      </svg>
-                      Project Column Style
-                    </h4>
-                    
-                    <div className="space-y-3">
-                      {/* Font Color */}
-                      <div>
-                        <label className="block text-xs font-medium text-gray-600 dark:text-gray-400 mb-1.5">
-                          Font Color
-                        </label>
-                        <div className="flex items-center gap-2">
-                          <input
-                            type="color"
-                            value={newProject.fontColor}
-                            onChange={(e) => setNewProject(prev => ({ ...prev, fontColor: e.target.value }))}
-                            className="w-8 h-8 rounded-lg border border-gray-300 dark:border-gray-500 cursor-pointer bg-transparent"
-                          />
-                          <div className="flex-1 flex flex-wrap gap-1">
-                            {['#1f2937', '#dc2626', '#16a34a', '#2563eb', '#7c3aed'].map(color => (
-                              <button
-                                key={color}
-                                onClick={() => setNewProject(prev => ({ ...prev, fontColor: color }))}
-                                className={`w-5 h-5 rounded-full border-2 transition-all ${newProject.fontColor === color ? 'border-blue-500 scale-110' : 'border-transparent hover:scale-105'}`}
-                                style={{ backgroundColor: color }}
-                              />
-                            ))}
-                          </div>
-                        </div>
-                      </div>
-                      
-                      {/* Font Style */}
-                      <div>
-                        <label className="block text-xs font-medium text-gray-600 dark:text-gray-400 mb-1.5">
-                          Font Style
-                        </label>
-                        <div className="flex gap-2">
-                          <select
-                            value={newProject.fontFamily}
-                            onChange={(e) => setNewProject(prev => ({ ...prev, fontFamily: e.target.value }))}
-                            className="flex-1 px-2 py-1.5 rounded-lg border border-gray-200 dark:border-gray-600 bg-white dark:bg-gray-600 text-gray-700 dark:text-gray-200 text-xs focus:ring-2 focus:ring-blue-500 focus:border-transparent"
-                            style={{ fontFamily: newProject.fontFamily }}
-                          >
-                            <option value="Inter">Inter</option>
-                            <option value="Arial, sans-serif">Arial</option>
-                            <option value="Georgia, serif">Georgia</option>
-                            <option value="Verdana, sans-serif">Verdana</option>
-                          </select>
-                          <button
-                            type="button"
-                            onClick={() => setNewProject(prev => ({ ...prev, fontBold: !prev.fontBold }))}
-                            className={`w-8 h-8 rounded-lg border-2 flex items-center justify-center text-sm transition-all ${
-                              newProject.fontBold ? 'bg-blue-500 border-blue-500 text-white' : 'border-gray-300 dark:border-gray-500 text-gray-600 dark:text-gray-300'
-                            }`}
-                          >
-                            <span className="font-bold">B</span>
-                          </button>
-                          <button
-                            type="button"
-                            onClick={() => setNewProject(prev => ({ ...prev, fontItalic: !prev.fontItalic }))}
-                            className={`w-8 h-8 rounded-lg border-2 flex items-center justify-center text-sm transition-all ${
-                              newProject.fontItalic ? 'bg-blue-500 border-blue-500 text-white' : 'border-gray-300 dark:border-gray-500 text-gray-600 dark:text-gray-300'
-                            }`}
-                          >
-                            <span className="italic">I</span>
-                          </button>
-                        </div>
-                      </div>
-
-                      {/* Cell Color */}
-                      <div>
-                        <label className="block text-xs font-medium text-gray-600 dark:text-gray-400 mb-1.5">
-                          Cell Background
-                        </label>
-                        <div className="flex items-center gap-2">
-                          <input
-                            type="color"
-                            value={newProject.cellColor}
-                            onChange={(e) => setNewProject(prev => ({ ...prev, cellColor: e.target.value }))}
-                            className="w-8 h-8 rounded-lg border border-gray-300 dark:border-gray-500 cursor-pointer bg-transparent"
-                          />
-                          <div className="flex-1 flex flex-wrap gap-1">
-                            {['#3b82f6', '#22c55e', '#eab308', '#ef4444', '#a855f7'].map(color => (
-                              <button
-                                key={color}
-                                onClick={() => setNewProject(prev => ({ ...prev, cellColor: color }))}
-                                className={`w-5 h-5 rounded-full border-2 transition-all ${newProject.cellColor === color ? 'border-blue-500 scale-110' : 'border-transparent hover:scale-105'}`}
-                                style={{ backgroundColor: color }}
-                              />
-                            ))}
-                          </div>
-                        </div>
-                        <div className="mt-2 flex items-center gap-2">
-                          <span className="text-[10px] text-gray-400">Light</span>
-                          <input
-                            type="range"
-                            min="0"
-                            max="100"
-                            value={newProject.cellColorIntensity}
-                            onChange={(e) => setNewProject(prev => ({ ...prev, cellColorIntensity: parseInt(e.target.value) }))}
-                            className="flex-1 h-1.5 rounded-full appearance-none cursor-pointer"
-                            style={{ background: `linear-gradient(to right, transparent 0%, ${newProject.cellColor} 100%)` }}
-                          />
-                          <span className="text-[10px] text-gray-400">{newProject.cellColorIntensity}%</span>
-                        </div>
-                      </div>
-                    </div>
-                  </div>
-
-                  {/* Update Column Styling */}
-                  <div className="p-3 rounded-xl bg-emerald-50 dark:bg-emerald-900/20 border border-emerald-200 dark:border-emerald-700">
-                    <h4 className="text-sm font-semibold text-gray-700 dark:text-gray-300 mb-3 flex items-center gap-2">
-                      <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M11 5H6a2 2 0 00-2 2v11a2 2 0 002 2h11a2 2 0 002-2v-5m-1.414-9.414a2 2 0 112.828 2.828L11.828 15H9v-2.828l8.586-8.586z" />
-                      </svg>
-                      Update Column Style
-                    </h4>
-                    
-                    <div className="space-y-3">
-                      {/* Font Color & Italic */}
-                      <div>
-                        <label className="block text-xs font-medium text-gray-600 dark:text-gray-400 mb-1.5">
-                          Font Color
-                        </label>
-                        <div className="flex items-center gap-2">
-                          <input
-                            type="color"
-                            value={newProject.updateFontColor}
-                            onChange={(e) => setNewProject(prev => ({ ...prev, updateFontColor: e.target.value }))}
-                            className="w-8 h-8 rounded-lg border border-gray-300 dark:border-gray-500 cursor-pointer bg-transparent"
-                          />
-                          <div className="flex-1 flex flex-wrap gap-1">
-                            {['#4b5563', '#dc2626', '#16a34a', '#2563eb', '#7c3aed'].map(color => (
-                              <button
-                                key={color}
-                                onClick={() => setNewProject(prev => ({ ...prev, updateFontColor: color }))}
-                                className={`w-5 h-5 rounded-full border-2 transition-all ${newProject.updateFontColor === color ? 'border-emerald-500 scale-110' : 'border-transparent hover:scale-105'}`}
-                                style={{ backgroundColor: color }}
-                              />
-                            ))}
-                          </div>
-                          <button
-                            type="button"
-                            onClick={() => setNewProject(prev => ({ ...prev, updateFontItalic: !prev.updateFontItalic }))}
-                            className={`w-8 h-8 rounded-lg border-2 flex items-center justify-center text-sm transition-all flex-shrink-0 ${
-                              newProject.updateFontItalic ? 'bg-emerald-500 border-emerald-500 text-white' : 'border-gray-300 dark:border-gray-500 text-gray-600 dark:text-gray-300'
-                            }`}
-                          >
-                            <span className="italic">I</span>
-                          </button>
-                        </div>
-                      </div>
-
-                      {/* Cell Color */}
-                      <div>
-                        <label className="block text-xs font-medium text-gray-600 dark:text-gray-400 mb-1.5">
-                          Cell Background
-                        </label>
-                        <div className="flex items-center gap-2">
-                          <input
-                            type="color"
-                            value={newProject.updateCellColor}
-                            onChange={(e) => setNewProject(prev => ({ ...prev, updateCellColor: e.target.value }))}
-                            className="w-8 h-8 rounded-lg border border-gray-300 dark:border-gray-500 cursor-pointer bg-transparent"
-                          />
-                          <div className="flex-1 flex flex-wrap gap-1">
-                            {['#10b981', '#3b82f6', '#eab308', '#ef4444', '#a855f7'].map(color => (
-                              <button
-                                key={color}
-                                onClick={() => setNewProject(prev => ({ ...prev, updateCellColor: color }))}
-                                className={`w-5 h-5 rounded-full border-2 transition-all ${newProject.updateCellColor === color ? 'border-emerald-500 scale-110' : 'border-transparent hover:scale-105'}`}
-                                style={{ backgroundColor: color }}
-                              />
-                            ))}
-                          </div>
-                        </div>
-                        <div className="mt-2 flex items-center gap-2">
-                          <span className="text-[10px] text-gray-400">Light</span>
-                          <input
-                            type="range"
-                            min="0"
-                            max="100"
-                            value={newProject.updateCellColorIntensity}
-                            onChange={(e) => setNewProject(prev => ({ ...prev, updateCellColorIntensity: parseInt(e.target.value) }))}
-                            className="flex-1 h-1.5 rounded-full appearance-none cursor-pointer"
-                            style={{ background: `linear-gradient(to right, transparent 0%, ${newProject.updateCellColor} 100%)` }}
-                          />
-                          <span className="text-[10px] text-gray-400">{newProject.updateCellColorIntensity}%</span>
-                        </div>
-                      </div>
-                    </div>
-                  </div>
-                </div>
-                  
-                {/* Preview */}
-                <div className="pt-3 border-t border-gray-200 dark:border-gray-600">
-                  <label className="block text-xs font-medium text-gray-600 dark:text-gray-400 mb-1.5">Preview</label>
-                  <div className="flex rounded-lg border border-gray-200 dark:border-gray-500 overflow-hidden text-sm">
-                    <div 
-                      className="px-3 py-2 flex-1 border-r border-gray-200 dark:border-gray-500"
-                      style={{ 
-                        color: newProject.fontColor, 
-                        fontFamily: newProject.fontFamily,
-                        fontWeight: newProject.fontBold ? 'bold' : 'normal',
-                        fontStyle: newProject.fontItalic ? 'italic' : 'normal',
-                        backgroundColor: `${newProject.cellColor}${Math.round(newProject.cellColorIntensity * 2.55).toString(16).padStart(2, '0')}`
-                      }}
-                    >
-                      {newProject.name || 'Project Title'}
-                    </div>
-                    <div 
-                      className="px-3 py-2 flex-1"
-                      style={{ 
-                        color: newProject.updateFontColor,
-                        fontStyle: newProject.updateFontItalic ? 'italic' : 'normal',
-                        backgroundColor: `${newProject.updateCellColor}${Math.round(newProject.updateCellColorIntensity * 2.55).toString(16).padStart(2, '0')}`
-                      }}
-                    >
-                      {newProject.update || 'Update Preview'}
-                    </div>
-                  </div>
-                </div>
-              </div>
-              
-              {/* Footer */}
-              <div className="px-6 py-3 bg-gray-50 dark:bg-gray-900/50 border-t border-gray-200 dark:border-gray-700 flex items-center justify-end gap-3">
-                <button
-                  onClick={() => setShowAddProjectModal(false)}
-                  className="px-4 py-2 text-sm font-medium text-gray-600 dark:text-gray-300 hover:bg-gray-100 dark:hover:bg-gray-700 rounded-xl transition-colors"
-                >
-                  Cancel
-                </button>
-                <button
-                  onClick={handleAddProject}
-                  disabled={!newProject.name.trim()}
-                  className="px-4 py-2 text-sm font-medium text-white bg-gradient-to-r from-blue-500 to-indigo-600 hover:from-blue-600 hover:to-indigo-700 disabled:from-gray-400 disabled:to-gray-500 disabled:cursor-not-allowed rounded-xl shadow-lg shadow-blue-500/25 transition-all flex items-center gap-2"
-                >
-                  <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 4v16m8-8H4" />
-                  </svg>
-                  Add Project
                 </button>
               </div>
             </div>
@@ -3035,726 +3656,6 @@ function LSWContent() {
           </div>
         );
       })()}
-
-      {/* Add Follow Up Modal */}
-      {showAddFollowUpModal && (
-        <div className="fixed inset-0 z-50 overflow-y-auto">
-          {/* Backdrop */}
-          <div 
-            className="fixed inset-0 bg-black/60 backdrop-blur-sm transition-opacity"
-            onClick={() => setShowAddFollowUpModal(false)}
-          />
-          
-          {/* Modal */}
-          <div className="flex min-h-full items-center justify-center p-4">
-            <div className="relative w-full max-w-md transform overflow-hidden rounded-2xl bg-white dark:bg-gray-800 shadow-2xl transition-all">
-              {/* Header */}
-              <div className="relative bg-gradient-to-r from-amber-500 to-orange-600 px-6 py-4">
-                <div className="absolute inset-0 bg-[url('data:image/svg+xml;base64,PHN2ZyB3aWR0aD0iNjAiIGhlaWdodD0iNjAiIHZpZXdCb3g9IjAgMCA2MCA2MCIgeG1sbnM9Imh0dHA6Ly93d3cudzMub3JnLzIwMDAvc3ZnIj48ZyBmaWxsPSJub25lIiBmaWxsLXJ1bGU9ImV2ZW5vZGQiPjxwYXRoIGQ9Ik0zNiAxOGMtOS45NDEgMC0xOCA4LjA1OS0xOCAxOHM4LjA1OSAxOCAxOCAxOCAxOC04LjA1OSAxOC0xOC04LjA1OS0xOC0xOC0xOHptMCAzMmMtNy43MzIgMC0xNC02LjI2OC0xNC0xNHM2LjI2OC0xNCAxNC0xNCAxNCA2LjI2OCAxNCAxNC02LjI2OCAxNC0xNCAxNHoiIGZpbGw9IiNmZmYiIGZpbGwtb3BhY2l0eT0iLjA1Ii8+PC9nPjwvc3ZnPg==')] opacity-30" />
-                <div className="relative">
-                  <h3 className="text-xl font-bold text-white flex items-center gap-3">
-                    <div className="w-10 h-10 rounded-xl bg-white/20 flex items-center justify-center">
-                      <span className="text-xl">🔔</span>
-                    </div>
-                    Add Follow Up
-                  </h3>
-                  <p className="text-amber-100 text-sm mt-1">Create a new follow up item to track</p>
-                </div>
-                <button
-                  onClick={() => setShowAddFollowUpModal(false)}
-                  className="absolute top-4 right-4 p-2 rounded-lg bg-white/10 hover:bg-white/20 transition-colors"
-                >
-                  <svg className="w-5 h-5 text-white" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
-                  </svg>
-                </button>
-              </div>
-              
-              {/* Content */}
-              <div className="px-6 py-5 space-y-4">
-                {/* Follow Up Task */}
-                <div>
-                  <label className="block text-sm font-semibold text-gray-700 dark:text-gray-300 mb-1.5">
-                    Follow Up <span className="text-red-500">*</span>
-                  </label>
-                  <input
-                    type="text"
-                    value={newFollowUp.task}
-                    onChange={(e) => setNewFollowUp(prev => ({ ...prev, task: e.target.value }))}
-                    placeholder="e.g., Review safety documentation"
-                    className="w-full px-3 py-2.5 rounded-xl border border-gray-200 dark:border-gray-600 bg-gray-50 dark:bg-gray-700 text-gray-800 dark:text-white placeholder-gray-400 focus:ring-2 focus:ring-amber-500 focus:border-transparent transition-all"
-                  />
-                </div>
-
-                {/* Due Date and Responsible - Two columns */}
-                <div className="grid grid-cols-2 gap-3">
-                  <div>
-                    <label className="block text-sm font-semibold text-gray-700 dark:text-gray-300 mb-1.5">
-                      Due Date <span className="text-red-500">*</span>
-                    </label>
-                    <input
-                      type="date"
-                      value={newFollowUp.dueDate}
-                      onChange={(e) => setNewFollowUp(prev => ({ ...prev, dueDate: e.target.value }))}
-                      className="w-full px-3 py-2.5 rounded-xl border border-gray-200 dark:border-gray-600 bg-gray-50 dark:bg-gray-700 text-gray-800 dark:text-white focus:ring-2 focus:ring-amber-500 focus:border-transparent transition-all"
-                    />
-                  </div>
-                  <div>
-                    <label className="block text-sm font-semibold text-gray-700 dark:text-gray-300 mb-1.5">
-                      Responsible <span className="text-red-500">*</span>
-                    </label>
-                    <input
-                      type="text"
-                      value={newFollowUp.responsible}
-                      onChange={(e) => setNewFollowUp(prev => ({ ...prev, responsible: e.target.value }))}
-                      placeholder="e.g., John Smith"
-                      className="w-full px-3 py-2.5 rounded-xl border border-gray-200 dark:border-gray-600 bg-gray-50 dark:bg-gray-700 text-gray-800 dark:text-white placeholder-gray-400 focus:ring-2 focus:ring-amber-500 focus:border-transparent transition-all"
-                    />
-                  </div>
-                </div>
-
-                {/* Comments */}
-                <div>
-                  <label className="block text-sm font-semibold text-gray-700 dark:text-gray-300 mb-1.5">
-                    Comments <span className="text-gray-400 font-normal">(Optional)</span>
-                  </label>
-                  <textarea
-                    value={newFollowUp.comments}
-                    onChange={(e) => setNewFollowUp(prev => ({ ...prev, comments: e.target.value }))}
-                    placeholder="Add any notes or context..."
-                    rows={3}
-                    className="w-full px-3 py-2.5 rounded-xl border border-gray-200 dark:border-gray-600 bg-gray-50 dark:bg-gray-700 text-gray-800 dark:text-white placeholder-gray-400 focus:ring-2 focus:ring-amber-500 focus:border-transparent transition-all resize-none"
-                  />
-                </div>
-              </div>
-
-              {/* Footer */}
-              <div className="px-6 py-4 bg-gray-50 dark:bg-gray-900/50 flex items-center justify-end gap-3">
-                <button
-                  onClick={() => {
-                    setShowAddFollowUpModal(false);
-                    setNewFollowUp({ task: '', dueDate: new Date().toISOString().split('T')[0], responsible: '', comments: '' });
-                  }}
-                  className="px-4 py-2 text-sm font-medium text-gray-600 dark:text-gray-300 hover:text-gray-800 dark:hover:text-white transition-colors"
-                >
-                  Cancel
-                </button>
-                <button
-                  onClick={async () => {
-                    if (!newFollowUp.task.trim() || !newFollowUp.dueDate || !newFollowUp.responsible.trim()) return;
-                    try {
-                      const created = await createLswFollowUp({
-                        task: newFollowUp.task,
-                        dueDate: newFollowUp.dueDate,
-                        responsibleName: newFollowUp.responsible,
-                        comments: newFollowUp.comments,
-                      });
-                      setFollowUps(prev => [...prev, mapFollowUpFromDb(created)]);
-                      setNewFollowUp({ task: '', dueDate: new Date().toISOString().split('T')[0], responsible: '', comments: '' });
-                      setShowAddFollowUpModal(false);
-                    } catch (e) { console.error('Failed to add follow-up:', e); }
-                  }}
-                  disabled={!newFollowUp.task.trim() || !newFollowUp.dueDate || !newFollowUp.responsible.trim()}
-                  className="px-5 py-2 text-sm font-medium text-white bg-gradient-to-r from-amber-500 to-orange-600 hover:from-amber-600 hover:to-orange-700 disabled:from-gray-400 disabled:to-gray-500 disabled:cursor-not-allowed rounded-xl shadow-lg shadow-amber-500/25 disabled:shadow-none transition-all"
-                >
-                  Add Follow Up
-                </button>
-              </div>
-            </div>
-          </div>
-        </div>
-      )}
-
-      {/* Add Trigger Modal */}
-      {showAddTriggerModal && (
-        <div className="fixed inset-0 z-50 overflow-y-auto">
-          {/* Backdrop */}
-          <div 
-            className="fixed inset-0 bg-black/60 backdrop-blur-sm transition-opacity"
-            onClick={() => setShowAddTriggerModal(false)}
-          />
-          
-          {/* Modal */}
-          <div className="flex min-h-full items-center justify-center p-4">
-            <div className="relative w-full max-w-md transform overflow-hidden rounded-2xl bg-white dark:bg-gray-800 shadow-2xl transition-all">
-              {/* Header */}
-              <div className="relative bg-gradient-to-r from-red-500 to-rose-600 px-6 py-4">
-                <div className="absolute inset-0 bg-[url('data:image/svg+xml;base64,PHN2ZyB3aWR0aD0iNjAiIGhlaWdodD0iNjAiIHZpZXdCb3g9IjAgMCA2MCA2MCIgeG1sbnM9Imh0dHA6Ly93d3cudzMub3JnLzIwMDAvc3ZnIj48ZyBmaWxsPSJub25lIiBmaWxsLXJ1bGU9ImV2ZW5vZGQiPjxwYXRoIGQ9Ik0zNiAxOGMtOS45NDEgMC0xOCA4LjA1OS0xOCAxOHM4LjA1OSAxOCAxOCAxOCAxOC04LjA1OSAxOC0xOC04LjA1OS0xOC0xOC0xOHptMCAzMmMtNy43MzIgMC0xNC02LjI2OC0xNC0xNHM2LjI2OC0xNCAxNC0xNCAxNCA2LjI2OCAxNCAxNC02LjI2OCAxNC0xNCAxNHoiIGZpbGw9IiNmZmYiIGZpbGwtb3BhY2l0eT0iLjA1Ii8+PC9nPjwvc3ZnPg==')] opacity-30" />
-                <div className="relative">
-                  <h3 className="text-xl font-bold text-white flex items-center gap-3">
-                    <div className="w-10 h-10 rounded-xl bg-white/20 flex items-center justify-center">
-                      <span className="text-xl">⚠️</span>
-                    </div>
-                    Add RCA Trigger
-                  </h3>
-                  <p className="text-red-100 text-sm mt-1">Add a new RCA event trigger</p>
-                </div>
-                <button
-                  onClick={() => setShowAddTriggerModal(false)}
-                  className="absolute top-4 right-4 p-2 rounded-lg bg-white/10 hover:bg-white/20 transition-colors"
-                >
-                  <svg className="w-5 h-5 text-white" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
-                  </svg>
-                </button>
-              </div>
-              
-              {/* Content */}
-              <div className="px-6 py-5 space-y-4">
-                {/* RCA Event Trigger */}
-                <div>
-                  <label className="block text-sm font-semibold text-gray-700 dark:text-gray-300 mb-1.5">
-                    RCA Event Trigger <span className="text-red-500">*</span>
-                  </label>
-                  <textarea
-                    value={newTrigger.trigger}
-                    onChange={(e) => {
-                      setNewTrigger(prev => ({ ...prev, trigger: e.target.value }));
-                      e.target.style.height = 'auto';
-                      const maxHeight = 120;
-                      if (e.target.scrollHeight > maxHeight) {
-                        e.target.style.height = maxHeight + 'px';
-                        e.target.style.overflowY = 'auto';
-                      } else {
-                        e.target.style.height = e.target.scrollHeight + 'px';
-                        e.target.style.overflowY = 'hidden';
-                      }
-                    }}
-                    placeholder="e.g., People Safety - OSHA recordable"
-                    rows={1}
-                    className="w-full px-3 py-2.5 rounded-xl border border-gray-200 dark:border-gray-600 bg-gray-50 dark:bg-gray-700 text-gray-800 dark:text-white placeholder-gray-400 focus:ring-2 focus:ring-red-500 focus:border-transparent transition-all resize-none"
-                  />
-                </div>
-
-                {/* Event Date */}
-                <div>
-                  <label className="block text-sm font-semibold text-gray-700 dark:text-gray-300 mb-1.5">
-                    Event Date <span className="text-gray-400 font-normal">(Optional)</span>
-                  </label>
-                  <input
-                    type="date"
-                    value={newTrigger.eventDate}
-                    onChange={(e) => setNewTrigger(prev => ({ ...prev, eventDate: e.target.value }))}
-                    className="w-full px-3 py-2.5 rounded-xl border border-gray-200 dark:border-gray-600 bg-gray-50 dark:bg-gray-700 text-gray-800 dark:text-white focus:ring-2 focus:ring-red-500 focus:border-transparent transition-all"
-                  />
-                </div>
-
-                {/* Comments */}
-                <div>
-                  <label className="block text-sm font-semibold text-gray-700 dark:text-gray-300 mb-1.5">
-                    Comments/Notes <span className="text-gray-400 font-normal">(Optional)</span>
-                  </label>
-                  <textarea
-                    value={newTrigger.comments}
-                    onChange={(e) => setNewTrigger(prev => ({ ...prev, comments: e.target.value }))}
-                    placeholder="Add any notes or context..."
-                    rows={3}
-                    className="w-full px-3 py-2.5 rounded-xl border border-gray-200 dark:border-gray-600 bg-gray-50 dark:bg-gray-700 text-gray-800 dark:text-white placeholder-gray-400 focus:ring-2 focus:ring-red-500 focus:border-transparent transition-all resize-none"
-                  />
-                </div>
-              </div>
-
-              {/* Footer */}
-              <div className="px-6 py-4 bg-gray-50 dark:bg-gray-900/50 flex items-center justify-end gap-3">
-                <button
-                  onClick={() => {
-                    setShowAddTriggerModal(false);
-                    setNewTrigger({ trigger: '', eventDate: '', comments: '' });
-                  }}
-                  className="px-4 py-2 text-sm font-medium text-gray-600 dark:text-gray-300 hover:text-gray-800 dark:hover:text-white transition-colors"
-                >
-                  Cancel
-                </button>
-                <button
-                  onClick={async () => {
-                    if (!newTrigger.trigger.trim()) return;
-                    try {
-                      const created = await createLswRcaTrigger({
-                        trigger: newTrigger.trigger,
-                        eventDate: newTrigger.eventDate || undefined,
-                        comments: newTrigger.comments || undefined,
-                      });
-                      setRcaTriggers(prev => [...prev, mapTriggerFromDb(created)]);
-                      setNewTrigger({ trigger: '', eventDate: '', comments: '' });
-                      setShowAddTriggerModal(false);
-                    } catch (e) { console.error('Failed to add trigger:', e); }
-                  }}
-                  disabled={!newTrigger.trigger.trim()}
-                  className="px-5 py-2 text-sm font-medium text-white bg-gradient-to-r from-red-500 to-rose-600 hover:from-red-600 hover:to-rose-700 disabled:from-gray-400 disabled:to-gray-500 disabled:cursor-not-allowed rounded-xl shadow-lg shadow-red-500/25 disabled:shadow-none transition-all"
-                >
-                  Add Trigger
-                </button>
-              </div>
-            </div>
-          </div>
-        </div>
-      )}
-
-      {/* Add Todo Item Modal */}
-      {/* Add Meeting Rail Modal */}
-      {showAddMeetingRailModal && (
-        <div className="fixed inset-0 z-50 overflow-y-auto">
-          {/* Backdrop */}
-          <div 
-            className="fixed inset-0 bg-black/60 backdrop-blur-sm transition-opacity"
-            onClick={() => setShowAddMeetingRailModal(false)}
-          />
-          
-          {/* Modal */}
-          <div className="flex min-h-full items-center justify-center p-4">
-            <div className="relative w-full max-w-md transform overflow-hidden rounded-2xl bg-white dark:bg-gray-800 shadow-2xl transition-all">
-              {/* Header */}
-              <div className="relative bg-gradient-to-r from-purple-500 to-pink-600 px-6 py-4">
-                <div className="absolute inset-0 bg-[url('data:image/svg+xml;base64,PHN2ZyB3aWR0aD0iNjAiIGhlaWdodD0iNjAiIHZpZXdCb3g9IjAgMCA2MCA2MCIgeG1sbnM9Imh0dHA6Ly93d3cudzMub3JnLzIwMDAvc3ZnIj48ZyBmaWxsPSJub25lIiBmaWxsLXJ1bGU9ImV2ZW5vZGQiPjxwYXRoIGQ9Ik0zNiAxOGMtOS45NDEgMC0xOCA4LjA1OS0xOCAxOHM4LjA1OSAxOCAxOCAxOCAxOC04LjA1OSAxOC0xOC04LjA1OS0xOC0xOC0xOHptMCAzMmMtNy43MzIgMC0xNC02LjI2OC0xNC0xNHM2LjI2OC0xNCAxNC0xNCAxNCA2LjI2OCAxNCAxNC02LjI2OCAxNC0xNCAxNHoiIGZpbGw9IiNmZmYiIGZpbGwtb3BhY2l0eT0iLjA1Ii8+PC9nPjwvc3ZnPg==')] opacity-30" />
-                <div className="relative">
-                  <h3 className="text-xl font-bold text-white flex items-center gap-3">
-                    <div className="w-10 h-10 rounded-xl bg-white/20 flex items-center justify-center">
-                      <span className="text-xl">🚂</span>
-                    </div>
-                    Add Meeting Rail
-                  </h3>
-                  <p className="text-purple-100 text-sm mt-1">Add a new meeting rail to track</p>
-                </div>
-                <button
-                  onClick={() => setShowAddMeetingRailModal(false)}
-                  className="absolute top-4 right-4 p-2 rounded-lg bg-white/10 hover:bg-white/20 transition-colors"
-                >
-                  <svg className="w-5 h-5 text-white" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
-                  </svg>
-                </button>
-              </div>
-              
-              {/* Content */}
-              <div className="px-6 py-5 space-y-4">
-                {/* Meeting Rail Name */}
-                <div>
-                  <label className="block text-sm font-semibold text-gray-700 dark:text-gray-300 mb-1.5">
-                    Meeting Rail <span className="text-red-500">*</span>
-                  </label>
-                  <input
-                    type="text"
-                    value={newMeetingRail.rail}
-                    onChange={(e) => setNewMeetingRail(prev => ({ ...prev, rail: e.target.value }))}
-                    placeholder="e.g., Level 1 - Daily Stand-up"
-                    className="w-full px-3 py-2.5 rounded-xl border border-gray-200 dark:border-gray-600 bg-gray-50 dark:bg-gray-700 text-gray-800 dark:text-white placeholder-gray-400 focus:ring-2 focus:ring-purple-500 focus:border-transparent transition-all"
-                  />
-                </div>
-
-                {/* Due Date */}
-                <div>
-                  <label className="block text-sm font-semibold text-gray-700 dark:text-gray-300 mb-1.5">
-                    Due Date <span className="text-red-500">*</span>
-                  </label>
-                  <input
-                    type="date"
-                    value={newMeetingRail.dueDate}
-                    onChange={(e) => setNewMeetingRail(prev => ({ ...prev, dueDate: e.target.value }))}
-                    className="w-full px-3 py-2.5 rounded-xl border border-gray-200 dark:border-gray-600 bg-gray-50 dark:bg-gray-700 text-gray-800 dark:text-white focus:ring-2 focus:ring-purple-500 focus:border-transparent transition-all"
-                  />
-                </div>
-              </div>
-
-              {/* Footer */}
-              <div className="px-6 py-4 bg-gray-50 dark:bg-gray-900/50 flex items-center justify-end gap-3">
-                <button
-                  onClick={() => {
-                    setShowAddMeetingRailModal(false);
-                    setNewMeetingRail({ rail: '', dueDate: new Date().toISOString().split('T')[0] });
-                  }}
-                  className="px-4 py-2 text-sm font-medium text-gray-600 dark:text-gray-300 hover:text-gray-800 dark:hover:text-white transition-colors"
-                >
-                  Cancel
-                </button>
-                <button
-                  onClick={async () => {
-                    if (!newMeetingRail.rail.trim()) return;
-                    try {
-                      const created = await createLswMeetingRail({
-                        rail: newMeetingRail.rail,
-                        dueDate: newMeetingRail.dueDate,
-                        weekNumber: currentWeek,
-                        year: currentYear,
-                      });
-                      setMeetingRails(prev => [...prev, mapMeetingRailFromDb(created)]);
-                      setNewMeetingRail({ rail: '', dueDate: new Date().toISOString().split('T')[0] });
-                      setShowAddMeetingRailModal(false);
-                    } catch (e) { console.error('Failed to add meeting rail:', e); }
-                  }}
-                  disabled={!newMeetingRail.rail.trim()}
-                  className="px-5 py-2 text-sm font-medium text-white bg-gradient-to-r from-purple-500 to-pink-600 hover:from-purple-600 hover:to-pink-700 disabled:from-gray-400 disabled:to-gray-500 disabled:cursor-not-allowed rounded-xl shadow-lg shadow-purple-500/25 disabled:shadow-none transition-all"
-                >
-                  Add Rail
-                </button>
-              </div>
-            </div>
-          </div>
-        </div>
-      )}
-
-      {showAddTodoModal && (
-        <div className="fixed inset-0 z-50 overflow-y-auto">
-          {/* Backdrop */}
-          <div 
-            className="fixed inset-0 bg-black/60 backdrop-blur-sm transition-opacity"
-            onClick={() => setShowAddTodoModal(false)}
-          />
-          
-          {/* Modal */}
-          <div className="flex min-h-full items-center justify-center p-4">
-            <div className="relative w-full max-w-md transform overflow-hidden rounded-2xl bg-white dark:bg-gray-800 shadow-2xl transition-all">
-              {/* Header */}
-              <div className="relative bg-gradient-to-r from-blue-500 to-cyan-600 px-6 py-4">
-                <div className="absolute inset-0 bg-[url('data:image/svg+xml;base64,PHN2ZyB3aWR0aD0iNjAiIGhlaWdodD0iNjAiIHZpZXdCb3g9IjAgMCA2MCA2MCIgeG1sbnM9Imh0dHA6Ly93d3cudzMub3JnLzIwMDAvc3ZnIj48ZyBmaWxsPSJub25lIiBmaWxsLXJ1bGU9ImV2ZW5vZGQiPjxwYXRoIGQ9Ik0zNiAxOGMtOS45NDEgMC0xOCA4LjA1OS0xOCAxOHM4LjA1OSAxOCAxOCAxOCAxOC04LjA1OSAxOC0xOC04LjA1OS0xOC0xOC0xOHptMCAzMmMtNy43MzIgMC0xNC02LjI2OC0xNC0xNHM2LjI2OC0xNCAxNC0xNCAxNCA2LjI2OCAxNCAxNC02LjI2OCAxNC0xNCAxNHoiIGZpbGw9IiNmZmYiIGZpbGwtb3BhY2l0eT0iLjA1Ii8+PC9nPjwvc3ZnPg==')] opacity-30" />
-                <div className="relative">
-                  <h3 className="text-xl font-bold text-white flex items-center gap-3">
-                    <div className="w-10 h-10 rounded-xl bg-white/20 flex items-center justify-center">
-                      <span className="text-xl">✅</span>
-                    </div>
-                    Add Todo Item
-                  </h3>
-                  <p className="text-blue-100 text-sm mt-1">Add a new task to your todo list</p>
-                </div>
-                <button
-                  onClick={() => setShowAddTodoModal(false)}
-                  className="absolute top-4 right-4 p-2 rounded-lg bg-white/10 hover:bg-white/20 transition-colors"
-                >
-                  <svg className="w-5 h-5 text-white" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
-                  </svg>
-                </button>
-              </div>
-              
-              {/* Content */}
-              <div className="px-6 py-5 space-y-4">
-                {/* Task */}
-                <div>
-                  <label className="block text-sm font-semibold text-gray-700 dark:text-gray-300 mb-1.5">
-                    Task <span className="text-red-500">*</span>
-                  </label>
-                  <input
-                    type="text"
-                    value={newTodoItem.task}
-                    onChange={(e) => setNewTodoItem(prev => ({ ...prev, task: e.target.value }))}
-                    placeholder="e.g., Complete safety training documentation"
-                    className="w-full px-3 py-2.5 rounded-xl border border-gray-200 dark:border-gray-600 bg-gray-50 dark:bg-gray-700 text-gray-800 dark:text-white placeholder-gray-400 focus:ring-2 focus:ring-blue-500 focus:border-transparent transition-all"
-                  />
-                </div>
-
-                {/* Time */}
-                <div>
-                  <label className="block text-sm font-semibold text-gray-700 dark:text-gray-300 mb-1.5">
-                    Time <span className="text-gray-400 font-normal">(Optional)</span>
-                  </label>
-                  <input
-                    type="time"
-                    value={newTodoItem.dueDate}
-                    onChange={(e) => setNewTodoItem(prev => ({ ...prev, dueDate: e.target.value }))}
-                    className="w-full px-3 py-2.5 rounded-xl border border-gray-200 dark:border-gray-600 bg-gray-50 dark:bg-gray-700 text-gray-800 dark:text-white focus:ring-2 focus:ring-blue-500 focus:border-transparent transition-all"
-                  />
-                </div>
-              </div>
-
-              {/* Footer */}
-              <div className="px-6 py-4 bg-gray-50 dark:bg-gray-900/50 flex items-center justify-end gap-3">
-                <button
-                  onClick={() => {
-                    setShowAddTodoModal(false);
-                    setNewTodoItem({ task: '', dueDate: '' });
-                  }}
-                  className="px-4 py-2 text-sm font-medium text-gray-600 dark:text-gray-300 hover:text-gray-800 dark:hover:text-white transition-colors"
-                >
-                  Cancel
-                </button>
-                <button
-                  onClick={async () => {
-                    if (!newTodoItem.task.trim()) return;
-                    try {
-                      const created = await createLswTodoItem({
-                        task: newTodoItem.task,
-                        dueDate: newTodoItem.dueDate || undefined,
-                        weekNumber: currentWeek,
-                        year: currentYear,
-                      });
-                      setTodoItems(prev => [...prev, mapTodoFromDb(created)]);
-                      setNewTodoItem({ task: '', dueDate: '' });
-                      setShowAddTodoModal(false);
-                    } catch (e) { console.error('Failed to add todo:', e); }
-                  }}
-                  disabled={!newTodoItem.task.trim()}
-                  className="px-5 py-2 text-sm font-medium text-white bg-gradient-to-r from-blue-500 to-cyan-600 hover:from-blue-600 hover:to-cyan-700 disabled:from-gray-400 disabled:to-gray-500 disabled:cursor-not-allowed rounded-xl shadow-lg shadow-blue-500/25 disabled:shadow-none transition-all"
-                >
-                  Add Item
-                </button>
-              </div>
-            </div>
-          </div>
-        </div>
-      )}
-      {/* Add Scheduled Task Modal */}
-      {showAddScheduledTaskModal && (
-        <div className="fixed inset-0 z-50 overflow-y-auto">
-          {/* Backdrop */}
-          <div 
-            className="fixed inset-0 bg-black/60 backdrop-blur-sm transition-opacity"
-            onClick={() => setShowAddScheduledTaskModal(false)}
-          />
-          
-          {/* Modal */}
-          <div className="flex min-h-full items-center justify-center p-4">
-            <div className="relative w-full max-w-md transform overflow-hidden rounded-2xl bg-white dark:bg-gray-800 shadow-2xl transition-all">
-              {/* Header */}
-              <div className="relative bg-gradient-to-r from-violet-500 to-purple-600 px-6 py-4">
-                <div className="absolute inset-0 bg-[url('data:image/svg+xml;base64,PHN2ZyB3aWR0aD0iNjAiIGhlaWdodD0iNjAiIHZpZXdCb3g9IjAgMCA2MCA2MCIgeG1sbnM9Imh0dHA6Ly93d3cudzMub3JnLzIwMDAvc3ZnIj48ZyBmaWxsPSJub25lIiBmaWxsLXJ1bGU9ImV2ZW5vZGQiPjxwYXRoIGQ9Ik0zNiAxOGMtOS45NDEgMC0xOCA4LjA1OS0xOCAxOHM4LjA1OSAxOCAxOCAxOCAxOC04LjA1OSAxOC0xOC04LjA1OS0xOC0xOC0xOHptMCAzMmMtNy43MzIgMC0xNC02LjI2OC0xNC0xNHM2LjI2OC0xNCAxNC0xNCAxNCA2LjI2OCAxNCAxNC02LjI2OCAxNC0xNCAxNHoiIGZpbGw9IiNmZmYiIGZpbGwtb3BhY2l0eT0iLjA1Ii8+PC9nPjwvc3ZnPg==')] opacity-30" />
-                <div className="relative">
-                  <h3 className="text-xl font-bold text-white flex items-center gap-3">
-                    <div className="w-10 h-10 rounded-xl bg-white/20 flex items-center justify-center">
-                      <span className="text-xl">📆</span>
-                    </div>
-                    Add Scheduled Task
-                  </h3>
-                  <p className="text-violet-100 text-sm mt-1">Add a new scheduled task or meeting</p>
-                </div>
-                <button
-                  onClick={() => setShowAddScheduledTaskModal(false)}
-                  className="absolute top-4 right-4 p-2 rounded-lg bg-white/10 hover:bg-white/20 transition-colors"
-                >
-                  <svg className="w-5 h-5 text-white" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
-                  </svg>
-                </button>
-              </div>
-              
-              {/* Content */}
-              <div className="px-6 py-5 space-y-4">
-                {/* Task/Meeting */}
-                <div>
-                  <label className="block text-sm font-semibold text-gray-700 dark:text-gray-300 mb-1.5">
-                    Task/Meeting <span className="text-red-500">*</span>
-                  </label>
-                  <textarea
-                    value={newScheduledTask.task}
-                    onChange={(e) => setNewScheduledTask(prev => ({ ...prev, task: e.target.value }))}
-                    placeholder="e.g., Safety Committee Meeting"
-                    rows={3}
-                    wrap="soft"
-                    style={{ whiteSpace: 'pre-wrap', wordBreak: 'break-word', overflowWrap: 'break-word' }}
-                    className="w-full px-3 py-2.5 rounded-xl border border-gray-200 dark:border-gray-600 bg-gray-50 dark:bg-gray-700 text-gray-800 dark:text-white placeholder-gray-400 focus:ring-2 focus:ring-violet-500 focus:border-transparent transition-all resize-none overflow-y-auto"
-                  />
-                </div>
-
-                {/* Frequency */}
-                <div>
-                  <label className="block text-sm font-semibold text-gray-700 dark:text-gray-300 mb-1.5">
-                    Frequency <span className="text-red-500">*</span>
-                  </label>
-                  <select
-                    value={newScheduledTask.frequency}
-                    onChange={(e) => setNewScheduledTask(prev => ({ ...prev, frequency: e.target.value as 'biweekly' | 'monthly' | 'quarterly' | 'annually' }))}
-                    className="w-full px-3 py-2.5 rounded-xl border border-gray-200 dark:border-gray-600 bg-gray-50 dark:bg-gray-700 text-gray-800 dark:text-white focus:ring-2 focus:ring-violet-500 focus:border-transparent transition-all"
-                  >
-                    <option value="biweekly">Bi-Weekly</option>
-                    <option value="monthly">Monthly</option>
-                    <option value="quarterly">Quarterly</option>
-                    <option value="annually">Annually</option>
-                  </select>
-                </div>
-
-                {/* Minutes */}
-                <div>
-                  <label className="block text-sm font-semibold text-gray-700 dark:text-gray-300 mb-1.5">
-                    Duration (Minutes) <span className="text-red-500">*</span>
-                  </label>
-                  <input
-                    type="number"
-                    value={newScheduledTask.minutes}
-                    onChange={(e) => setNewScheduledTask(prev => ({ ...prev, minutes: parseInt(e.target.value) || 0 }))}
-                    min="1"
-                    className="w-full px-3 py-2.5 rounded-xl border border-gray-200 dark:border-gray-600 bg-gray-50 dark:bg-gray-700 text-gray-800 dark:text-white focus:ring-2 focus:ring-violet-500 focus:border-transparent transition-all"
-                  />
-                </div>
-
-                {/* Due Date */}
-                <div>
-                  <label className="block text-sm font-semibold text-gray-700 dark:text-gray-300 mb-1.5">
-                    Due Date <span className="text-red-500">*</span>
-                  </label>
-                  <input
-                    type="date"
-                    value={newScheduledTask.dueDate}
-                    onChange={(e) => setNewScheduledTask(prev => ({ ...prev, dueDate: e.target.value }))}
-                    className="w-full px-3 py-2.5 rounded-xl border border-gray-200 dark:border-gray-600 bg-gray-50 dark:bg-gray-700 text-gray-800 dark:text-white focus:ring-2 focus:ring-violet-500 focus:border-transparent transition-all"
-                  />
-                </div>
-              </div>
-              
-              {/* Footer */}
-              <div className="px-6 py-4 bg-gray-50 dark:bg-gray-900/50 border-t border-gray-200 dark:border-gray-700 flex justify-end gap-3">
-                <button
-                  onClick={() => setShowAddScheduledTaskModal(false)}
-                  className="px-4 py-2 text-sm font-medium text-gray-700 dark:text-gray-300 hover:bg-gray-100 dark:hover:bg-gray-700 rounded-xl transition-colors"
-                >
-                  Cancel
-                </button>
-                <button
-                  onClick={async () => {
-                    if (!newScheduledTask.task.trim() || !newScheduledTask.dueDate || newScheduledTask.minutes <= 0) return;
-                    try {
-                      const created = await createLswFrequencyTask({
-                        task: newScheduledTask.task,
-                        minutes: newScheduledTask.minutes,
-                        dueDate: newScheduledTask.dueDate,
-                        frequency: FREQ_UI_TO_DB[newScheduledTask.frequency],
-                        weekNumber: currentWeek,
-                        year: currentYear,
-                      });
-                      setFrequencyTasks(prev => [...prev, mapFreqTaskFromDb(created)]);
-                      setNewScheduledTask({ task: '', minutes: 60, dueDate: new Date().toISOString().split('T')[0], frequency: 'biweekly' });
-                      setShowAddScheduledTaskModal(false);
-                    } catch (e) { console.error('Failed to add scheduled task:', e); }
-                  }}
-                  disabled={!newScheduledTask.task.trim() || !newScheduledTask.dueDate || newScheduledTask.minutes <= 0}
-                  className="px-5 py-2 text-sm font-medium text-white bg-gradient-to-r from-violet-500 to-purple-600 hover:from-violet-600 hover:to-purple-700 disabled:from-gray-400 disabled:to-gray-500 disabled:cursor-not-allowed rounded-xl shadow-lg shadow-violet-500/25 disabled:shadow-none transition-all"
-                >
-                  Add Task
-                </button>
-              </div>
-            </div>
-          </div>
-        </div>
-      )}
-
-      {/* Add Goal Modal */}
-      {showAddGoalModal && (
-        <div className="fixed inset-0 z-50 overflow-y-auto">
-          {/* Backdrop */}
-          <div 
-            className="fixed inset-0 bg-black/60 backdrop-blur-sm transition-opacity"
-            onClick={() => setShowAddGoalModal(false)}
-          />
-          
-          {/* Modal */}
-          <div className="flex min-h-full items-center justify-center p-4">
-            <div className="relative w-full max-w-md transform overflow-hidden rounded-2xl bg-white dark:bg-gray-800 shadow-2xl transition-all">
-              {/* Header */}
-              <div className="relative bg-gradient-to-r from-rose-500 to-pink-600 px-6 py-4">
-                <div className="absolute inset-0 bg-[url('data:image/svg+xml;base64,PHN2ZyB3aWR0aD0iNjAiIGhlaWdodD0iNjAiIHZpZXdCb3g9IjAgMCA2MCA2MCIgeG1sbnM9Imh0dHA6Ly93d3cudzMub3JnLzIwMDAvc3ZnIj48ZyBmaWxsPSJub25lIiBmaWxsLXJ1bGU9ImV2ZW5vZGQiPjxwYXRoIGQ9Ik0zNiAxOGMtOS45NDEgMC0xOCA4LjA1OS0xOCAxOHM4LjA1OSAxOCAxOCAxOCAxOC04LjA1OSAxOC0xOC04LjA1OS0xOC0xOC0xOHptMCAzMmMtNy43MzIgMC0xNC02LjI2OC0xNC0xNHM2LjI2OC0xNCAxNC0xNCAxNCA2LjI2OCAxNCAxNC02LjI2OCAxNC0xNCAxNHoiIGZpbGw9IiNmZmYiIGZpbGwtb3BhY2l0eT0iLjA1Ii8+PC9nPjwvc3ZnPg==')] opacity-30" />
-                <div className="relative">
-                  <h3 className="text-xl font-bold text-white flex items-center gap-3">
-                    <div className="w-10 h-10 rounded-xl bg-white/20 flex items-center justify-center">
-                      <span className="text-xl">🎯</span>
-                    </div>
-                    Add Personal Goal
-                  </h3>
-                  <p className="text-rose-100 text-sm mt-1">Set a new personal objective to track</p>
-                </div>
-                <button
-                  onClick={() => setShowAddGoalModal(false)}
-                  className="absolute top-4 right-4 p-2 rounded-lg bg-white/10 hover:bg-white/20 transition-colors"
-                  title="Close"
-                >
-                  <svg className="w-5 h-5 text-white" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
-                  </svg>
-                </button>
-              </div>
-              
-              {/* Content */}
-              <div className="px-6 py-5 space-y-4">
-                {/* Objective */}
-                <div>
-                  <label className="block text-sm font-semibold text-gray-700 dark:text-gray-300 mb-1.5">
-                    Objective <span className="text-red-500">*</span>
-                  </label>
-                  <textarea
-                    value={newGoal.objective}
-                    onChange={(e) => {
-                      setNewGoal(prev => ({ ...prev, objective: e.target.value }));
-                      e.target.style.height = 'auto';
-                      const maxHeight = 120;
-                      if (e.target.scrollHeight > maxHeight) {
-                        e.target.style.height = maxHeight + 'px';
-                        e.target.style.overflowY = 'auto';
-                      } else {
-                        e.target.style.height = e.target.scrollHeight + 'px';
-                        e.target.style.overflowY = 'hidden';
-                      }
-                    }}
-                    placeholder="e.g., Complete Lean Six Sigma Certification"
-                    rows={1}
-                    className="w-full px-3 py-2.5 rounded-xl border border-gray-200 dark:border-gray-600 bg-gray-50 dark:bg-gray-700 text-gray-800 dark:text-white placeholder-gray-400 focus:ring-2 focus:ring-rose-500 focus:border-transparent transition-all resize-none"
-                  />
-                </div>
-
-                {/* Due Date */}
-                <div>
-                  <label className="block text-sm font-semibold text-gray-700 dark:text-gray-300 mb-1.5">
-                    Due Date <span className="text-red-500">*</span>
-                  </label>
-                  <input
-                    type="date"
-                    value={newGoal.dueDate}
-                    onChange={(e) => setNewGoal(prev => ({ ...prev, dueDate: e.target.value }))}
-                    className="w-full px-3 py-2.5 rounded-xl border border-gray-200 dark:border-gray-600 bg-gray-50 dark:bg-gray-700 text-gray-800 dark:text-white focus:ring-2 focus:ring-rose-500 focus:border-transparent transition-all"
-                  />
-                </div>
-
-                {/* Progress */}
-                <div>
-                  <label className="block text-sm font-semibold text-gray-700 dark:text-gray-300 mb-1.5">
-                    Initial Progress <span className="text-gray-400 font-normal">({newGoal.progress}%)</span>
-                  </label>
-                  <input
-                    type="range"
-                    min="0"
-                    max="100"
-                    value={newGoal.progress}
-                    onChange={(e) => setNewGoal(prev => ({ ...prev, progress: parseInt(e.target.value) }))}
-                    className="w-full h-2 bg-gray-200 dark:bg-gray-700 rounded-lg appearance-none cursor-pointer accent-rose-500"
-                  />
-                  <div className="flex justify-between text-xs text-gray-400 mt-1">
-                    <span>0%</span>
-                    <span>50%</span>
-                    <span>100%</span>
-                  </div>
-                </div>
-              </div>
-
-              {/* Footer */}
-              <div className="px-6 py-4 bg-gray-50 dark:bg-gray-900/50 flex items-center justify-end gap-3">
-                <button
-                  onClick={() => {
-                    setShowAddGoalModal(false);
-                    setNewGoal({ objective: '', dueDate: '', progress: 0 });
-                  }}
-                  className="px-4 py-2 text-sm font-medium text-gray-600 dark:text-gray-300 hover:text-gray-800 dark:hover:text-white transition-colors"
-                >
-                  Cancel
-                </button>
-                <button
-                  onClick={async () => {
-                    if (!newGoal.objective.trim() || !newGoal.dueDate) return;
-                    try {
-                      const created = await createLswPersonalGoal({
-                        objective: newGoal.objective,
-                        dueDate: newGoal.dueDate,
-                        progress: newGoal.progress,
-                      });
-                      setPersonalGoals(prev => [...prev, mapGoalFromDb(created)]);
-                      setNewGoal({ objective: '', dueDate: '', progress: 0 });
-                      setShowAddGoalModal(false);
-                    } catch (e) { console.error('Failed to add goal:', e); }
-                  }}
-                  disabled={!newGoal.objective.trim() || !newGoal.dueDate}
-                  className="px-5 py-2 text-sm font-medium text-white bg-gradient-to-r from-rose-500 to-pink-600 hover:from-rose-600 hover:to-pink-700 disabled:from-gray-400 disabled:to-gray-500 disabled:cursor-not-allowed rounded-xl shadow-lg shadow-rose-500/25 disabled:shadow-none transition-all"
-                >
-                  Add Goal
-                </button>
-              </div>
-            </div>
-          </div>
-        </div>
-      )}
 
       {/* ──── Early Completion Log Modal ──── */}
       {showEarlyLogModal && (() => {
@@ -4312,74 +4213,7 @@ function LSWContent() {
         </div>
       )}
 
-      {/* ──── Overdue Tasks Notification Modal ──── */}
-      {showOverdueModal && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center">
-          {/* Backdrop */}
-          <div className="absolute inset-0 bg-black/40 backdrop-blur-sm" onClick={() => setShowOverdueModal(false)} />
-          {/* Modal */}
-          <div className="relative w-full max-w-lg mx-4 bg-white dark:bg-gray-800 rounded-2xl shadow-2xl border border-gray-200 dark:border-gray-700 overflow-hidden animate-fade-in">
-            {/* Header */}
-            <div className="flex items-center justify-between px-5 py-4 bg-gradient-to-r from-amber-50 to-orange-50 dark:from-amber-900/30 dark:to-orange-900/30 border-b border-amber-200 dark:border-amber-700/50">
-              <div className="flex items-center gap-2">
-                <span className="text-xl">🔔</span>
-                <h3 className="text-sm font-bold text-amber-800 dark:text-amber-200">Task Notifications</h3>
-              </div>
-              <button
-                onClick={() => setShowOverdueModal(false)}
-                className="p-1.5 rounded-lg hover:bg-amber-200/50 dark:hover:bg-amber-800/50 transition-colors"
-              >
-                <svg className="w-4 h-4 text-amber-700 dark:text-amber-300" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
-                </svg>
-              </button>
-            </div>
-            {/* Body */}
-            <div className="px-5 py-4 max-h-[60vh] overflow-y-auto">
-              {(() => {
-                const overdue = getOverdueTasks();
-                if (overdue.totalCount === 0) {
-                  return (
-                    <div className="text-center py-8">
-                      <span className="text-4xl block mb-3">✅</span>
-                      <p className="text-sm font-semibold text-gray-700 dark:text-gray-300">All caught up!</p>
-                      <p className="text-xs text-gray-500 dark:text-gray-400 mt-1">No overdue tasks or meetings.</p>
-                    </div>
-                  );
-                }
-                return (
-                  <>
-                    <div className="bg-amber-50 dark:bg-amber-900/20 border border-amber-200 dark:border-amber-700/50 rounded-xl p-3 mb-4">
-                      <p className="text-xs font-semibold text-amber-800 dark:text-amber-200">
-                        ⚠️ You have {overdue.totalCount} unchecked task/meeting{overdue.totalCount !== 1 ? 's' : ''} past their scheduled time
-                      </p>
-                      <p className="text-[11px] text-amber-700 dark:text-amber-300 mt-1">
-                        Please check your tasks/meetings if they were already completed. If not, try to complete all your tasks and attend your meetings on time.
-                      </p>
-                    </div>
-                    <div className="space-y-2">
-                      {overdue.tasks.map(task => (
-                        <div key={task.taskId} className="flex items-start gap-3 p-3 rounded-xl bg-gray-50 dark:bg-gray-700/50 border border-gray-100 dark:border-gray-600/50">
-                          <span className="text-lg flex-shrink-0">🕐</span>
-                          <div className="min-w-0">
-                            <p className="text-sm font-semibold text-gray-800 dark:text-gray-200 truncate">{task.task}</p>
-                            <div className="flex items-center gap-2 mt-1">
-                              <span className="text-xs text-gray-500 dark:text-gray-400">Scheduled: {task.time}</span>
-                              <span className="text-[10px] px-2 py-0.5 rounded-full bg-red-100 dark:bg-red-900/30 text-red-700 dark:text-red-300 font-medium">
-                                {task.overdueDays.join(', ')}
-                              </span>
-                            </div>
-                          </div>
-                        </div>
-                      ))}
-                    </div>
-                  </>
-                );
-              })()}
-            </div>
-          </div>
-        </div>
-      )}
+
     </div>
   );
 }

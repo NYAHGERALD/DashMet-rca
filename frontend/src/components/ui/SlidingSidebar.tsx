@@ -3,6 +3,7 @@
 import { useState, useEffect, useRef, useCallback } from 'react';
 import { createPortal } from 'react-dom';
 import Link from 'next/link';
+import { useTheme } from '@/components/providers/ThemeProvider';
 
 interface SidebarLink {
   href?: string;
@@ -198,6 +199,8 @@ export default function SlidingSidebar({
     }
   };
   
+  const { theme } = useTheme();
+  const isDark = theme === 'dark';
   const sidebarRef = useRef<HTMLDivElement>(null);
   const navRef = useRef<HTMLElement>(null);
   const collapsedNavRef = useRef<HTMLElement>(null);
@@ -271,12 +274,12 @@ export default function SlidingSidebar({
         }`}
         style={{
           width: isOpen ? 240 : 0,
-          background: 'rgba(186, 230, 253, 0.55)',
+          background: isDark ? 'rgba(30, 41, 59, 0.92)' : 'rgba(186, 230, 253, 0.55)',
           backdropFilter: 'blur(20px) saturate(180%)',
           WebkitBackdropFilter: 'blur(20px) saturate(180%)',
-          boxShadow: '0 4px 24px rgba(14, 165, 233, 0.1), 0 0 0 1px rgba(125,211,252,0.3) inset',
-          borderRight: position === 'left' ? '1px solid rgba(125,211,252,0.4)' : 'none',
-          borderLeft: position === 'right' ? '1px solid rgba(125,211,252,0.4)' : 'none',
+          boxShadow: isDark ? '0 4px 24px rgba(0, 0, 0, 0.3), 0 0 0 1px rgba(51,65,85,0.5) inset' : '0 4px 24px rgba(14, 165, 233, 0.1), 0 0 0 1px rgba(125,211,252,0.3) inset',
+          borderRight: position === 'left' ? `1px solid ${isDark ? 'rgba(51,65,85,0.6)' : 'rgba(125,211,252,0.4)'}` : 'none',
+          borderLeft: position === 'right' ? `1px solid ${isDark ? 'rgba(51,65,85,0.6)' : 'rgba(125,211,252,0.4)'}` : 'none',
         }}
         onMouseEnter={() => setHovered(true)}
         onMouseLeave={() => setHovered(false)}
@@ -297,7 +300,7 @@ export default function SlidingSidebar({
         </button>
 
         {/* Header */}
-        <div className="px-3 py-2.5 border-b border-white/20 dark:border-gray-700/40" style={{ background: 'linear-gradient(135deg, rgba(14,165,233,0.08) 0%, rgba(14,165,233,0.02) 100%)' }}>
+        <div className="px-3 py-2.5 border-b border-white/20 dark:border-gray-700/40" style={{ background: isDark ? 'linear-gradient(135deg, rgba(14,165,233,0.12) 0%, rgba(14,165,233,0.04) 100%)' : 'linear-gradient(135deg, rgba(14,165,233,0.08) 0%, rgba(14,165,233,0.02) 100%)' }}>
           <h2 className="text-[11px] font-semibold text-gray-500 dark:text-gray-400 flex items-center gap-2 tracking-wide uppercase cursor-default group/title transition-colors duration-200 hover:text-primary-600 dark:hover:text-primary-400">
             <div className="w-5 h-5 rounded-md bg-primary-500/15 dark:bg-primary-400/20 flex items-center justify-center transition-all duration-300 group-hover/title:bg-primary-500/25 group-hover/title:scale-110 group-hover/title:rotate-6">
               <svg className="w-3 h-3 text-primary-600 dark:text-primary-400" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2.2}>
@@ -397,12 +400,12 @@ export default function SlidingSidebar({
           className="absolute inset-0 flex flex-col"
           style={{
             width: collapsedWidth,
-            background: 'linear-gradient(180deg, rgba(186, 230, 253, 0.9) 0%, rgba(164, 220, 251, 0.88) 100%)',
+            background: isDark ? 'linear-gradient(180deg, rgba(30, 41, 59, 0.95) 0%, rgba(22, 33, 49, 0.93) 100%)' : 'linear-gradient(180deg, rgba(186, 230, 253, 0.9) 0%, rgba(164, 220, 251, 0.88) 100%)',
             backdropFilter: 'blur(24px) saturate(180%)',
             WebkitBackdropFilter: 'blur(24px) saturate(180%)',
             boxShadow: position === 'left'
-              ? '4px 0 20px rgba(14, 165, 233, 0.12), 1px 0 0 rgba(125,211,252,0.5)'
-              : '-4px 0 20px rgba(14, 165, 233, 0.12), -1px 0 0 rgba(125,211,252,0.5)',
+              ? isDark ? '4px 0 20px rgba(0, 0, 0, 0.25), 1px 0 0 rgba(51,65,85,0.5)' : '4px 0 20px rgba(14, 165, 233, 0.12), 1px 0 0 rgba(125,211,252,0.5)'
+              : isDark ? '-4px 0 20px rgba(0, 0, 0, 0.25), -1px 0 0 rgba(51,65,85,0.5)' : '-4px 0 20px rgba(14, 165, 233, 0.12), -1px 0 0 rgba(125,211,252,0.5)',
           }}
         >
           {/* Expand button at top */}

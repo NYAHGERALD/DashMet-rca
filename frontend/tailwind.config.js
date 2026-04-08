@@ -85,6 +85,7 @@ module.exports = {
         'slide-up': 'slideUp 0.5s ease-out forwards',
         'slide-down': 'slideDown 0.5s ease-out forwards',
         'bounce-in': 'bounceIn 0.6s cubic-bezier(0.68, -0.55, 0.265, 1.55) forwards',
+        'drop-bounce': 'dropBounce 0.5s cubic-bezier(0.34, 1.56, 0.64, 1) forwards',
         'spin-slow': 'spin 3s linear infinite',
         'pulse-soft': 'pulseSoft 2s ease-in-out infinite',
         'wiggle': 'wiggle 1s ease-in-out infinite',
@@ -151,6 +152,13 @@ module.exports = {
           '50%': { transform: 'scale(1.05)' },
           '70%': { transform: 'scale(0.9)' },
           '100%': { opacity: '1', transform: 'scale(1)' },
+        },
+        dropBounce: {
+          '0%': { transform: 'scaleY(0.95) translateY(-4px)', opacity: '0.8' },
+          '40%': { transform: 'scaleY(1.02) translateY(2px)', opacity: '1' },
+          '65%': { transform: 'scaleY(0.99) translateY(-1px)' },
+          '85%': { transform: 'scaleY(1.005) translateY(0.5px)' },
+          '100%': { transform: 'scaleY(1) translateY(0)', opacity: '1' },
         },
         pulseSoft: {
           '0%, 100%': { opacity: '1', transform: 'scale(1)' },
