@@ -498,6 +498,7 @@ export const NAV_PRIVILEGES = {
   MEETINGS: 'nav.meetings',
   OPERATIONS: 'nav.operations',
   ACTION_ITEMS: 'nav.action_items',
+  CANVAS_AI: 'nav.canvas_ai',
   // Organization Management
   ADMIN_ORGANIZATIONS: 'nav.admin_organizations',
   ADMIN_FACILITIES: 'nav.admin_facilities',

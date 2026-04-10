@@ -1556,6 +1556,16 @@ export const PRIVILEGE_DEFINITIONS: PrivilegeDefinition[] = [
     sortOrder: 1220,
     defaultRoles: ['OPERATOR', 'SUPERVISOR', 'QA_FOOD_SAFETY', 'QUALITY_CONTROL_MANAGER', 'MAINTENANCE_ENGINEERING', 'SAFETY_SECURITY_MANAGER', 'CI_MANAGER', 'ADMIN'],
   },
+  {
+    key: 'nav.canvas_ai',
+    module: 'NAVIGATION',
+    action: 'VIEW',
+    displayName: 'Canvas AI',
+    description: 'Access collaborative AI whiteboard',
+    category: 'Quick Navigation',
+    sortOrder: 1221,
+    defaultRoles: ['OPERATOR', 'SUPERVISOR', 'QA_FOOD_SAFETY', 'QUALITY_CONTROL_MANAGER', 'MAINTENANCE_ENGINEERING', 'SAFETY_SECURITY_MANAGER', 'CI_MANAGER', 'ADMIN'],
+  },
 
   // ── Organization Management Links ──
   {

@@ -187,6 +187,10 @@ const httpServer = createServer(app);
 const corsOriginsArray = Array.isArray(corsOptions.origin) ? corsOptions.origin : [corsOptions.origin];
 websocketService.initialize(httpServer, corsOriginsArray as string[]);
 
+// Initialize Yjs WebSocket server for Canvas AI whiteboard collaboration
+import { initializeYjsWebSocket } from './services/yjsService';
+initializeYjsWebSocket(httpServer);
+
 // Start server - bind to 0.0.0.0 to allow network access
 const HOST = process.env.HOST || '0.0.0.0';
 const server = httpServer.listen(PORT, HOST, () => {

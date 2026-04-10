@@ -52,7 +52,10 @@
     "socket.io": "^4.8.3",
     "tsx": "^4.21.0",
     "uuid": "^9.0.1",
-    "winston": "^3.11.0"
+    "winston": "^3.11.0",
+    "ws": "^8.20.0",
+    "y-websocket": "^3.0.0",
+    "yjs": "^13.6.30"
   },
   "devDependencies": {
     "@types/bcryptjs": "^2.4.6",
@@ -66,6 +69,7 @@
     "@types/node": "^20.10.5",
     "@types/pdf-parse": "^1.1.5",
     "@types/uuid": "^9.0.8",
+    "@types/ws": "^8.18.1",
     "@typescript-eslint/eslint-plugin": "^6.15.0",
     "@typescript-eslint/parser": "^6.15.0",
     "eslint": "^8.56.0",

@@ -2,6 +2,7 @@ import { Router, Response } from 'express';
 import { AuthRequest } from '../middleware/auth';
 import { authenticate } from '../middleware/auth';
 import lswService from '../services/lswService';
+import lswExportService from '../services/lswExportService';
 import { websocketService } from '../services/websocketService';
 
 const router = Router();
@@ -601,6 +602,43 @@ router.delete('/early-completion-logs', async (req: AuthRequest, res: Response) 
     });
     res.json({ success: true });
   } catch (error: any) {
+    res.status(500).json({ success: false, error: error.message });
+  }
+});
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Export: GET /api/lsw/export?weekNumber=15&year=2026&weekStart=2026-04-06
+// Generates a filled LSW Excel report for the specified week
+// ─────────────────────────────────────────────────────────────────────────────
+router.get('/export', async (req: AuthRequest, res: Response) => {
+  try {
+    const userId = req.user!.id;
+    const organizationId = req.user!.organizationId;
+    const weekNumber = parseInt(req.query.weekNumber as string);
+    const year = parseInt(req.query.year as string);
+    const weekStart = (req.query.weekStart as string) || '';
+
+    if (!weekNumber || !year || !organizationId) {
+      return res.status(400).json({ success: false, error: 'weekNumber, year, and organizationId are required' });
+    }
+
+    const userName = `${req.user!.firstName || ''} ${req.user!.lastName || ''}`.trim() || 'User';
+
+    const buffer = await lswExportService.generateLswExcelReport(
+      userId,
+      organizationId,
+      weekNumber,
+      year,
+      userName,
+      weekStart,
+    );
+
+    const filename = `LSW_Report_Week${weekNumber}_${year}.xlsx`;
+    res.setHeader('Content-Type', 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet');
+    res.setHeader('Content-Disposition', `attachment; filename="${filename}"`);
+    res.send(Buffer.from(buffer as ArrayBuffer));
+  } catch (error: any) {
+    console.error('Error exporting LSW report:', error);
     res.status(500).json({ success: false, error: error.message });
   }
 });

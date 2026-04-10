@@ -460,3 +460,13 @@ export async function getLswEarlyCompletionLogs(weekNumber?: number, year?: numb
 export async function deleteLswEarlyCompletionLog(dailyTaskId: string, dayKey: string, weekNumber: number, year: number): Promise<void> {
   await api.delete('/lsw/early-completion-logs', { data: { dailyTaskId, dayKey, weekNumber, year } });
 }
+
+// ─── Export ───────────────────────────────────────────────────────────────────
+
+export async function exportLswReport(weekNumber: number, year: number, weekStart: string): Promise<Blob> {
+  const res = await api.get('/lsw/export', {
+    params: { weekNumber, year, weekStart },
+    responseType: 'blob',
+  });
+  return res.data;
+}

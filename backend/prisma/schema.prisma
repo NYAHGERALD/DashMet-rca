@@ -1091,6 +1091,9 @@ model Organization {
   // User-specific privilege overrides
   UserPrivilegeOverrides     UserPrivilegeOverride[]
 
+  // Canvas AI — Whiteboard Relations
+  Boards                     Board[]                     @relation("BoardOrganization")
+
   @@index([name])
   @@index([signupCode])
 }
@@ -1607,6 +1610,12 @@ model User {
 
   // User-specific privilege overrides
   PrivilegeOverrides                                                  UserPrivilegeOverride[]
+
+  // Canvas AI — Whiteboard Relations
+  BoardsOwned                                                         Board[]                               @relation("BoardOwner")
+  BoardCollaborations                                                 BoardCollaborator[]                   @relation("BoardCollaboratorUser")
+  BoardVersionsCreated                                                BoardVersion[]                        @relation("BoardVersionCreator")
+  BoardComments                                                       BoardComment[]                        @relation("BoardCommentUser")
 
   @@index([email])
   @@index([isOnline])
@@ -4119,4 +4128,112 @@ model DayOfWeek {
   @@index([facilityId])
   @@index([departmentId])
   @@index([organizationId, dayOrder])
+}
+
+// ═══════════════════════════════════════════════════════════════════════════
+// CANVAS AI — Whiteboard Models
+// ═══════════════════════════════════════════════════════════════════════════
+
+enum BoardVisibility {
+  PRIVATE
+  TEAM
+  PUBLIC
+}
+
+enum BoardCollaboratorRole {
+  OWNER
+  EDITOR
+  VIEWER
+}
+
+model Board {
+  id              String           @id @default(uuid())
+  title           String           @default("Untitled Board")
+  description     String?          @db.Text
+  thumbnail       String?          // S3 URL for board preview image
+
+  ownerId         String
+  owner           User             @relation("BoardOwner", fields: [ownerId], references: [id], onDelete: Cascade)
+  organizationId  String
+  organization    Organization     @relation("BoardOrganization", fields: [organizationId], references: [id], onDelete: Cascade)
+
+  visibility      BoardVisibility  @default(PRIVATE)
+  isFavorite      Boolean          @default(false)
+  isArchived      Boolean          @default(false)
+
+  // Yjs document state stored as binary
+  yjsState        Bytes?
+
+  createdAt       DateTime         @default(now())
+  updatedAt       DateTime         @updatedAt
+
+  collaborators   BoardCollaborator[]
+  versions        BoardVersion[]
+  assets          BoardAsset[]
+  comments        BoardComment[]
+
+  @@index([ownerId])
+  @@index([organizationId])
+  @@index([ownerId, isArchived])
+}
+
+model BoardCollaborator {
+  id        String                @id @default(uuid())
+  boardId   String
+  board     Board                 @relation(fields: [boardId], references: [id], onDelete: Cascade)
+  userId    String
+  user      User                  @relation("BoardCollaboratorUser", fields: [userId], references: [id], onDelete: Cascade)
+  role      BoardCollaboratorRole @default(EDITOR)
+  joinedAt  DateTime              @default(now())
+
+  @@unique([boardId, userId])
+  @@index([userId])
+}
+
+model BoardVersion {
+  id          String   @id @default(uuid())
+  boardId     String
+  board       Board    @relation(fields: [boardId], references: [id], onDelete: Cascade)
+  snapshot    Bytes    // Yjs state vector snapshot
+  label       String?  // Optional version label
+  createdById String
+  createdBy   User     @relation("BoardVersionCreator", fields: [createdById], references: [id], onDelete: Cascade)
+  createdAt   DateTime @default(now())
+
+  @@index([boardId])
+}
+
+model BoardAsset {
+  id        String   @id @default(uuid())
+  boardId   String
+  board     Board    @relation(fields: [boardId], references: [id], onDelete: Cascade)
+  fileName  String
+  url       String   // S3/R2 URL
+  mimeType  String
+  sizeBytes Int
+  width     Int?
+  height    Int?
+  createdAt DateTime @default(now())
+
+  @@index([boardId])
+}
+
+model BoardComment {
+  id        String   @id @default(uuid())
+  boardId   String
+  board     Board    @relation(fields: [boardId], references: [id], onDelete: Cascade)
+  userId    String
+  user      User     @relation("BoardCommentUser", fields: [userId], references: [id], onDelete: Cascade)
+  content   String   @db.Text
+  // Position on canvas
+  posX      Float?
+  posY      Float?
+  parentId  String?  // For threaded replies
+  parent    BoardComment?  @relation("BoardCommentThread", fields: [parentId], references: [id], onDelete: Cascade)
+  replies   BoardComment[] @relation("BoardCommentThread")
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([boardId])
+  @@index([userId])
 }

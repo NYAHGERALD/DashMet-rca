@@ -18,6 +18,7 @@ import {
   createLswRcaTrigger, updateLswRcaTrigger, deleteLswRcaTrigger,
   updateLswWorkDaysPerWeek,
   createLswEarlyCompletionLog, getLswEarlyCompletionLogs, deleteLswEarlyCompletionLog,
+  exportLswReport,
   type LswDailyTask, type LswTodoItem, type LswFrequencyTask, type LswEarlyCompletionLog,
   type LswProject, type LswProjectUpdate, type LswMeetingRail,
   type LswFollowUp, type LswKeyResultSet, type LswKeyResult,
@@ -1546,7 +1547,22 @@ function LSWContent() {
               
               {/* Print Report Button */}
               <button
-                onClick={() => window.print()}
+                onClick={async () => {
+                  try {
+                    const weekStart = weekDates.start.toISOString().split('T')[0];
+                    const blob = await exportLswReport(currentWeek, currentYear, weekStart);
+                    const url = URL.createObjectURL(blob);
+                    const a = document.createElement('a');
+                    a.href = url;
+                    a.download = `LSW_Report_Week${currentWeek}_${currentYear}.xlsx`;
+                    document.body.appendChild(a);
+                    a.click();
+                    document.body.removeChild(a);
+                    URL.revokeObjectURL(url);
+                  } catch (err) {
+                    console.error('Export failed:', err);
+                  }
+                }}
                 className="flex items-center gap-2 px-4 py-2 text-sm font-medium text-white bg-emerald-600 hover:bg-emerald-700 rounded-lg shadow-sm transition-colors"
               >
                 <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
@@ -2527,7 +2543,7 @@ function LSWContent() {
                           )}
                         </td>
                         {/* Event Date - inline editable */}
-                        <td className="px-4 py-2">
+                        <td className="px-4 py-2 whitespace-nowrap">
                           {editingTriggerId === trigger.id ? (
                             <input
                               type="date"

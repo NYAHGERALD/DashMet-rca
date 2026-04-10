@@ -265,6 +265,10 @@ router.use('/operations', operationsRoutes);
 import vacationRoutes from './vacationRoutes';
 router.use('/vacation', vacationRoutes);
 
+// Canvas AI — Whiteboard routes - authenticated
+import boardRoutes from './boardRoutes';
+router.use('/boards', rateLimiter, boardRoutes);
+
 // Get transcripts for a specific incident (nested under incidents for convenience)
 router.get('/incidents/:incidentId/transcripts', authenticate, getIncidentTranscripts);
 

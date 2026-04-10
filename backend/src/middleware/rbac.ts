@@ -294,6 +294,7 @@ const DEFAULT_PRIVILEGES: Record<string, UserRole[]> = {
   'nav.meetings': ['OPERATOR', 'SUPERVISOR', 'QA_FOOD_SAFETY', 'QUALITY_CONTROL_MANAGER', 'MAINTENANCE_ENGINEERING', 'SAFETY_SECURITY_MANAGER', 'CI_MANAGER', 'ADMIN', 'SYSTEM_ADMIN'],
   'nav.operations': ['OPERATOR', 'SUPERVISOR', 'QA_FOOD_SAFETY', 'QUALITY_CONTROL_MANAGER', 'MAINTENANCE_ENGINEERING', 'SAFETY_SECURITY_MANAGER', 'CI_MANAGER', 'ADMIN', 'SYSTEM_ADMIN'],
   'nav.action_items': ['OPERATOR', 'SUPERVISOR', 'QA_FOOD_SAFETY', 'QUALITY_CONTROL_MANAGER', 'MAINTENANCE_ENGINEERING', 'SAFETY_SECURITY_MANAGER', 'CI_MANAGER', 'ADMIN', 'SYSTEM_ADMIN'],
+  'nav.canvas_ai': ['OPERATOR', 'SUPERVISOR', 'QA_FOOD_SAFETY', 'QUALITY_CONTROL_MANAGER', 'MAINTENANCE_ENGINEERING', 'SAFETY_SECURITY_MANAGER', 'CI_MANAGER', 'ADMIN', 'SYSTEM_ADMIN'],
 
   // ============================================================================
   // NAVIGATION MODULE - Organization Management
@@ -464,6 +465,7 @@ const API_ROUTE_TO_NAV_KEY: Record<string, string> = {
   '/api/meetings': 'nav.meetings',
   '/api/operations': 'nav.operations',
   '/api/action-items': 'nav.action_items',
+  '/api/boards': 'nav.canvas_ai',
   '/api/organizations': 'nav.admin_organizations',
   '/api/facilities': 'nav.admin_facilities',
   '/api/departments': 'nav.admin_departments',
