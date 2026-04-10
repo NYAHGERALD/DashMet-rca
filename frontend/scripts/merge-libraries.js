@@ -27,6 +27,10 @@ const OUT_FILE = path.join(
 
 function run() {
   if (!fs.existsSync(SRC_DIR)) {
+    if (fs.existsSync(OUT_FILE)) {
+      console.log('⏭ Source directory not found, but bundled-libraries.json already exists — skipping merge.');
+      process.exit(0);
+    }
     console.error(`Source directory not found: ${SRC_DIR}`);
     process.exit(1);
   }
