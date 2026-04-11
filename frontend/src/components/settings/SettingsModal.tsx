@@ -43,6 +43,21 @@ export default function SettingsModal() {
   const [passwordLoading, setPasswordLoading] = useState(false);
   const [closing, setClosing] = useState(false);
 
+  // Phone number state
+  const COUNTRY_CODES = [
+    { country: 'US', code: '1', flag: '🇺🇸', label: 'US +1', format: '(555) 123-4567', maxDigits: 10 },
+    { country: 'CA', code: '1', flag: '🇨🇦', label: 'CA +1', format: '(555) 123-4567', maxDigits: 10 },
+    { country: 'MX', code: '52', flag: '🇲🇽', label: 'MX +52', format: '(55) 1234-5678', maxDigits: 10 },
+  ];
+  const [phoneDigits, setPhoneDigits] = useState('');
+  const [selectedCountry, setSelectedCountry] = useState(COUNTRY_CODES[0]);
+  const [showCountryDropdown, setShowCountryDropdown] = useState(false);
+  const [phoneLoading, setPhoneLoading] = useState(false);
+  const [isEditingPhone, setIsEditingPhone] = useState(false);
+  const [phoneVerificationStep, setPhoneVerificationStep] = useState<'input' | 'verify'>('input');
+  const [phoneVerificationCode, setPhoneVerificationCode] = useState('');
+  const [phoneVerifyLoading, setPhoneVerifyLoading] = useState(false);
+
   interface Session {
     id: string;
     deviceInfo: string | null;
@@ -81,6 +96,22 @@ export default function SettingsModal() {
       const response = await api.get('/firebase-auth/me');
       if (response.data.data.user.profilePicture) {
         setProfilePicture(response.data.data.user.profilePicture);
+      }
+      // Load phone number if available
+      const userPhone = response.data.data.user.phone;
+      if (userPhone) {
+        // Phone comes back as E.164 format e.g. "+15551234567"
+        // Parse country code and digits
+        if (userPhone.startsWith('+52')) {
+          setSelectedCountry(COUNTRY_CODES[2]); // MX
+          setPhoneDigits(userPhone.replace('+52', ''));
+        } else if (userPhone.startsWith('+1')) {
+          setSelectedCountry(COUNTRY_CODES[0]); // US (default)
+          setPhoneDigits(userPhone.replace('+1', ''));
+        } else {
+          // Fallback: strip the + and first digits
+          setPhoneDigits(userPhone.replace(/^\+\d{1,3}/, ''));
+        }
       }
     } catch (err: any) {
       console.error('Failed to load profile picture:', err);
@@ -133,6 +164,78 @@ export default function SettingsModal() {
       setError(err.response?.data?.error || 'Failed to remove profile picture');
     } finally {
       setUploadingPicture(false);
+    }
+  };
+
+  const formatPhoneNumber = (digits: string, countryCode: string): string => {
+    if (!digits) return '';
+    if (countryCode === '52') {
+      // Mexico: (XX) XXXX-XXXX
+      if (digits.length <= 2) return `(${digits}`;
+      if (digits.length <= 6) return `(${digits.slice(0, 2)}) ${digits.slice(2)}`;
+      return `(${digits.slice(0, 2)}) ${digits.slice(2, 6)}-${digits.slice(6, 10)}`;
+    }
+    // US/CA: (XXX) XXX-XXXX
+    if (digits.length <= 3) return `(${digits}`;
+    if (digits.length <= 6) return `(${digits.slice(0, 3)}) ${digits.slice(3)}`;
+    return `(${digits.slice(0, 3)}) ${digits.slice(3, 6)}-${digits.slice(6, 10)}`;
+  };
+
+  const handleSavePhone = async () => {
+    setPhoneLoading(true);
+    setError('');
+    setMessage('');
+
+    try {
+      const response = await api.patch('/firebase-auth/update-phone', {
+        phone: phoneDigits,
+        countryCode: selectedCountry.code,
+      });
+
+      if (response.data?.data?.requiresVerification) {
+        // Step 1: Code sent to email — show verification input
+        setMessage('A verification code has been sent to your email.');
+        setPhoneVerificationStep('verify');
+      } else {
+        // Direct success (e.g., removing phone)
+        setMessage('Phone number updated successfully!');
+        setIsEditingPhone(false);
+        setPhoneVerificationStep('input');
+        setPhoneVerificationCode('');
+        if (refreshUser) refreshUser();
+        setTimeout(() => setMessage(''), 3000);
+      }
+    } catch (err: any) {
+      console.error('Failed to update phone:', err);
+      setError(err.response?.data?.error || 'Failed to update phone number');
+    } finally {
+      setPhoneLoading(false);
+    }
+  };
+
+  const handleVerifyPhone = async () => {
+    if (phoneVerificationCode.length !== 6) return;
+    setPhoneVerifyLoading(true);
+    setError('');
+    setMessage('');
+
+    try {
+      await api.patch('/firebase-auth/update-phone', {
+        phone: phoneDigits,
+        countryCode: selectedCountry.code,
+        verificationCode: phoneVerificationCode,
+      });
+      setMessage('Phone number verified and saved!');
+      setIsEditingPhone(false);
+      setPhoneVerificationStep('input');
+      setPhoneVerificationCode('');
+      if (refreshUser) refreshUser();
+      setTimeout(() => setMessage(''), 3000);
+    } catch (err: any) {
+      console.error('Failed to verify phone:', err);
+      setError(err.response?.data?.error || 'Invalid or expired verification code');
+    } finally {
+      setPhoneVerifyLoading(false);
     }
   };
 
@@ -402,6 +505,156 @@ export default function SettingsModal() {
                   <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">Role</label>
                   <input type="text" value={user?.role || ''} disabled className="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-md bg-gray-100 dark:bg-gray-700 text-gray-500 dark:text-gray-400" />
                 </div>
+              </div>
+
+              {/* Phone Number */}
+              <div>
+                <div className="flex items-center justify-between mb-1">
+                  <label className="block text-sm font-medium text-gray-700 dark:text-gray-300">
+                    📱 Phone Number
+                  </label>
+                  {!isEditingPhone && (
+                    <button
+                      onClick={() => setIsEditingPhone(true)}
+                      className="text-xs font-medium text-primary-600 dark:text-primary-400 hover:text-primary-700 dark:hover:text-primary-300 transition-colors"
+                    >
+                      {phoneDigits ? 'Change' : 'Add Phone'}
+                    </button>
+                  )}
+                </div>
+
+                {!isEditingPhone ? (
+                  <div className="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-md bg-gray-100 dark:bg-gray-700 text-gray-500 dark:text-gray-400 text-sm">
+                    {phoneDigits
+                      ? `${selectedCountry.flag} +${selectedCountry.code} ${formatPhoneNumber(phoneDigits, selectedCountry.code)}`
+                      : 'No phone number added'
+                    }
+                  </div>
+                ) : (
+                  <div className="space-y-2">
+                    {phoneVerificationStep === 'input' ? (
+                      <>
+                        <div className="flex gap-2">
+                          {/* Country Code */}
+                          <div className="relative">
+                            <button
+                              type="button"
+                              onClick={() => setShowCountryDropdown(!showCountryDropdown)}
+                              className="flex items-center gap-1 px-2.5 py-2 border border-gray-300 dark:border-gray-600 rounded-md bg-white dark:bg-gray-700 text-gray-900 dark:text-white text-sm hover:bg-gray-50 dark:hover:bg-gray-600 transition-colors min-w-[90px]"
+                            >
+                              <span className="text-base">{selectedCountry.flag}</span>
+                              <span className="text-xs text-gray-600 dark:text-gray-300">+{selectedCountry.code}</span>
+                              <svg className="w-3 h-3 text-gray-400 ml-auto" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 9l-7 7-7-7" />
+                              </svg>
+                            </button>
+                            {showCountryDropdown && (
+                              <div className="absolute top-full left-0 mt-1 w-40 bg-white dark:bg-gray-700 border border-gray-200 dark:border-gray-600 rounded-lg shadow-xl z-50 overflow-hidden">
+                                {COUNTRY_CODES.map((c, i) => (
+                                  <button
+                                    key={`${c.country}-${i}`}
+                                    type="button"
+                                    onClick={() => {
+                                      setSelectedCountry(c);
+                                      setShowCountryDropdown(false);
+                                      setPhoneDigits('');
+                                    }}
+                                    className={`w-full flex items-center gap-2 px-3 py-2 text-sm hover:bg-gray-100 dark:hover:bg-gray-600 transition-colors ${
+                                      selectedCountry.country === c.country
+                                        ? 'bg-primary-50 dark:bg-primary-900/20 text-primary-700 dark:text-primary-300'
+                                        : 'text-gray-700 dark:text-gray-200'
+                                    }`}
+                                  >
+                                    <span className="text-base">{c.flag}</span>
+                                    <span>{c.label}</span>
+                                  </button>
+                                ))}
+                              </div>
+                            )}
+                          </div>
+                          {/* Phone Input */}
+                          <input
+                            type="tel"
+                            value={formatPhoneNumber(phoneDigits, selectedCountry.code)}
+                            onChange={(e) => {
+                              const raw = e.target.value.replace(/\D/g, '');
+                              if (raw.length <= selectedCountry.maxDigits) {
+                                setPhoneDigits(raw);
+                              }
+                            }}
+                            className="flex-1 px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-md bg-white dark:bg-gray-700 text-gray-900 dark:text-white text-sm focus:ring-2 focus:ring-primary-500 focus:border-primary-500"
+                            placeholder={selectedCountry.format}
+                          />
+                        </div>
+                        <div className="flex items-center gap-2">
+                          <button
+                            onClick={handleSavePhone}
+                            disabled={phoneLoading || (phoneDigits.length > 0 && phoneDigits.length < 10)}
+                            className="px-3 py-1.5 text-xs font-medium bg-primary-600 hover:bg-primary-700 text-white rounded-md transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+                          >
+                            {phoneLoading ? 'Sending Code...' : 'Verify & Save'}
+                          </button>
+                          <button
+                            onClick={() => { setIsEditingPhone(false); setPhoneVerificationStep('input'); setPhoneVerificationCode(''); }}
+                            className="px-3 py-1.5 text-xs font-medium text-gray-600 dark:text-gray-400 hover:text-gray-800 dark:hover:text-gray-200 transition-colors"
+                          >
+                            Cancel
+                          </button>
+                        </div>
+                        <p className="text-xs text-gray-500 dark:text-gray-400">
+                          A verification code will be sent to your email to confirm this phone number.
+                        </p>
+                      </>
+                    ) : (
+                      <>
+                        {/* Verification Code Step */}
+                        <div className="p-3 bg-blue-50 dark:bg-blue-900/20 border border-blue-200 dark:border-blue-800 rounded-lg">
+                          <p className="text-sm text-blue-800 dark:text-blue-200 mb-1 font-medium">📧 Check your email</p>
+                          <p className="text-xs text-blue-600 dark:text-blue-300">
+                            We sent a 6-digit code to your email address. Enter it below to confirm your phone number.
+                          </p>
+                        </div>
+                        <div className="flex gap-2 items-center">
+                          <input
+                            type="text"
+                            inputMode="numeric"
+                            maxLength={6}
+                            value={phoneVerificationCode}
+                            onChange={(e) => setPhoneVerificationCode(e.target.value.replace(/\D/g, '').slice(0, 6))}
+                            className="flex-1 px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-md bg-white dark:bg-gray-700 text-gray-900 dark:text-white text-sm text-center tracking-[0.3em] font-mono focus:ring-2 focus:ring-primary-500 focus:border-primary-500"
+                            placeholder="000000"
+                            autoFocus
+                          />
+                        </div>
+                        <div className="flex items-center gap-2">
+                          <button
+                            onClick={handleVerifyPhone}
+                            disabled={phoneVerifyLoading || phoneVerificationCode.length !== 6}
+                            className="px-3 py-1.5 text-xs font-medium bg-green-600 hover:bg-green-700 text-white rounded-md transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+                          >
+                            {phoneVerifyLoading ? 'Verifying...' : 'Confirm Code'}
+                          </button>
+                          <button
+                            onClick={handleSavePhone}
+                            disabled={phoneLoading}
+                            className="px-3 py-1.5 text-xs font-medium text-primary-600 dark:text-primary-400 hover:text-primary-700 transition-colors disabled:opacity-50"
+                          >
+                            {phoneLoading ? 'Sending...' : 'Resend Code'}
+                          </button>
+                          <button
+                            onClick={() => { setPhoneVerificationStep('input'); setPhoneVerificationCode(''); setMessage(''); }}
+                            className="px-3 py-1.5 text-xs font-medium text-gray-600 dark:text-gray-400 hover:text-gray-800 dark:hover:text-gray-200 transition-colors"
+                          >
+                            Back
+                          </button>
+                        </div>
+                        <p className="text-xs text-gray-500 dark:text-gray-400">
+                          Code expires in 10 minutes.
+                        </p>
+                      </>
+                    )}
+                  </div>
+                )}
               </div>
 
               <div className="pt-3 border-t border-gray-200 dark:border-gray-700">
