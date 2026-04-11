@@ -16,13 +16,14 @@ import crypto from 'crypto';
 import { registerDeviceToken, unregisterDeviceToken } from '../services/pushNotificationService';
 import { encryptPhone, phoneHashVariants, decrypt } from '../utils/encryption';
 import { sendVerificationEmail } from '../services/emailService';
+import { adminAuth } from '../config/firebase-admin';
 
 const router = Router();
 
 // ============================================================================
 // POST /api/mobile/check-phone
 // Check if phone number exists in database
-// Returns: { exists: boolean, user?: { id, firstName, lastName } }
+// Returns: { exists: boolean }
 // ============================================================================
 router.post('/check-phone', async (req: Request, res: Response) => {
   try {
@@ -49,9 +50,6 @@ router.post('/check-phone', async (req: Request, res: Response) => {
       },
       select: {
         id: true,
-        firstName: true,
-        lastName: true,
-        phoneVerified: true,
       },
     });
 
@@ -59,19 +57,12 @@ router.post('/check-phone', async (req: Request, res: Response) => {
       return res.json({
         success: true,
         exists: true,
-        user: {
-          id: user.id,
-          firstName: user.firstName,
-          lastName: user.lastName,
-          phoneVerified: user.phoneVerified,
-        },
       });
     }
 
     return res.json({
       success: true,
       exists: false,
-      user: null,
     });
   } catch (error: any) {
     console.error('Check phone error:', error);
@@ -85,7 +76,7 @@ router.post('/check-phone', async (req: Request, res: Response) => {
 // ============================================================================
 // POST /api/mobile/check-email
 // Check if email exists in database
-// Returns: { exists: boolean, email?: string, firstName?: string, lastName?: string }
+// Returns: { exists: boolean }
 // ============================================================================
 router.post('/check-email', async (req: Request, res: Response) => {
   try {
@@ -106,19 +97,12 @@ router.post('/check-email', async (req: Request, res: Response) => {
       },
       select: {
         id: true,
-        email: true,
-        firstName: true,
-        lastName: true,
       },
     });
 
     return res.json({
       success: true,
       exists: !!user,
-      email: user?.email || null,
-      firstName: user?.firstName || null,
-      lastName: user?.lastName || null,
-      userId: user?.id || null,
     });
   } catch (error: any) {
     console.error('Check email error:', error);
@@ -493,14 +477,42 @@ router.post('/link-firebase', async (req: Request, res: Response) => {
   try {
     const { phone, firebaseUid, countryCode } = req.body;
 
-    console.log(`📱 link-firebase called with phone: ${phone}, firebaseUid: ${firebaseUid}, countryCode: ${countryCode}`);
-
     if (!phone || !firebaseUid) {
       return res.status(400).json({
         success: false,
         error: 'Phone and firebaseUid are required',
       });
     }
+
+    // Verify Firebase ID token — caller must prove they own this firebaseUid
+    const authHeader = req.headers.authorization;
+    if (!authHeader?.startsWith('Bearer ')) {
+      return res.status(401).json({
+        success: false,
+        error: 'Authorization token required',
+      });
+    }
+
+    const idToken = authHeader.replace('Bearer ', '');
+    let decodedToken;
+    try {
+      decodedToken = await adminAuth.verifyIdToken(idToken, true);
+    } catch {
+      return res.status(401).json({
+        success: false,
+        error: 'Invalid or expired token',
+      });
+    }
+
+    // Ensure the verified token UID matches the claimed firebaseUid
+    if (decodedToken.uid !== firebaseUid) {
+      return res.status(403).json({
+        success: false,
+        error: 'Token UID does not match',
+      });
+    }
+
+    console.log(`📱 link-firebase called for verified UID: ${decodedToken.uid}`);
 
     // Normalize phone: remove spaces, dashes, parentheses
     let normalizedPhone = phone.replace(/[\s\-\(\)]/g, '').trim();
@@ -590,18 +602,28 @@ router.post('/link-firebase', async (req: Request, res: Response) => {
 // ============================================================================
 router.post('/device-token', async (req: Request, res: Response) => {
   try {
-    const { userId, token, platform, deviceId, appVersion } = req.body;
-
-    if (!userId || !token) {
-      return res.status(400).json({
+    // Verify Firebase ID token — only authenticated users can register tokens
+    const authHeader = req.headers.authorization;
+    if (!authHeader?.startsWith('Bearer ')) {
+      return res.status(401).json({
         success: false,
-        error: 'userId and token are required',
+        error: 'Authorization token required',
       });
     }
 
-    // Verify user exists
-    const user = await prisma.user.findUnique({
-      where: { id: userId },
+    let decodedToken;
+    try {
+      decodedToken = await adminAuth.verifyIdToken(authHeader.replace('Bearer ', ''), true);
+    } catch {
+      return res.status(401).json({
+        success: false,
+        error: 'Invalid or expired token',
+      });
+    }
+
+    // Look up the authenticated user by Firebase UID
+    const user = await prisma.user.findFirst({
+      where: { firebaseUid: decodedToken.uid, isActive: true },
       select: { id: true },
     });
 
@@ -612,9 +634,19 @@ router.post('/device-token', async (req: Request, res: Response) => {
       });
     }
 
+    const userId = user.id;
+    const { token, platform, deviceId, appVersion } = req.body;
+
+    if (!token) {
+      return res.status(400).json({
+        success: false,
+        error: 'token is required',
+      });
+    }
+
     // Register the device token
     const success = await registerDeviceToken(
-      userId,
+      user.id,
       token,
       platform || 'IOS',
       deviceId,
@@ -622,7 +654,7 @@ router.post('/device-token', async (req: Request, res: Response) => {
     );
 
     if (success) {
-      console.log(`✅ Device token registered for user ${userId}`);
+      console.log(`✅ Device token registered for user ${user.id}`);
       return res.json({
         success: true,
         message: 'Device token registered successfully',
@@ -649,20 +681,52 @@ router.post('/device-token', async (req: Request, res: Response) => {
 // ============================================================================
 router.delete('/device-token', async (req: Request, res: Response) => {
   try {
-    const { userId, token } = req.body;
-
-    if (!userId || !token) {
-      return res.status(400).json({
+    // Verify Firebase ID token — only authenticated users can unregister tokens
+    const authHeader = req.headers.authorization;
+    if (!authHeader?.startsWith('Bearer ')) {
+      return res.status(401).json({
         success: false,
-        error: 'userId and token are required',
+        error: 'Authorization token required',
       });
     }
 
-    // Unregister the device token
-    const success = await unregisterDeviceToken(userId, token);
+    let decodedToken;
+    try {
+      decodedToken = await adminAuth.verifyIdToken(authHeader.replace('Bearer ', ''), true);
+    } catch {
+      return res.status(401).json({
+        success: false,
+        error: 'Invalid or expired token',
+      });
+    }
+
+    // Look up the authenticated user by Firebase UID
+    const user = await prisma.user.findFirst({
+      where: { firebaseUid: decodedToken.uid, isActive: true },
+      select: { id: true },
+    });
+
+    if (!user) {
+      return res.status(404).json({
+        success: false,
+        error: 'User not found',
+      });
+    }
+
+    const { token } = req.body;
+
+    if (!token) {
+      return res.status(400).json({
+        success: false,
+        error: 'token is required',
+      });
+    }
+
+    // Unregister the device token using authenticated userId
+    const success = await unregisterDeviceToken(user.id, token);
 
     if (success) {
-      console.log(`✅ Device token unregistered for user ${userId}`);
+      console.log(`✅ Device token unregistered for user ${user.id}`);
       return res.json({
         success: true,
         message: 'Device token unregistered successfully',
