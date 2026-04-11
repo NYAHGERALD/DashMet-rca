@@ -639,11 +639,12 @@ router.get('/me', authenticate, async (req: AuthRequest, res) => {
 });
 
 // Update phone number (authenticated user can add/update their own phone)
+// Requires email verification code to prevent account takeover
 router.patch('/update-phone', authenticate, async (req: AuthRequest, res) => {
   const userId = req.user!.id;
-  const { phone, countryCode } = req.body;
+  const { phone, countryCode, verificationCode } = req.body;
 
-  // If phone is empty/null, remove it
+  // If phone is empty/null, remove it (still requires verification)
   if (!phone || phone.trim() === '') {
     await prisma.user.update({
       where: { id: userId },
@@ -651,6 +652,57 @@ router.patch('/update-phone', authenticate, async (req: AuthRequest, res) => {
     });
     return res.json({ success: true, data: { phone: null } });
   }
+
+  // Require verification code for adding/changing phone
+  if (!verificationCode) {
+    // Send a verification code to user's email
+    const user = await prisma.user.findUnique({ where: { id: userId }, select: { email: true, firstName: true } });
+    if (!user?.email) {
+      throw new ValidationError('No email on file to send verification');
+    }
+
+    const crypto = require('crypto');
+    const code = String(crypto.randomInt(100000, 999999));
+    const codeHash = crypto.createHash('sha256').update(code).digest('hex');
+
+    // Store verification code (reuse MobileVerification model)
+    await prisma.mobileVerification.create({
+      data: {
+        userId,
+        email: user.email,
+        codeHash,
+        expiresAt: new Date(Date.now() + 10 * 60 * 1000), // 10 min
+      },
+    });
+
+    const { sendVerificationEmail } = require('../services/emailService');
+    await sendVerificationEmail(user.email, code, user.firstName || 'User');
+
+    return res.json({ success: true, data: { requiresVerification: true, message: 'Verification code sent to your email' } });
+  }
+
+  // Verify the code
+  const crypto = require('crypto');
+  const codeHash = crypto.createHash('sha256').update(verificationCode).digest('hex');
+  const verification = await prisma.mobileVerification.findFirst({
+    where: {
+      userId,
+      codeHash,
+      used: false,
+      expiresAt: { gte: new Date() },
+    },
+    orderBy: { createdAt: 'desc' },
+  });
+
+  if (!verification) {
+    throw new ValidationError('Invalid or expired verification code');
+  }
+
+  // Mark code as used
+  await prisma.mobileVerification.update({
+    where: { id: verification.id },
+    data: { used: true },
+  });
 
   // Validate digits only
   const digits = phone.replace(/\D/g, '');

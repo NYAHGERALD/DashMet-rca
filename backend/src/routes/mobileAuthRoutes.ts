@@ -500,43 +500,18 @@ router.post('/link-firebase', async (req: Request, res: Response) => {
     // Normalize phone: remove spaces, dashes, parentheses
     let normalizedPhone = phone.replace(/[\s\-\(\)]/g, '').trim();
     
-    // Build phone variants for matching (same logic as check-phone)
-    const phoneVariants: string[] = [normalizedPhone];
-    
-    if (!normalizedPhone.startsWith('+')) {
-      phoneVariants.push(`+${normalizedPhone}`);
-    }
-    
-    if (countryCode && !normalizedPhone.startsWith('+')) {
-      const cleanCountryCode = countryCode.replace(/[^0-9+]/g, '');
-      phoneVariants.push(`${cleanCountryCode}${normalizedPhone}`);
-      if (!cleanCountryCode.startsWith('+')) {
-        phoneVariants.push(`+${cleanCountryCode}${normalizedPhone}`);
-      }
-    }
-    
-    // LEGACY FIX: For US numbers (10 digits), also try with +1 prefix
-    const digitsOnly = normalizedPhone.replace(/^\+/, '');
-    if (digitsOnly.length === 10 && /^[2-9]/.test(digitsOnly)) {
-      phoneVariants.push(`+1${digitsOnly}`);
-      phoneVariants.push(digitsOnly);
-    }
-    if (digitsOnly.length === 11 && digitsOnly.startsWith('1')) {
-      phoneVariants.push(`+${digitsOnly}`);
-      phoneVariants.push(`+${digitsOnly.substring(1)}`);
-    }
-    
-    const uniqueVariants = [...new Set(phoneVariants)];
-    console.log(`📱 Searching for phone variants:`, uniqueVariants);
+    // Use phoneHash for matching (consistent with check-phone)
+    const hashes = phoneHashVariants(normalizedPhone, countryCode);
+    console.log(`📱 link-firebase: searching ${hashes.length} hash variants`);
 
-    // Find user by phone (try multiple formats)
+    // Find user by phoneHash (supports encrypted phone storage)
     const user = await prisma.user.findFirst({
       where: { 
-        phone: { in: uniqueVariants }
+        phoneHash: { in: hashes }
       },
     });
     
-    console.log(`📱 Found user:`, user ? { id: user.id, phone: user.phone, email: user.email } : 'null');
+    console.log(`📱 Found user:`, user ? { id: user.id, email: user.email } : 'null');
 
     if (!user) {
       console.log(`❌ link-firebase: No user found for phone variants`);

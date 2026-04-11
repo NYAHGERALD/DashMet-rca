@@ -5,6 +5,7 @@
 import OpenAI from 'openai';
 import { sanitizeForPrompt, sanitizeForSystemPrompt, wrapUserContent } from '../utils/promptSanitizer';
 import axios from 'axios';
+import { validateFetchUrl } from '../utils/urlValidator';
 
 // Lazy load pdf-parse to avoid DOMMatrix error on import
 let pdfParse: any = null;
@@ -88,8 +89,9 @@ async function analyzeImage(
       mimeType = matches[1];
       base64Image = matches[2];
     } else if (imageUrl.startsWith('http://') || imageUrl.startsWith('https://')) {
-      // Fetch remote image and convert to base64
-      const response = await axios.get(imageUrl, { responseType: 'arraybuffer' });
+      // SSRF protection: validate URL before fetching
+      await validateFetchUrl(imageUrl);
+      const response = await axios.get(imageUrl, { responseType: 'arraybuffer', timeout: 10000 });
       base64Image = Buffer.from(response.data).toString('base64');
       mimeType = response.headers['content-type'] || 'image/jpeg';
     } else {
@@ -212,8 +214,9 @@ async function analyzePDF(
       }
       pdfBuffer = Buffer.from(matches[2], 'base64');
     } else if (pdfUrl.startsWith('http://') || pdfUrl.startsWith('https://')) {
-      // Fetch remote PDF
-      const response = await axios.get(pdfUrl, { responseType: 'arraybuffer' });
+      // SSRF protection: validate URL before fetching
+      await validateFetchUrl(pdfUrl);
+      const response = await axios.get(pdfUrl, { responseType: 'arraybuffer', timeout: 10000 });
       pdfBuffer = Buffer.from(response.data);
     } else {
       throw new Error(`Unsupported protocol for PDF: ${pdfUrl.substring(0, 30)}...`);

@@ -7,6 +7,7 @@ import { AuthRequest } from '../middleware/auth';
 import { ValidationError, AuthenticationError, NotFoundError } from '../middleware/errorHandler';
 import { logger } from '../utils/logger';
 import { logAuditEvent, logAuditFromRequest, getClientIp } from '../services/auditService';
+import { adminAuth } from '../config/firebase-admin';
 
 // Generate JWT tokens
 const generateTokens = (userId: string) => {
@@ -507,6 +508,16 @@ export const changePassword = async (req: AuthRequest, res: Response) => {
       lockedUntil: null,
     },
   });
+
+  // Revoke Firebase refresh tokens so old sessions are invalidated
+  if (user.firebaseUid) {
+    try {
+      await adminAuth.revokeRefreshTokens(user.firebaseUid);
+      logger.info(`Firebase tokens revoked for user: ${user.email}`);
+    } catch (err) {
+      logger.warn(`Failed to revoke Firebase tokens for ${user.email}: ${err}`);
+    }
+  }
 
   logger.info(`Password changed for user: ${user.email}`);
 

@@ -13,6 +13,7 @@ import OpenAI from 'openai';
 import fs from 'fs';
 import path from 'path';
 import os from 'os';
+import { validateFetchUrl } from '../utils/urlValidator';
 import { execFile } from 'child_process';
 import { promisify } from 'util';
 
@@ -604,6 +605,8 @@ export async function transcribeFromUrl(
   try {
     console.log(`[Whisper] Downloading audio from URL`);
     
+    // SSRF protection: validate URL before fetching
+    await validateFetchUrl(audioUrl);
     const response = await axios.get(audioUrl, {
       responseType: 'arraybuffer',
       timeout: 300000, // 5 minutes for download

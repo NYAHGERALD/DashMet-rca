@@ -3,6 +3,7 @@
 
 import OpenAI from 'openai';
 import { sanitizeForPrompt, sanitizeForSystemPrompt, wrapUserContent } from '../utils/promptSanitizer';
+import { validateFetchUrl } from '../utils/urlValidator';
 
 // Lazy initialization of OpenAI client with proper timeout configuration
 let openaiClient: OpenAI | null = null;
@@ -5802,6 +5803,8 @@ async function analyzeEvidenceForAudit(
       mimeType = matches[1];
       base64Image = matches[2];
     } else if (imageUrl.startsWith('http://') || imageUrl.startsWith('https://')) {
+      // SSRF protection: validate URL before fetching
+      await validateFetchUrl(imageUrl);
       const axios = require('axios');
       const response = await axios.get(imageUrl, { responseType: 'arraybuffer', timeout: 5000 });
       base64Image = Buffer.from(response.data).toString('base64');

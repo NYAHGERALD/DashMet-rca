@@ -103,6 +103,7 @@ Thumbs.db
 
 # Excel files (data exports)
 *.xlsx
+!backend/assets/**/*.xlsx
 ~$*
 
 # Log files
@@ -124,3 +125,7 @@ SECURITY_HARDENING_ACTION_PLAN.md
 
 # Excalidraw individual library source files (merged into bundled-libraries.json)
 frontend/public/libraries/individual/
+
+# Seed scripts (contain test data, not for production)
+backend/seed-*.js
+backend/seed-*.ts
