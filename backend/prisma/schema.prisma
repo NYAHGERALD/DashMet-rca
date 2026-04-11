@@ -1519,7 +1519,9 @@ model User {
   socketId                                                            String?
   profilePicture                                                      String?
   autoSaveEnabled                                                     Boolean                              @default(false)
-  phone                                                               String?                              @unique
+  phone                                                               String?                              // Encrypted (AES-256-GCM)
+  phoneHash                                                           String?                              @unique  // HMAC-SHA256 for lookups
+  phoneVerified                                                       Boolean                              @default(false)  // Set true after email OTP verification on mobile
   lswWorkDaysPerWeek                                                  Int                                  @default(5)  // 5=Mon-Fri, 6=Mon-Sat, 7=All days
   AIFishboneSessionsUpdated                                           AIFishboneSession[]                  @relation("AIFishboneSessionUpdatedBy")
   AIFishboneSessionsStarted                                           AIFishboneSession[]                  @relation("AIFishboneSessionStartedBy")
@@ -1544,6 +1546,7 @@ model User {
   IncidentParticipant_IncidentParticipant_addedByIdToUser             IncidentParticipant[]                @relation("IncidentParticipant_addedByIdToUser")
   IncidentParticipant_IncidentParticipant_userIdToUser                IncidentParticipant[]                @relation("IncidentParticipant_userIdToUser")
   RecordingsCreated                                                   MeetingRecording[]                   @relation("RecordingRecordedBy")
+  MobileVerification                                                 MobileVerification[]
   OrganizationAccessCode                                              OrganizationAccessCode[]
   InvitationsSent                                                     Invitation[]                         @relation("InvitationsSent")
   InvitationsAccepted                                                 Invitation[]                         @relation("InvitationsAccepted")
@@ -4236,4 +4239,26 @@ model BoardComment {
 
   @@index([boardId])
   @@index([userId])
+}
+
+// ═══════════════════════════════════════════════════════════════════════════
+// MOBILE VERIFICATION — Email OTP for phone-based login verification
+// ═══════════════════════════════════════════════════════════════════════════
+
+model MobileVerification {
+  id          String   @id @default(uuid())
+  userId      String
+  email       String
+  codeHash    String   // SHA-256 hash of OTP (never stored in plaintext)
+  attempts    Int      @default(0)  // Brute-force protection: max 5
+  used        Boolean  @default(false)
+  expiresAt   DateTime // 10-minute TTL
+  createdAt   DateTime @default(now())
+
+  user        User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId])
+  @@index([email])
+  @@index([expiresAt])
+  @@map("mobile_verifications")
 }

@@ -12,7 +12,10 @@
 import { Router, Request, Response } from 'express';
 import { prisma } from '../utils/prisma';
 import { v4 as uuidv4 } from 'uuid';
+import crypto from 'crypto';
 import { registerDeviceToken, unregisterDeviceToken } from '../services/pushNotificationService';
+import { encryptPhone, phoneHashVariants, decrypt } from '../utils/encryption';
+import { sendVerificationEmail } from '../services/emailService';
 
 const router = Router();
 
@@ -35,50 +38,20 @@ router.post('/check-phone', async (req: Request, res: Response) => {
     // Normalize phone: remove spaces, dashes, parentheses
     let normalizedPhone = phone.replace(/[\s\-\(\)]/g, '').trim();
     
-    // Build phone variants for matching
-    // Primary: exact match with E.164 format
-    // Fallback: try with/without + prefix for legacy data
-    const phoneVariants: string[] = [normalizedPhone];
-    
-    // If phone doesn't start with +, try adding it
-    if (!normalizedPhone.startsWith('+')) {
-      phoneVariants.push(`+${normalizedPhone}`);
-    }
-    
-    // If countryCode provided and phone is local (no country code), try with country code
-    // This handles case where iOS sends local number + country code separately
-    if (countryCode && !normalizedPhone.startsWith('+')) {
-      const cleanCountryCode = countryCode.replace(/[^0-9+]/g, '');
-      phoneVariants.push(`${cleanCountryCode}${normalizedPhone}`);
-      if (!cleanCountryCode.startsWith('+')) {
-        phoneVariants.push(`+${cleanCountryCode}${normalizedPhone}`);
-      }
-    }
-    
-    // LEGACY FIX: For US numbers (10 digits), also try with +1 prefix
-    // This handles existing US users whose phones were stored without +1
-    const digitsOnly = normalizedPhone.replace(/^\+/, '');
-    if (digitsOnly.length === 10 && /^[2-9]/.test(digitsOnly)) {
-      phoneVariants.push(`+1${digitsOnly}`);
-      phoneVariants.push(digitsOnly);
-    }
-    // If it's 11 digits starting with 1, also try without the 1
-    if (digitsOnly.length === 11 && digitsOnly.startsWith('1')) {
-      phoneVariants.push(`+${digitsOnly}`);
-      phoneVariants.push(`+${digitsOnly.substring(1)}`);
-    }
-    
-    console.log(`📱 check-phone: searching for variants:`, [...new Set(phoneVariants)]);
+    // Build HMAC hash variants for matching against phoneHash column
+    const hashes = phoneHashVariants(normalizedPhone, countryCode);
+    console.log(`📱 check-phone: searching ${hashes.length} hash variants`);
 
-    // Check if user exists with any of these phone number variants
+    // Check if user exists with any of these phone hash variants
     const user = await prisma.user.findFirst({
       where: {
-        phone: { in: [...new Set(phoneVariants)] }, // Remove duplicates
+        phoneHash: { in: hashes },
       },
       select: {
         id: true,
         firstName: true,
         lastName: true,
+        phoneVerified: true,
       },
     });
 
@@ -90,6 +63,7 @@ router.post('/check-phone', async (req: Request, res: Response) => {
           id: user.id,
           firstName: user.firstName,
           lastName: user.lastName,
+          phoneVerified: user.phoneVerified,
         },
       });
     }
@@ -299,44 +273,58 @@ router.post('/register', async (req: Request, res: Response) => {
     const { firstName, lastName, email, phone, accessCodeId, facilityId, firebaseUid } = req.body;
 
     // Validate required fields
-    if (!email || !phone || !accessCodeId) {
+    if (!email || !phone) {
       return res.status(400).json({
         success: false,
-        error: 'Missing required fields: email, phone, accessCodeId',
+        error: 'Missing required fields: email, phone',
       });
     }
 
     const normalizedEmail = email.toLowerCase().trim();
     const normalizedPhone = phone.replace(/\s+/g, '').trim();
 
-    // Validate access code and get role/organization
-    const accessCode = await prisma.organizationAccessCode.findFirst({
-      where: {
-        id: accessCodeId,
-        isActive: true,
-      },
-      include: {
-        Organization: true,
-      },
+    // Check if email already exists in database
+    const existingUser = await prisma.user.findFirst({
+      where: { email: normalizedEmail },
     });
 
-    if (!accessCode) {
-      return res.status(400).json({
-        success: false,
-        error: 'Invalid or inactive access code',
+    // Access code validation — only required for NEW user creation
+    let accessCode: any = null;
+    if (accessCodeId) {
+      accessCode = await prisma.organizationAccessCode.findFirst({
+        where: {
+          id: accessCodeId,
+          isActive: true,
+        },
+        include: {
+          Organization: true,
+        },
       });
-    }
 
-    // Check max uses
-    if (accessCode.usedCount >= accessCode.maxUses) {
+      if (!accessCode) {
+        return res.status(400).json({
+          success: false,
+          error: 'Invalid or inactive access code',
+        });
+      }
+
+      // Check max uses
+      if (accessCode.usedCount >= accessCode.maxUses) {
+        return res.status(400).json({
+          success: false,
+          error: 'Access code has reached maximum uses',
+        });
+      }
+    } else if (!existingUser) {
+      // No access code AND no existing user — can't create new user without access code
       return res.status(400).json({
         success: false,
-        error: 'Access code has reached maximum uses',
+        error: 'Access code is required for new user registration',
       });
     }
 
     // If facilityId provided, verify it belongs to the organization
-    if (facilityId) {
+    if (facilityId && accessCode) {
       const facility = await prisma.facility.findFirst({
         where: {
           id: facilityId,
@@ -352,10 +340,10 @@ router.post('/register', async (req: Request, res: Response) => {
       }
     }
 
-    // Check if email already exists in database
-    const existingUser = await prisma.user.findFirst({
-      where: { email: normalizedEmail },
-    });
+    // Encrypt the phone number
+    const countryCodeDigits = (req.body.countryCode || '1').replace(/\D/g, '');
+    const phoneDigits = normalizedPhone.replace(/\D/g, '');
+    const { encryptedPhone, phoneHash } = encryptPhone(phoneDigits, countryCodeDigits);
 
     let user;
 
@@ -364,7 +352,7 @@ router.post('/register', async (req: Request, res: Response) => {
       // Check if phone is already used by a DIFFERENT user
       const phoneInUse = await prisma.user.findFirst({
         where: { 
-          phone: normalizedPhone,
+          phoneHash,
           id: { not: existingUser.id }
         },
       });
@@ -380,7 +368,8 @@ router.post('/register', async (req: Request, res: Response) => {
       user = await prisma.user.update({
         where: { id: existingUser.id },
         data: {
-          phone: normalizedPhone,
+          phone: encryptedPhone,
+          phoneHash,
           firebaseUid: firebaseUid || existingUser.firebaseUid,
           updatedAt: new Date(),
         },
@@ -404,7 +393,7 @@ router.post('/register', async (req: Request, res: Response) => {
           firstName: user.firstName,
           lastName: user.lastName,
           email: user.email,
-          phone: user.phone,
+          phone: user.phone ? decrypt(user.phone) : null,
           role: user.role,
           organizationId: user.organizationId,
           facilityId: facilityId || null,
@@ -421,9 +410,9 @@ router.post('/register', async (req: Request, res: Response) => {
         });
       }
 
-      // Check if phone already exists
+      // Check if phone already exists via hash
       const existingPhoneUser = await prisma.user.findFirst({
-        where: { phone: normalizedPhone },
+        where: { phoneHash },
       });
 
       if (existingPhoneUser) {
@@ -439,7 +428,8 @@ router.post('/register', async (req: Request, res: Response) => {
           id: uuidv4(),
           updatedAt: new Date(),
           email: normalizedEmail,
-          phone: normalizedPhone,
+          phone: encryptedPhone,
+          phoneHash,
           firstName: firstName.trim(),
           lastName: lastName.trim(),
           role: accessCode.role,
@@ -473,7 +463,7 @@ router.post('/register', async (req: Request, res: Response) => {
           firstName: user.firstName,
           lastName: user.lastName,
           email: user.email,
-          phone: user.phone,
+          phone: user.phone ? decrypt(user.phone) : null,
           role: user.role,
           organizationId: user.organizationId,
           facilityId: facilityId || null,
@@ -708,6 +698,224 @@ router.delete('/device-token', async (req: Request, res: Response) => {
     return res.status(500).json({
       success: false,
       error: 'Failed to unregister device token',
+    });
+  }
+});
+
+// ============================================================================
+// POST /api/mobile/send-verification
+// Send a 6-digit OTP to the user's email for mobile phone verification
+// Body: { userId, email }
+// Security: cryptographically random OTP, hashed (SHA-256) in DB,
+//   10-min TTL, max 5 attempts, rate-limited (3 per email/hour)
+// ============================================================================
+router.post('/send-verification', async (req: Request, res: Response) => {
+  try {
+    const { userId, email } = req.body;
+
+    if (!userId || !email) {
+      return res.status(400).json({
+        success: false,
+        error: 'userId and email are required',
+      });
+    }
+
+    const normalizedEmail = email.toLowerCase().trim();
+
+    // Verify user exists and email matches
+    const user = await prisma.user.findUnique({
+      where: { id: userId },
+      select: { id: true, email: true, firstName: true, phoneVerified: true },
+    });
+
+    if (!user || user.email.toLowerCase() !== normalizedEmail) {
+      // Normalize timing — don't reveal whether user exists
+      await new Promise(r => setTimeout(r, 200 + Math.random() * 300));
+      return res.status(400).json({
+        success: false,
+        error: 'Invalid request',
+      });
+    }
+
+    // Rate limit: max 3 OTPs per email per hour
+    const oneHourAgo = new Date(Date.now() - 60 * 60 * 1000);
+    const recentCount = await prisma.mobileVerification.count({
+      where: {
+        email: normalizedEmail,
+        createdAt: { gte: oneHourAgo },
+      },
+    });
+
+    if (recentCount >= 3) {
+      return res.status(429).json({
+        success: false,
+        error: 'Too many verification requests. Please try again later.',
+      });
+    }
+
+    // Invalidate all previous unused OTPs for this user (replay prevention)
+    await prisma.mobileVerification.updateMany({
+      where: {
+        userId,
+        used: false,
+      },
+      data: { used: true },
+    });
+
+    // Generate cryptographically random 6-digit OTP
+    const code = crypto.randomInt(100000, 999999).toString();
+    const codeHash = crypto.createHash('sha256').update(code).digest('hex');
+
+    // Store hashed OTP with 10-minute expiry
+    await prisma.mobileVerification.create({
+      data: {
+        id: uuidv4(),
+        userId,
+        email: normalizedEmail,
+        codeHash,
+        expiresAt: new Date(Date.now() + 10 * 60 * 1000), // 10 minutes
+      },
+    });
+
+    // Send email via Resend
+    const sent = await sendVerificationEmail(normalizedEmail, code, user.firstName);
+
+    if (!sent) {
+      return res.status(500).json({
+        success: false,
+        error: 'Failed to send verification email. Please try again.',
+      });
+    }
+
+    return res.json({
+      success: true,
+      message: 'Verification code sent to your email',
+    });
+  } catch (error: any) {
+    console.error('Send verification error:', error);
+    return res.status(500).json({
+      success: false,
+      error: 'Failed to send verification code',
+    });
+  }
+});
+
+// ============================================================================
+// POST /api/mobile/verify-code
+// Verify the 6-digit OTP code for mobile phone login
+// Body: { userId, code, deviceModel?, osVersion? }
+// On success: marks phoneVerified = true, returns user profile
+// ============================================================================
+router.post('/verify-code', async (req: Request, res: Response) => {
+  try {
+    const { userId, code, deviceModel, osVersion } = req.body;
+
+    if (!userId || !code) {
+      return res.status(400).json({
+        success: false,
+        error: 'userId and code are required',
+      });
+    }
+
+    const codeHash = crypto.createHash('sha256').update(code.trim()).digest('hex');
+
+    // Find the most recent unused, non-expired verification for this user
+    const verification = await prisma.mobileVerification.findFirst({
+      where: {
+        userId,
+        used: false,
+        expiresAt: { gte: new Date() },
+      },
+      orderBy: { createdAt: 'desc' },
+    });
+
+    if (!verification) {
+      return res.status(400).json({
+        success: false,
+        error: 'No active verification code. Please request a new one.',
+      });
+    }
+
+    // Brute-force protection: max 5 attempts per code
+    if (verification.attempts >= 5) {
+      // Burn the code
+      await prisma.mobileVerification.update({
+        where: { id: verification.id },
+        data: { used: true },
+      });
+      return res.status(429).json({
+        success: false,
+        error: 'Too many attempts. Please request a new verification code.',
+      });
+    }
+
+    // Increment attempt count
+    await prisma.mobileVerification.update({
+      where: { id: verification.id },
+      data: { attempts: { increment: 1 } },
+    });
+
+    // Constant-time comparison to prevent timing attacks
+    const isValid = crypto.timingSafeEqual(
+      Buffer.from(codeHash, 'hex'),
+      Buffer.from(verification.codeHash, 'hex')
+    );
+
+    if (!isValid) {
+      const remaining = 5 - (verification.attempts + 1);
+      return res.status(400).json({
+        success: false,
+        error: remaining > 0
+          ? `Invalid code. ${remaining} attempt(s) remaining.`
+          : 'Invalid code. Please request a new verification code.',
+      });
+    }
+
+    // Mark OTP as used (single-use)
+    await prisma.mobileVerification.update({
+      where: { id: verification.id },
+      data: { used: true },
+    });
+
+    // Mark user's phone as verified
+    const user = await prisma.user.update({
+      where: { id: userId },
+      data: { phoneVerified: true },
+      select: {
+        id: true,
+        email: true,
+        firstName: true,
+        lastName: true,
+        role: true,
+        organizationId: true,
+        phone: true,
+        phoneVerified: true,
+        profilePicture: true,
+      },
+    });
+
+    console.log(`✅ Mobile verification complete for user ${userId}`);
+
+    return res.json({
+      success: true,
+      message: 'Account verified successfully',
+      user: {
+        id: user.id,
+        email: user.email,
+        firstName: user.firstName,
+        lastName: user.lastName,
+        role: user.role,
+        organizationId: user.organizationId,
+        phone: user.phone ? decrypt(user.phone) : null,
+        phoneVerified: user.phoneVerified,
+        profilePicture: user.profilePicture,
+      },
+    });
+  } catch (error: any) {
+    console.error('Verify code error:', error);
+    return res.status(500).json({
+      success: false,
+      error: 'Failed to verify code',
     });
   }
 });

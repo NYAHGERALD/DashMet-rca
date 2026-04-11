@@ -7,6 +7,7 @@ import { adminAuth } from '../config/firebase-admin';
 import { websocketService } from '../services/websocketService';
 import { logAuditEvent, getClientIp } from '../services/auditService';
 import { v4 as uuidv4 } from 'uuid';
+import { encryptPhone, decrypt } from '../utils/encryption';
 
 const router = Router();
 
@@ -382,6 +383,8 @@ router.post('/create-profile', authenticateFirebaseOnly, async (req: FirebaseAut
     firstName, 
     lastName, 
     invitationToken,     // Required: 64-char hex token from invitation email
+    phone,               // Optional: raw phone digits (e.g. "5551234567")
+    countryCode,         // Optional: country dial code (e.g. "1", "52")
     // Legacy fields kept for backward compatibility but IGNORED when invitationToken is present
     role: _legacyRole, 
     organizationId: _legacyOrgId, 
@@ -455,6 +458,22 @@ router.post('/create-profile', authenticateFirebaseOnly, async (req: FirebaseAut
   const finalOrganizationId = invitation.organizationId;
   const facilityId = invitation.facilityId;
 
+  // Encrypt phone number if provided
+  let phoneData: { phone?: string; phoneHash?: string } = {};
+  if (phone && countryCode) {
+    const digits = phone.replace(/\D/g, '');
+    if (digits.length < 10 || digits.length > 15) {
+      throw new ValidationError('Phone number must be between 10 and 15 digits');
+    }
+    const { encryptedPhone, phoneHash } = encryptPhone(digits, countryCode);
+    // Check uniqueness via hash
+    const existing = await prisma.user.findUnique({ where: { phoneHash } });
+    if (existing) {
+      throw new ValidationError('This phone number is already registered to another account');
+    }
+    phoneData = { phone: encryptedPhone, phoneHash };
+  }
+
   // STEP 2: Create user profile in PostgreSQL
   const user = await prisma.user.create({
     data: {
@@ -468,6 +487,7 @@ router.post('/create-profile', authenticateFirebaseOnly, async (req: FirebaseAut
       organizationId: finalOrganizationId,
       emailVerified: true,
       lastLoginAt: new Date(),
+      ...phoneData,
     },
     select: {
       id: true,
@@ -565,6 +585,7 @@ router.get('/me', authenticate, async (req: AuthRequest, res) => {
       role: true,
       organizationId: true,
       profilePicture: true,
+      phone: true,
       Organization: {
         select: { id: true, name: true },
       },
@@ -599,8 +620,15 @@ router.get('/me', authenticate, async (req: AuthRequest, res) => {
   }
 
   // Flatten organization name for frontend convenience
+  // Decrypt phone if present
+  let decryptedPhone: string | null = null;
+  if (user.phone) {
+    try { decryptedPhone = decrypt(user.phone); } catch { decryptedPhone = null; }
+  }
+
   const userData = {
     ...user,
+    phone: decryptedPhone,
     organizationName: user.Organization?.name || null,
   };
 
@@ -608,6 +636,47 @@ router.get('/me', authenticate, async (req: AuthRequest, res) => {
     success: true,
     data: { user: userData },
   });
+});
+
+// Update phone number (authenticated user can add/update their own phone)
+router.patch('/update-phone', authenticate, async (req: AuthRequest, res) => {
+  const userId = req.user!.id;
+  const { phone, countryCode } = req.body;
+
+  // If phone is empty/null, remove it
+  if (!phone || phone.trim() === '') {
+    await prisma.user.update({
+      where: { id: userId },
+      data: { phone: null, phoneHash: null },
+    });
+    return res.json({ success: true, data: { phone: null } });
+  }
+
+  // Validate digits only
+  const digits = phone.replace(/\D/g, '');
+  if (digits.length < 10 || digits.length > 15) {
+    throw new ValidationError('Phone number must be between 10 and 15 digits');
+  }
+
+  // Encrypt and hash
+  const { encryptedPhone, phoneHash } = encryptPhone(digits, countryCode || '1');
+
+  // Check uniqueness (exclude current user)
+  const existing = await prisma.user.findFirst({
+    where: { phoneHash, id: { not: userId } },
+  });
+  if (existing) {
+    throw new ValidationError('This phone number is already registered to another account');
+  }
+
+  await prisma.user.update({
+    where: { id: userId },
+    data: { phone: encryptedPhone, phoneHash },
+  });
+
+  // Return the readable phone for display
+  const fullPhone = `+${countryCode || '1'}${digits}`;
+  res.json({ success: true, data: { phone: fullPhone } });
 });
 
 // Custom password reset with branded email (uses Firebase Admin SDK)
