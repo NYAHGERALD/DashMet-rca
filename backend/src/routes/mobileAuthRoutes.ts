@@ -342,7 +342,12 @@ router.post('/register', async (req: Request, res: Response) => {
 
     // Encrypt the phone number
     const countryCodeDigits = (req.body.countryCode || '1').replace(/\D/g, '');
-    const phoneDigits = normalizedPhone.replace(/\D/g, '');
+    let phoneDigits = normalizedPhone.replace(/\D/g, '');
+    // If phone was sent in E.164 format (e.g., "+15551234567"), the digits
+    // already include the country code. Strip it to avoid double-encoding.
+    if (normalizedPhone.startsWith('+') && phoneDigits.startsWith(countryCodeDigits)) {
+      phoneDigits = phoneDigits.substring(countryCodeDigits.length);
+    }
     const { encryptedPhone, phoneHash } = encryptPhone(phoneDigits, countryCodeDigits);
 
     let user;

@@ -135,5 +135,14 @@ export function phoneHashVariants(phone: string, countryCode?: string): string[]
     hashes.add(hmacHash(`+${digitsOnly.substring(1)}`));
   }
 
+  // Backward compat: handle historical double country-code hashes
+  // (e.g., E.164 "+15551234567" was stored as "+115551234567")
+  if (countryCode) {
+    const ccDigits = countryCode.replace(/\D/g, '');
+    if (ccDigits && digitsOnly.startsWith(ccDigits)) {
+      hashes.add(hmacHash(`+${ccDigits}${digitsOnly}`));
+    }
+  }
+
   return [...hashes];
 }
