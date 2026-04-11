@@ -193,8 +193,8 @@ export default function SettingsModal() {
       });
 
       if (response.data?.data?.requiresVerification) {
-        // Step 1: Code sent to email — show verification input
-        setMessage('A verification code has been sent to your email.');
+        // Step 1: Code sent via SMS — show verification input
+        setMessage('A verification code has been sent to your phone via SMS.');
         setPhoneVerificationStep('verify');
       } else {
         // Direct success (e.g., removing phone)
@@ -602,16 +602,16 @@ export default function SettingsModal() {
                           </button>
                         </div>
                         <p className="text-xs text-gray-500 dark:text-gray-400">
-                          A verification code will be sent to your email to confirm this phone number.
+                          An SMS verification code will be sent to this number to verify ownership.
                         </p>
                       </>
                     ) : (
                       <>
                         {/* Verification Code Step */}
                         <div className="p-3 bg-blue-50 dark:bg-blue-900/20 border border-blue-200 dark:border-blue-800 rounded-lg">
-                          <p className="text-sm text-blue-800 dark:text-blue-200 mb-1 font-medium">📧 Check your email</p>
+                          <p className="text-sm text-blue-800 dark:text-blue-200 mb-1 font-medium">� Check your phone</p>
                           <p className="text-xs text-blue-600 dark:text-blue-300">
-                            We sent a 6-digit code to your email address. Enter it below to confirm your phone number.
+                            We sent a 6-digit code via SMS to your phone number. Enter it below to verify ownership.
                           </p>
                         </div>
                         <div className="flex gap-2 items-center">
@@ -649,7 +649,7 @@ export default function SettingsModal() {
                           </button>
                         </div>
                         <p className="text-xs text-gray-500 dark:text-gray-400">
-                          Code expires in 10 minutes.
+                          Didn&apos;t receive the SMS? Check your phone and try resending.
                         </p>
                       </>
                     )}
