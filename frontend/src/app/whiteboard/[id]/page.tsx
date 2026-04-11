@@ -97,7 +97,30 @@ export default function WhiteboardEditorPage() {
       const appState = excalidrawAPI.getAppState();
       const files = excalidrawAPI.getFiles();
       const snap = { elements, appState: { viewBackgroundColor: appState.viewBackgroundColor, gridSize: appState.gridSize }, files };
-      await api.post(`/boards/${id}/snapshot`, { snapshot: snap });
+
+      // Generate thumbnail
+      let thumbnail: string | undefined;
+      const visibleElements = elements.filter((el: any) => !el.isDeleted);
+      if (visibleElements.length > 0) {
+        try {
+          const { exportToBlob } = await import('@excalidraw/excalidraw');
+          const blob = await exportToBlob({
+            elements: visibleElements,
+            appState: { ...appState, exportWithDarkMode: false, viewBackgroundColor: appState.viewBackgroundColor || '#ffffff' },
+            files,
+            maxWidthOrHeight: 320,
+          });
+          thumbnail = await new Promise<string>((resolve) => {
+            const reader = new FileReader();
+            reader.onloadend = () => resolve(reader.result as string);
+            reader.readAsDataURL(blob);
+          });
+        } catch (thumbErr) {
+          console.warn('Thumbnail generation failed:', thumbErr);
+        }
+      }
+
+      await api.post(`/boards/${id}/snapshot`, { snapshot: snap, thumbnail });
       setLastSaved(new Date());
     } catch (err) {
       console.error('Failed to save board:', err);

@@ -407,7 +407,7 @@ export default function AppLayout({ children }: AppLayoutProps) {
             { href: '/meetings', icon: <Mic size={18} strokeWidth={1.8} />, label: 'Meeting Intelligence', show: hasNavAccess(NAV_PRIVILEGES.MEETINGS) },
             { href: '/operations', icon: <Wrench size={18} strokeWidth={1.8} />, label: 'Operations', show: hasNavAccess(NAV_PRIVILEGES.OPERATIONS) },
             { href: '/assigned-actions', icon: <Pin size={18} strokeWidth={1.8} />, label: 'My Action Items', show: hasNavAccess(NAV_PRIVILEGES.ACTION_ITEMS) },
-            { href: '/whiteboard', icon: <PenTool size={18} strokeWidth={1.8} />, label: 'Canvas AI', show: hasNavAccess(NAV_PRIVILEGES.CANVAS_AI) },
+            { href: '/whiteboard', icon: <PenTool size={18} strokeWidth={1.8} />, label: 'Whiteboard', show: hasNavAccess(NAV_PRIVILEGES.CANVAS_AI) },
             { icon: <Settings size={18} strokeWidth={1.8} />, label: t('nav.settings'), onClick: () => openSettings() },
           ]}
         />
@@ -532,7 +532,7 @@ export default function AppLayout({ children }: AppLayoutProps) {
                     { href: '/meetings', icon: <Mic size={18} strokeWidth={1.8} />, label: 'Meeting Intelligence', show: hasNavAccess(NAV_PRIVILEGES.MEETINGS) },
                     { href: '/operations', icon: <Wrench size={18} strokeWidth={1.8} />, label: 'Operations', show: hasNavAccess(NAV_PRIVILEGES.OPERATIONS) },
                     { href: '/assigned-actions', icon: <Pin size={18} strokeWidth={1.8} />, label: 'My Action Items', show: hasNavAccess(NAV_PRIVILEGES.ACTION_ITEMS) },
-                    { href: '/whiteboard', icon: <PenTool size={18} strokeWidth={1.8} />, label: 'Canvas AI', show: hasNavAccess(NAV_PRIVILEGES.CANVAS_AI) },
+                    { href: '/whiteboard', icon: <PenTool size={18} strokeWidth={1.8} />, label: 'Whiteboard', show: hasNavAccess(NAV_PRIVILEGES.CANVAS_AI) },
                     { icon: <Settings size={18} strokeWidth={1.8} />, label: t('nav.settings'), onClick: () => { openSettings(); setMobileMenuOpen(false); } },
                   ]).filter(link => !('show' in link) || link.show !== false).map((link, idx) => (
                     link.onClick ? (

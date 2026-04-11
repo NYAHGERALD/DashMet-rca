@@ -19,6 +19,7 @@ export interface User {
   role: UserRole;
   isActive: boolean;
   organizationId: string;
+  phone?: string | null;
   theme: string;
   language: string;
   createdAt: string;

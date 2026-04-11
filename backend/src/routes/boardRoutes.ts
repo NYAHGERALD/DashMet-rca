@@ -92,9 +92,9 @@ router.post('/:id/duplicate', async (req: Request, res: Response) => {
 // POST /api/boards/:id/snapshot — Save tldraw snapshot
 router.post('/:id/snapshot', async (req: Request, res: Response) => {
   try {
-    const { snapshot } = req.body;
+    const { snapshot, thumbnail } = req.body;
     if (!snapshot) return res.status(400).json({ success: false, message: 'snapshot required' });
-    await boardService.saveSnapshot(req.params.id, snapshot);
+    await boardService.saveSnapshot(req.params.id, snapshot, thumbnail);
     res.json({ success: true, message: 'Snapshot saved' });
   } catch (error: any) {
     console.error('Error saving snapshot:', error);

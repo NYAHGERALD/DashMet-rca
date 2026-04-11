@@ -203,11 +203,13 @@ export async function listComments(boardId: string) {
 
 // ─── Tldraw Snapshot Persistence ───
 
-export async function saveSnapshot(boardId: string, snapshot: any) {
+export async function saveSnapshot(boardId: string, snapshot: any, thumbnail?: string) {
   const jsonStr = JSON.stringify(snapshot);
+  const data: any = { yjsState: Buffer.from(jsonStr, 'utf-8'), updatedAt: new Date() };
+  if (thumbnail) data.thumbnail = thumbnail;
   await prisma.board.update({
     where: { id: boardId },
-    data: { yjsState: Buffer.from(jsonStr, 'utf-8'), updatedAt: new Date() },
+    data,
   });
 }
 

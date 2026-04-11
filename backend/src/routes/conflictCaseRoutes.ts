@@ -26,87 +26,12 @@ import { Router, Request, Response } from 'express';
 import { Prisma } from '@prisma/client';
 import { prisma } from '../utils/prisma';
 import { authenticateFirebaseOnly } from '../middleware/auth';
-import crypto from 'crypto';
+import { encrypt, decrypt } from '../utils/encryption';
 
 const router = Router();
 
 // All conflict case routes require Firebase authentication
 router.use(authenticateFirebaseOnly);
-
-// ============================================================================
-// ENCRYPTION UTILITIES
-// Note: In production, use a proper key management service
-// ============================================================================
-
-/**
- * Derive a 32-byte encryption key buffer from the environment variable.
- * AES-256-CBC requires EXACTLY 32 bytes. The env var may be any length
- * (e.g., Render's generateValue produces 64 chars), so we normalize it.
- */
-function getEncryptionKeyBuffer(): Buffer {
-  const raw = process.env.ENCRYPTION_KEY;
-  if (!raw) {
-    // Fallback for development — generate a deterministic 32-char key
-    return Buffer.from(crypto.randomBytes(32).toString('hex').slice(0, 32), 'utf8');
-  }
-  const buf = Buffer.from(raw, 'utf8');
-  if (buf.length === 32) {
-    return buf; // Perfect length, use as-is
-  }
-  if (buf.length > 32) {
-    // Truncate to exactly 32 bytes (safe: if key was >32 bytes before,
-    // encrypt() always threw "Invalid key length" so no data was ever encrypted)
-    return buf.slice(0, 32);
-  }
-  // Pad shorter keys to 32 bytes
-  const padded = Buffer.alloc(32, 0);
-  buf.copy(padded);
-  return padded;
-}
-
-const ENCRYPTION_KEY_BUFFER = getEncryptionKeyBuffer();
-const IV_LENGTH = 16;
-const AUTH_TAG_LENGTH = 16;
-
-function encrypt(text: string): string {
-  if (!text) return text;
-  const iv = crypto.randomBytes(IV_LENGTH);
-  const cipher = crypto.createCipheriv('aes-256-gcm', ENCRYPTION_KEY_BUFFER, iv);
-  let encrypted = cipher.update(text, 'utf8', 'hex');
-  encrypted += cipher.final('hex');
-  const authTag = cipher.getAuthTag().toString('hex');
-  // Format: iv:authTag:encryptedData (3-part = GCM)
-  return iv.toString('hex') + ':' + authTag + ':' + encrypted;
-}
-
-function decrypt(text: string): string {
-  if (!text || !text.includes(':')) return text;
-  try {
-    const parts = text.split(':');
-    if (parts.length === 3) {
-      // GCM format: iv:authTag:encryptedData
-      const iv = Buffer.from(parts[0], 'hex');
-      const authTag = Buffer.from(parts[1], 'hex');
-      const encryptedText = parts[2];
-      const decipher = crypto.createDecipheriv('aes-256-gcm', ENCRYPTION_KEY_BUFFER, iv);
-      decipher.setAuthTag(authTag);
-      let decrypted = decipher.update(encryptedText, 'hex', 'utf8');
-      decrypted += decipher.final('utf8');
-      return decrypted;
-    } else if (parts.length === 2) {
-      // Legacy CBC format: iv:encryptedData — read-only backward compat
-      const iv = Buffer.from(parts[0], 'hex');
-      const encryptedText = parts[1];
-      const decipher = crypto.createDecipheriv('aes-256-cbc', ENCRYPTION_KEY_BUFFER, iv);
-      let decrypted = decipher.update(encryptedText, 'hex', 'utf8');
-      decrypted += decipher.final('utf8');
-      return decrypted;
-    }
-    return text;
-  } catch {
-    return text; // Return original if decryption fails
-  }
-}
 
 // Decrypt sensitive fields in case response
 function decryptCaseData(caseData: any): any {

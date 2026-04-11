@@ -639,10 +639,12 @@ router.get('/me', authenticate, async (req: AuthRequest, res) => {
 });
 
 // Update phone number (authenticated user can add/update their own phone)
-// Requires SMS verification code sent to the phone number
+// Frontend verifies the phone via Firebase Phone Auth (SMS OTP), then calls this to persist.
+// Backend confirms the phone is linked to the user's Firebase account before saving.
 router.patch('/update-phone', authenticate, async (req: AuthRequest, res) => {
   const userId = req.user!.id;
-  const { phone, countryCode, verificationCode } = req.body;
+  const firebaseUid = req.user!.firebaseUid;
+  const { phone, countryCode } = req.body;
 
   // If phone is empty/null, remove it
   if (!phone || phone.trim() === '') {
@@ -653,30 +655,21 @@ router.patch('/update-phone', authenticate, async (req: AuthRequest, res) => {
     return res.json({ success: true, data: { phone: null } });
   }
 
-  // Build E.164 phone number for Twilio
+  // Build E.164 phone number
   const digits = phone.replace(/\D/g, '');
   const cc = (countryCode || '1').replace(/\D/g, '');
   const e164Phone = `+${cc}${digits}`;
 
-  if (!verificationCode) {
-    // Step 1: Send SMS verification code to the phone number
-    const { sendPhoneVerification } = require('../services/smsService');
-    await sendPhoneVerification(e164Phone);
-
-    return res.json({ success: true, data: { requiresVerification: true, message: 'Verification code sent via SMS to your phone' } });
-  }
-
-  // Step 2: Verify the SMS code via Twilio Verify
-  const { checkPhoneVerification } = require('../services/smsService');
-  const isValid = await checkPhoneVerification(e164Phone, verificationCode);
-
-  if (!isValid) {
-    throw new ValidationError('Invalid or expired verification code');
-  }
-
   // Validate digits
   if (digits.length < 10 || digits.length > 15) {
     throw new ValidationError('Phone number must be between 10 and 15 digits');
+  }
+
+  // Verify the phone was actually verified via Firebase Phone Auth
+  // The frontend calls updatePhoneNumber() which links the phone to the Firebase user
+  const fbUser = await adminAuth.getUser(firebaseUid);
+  if (fbUser.phoneNumber !== e164Phone) {
+    throw new ValidationError('Phone number has not been verified. Please complete SMS verification first.');
   }
 
   // Encrypt and hash
