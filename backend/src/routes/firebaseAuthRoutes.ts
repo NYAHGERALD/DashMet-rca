@@ -7,7 +7,9 @@ import { adminAuth } from '../config/firebase-admin';
 import { websocketService } from '../services/websocketService';
 import { logAuditEvent, getClientIp } from '../services/auditService';
 import { v4 as uuidv4 } from 'uuid';
+import crypto from 'crypto';
 import { encryptPhone, decrypt } from '../utils/encryption';
+import { sendVerificationEmail } from '../services/emailService';
 
 const router = Router();
 
@@ -639,12 +641,11 @@ router.get('/me', authenticate, async (req: AuthRequest, res) => {
 });
 
 // Update phone number (authenticated user can add/update their own phone)
-// Frontend verifies the phone via Firebase Phone Auth (SMS OTP), then calls this to persist.
-// Backend confirms the phone is linked to the user's Firebase account before saving.
+// 2-step flow: Step 1 sends email OTP to user's verified email, Step 2 verifies code and saves phone.
 router.patch('/update-phone', authenticate, async (req: AuthRequest, res) => {
   const userId = req.user!.id;
-  const firebaseUid = req.user!.firebaseUid;
-  const { phone, countryCode } = req.body;
+  const userEmail = req.user!.email;
+  const { phone, countryCode, verificationCode } = req.body;
 
   // If phone is empty/null, remove it
   if (!phone || phone.trim() === '') {
@@ -655,7 +656,6 @@ router.patch('/update-phone', authenticate, async (req: AuthRequest, res) => {
     return res.json({ success: true, data: { phone: null } });
   }
 
-  // Build E.164 phone number
   const digits = phone.replace(/\D/g, '');
   const cc = (countryCode || '1').replace(/\D/g, '');
   const e164Phone = `+${cc}${digits}`;
@@ -665,12 +665,88 @@ router.patch('/update-phone', authenticate, async (req: AuthRequest, res) => {
     throw new ValidationError('Phone number must be between 10 and 15 digits');
   }
 
-  // Verify the phone was actually verified via Firebase Phone Auth
-  // The frontend calls updatePhoneNumber() which links the phone to the Firebase user
-  const fbUser = await adminAuth.getUser(firebaseUid);
-  if (fbUser.phoneNumber !== e164Phone) {
-    throw new ValidationError('Phone number has not been verified. Please complete SMS verification first.');
+  if (!verificationCode) {
+    // ── Step 1: Send email OTP to the user's verified email ──
+
+    // Rate limit: max 3 OTPs per user per hour
+    const oneHourAgo = new Date(Date.now() - 60 * 60 * 1000);
+    const recentCount = await prisma.mobileVerification.count({
+      where: { userId, createdAt: { gte: oneHourAgo } },
+    });
+    if (recentCount >= 3) {
+      throw new ValidationError('Too many verification requests. Please try again later.');
+    }
+
+    // Invalidate previous unused OTPs
+    await prisma.mobileVerification.updateMany({
+      where: { userId, used: false },
+      data: { used: true },
+    });
+
+    // Generate cryptographically random 6-digit OTP
+    const code = crypto.randomInt(100000, 999999).toString();
+    const codeHash = crypto.createHash('sha256').update(code).digest('hex');
+
+    // Store hashed OTP with 10-minute expiry
+    await prisma.mobileVerification.create({
+      data: {
+        id: uuidv4(),
+        userId,
+        email: userEmail.toLowerCase(),
+        codeHash,
+        expiresAt: new Date(Date.now() + 10 * 60 * 1000),
+      },
+    });
+
+    // Send via Resend
+    const firstName = req.user!.firstName || 'there';
+    const sent = await sendVerificationEmail(userEmail, code, firstName);
+    if (!sent) {
+      throw new ValidationError('Failed to send verification email. Please try again.');
+    }
+
+    return res.json({
+      success: true,
+      data: { requiresVerification: true, message: 'Verification code sent to your email' },
+    });
   }
+
+  // ── Step 2: Verify the email OTP and save the phone number ──
+  const codeHash = crypto.createHash('sha256').update(verificationCode).digest('hex');
+
+  const verification = await prisma.mobileVerification.findFirst({
+    where: {
+      userId,
+      codeHash,
+      used: false,
+      expiresAt: { gt: new Date() },
+    },
+  });
+
+  if (!verification) {
+    // Increment attempt count on most recent verification for brute-force protection
+    const latest = await prisma.mobileVerification.findFirst({
+      where: { userId, used: false },
+      orderBy: { createdAt: 'desc' },
+    });
+    if (latest) {
+      const newAttempts = latest.attempts + 1;
+      await prisma.mobileVerification.update({
+        where: { id: latest.id },
+        data: { used: newAttempts >= 5, attempts: newAttempts },
+      });
+      if (newAttempts >= 5) {
+        throw new ValidationError('Too many failed attempts. Please request a new code.');
+      }
+    }
+    throw new ValidationError('Invalid or expired verification code');
+  }
+
+  // Mark code as used
+  await prisma.mobileVerification.update({
+    where: { id: verification.id },
+    data: { used: true },
+  });
 
   // Encrypt and hash
   const { encryptedPhone, phoneHash } = encryptPhone(digits, cc);
@@ -688,7 +764,6 @@ router.patch('/update-phone', authenticate, async (req: AuthRequest, res) => {
     data: { phone: encryptedPhone, phoneHash },
   });
 
-  // Return the readable phone for display
   res.json({ success: true, data: { phone: e164Phone } });
 });
 

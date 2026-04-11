@@ -1,8 +1,8 @@
 'use client';
 
-import { useState, useEffect, useCallback, useRef } from 'react';
+import { useState, useEffect, useCallback } from 'react';
 import dynamic from 'next/dynamic';
-import { sendPasswordResetEmail, PhoneAuthProvider, RecaptchaVerifier, updatePhoneNumber } from 'firebase/auth';
+import { sendPasswordResetEmail } from 'firebase/auth';
 import { auth } from '@/lib/firebase';
 import { getFirebaseErrorMessage } from '@/lib/firebaseErrors';
 import { useAuth } from '@/components/providers/AuthProvider';
@@ -57,8 +57,6 @@ export default function SettingsModal() {
   const [phoneVerificationStep, setPhoneVerificationStep] = useState<'input' | 'verify'>('input');
   const [phoneVerificationCode, setPhoneVerificationCode] = useState('');
   const [phoneVerifyLoading, setPhoneVerifyLoading] = useState(false);
-  const [verificationId, setVerificationId] = useState('');
-  const recaptchaVerifierRef = useRef<RecaptchaVerifier | null>(null);
 
   interface Session {
     id: string;
@@ -189,36 +187,27 @@ export default function SettingsModal() {
     setMessage('');
 
     try {
-      // If removing phone, call backend directly
-      if (!phoneDigits || phoneDigits.trim() === '') {
-        await api.patch('/firebase-auth/update-phone', { phone: '', countryCode: selectedCountry.code });
-        setMessage('Phone number removed.');
+      const response = await api.patch('/firebase-auth/update-phone', {
+        phone: phoneDigits,
+        countryCode: selectedCountry.code,
+      });
+
+      if (response.data?.data?.requiresVerification) {
+        // Code sent to email — show verification input
+        setMessage('A verification code has been sent to your email.');
+        setPhoneVerificationStep('verify');
+      } else {
+        // Direct success (e.g., removing phone)
+        setMessage('Phone number updated successfully!');
         setIsEditingPhone(false);
+        setPhoneVerificationStep('input');
+        setPhoneVerificationCode('');
         if (refreshUser) refreshUser();
         setTimeout(() => setMessage(''), 3000);
-        return;
       }
-
-      const e164Phone = `+${selectedCountry.code}${phoneDigits}`;
-
-      // Set up invisible reCAPTCHA
-      if (!recaptchaVerifierRef.current) {
-        recaptchaVerifierRef.current = new RecaptchaVerifier(auth, 'recaptcha-container', {
-          size: 'invisible',
-        });
-      }
-
-      // Send SMS via Firebase Phone Auth
-      const provider = new PhoneAuthProvider(auth);
-      const vId = await provider.verifyPhoneNumber(e164Phone, recaptchaVerifierRef.current);
-      setVerificationId(vId);
-      setPhoneVerificationStep('verify');
-      setMessage('A verification code has been sent to your phone via SMS.');
     } catch (err: any) {
-      console.error('Failed to send verification:', err);
-      setError(getFirebaseErrorMessage(err, 'Failed to send verification code'));
-      // Reset reCAPTCHA on error so it can be recreated
-      recaptchaVerifierRef.current = null;
+      console.error('Failed to update phone:', err);
+      setError(err.response?.data?.error || 'Failed to update phone number');
     } finally {
       setPhoneLoading(false);
     }
@@ -231,37 +220,20 @@ export default function SettingsModal() {
     setMessage('');
 
     try {
-      // Verify the code via Firebase (also links phone to Firebase user)
-      const credential = PhoneAuthProvider.credential(verificationId, phoneVerificationCode);
-      const currentUser = auth.currentUser;
-      if (!currentUser) throw new Error('Not authenticated');
-      await updatePhoneNumber(currentUser, credential);
-
-      // Phone verified — save to database
       await api.patch('/firebase-auth/update-phone', {
         phone: phoneDigits,
         countryCode: selectedCountry.code,
+        verificationCode: phoneVerificationCode,
       });
-
       setMessage('Phone number verified and saved!');
       setIsEditingPhone(false);
       setPhoneVerificationStep('input');
       setPhoneVerificationCode('');
-      setVerificationId('');
-      recaptchaVerifierRef.current = null;
       if (refreshUser) refreshUser();
       setTimeout(() => setMessage(''), 3000);
     } catch (err: any) {
       console.error('Failed to verify phone:', err);
-      if (err.code === 'auth/credential-already-in-use') {
-        setError('This phone number is already linked to another account.');
-      } else if (err.code === 'auth/invalid-verification-code') {
-        setError('Invalid verification code. Please try again.');
-      } else if (err.code === 'auth/code-expired') {
-        setError('Verification code expired. Please resend.');
-      } else {
-        setError(getFirebaseErrorMessage(err, err.response?.data?.error || 'Failed to verify phone number'));
-      }
+      setError(err.response?.data?.error || 'Invalid or expired verification code');
     } finally {
       setPhoneVerifyLoading(false);
     }
@@ -408,9 +380,6 @@ export default function SettingsModal() {
 
   return (
     <>
-      {/* Invisible reCAPTCHA container for Firebase Phone Auth */}
-      <div id="recaptcha-container"></div>
-
       {/* Backdrop */}
       <div
         className={`fixed inset-0 z-[60] bg-black/50 backdrop-blur-sm transition-opacity duration-250 ${closing ? 'opacity-0' : 'opacity-100'}`}
@@ -633,16 +602,16 @@ export default function SettingsModal() {
                           </button>
                         </div>
                         <p className="text-xs text-gray-500 dark:text-gray-400">
-                          An SMS verification code will be sent to this number to verify ownership.
+                          A verification code will be sent to your email to authorize this phone change.
                         </p>
                       </>
                     ) : (
                       <>
                         {/* Verification Code Step */}
                         <div className="p-3 bg-blue-50 dark:bg-blue-900/20 border border-blue-200 dark:border-blue-800 rounded-lg">
-                          <p className="text-sm text-blue-800 dark:text-blue-200 mb-1 font-medium">� Check your phone</p>
+                          <p className="text-sm text-blue-800 dark:text-blue-200 mb-1 font-medium">📧 Check your email</p>
                           <p className="text-xs text-blue-600 dark:text-blue-300">
-                            We sent a 6-digit code via SMS to your phone number. Enter it below to verify ownership.
+                            We sent a 6-digit verification code to your email address. Enter it below to confirm this phone change.
                           </p>
                         </div>
                         <div className="flex gap-2 items-center">
@@ -680,7 +649,7 @@ export default function SettingsModal() {
                           </button>
                         </div>
                         <p className="text-xs text-gray-500 dark:text-gray-400">
-                          Didn&apos;t receive the SMS? Check your phone and try resending.
+                          Didn&apos;t receive the code? Check your spam folder or try resending.
                         </p>
                       </>
                     )}
