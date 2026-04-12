@@ -2560,14 +2560,14 @@ function LSWContent() {
                             <span
                               onClick={() => handleStartFollowUpEdit(followUp)}
                               className={`inline-block px-2 py-1 rounded-full text-xs font-medium cursor-pointer ${
-                                new Date(followUp.dueDate) < new Date()
+                                new Date(followUp.dueDate + 'T00:00:00Z') < new Date()
                                   ? 'bg-red-100 text-red-700 dark:bg-red-900/30 dark:text-red-400'
-                                  : new Date(followUp.dueDate) < new Date(Date.now() + 3 * 24 * 60 * 60 * 1000)
+                                  : new Date(followUp.dueDate + 'T00:00:00Z') < new Date(Date.now() + 3 * 24 * 60 * 60 * 1000)
                                   ? 'bg-amber-100 text-amber-700 dark:bg-amber-900/30 dark:text-amber-400'
                                   : 'bg-gray-100 text-gray-700 dark:bg-gray-700 dark:text-gray-300'
                               } whitespace-nowrap`}
                             >
-                              {followUp.dueDate ? new Date(followUp.dueDate).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' }) : 'Set date'}
+                              {followUp.dueDate ? new Date(followUp.dueDate + 'T00:00:00Z').toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric', timeZone: 'UTC' }) : 'Set date'}
                             </span>
                           )}
                         </td>
@@ -2724,7 +2724,7 @@ function LSWContent() {
                               className="block w-full px-2 py-1 text-sm text-gray-600 dark:text-gray-400 cursor-pointer border border-transparent hover:border-gray-300 dark:hover:border-gray-600 rounded transition-colors"
                             >
                               {trigger.eventDate 
-                                ? new Date(trigger.eventDate).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' })
+                                ? new Date(trigger.eventDate + 'T00:00:00Z').toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric', timeZone: 'UTC' })
                                 : <span className="text-gray-400 italic">Set date...</span>
                               }
                             </span>
@@ -2860,7 +2860,7 @@ function LSWContent() {
                                   />
                                 ) : (
                                   <span onClick={() => handleStartFreqTaskEdit(task, 'dueDate')} className="cursor-pointer">
-                                    {new Date(task.dueDate).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' })}
+                                    {new Date(task.dueDate + 'T00:00:00Z').toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric', timeZone: 'UTC' })}
                                   </span>
                                 )}
                               </td>
@@ -3172,7 +3172,7 @@ function LSWContent() {
                             className="text-xs text-gray-500 dark:text-gray-400 cursor-pointer whitespace-nowrap"
                             onClick={() => handleStartRailEdit(rail, 'dueDate')}
                           >
-                            {new Date(rail.dueDate).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' })}
+                            {new Date(rail.dueDate + 'T00:00:00Z').toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric', timeZone: 'UTC' })}
                           </span>
                         )}
                         <button
@@ -3312,7 +3312,7 @@ function LSWContent() {
                             className="text-xs text-gray-500 dark:text-gray-400 whitespace-nowrap cursor-pointer"
                             onClick={() => handleStartGoalEdit(goal, 'dueDate')}
                           >
-                            {new Date(goal.dueDate).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' })}
+                            {new Date(goal.dueDate + 'T00:00:00Z').toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric', timeZone: 'UTC' })}
                           </span>
                         )}
                         <button
@@ -3853,7 +3853,7 @@ function LSWContent() {
         for (const f of earlyLogFilters) {
           filtered = filtered.filter(log => {
             const val = f.field === 'scheduledDate'
-              ? (log.scheduledDate ? new Date(log.scheduledDate).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' }) : '')
+              ? (log.scheduledDate ? new Date(log.scheduledDate + 'T00:00:00Z').toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric', timeZone: 'UTC' }) : '')
               : f.field === 'completedAt'
               ? new Date(log.completedAt).toLocaleString('en-US', { month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit', hour12: true })
               : (log as any)[f.field] || '';
@@ -3890,7 +3890,7 @@ function LSWContent() {
         };
 
         const getCellDisplayValue = (log: LswEarlyCompletionLog, field: string): string => {
-          if (field === 'scheduledDate') return log.scheduledDate ? new Date(log.scheduledDate).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' }) : '';
+          if (field === 'scheduledDate') return log.scheduledDate ? new Date(log.scheduledDate + 'T00:00:00Z').toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric', timeZone: 'UTC' }) : '';
           if (field === 'completedAt') return new Date(log.completedAt).toLocaleString('en-US', { month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit', hour12: true });
           return (log as any)[field] || '';
         };
@@ -4158,7 +4158,7 @@ function LSWContent() {
                             </span>
                           </td>
                           <td className="px-4 py-3 text-sm text-center text-gray-600 dark:text-gray-300 cursor-context-menu" onContextMenu={(e) => handleColumnContextMenu(e, 'scheduledDate', getCellDisplayValue(log, 'scheduledDate'))}>
-                            {log.scheduledDate ? new Date(log.scheduledDate).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' }) : '—'}
+                            {log.scheduledDate ? new Date(log.scheduledDate + 'T00:00:00Z').toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric', timeZone: 'UTC' }) : '—'}
                           </td>
                           <td className="px-4 py-3 text-sm text-center text-gray-500 dark:text-gray-400 cursor-context-menu" onContextMenu={(e) => handleColumnContextMenu(e, 'completedAt', getCellDisplayValue(log, 'completedAt'))}>
                             {new Date(log.completedAt).toLocaleString('en-US', { month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit', hour12: true })}
