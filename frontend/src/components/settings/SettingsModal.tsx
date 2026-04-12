@@ -233,7 +233,7 @@ export default function SettingsModal() {
       setTimeout(() => setMessage(''), 3000);
     } catch (err: any) {
       console.error('Failed to verify phone:', err);
-      setError(err.response?.data?.error || 'Invalid or expired verification code');
+      setError(err.response?.data?.error || 'Failed to verify phone number. Please try again.');
     } finally {
       setPhoneVerifyLoading(false);
     }

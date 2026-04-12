@@ -588,6 +588,7 @@ router.get('/me', authenticate, async (req: AuthRequest, res) => {
       organizationId: true,
       profilePicture: true,
       phone: true,
+      phoneChangeVerified: true,
       Organization: {
         select: { id: true, name: true },
       },
@@ -642,129 +643,148 @@ router.get('/me', authenticate, async (req: AuthRequest, res) => {
 
 // Update phone number (authenticated user can add/update their own phone)
 // 2-step flow: Step 1 sends email OTP to user's verified email, Step 2 verifies code and saves phone.
-router.patch('/update-phone', authenticate, async (req: AuthRequest, res) => {
-  const userId = req.user!.id;
-  const userEmail = req.user!.email;
-  const { phone, countryCode, verificationCode } = req.body;
+router.patch('/update-phone', authenticate, async (req: AuthRequest, res, next) => {
+  try {
+    const userId = req.user!.id;
+    const userEmail = req.user!.email;
+    const { phone, countryCode, verificationCode } = req.body;
 
-  // If phone is empty/null, remove it
-  if (!phone || phone.trim() === '') {
-    await prisma.user.update({
-      where: { id: userId },
-      data: { phone: null, phoneHash: null },
-    });
-    return res.json({ success: true, data: { phone: null } });
-  }
-
-  const digits = phone.replace(/\D/g, '');
-  const cc = (countryCode || '1').replace(/\D/g, '');
-  const e164Phone = `+${cc}${digits}`;
-
-  // Validate digits
-  if (digits.length < 10 || digits.length > 15) {
-    throw new ValidationError('Phone number must be between 10 and 15 digits');
-  }
-
-  if (!verificationCode) {
-    // ── Step 1: Send email OTP to the user's verified email ──
-
-    // Rate limit: max 3 OTPs per user per hour
-    const oneHourAgo = new Date(Date.now() - 60 * 60 * 1000);
-    const recentCount = await prisma.mobileVerification.count({
-      where: { userId, createdAt: { gte: oneHourAgo } },
-    });
-    if (recentCount >= 3) {
-      throw new ValidationError('Too many verification requests. Please try again later.');
+    // If phone is empty/null, remove it
+    if (!phone || phone.trim() === '') {
+      await prisma.user.update({
+        where: { id: userId },
+        data: { phone: null, phoneHash: null },
+      });
+      return res.json({ success: true, data: { phone: null } });
     }
 
-    // Invalidate previous unused OTPs
-    await prisma.mobileVerification.updateMany({
-      where: { userId, used: false },
-      data: { used: true },
-    });
+    const digits = phone.replace(/\D/g, '');
+    const cc = (countryCode || '1').replace(/\D/g, '');
+    const e164Phone = `+${cc}${digits}`;
 
-    // Generate cryptographically random 6-digit OTP
-    const code = crypto.randomInt(100000, 999999).toString();
-    const codeHash = crypto.createHash('sha256').update(code).digest('hex');
+    // Validate digits
+    if (digits.length < 10 || digits.length > 15) {
+      return res.status(400).json({ success: false, error: 'Phone number must be between 10 and 15 digits' });
+    }
 
-    // Store hashed OTP with 10-minute expiry
-    await prisma.mobileVerification.create({
-      data: {
-        id: uuidv4(),
+    if (!verificationCode) {
+      // ── Step 1: Send email OTP to the user's verified email ──
+
+      // Rate limit: max 3 OTPs per user per hour
+      const oneHourAgo = new Date(Date.now() - 60 * 60 * 1000);
+      const recentCount = await prisma.mobileVerification.count({
+        where: { userId, createdAt: { gte: oneHourAgo } },
+      });
+      if (recentCount >= 3) {
+        return res.status(429).json({ success: false, error: 'Too many verification requests. Please try again later.' });
+      }
+
+      // Invalidate previous unused OTPs
+      await prisma.mobileVerification.updateMany({
+        where: { userId, used: false },
+        data: { used: true },
+      });
+
+      // Generate cryptographically random 6-digit OTP
+      const code = crypto.randomInt(100000, 999999).toString();
+      const codeHash = crypto.createHash('sha256').update(code).digest('hex');
+
+      // Store hashed OTP with 10-minute expiry
+      await prisma.mobileVerification.create({
+        data: {
+          id: uuidv4(),
+          userId,
+          email: userEmail.toLowerCase(),
+          codeHash,
+          expiresAt: new Date(Date.now() + 10 * 60 * 1000),
+        },
+      });
+
+      // Send via Resend
+      const firstName = req.user!.firstName || 'there';
+      const sent = await sendVerificationEmail(userEmail, code, firstName);
+      if (!sent) {
+        return res.status(500).json({ success: false, error: 'Failed to send verification email. Please try again.' });
+      }
+
+      return res.json({
+        success: true,
+        data: { requiresVerification: true, message: 'Verification code sent to your email' },
+      });
+    }
+
+    // ── Step 2: Verify the email OTP and save the phone number ──
+    const codeHash = crypto.createHash('sha256').update(verificationCode).digest('hex');
+
+    const verification = await prisma.mobileVerification.findFirst({
+      where: {
         userId,
-        email: userEmail.toLowerCase(),
         codeHash,
-        expiresAt: new Date(Date.now() + 10 * 60 * 1000),
+        used: false,
+        expiresAt: { gt: new Date() },
       },
     });
 
-    // Send via Resend
-    const firstName = req.user!.firstName || 'there';
-    const sent = await sendVerificationEmail(userEmail, code, firstName);
-    if (!sent) {
-      throw new ValidationError('Failed to send verification email. Please try again.');
-    }
-
-    return res.json({
-      success: true,
-      data: { requiresVerification: true, message: 'Verification code sent to your email' },
-    });
-  }
-
-  // ── Step 2: Verify the email OTP and save the phone number ──
-  const codeHash = crypto.createHash('sha256').update(verificationCode).digest('hex');
-
-  const verification = await prisma.mobileVerification.findFirst({
-    where: {
-      userId,
-      codeHash,
-      used: false,
-      expiresAt: { gt: new Date() },
-    },
-  });
-
-  if (!verification) {
-    // Increment attempt count on most recent verification for brute-force protection
-    const latest = await prisma.mobileVerification.findFirst({
-      where: { userId, used: false },
-      orderBy: { createdAt: 'desc' },
-    });
-    if (latest) {
-      const newAttempts = latest.attempts + 1;
-      await prisma.mobileVerification.update({
-        where: { id: latest.id },
-        data: { used: newAttempts >= 5, attempts: newAttempts },
+    if (!verification) {
+      // Increment attempt count on most recent verification for brute-force protection
+      const latest = await prisma.mobileVerification.findFirst({
+        where: { userId, used: false },
+        orderBy: { createdAt: 'desc' },
       });
-      if (newAttempts >= 5) {
-        throw new ValidationError('Too many failed attempts. Please request a new code.');
+      if (latest) {
+        const newAttempts = latest.attempts + 1;
+        await prisma.mobileVerification.update({
+          where: { id: latest.id },
+          data: { used: newAttempts >= 5, attempts: newAttempts },
+        });
+        if (newAttempts >= 5) {
+          return res.status(400).json({ success: false, error: 'Too many failed attempts. Please request a new code.' });
+        }
       }
+      return res.status(400).json({ success: false, error: 'Invalid or expired verification code' });
     }
-    throw new ValidationError('Invalid or expired verification code');
+
+    // Mark code as used
+    await prisma.mobileVerification.update({
+      where: { id: verification.id },
+      data: { used: true },
+    });
+
+    // Encrypt and hash
+    const { encryptedPhone, phoneHash } = encryptPhone(digits, cc);
+
+    // Check uniqueness (exclude current user)
+    const existing = await prisma.user.findFirst({
+      where: { phoneHash, id: { not: userId } },
+    });
+    if (existing) {
+      return res.status(409).json({ success: false, error: 'This phone number already belongs to another account. Please use a different phone number.' });
+    }
+
+    // Check if phone hash has changed — if so, require re-verification on next phone login
+    const currentUser = await prisma.user.findUnique({
+      where: { id: userId },
+      select: { phoneHash: true, initialPhoneHash: true },
+    });
+
+    const isPhoneChanged = currentUser?.initialPhoneHash && currentUser.initialPhoneHash !== phoneHash;
+
+    await prisma.user.update({
+      where: { id: userId },
+      data: {
+        phone: encryptedPhone,
+        phoneHash,
+        // Set initialPhoneHash on first phone setup, never overwrite
+        ...(!currentUser?.initialPhoneHash ? { initialPhoneHash: phoneHash } : {}),
+        // If phone changed from the original, require re-verification on next phone login
+        ...(isPhoneChanged ? { phoneChangeVerified: false } : {}),
+      },
+    });
+
+    res.json({ success: true, data: { phone: e164Phone } });
+  } catch (err) {
+    next(err);
   }
-
-  // Mark code as used
-  await prisma.mobileVerification.update({
-    where: { id: verification.id },
-    data: { used: true },
-  });
-
-  // Encrypt and hash
-  const { encryptedPhone, phoneHash } = encryptPhone(digits, cc);
-
-  // Check uniqueness (exclude current user)
-  const existing = await prisma.user.findFirst({
-    where: { phoneHash, id: { not: userId } },
-  });
-  if (existing) {
-    throw new ValidationError('This phone number is already registered to another account');
-  }
-
-  await prisma.user.update({
-    where: { id: userId },
-    data: { phone: encryptedPhone, phoneHash },
-  });
-
-  res.json({ success: true, data: { phone: e164Phone } });
 });
 
 // Custom password reset with branded email (uses Firebase Admin SDK)

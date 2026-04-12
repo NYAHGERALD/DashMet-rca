@@ -130,7 +130,13 @@ router.put('/daily-tasks/:id/completion', async (req: AuthRequest, res: Response
     }
     const completion = await lswService.upsertDailyTaskCompletion(req.params.id, weekNumber, year, day, value);
     // Notify all connected clients for this user (other tabs/devices)
-    websocketService.emitToUser(req.user!.id, 'lsw:completion-changed', { weekNumber, year });
+    websocketService.emitToUser(req.user!.id, 'lsw:completion-changed', {
+      weekNumber, year,
+      taskId: req.params.id,
+      day,
+      value,
+      action: 'toggle',
+    });
     res.json({ success: true, data: completion });
   } catch (error: any) {
     console.error('Error updating daily task completion:', error);
@@ -562,6 +568,11 @@ router.post('/early-completion-logs', async (req: AuthRequest, res: Response) =>
     websocketService.emitToUser(req.user!.id, 'lsw:completion-changed', {
       weekNumber: req.body.weekNumber,
       year: req.body.year,
+      taskId: req.body.dailyTaskId,
+      day: req.body.dayKey,
+      value: true,
+      action: 'early-complete',
+      earlyLog: log,
     });
     res.json({ success: true, data: log });
   } catch (error: any) {
@@ -599,6 +610,10 @@ router.delete('/early-completion-logs', async (req: AuthRequest, res: Response) 
     websocketService.emitToUser(req.user!.id, 'lsw:completion-changed', {
       weekNumber: Number(weekNumber),
       year: Number(year),
+      taskId: dailyTaskId,
+      day: dayKey,
+      value: false,
+      action: 'uncheck',
     });
     res.json({ success: true });
   } catch (error: any) {

@@ -97,12 +97,17 @@ router.post('/check-email', async (req: Request, res: Response) => {
       },
       select: {
         id: true,
+        firstName: true,
+        lastName: true,
       },
     });
 
     return res.json({
       success: true,
       exists: !!user,
+      userId: user?.id ?? null,
+      firstName: user?.firstName ?? null,
+      lastName: user?.lastName ?? null,
     });
   } catch (error: any) {
     console.error('Check email error:', error);
@@ -270,6 +275,18 @@ router.post('/register', async (req: Request, res: Response) => {
     // Check if email already exists in database
     const existingUser = await prisma.user.findFirst({
       where: { email: normalizedEmail },
+      select: {
+        id: true,
+        email: true,
+        firstName: true,
+        lastName: true,
+        role: true,
+        organizationId: true,
+        phone: true,
+        phoneHash: true,
+        firebaseUid: true,
+        defaultSiteId: true,
+      },
     });
 
     // Access code validation — only required for NEW user creation
@@ -359,6 +376,8 @@ router.post('/register', async (req: Request, res: Response) => {
         data: {
           phone: encryptedPhone,
           phoneHash,
+          // Set initialPhoneHash on first phone setup (never overwrite)
+          ...(!existingUser.phoneHash ? { initialPhoneHash: phoneHash, phoneChangeVerified: true } : {}),
           firebaseUid: firebaseUid || existingUser.firebaseUid,
           updatedAt: new Date(),
         },
@@ -419,6 +438,8 @@ router.post('/register', async (req: Request, res: Response) => {
           email: normalizedEmail,
           phone: encryptedPhone,
           phoneHash,
+          initialPhoneHash: phoneHash,
+          phoneChangeVerified: true,
           firstName: firstName.trim(),
           lastName: lastName.trim(),
           role: accessCode.role,
@@ -569,6 +590,7 @@ router.post('/link-firebase', async (req: Request, res: Response) => {
         role: true,
         organizationId: true,
         defaultSiteId: true,
+        phoneChangeVerified: true,
       },
     });
     
@@ -576,6 +598,7 @@ router.post('/link-firebase', async (req: Request, res: Response) => {
 
     return res.json({
       success: true,
+      requiresPhoneChangeVerification: !updatedUser.phoneChangeVerified,
       user: {
         id: updatedUser.id,
         firstName: updatedUser.firstName,
@@ -592,6 +615,198 @@ router.post('/link-firebase', async (req: Request, res: Response) => {
       success: false,
       error: 'Failed to link Firebase UID',
     });
+  }
+});
+
+// ============================================================================
+// POST /api/mobile/send-phone-change-verification
+// Send email OTP to verify identity after phone number was changed
+// Requires Firebase auth token
+// ============================================================================
+router.post('/send-phone-change-verification', async (req: Request, res: Response) => {
+  try {
+    const { userId } = req.body;
+
+    if (!userId) {
+      return res.status(400).json({ success: false, error: 'userId is required' });
+    }
+
+    // Verify Firebase auth
+    const authHeader = req.headers.authorization;
+    if (!authHeader?.startsWith('Bearer ')) {
+      return res.status(401).json({ success: false, error: 'Authorization token required' });
+    }
+
+    let decodedToken;
+    try {
+      decodedToken = await adminAuth.verifyIdToken(authHeader.replace('Bearer ', ''), true);
+    } catch {
+      return res.status(401).json({ success: false, error: 'Invalid or expired token' });
+    }
+
+    const user = await prisma.user.findUnique({
+      where: { id: userId },
+      select: { id: true, email: true, firstName: true, firebaseUid: true, phoneChangeVerified: true },
+    });
+
+    if (!user || user.firebaseUid !== decodedToken.uid) {
+      // Constant-time-like delay to prevent user enumeration
+      await new Promise(r => setTimeout(r, 200 + Math.random() * 300));
+      return res.status(400).json({ success: false, error: 'Invalid request' });
+    }
+
+    if (user.phoneChangeVerified) {
+      return res.json({ success: true, message: 'Phone change already verified' });
+    }
+
+    // Rate limit: max 3 OTPs per user per hour
+    const oneHourAgo = new Date(Date.now() - 60 * 60 * 1000);
+    const recentCount = await prisma.mobileVerification.count({
+      where: { userId, createdAt: { gte: oneHourAgo } },
+    });
+    if (recentCount >= 3) {
+      return res.status(429).json({ success: false, error: 'Too many verification requests. Please try again later.' });
+    }
+
+    // Invalidate previous unused OTPs
+    await prisma.mobileVerification.updateMany({
+      where: { userId, used: false },
+      data: { used: true },
+    });
+
+    // Generate 6-digit OTP
+    const code = crypto.randomInt(100000, 999999).toString();
+    const codeHash = crypto.createHash('sha256').update(code).digest('hex');
+
+    await prisma.mobileVerification.create({
+      data: {
+        id: uuidv4(),
+        userId,
+        email: user.email.toLowerCase(),
+        codeHash,
+        expiresAt: new Date(Date.now() + 10 * 60 * 1000), // 10 minutes
+      },
+    });
+
+    const sent = await sendVerificationEmail(user.email.toLowerCase(), code, user.firstName || 'there');
+    if (!sent) {
+      return res.status(500).json({ success: false, error: 'Failed to send verification email' });
+    }
+
+    return res.json({ success: true, message: 'Verification code sent to your email' });
+  } catch (error: any) {
+    console.error('Send phone change verification error:', error);
+    return res.status(500).json({ success: false, error: 'Failed to send verification code' });
+  }
+});
+
+// ============================================================================
+// POST /api/mobile/verify-phone-change
+// Verify email OTP code to confirm identity after phone number was changed
+// On success: sets phoneChangeVerified = true, updates initialPhoneHash to current phoneHash
+// ============================================================================
+router.post('/verify-phone-change', async (req: Request, res: Response) => {
+  try {
+    const { userId, code } = req.body;
+
+    if (!userId || !code) {
+      return res.status(400).json({ success: false, error: 'userId and code are required' });
+    }
+
+    // Verify Firebase auth
+    const authHeader = req.headers.authorization;
+    if (!authHeader?.startsWith('Bearer ')) {
+      return res.status(401).json({ success: false, error: 'Authorization token required' });
+    }
+
+    let decodedToken;
+    try {
+      decodedToken = await adminAuth.verifyIdToken(authHeader.replace('Bearer ', ''), true);
+    } catch {
+      return res.status(401).json({ success: false, error: 'Invalid or expired token' });
+    }
+
+    const user = await prisma.user.findUnique({
+      where: { id: userId },
+      select: { id: true, firebaseUid: true, phoneHash: true },
+    });
+
+    if (!user || user.firebaseUid !== decodedToken.uid) {
+      await new Promise(r => setTimeout(r, 200 + Math.random() * 300));
+      return res.status(400).json({ success: false, error: 'Invalid request' });
+    }
+
+    const codeHash = crypto.createHash('sha256').update(code.trim()).digest('hex');
+
+    // Find most recent unused verification
+    const verification = await prisma.mobileVerification.findFirst({
+      where: {
+        userId,
+        used: false,
+        expiresAt: { gte: new Date() },
+      },
+      orderBy: { createdAt: 'desc' },
+    });
+
+    if (!verification) {
+      return res.status(400).json({ success: false, error: 'No active verification code. Please request a new one.' });
+    }
+
+    // Brute-force protection: max 5 attempts
+    if (verification.attempts >= 5) {
+      await prisma.mobileVerification.update({
+        where: { id: verification.id },
+        data: { used: true },
+      });
+      return res.status(429).json({ success: false, error: 'Too many attempts. Please request a new verification code.' });
+    }
+
+    // Increment attempts
+    await prisma.mobileVerification.update({
+      where: { id: verification.id },
+      data: { attempts: { increment: 1 } },
+    });
+
+    // Constant-time comparison
+    const isValid = crypto.timingSafeEqual(
+      Buffer.from(codeHash, 'hex'),
+      Buffer.from(verification.codeHash, 'hex')
+    );
+
+    if (!isValid) {
+      const remaining = 5 - (verification.attempts + 1);
+      return res.status(400).json({
+        success: false,
+        error: remaining > 0
+          ? `Invalid code. ${remaining} attempt(s) remaining.`
+          : 'Invalid code. Please request a new verification code.',
+      });
+    }
+
+    // Mark OTP as used
+    await prisma.mobileVerification.update({
+      where: { id: verification.id },
+      data: { used: true },
+    });
+
+    // Mark phone change as verified and update initialPhoneHash to the current phone hash
+    await prisma.user.update({
+      where: { id: userId },
+      data: {
+        phoneChangeVerified: true,
+        initialPhoneHash: user.phoneHash,
+      },
+    });
+
+    console.log(`✅ Phone change verification complete for user ${userId}`);
+
+    return res.json({
+      success: true,
+      message: 'Identity verified successfully. You can now access the app.',
+    });
+  } catch (error: any) {
+    console.error('Verify phone change error:', error);
+    return res.status(500).json({ success: false, error: 'Failed to verify code' });
   }
 });
 

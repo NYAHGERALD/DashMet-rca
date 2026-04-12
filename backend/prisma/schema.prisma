@@ -1522,6 +1522,8 @@ model User {
   phone                                                               String?                              // Encrypted (AES-256-GCM)
   phoneHash                                                           String?                              @unique  // HMAC-SHA256 for lookups
   phoneVerified                                                       Boolean                              @default(false)  // Set true after email OTP verification on mobile
+  initialPhoneHash                                                    String?                              // HMAC-SHA256 of original phone — set once, never changes
+  phoneChangeVerified                                                 Boolean                              @default(true)   // False when phone changed, true after email re-verification
   lswWorkDaysPerWeek                                                  Int                                  @default(5)  // 5=Mon-Fri, 6=Mon-Sat, 7=All days
   AIFishboneSessionsUpdated                                           AIFishboneSession[]                  @relation("AIFishboneSessionUpdatedBy")
   AIFishboneSessionsStarted                                           AIFishboneSession[]                  @relation("AIFishboneSessionStartedBy")

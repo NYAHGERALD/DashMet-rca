@@ -143,6 +143,7 @@ function mapDailyTaskFromDb(t: LswDailyTask): DailyTask {
 }
 
 const DAY_KEY_TO_DB: Record<string, string> = { M: 'monday', T: 'tuesday', W: 'wednesday', H: 'thursday', F: 'friday', S1: 'saturday', S2: 'sunday' };
+const DB_TO_DAY_KEY: Record<string, string> = { monday: 'M', tuesday: 'T', wednesday: 'W', thursday: 'H', friday: 'F', saturday: 'S1', sunday: 'S2' };
 
 function mapFreqTaskFromDb(t: LswFrequencyTask): FrequencyTask {
   return { id: t.id, task: t.task, minutes: t.minutes, dueDate: t.dueDate.split('T')[0], frequency: FREQ_DB_TO_UI[t.frequency] || 'monthly' };
@@ -936,6 +937,7 @@ function LSWContent() {
   const loadLswData = useCallback(async () => {
     setIsLoading(true);
     setLoadError(null);
+    let needsRefetch = false;
     try {
       const data = await fetchLswData(currentWeek, currentYear);
 
@@ -954,8 +956,10 @@ function LSWContent() {
               setCurrentWeek(orgWeek);
               setCurrentYear(orgYear);
               setConfigReady(true);
-              setIsLoading(false);
-              return; // Will re-trigger loadLswData via useEffect
+              // Keep isLoading=true — the re-fetch with correct week/year will clear it.
+              // Don't set any task data — the wrong week was fetched.
+              needsRefetch = true;
+              return;
             }
           }
           setConfigReady(true);
@@ -965,7 +969,8 @@ function LSWContent() {
         setConfigReady(true);
       }
 
-      // Restore work days per week preference
+      // Only apply data when we have the correct week
+      // (skipped above on first load if week recalculation was needed)
       if (data.userPreferences?.workDaysPerWeek) {
         setWorkDaysPerWeek(data.userPreferences.workDaysPerWeek);
       }
@@ -992,7 +997,9 @@ function LSWContent() {
       console.error('Failed to load LSW data:', err);
       setLoadError(err.message || 'Failed to load data');
     } finally {
-      setIsLoading(false);
+      if (!needsRefetch) {
+        setIsLoading(false);
+      }
     }
   }, [currentWeek, currentYear]);
 
@@ -1002,12 +1009,38 @@ function LSWContent() {
     }
   }, [user, loadLswData]);
 
-  // Real-time sync: re-fetch data when another device/tab changes completion state
+  // Real-time sync: apply checkbox changes instantly from WebSocket events
   useEffect(() => {
-    const unsub = onLswCompletionChanged((data: { weekNumber: number; year: number }) => {
-      if (data.weekNumber === currentWeek && data.year === currentYear) {
-        loadLswData();
+    const unsub = onLswCompletionChanged((data: { weekNumber: number; year: number; taskId?: string; day?: string; value?: boolean; action?: string; earlyLog?: any }) => {
+      if (data.weekNumber !== currentWeek || data.year !== currentYear) return;
+
+      // If event includes task details, apply directly — no API call needed
+      if (data.taskId && data.day && data.value !== undefined) {
+        const uiDayKey = DB_TO_DAY_KEY[data.day] || data.day;
+
+        setDailyTasks(tasks =>
+          tasks.map(t => t.id === data.taskId
+            ? { ...t, days: { ...t.days, [uiDayKey]: data.value! } }
+            : t
+          )
+        );
+
+        // Handle early completion logs
+        if (data.action === 'early-complete' && data.earlyLog) {
+          setEarlyCompletionLogs(prev => {
+            if (prev.some(l => l.id === data.earlyLog.id)) return prev;
+            return [data.earlyLog, ...prev];
+          });
+        } else if (data.action === 'uncheck') {
+          setEarlyCompletionLogs(prev =>
+            prev.filter(log => !(log.dailyTaskId === data.taskId && log.dayKey === uiDayKey && log.weekNumber === currentWeek && log.year === currentYear))
+          );
+        }
+        return;
       }
+
+      // Fallback: full re-fetch for legacy events without task details
+      loadLswData();
     });
     return unsub;
   }, [onLswCompletionChanged, currentWeek, currentYear, loadLswData]);
@@ -1293,7 +1326,9 @@ function LSWContent() {
     const now = new Date();
     const currentMinutes = now.getHours() * 60 + now.getMinutes();
     const visibleDays = getVisibleDays();
-    const todayIndex = visibleDays.indexOf(today as keyof DailyTask['days']);
+    // Use full day ordering so weekends correctly compare against weekdays
+    const allDays: Array<keyof DailyTask['days']> = ['M', 'T', 'W', 'H', 'F', 'S1', 'S2'];
+    const todayAllIndex = allDays.indexOf(today as keyof DailyTask['days']);
 
     let totalCount = 0;
     const tasks: { taskId: string; task: string; time: string; overdueDays: string[] }[] = [];
@@ -1303,11 +1338,12 @@ function LSWContent() {
       const taskMinutes = h * 60 + (m || 0);
       const overdueDays: string[] = [];
 
-      visibleDays.forEach((day, idx) => {
+      visibleDays.forEach((day) => {
         if (task.days[day]) return; // Already checked
-        if (idx < todayIndex) {
+        const dayAllIndex = allDays.indexOf(day);
+        if (dayAllIndex < todayAllIndex) {
           overdueDays.push(dayLabelMap[day]); // Past day this week
-        } else if (idx === todayIndex && taskMinutes < currentMinutes) {
+        } else if (dayAllIndex === todayAllIndex && taskMinutes < currentMinutes) {
           overdueDays.push(dayLabelMap[day]); // Today but time passed
         }
       });
@@ -1334,7 +1370,6 @@ function LSWContent() {
   const isDayInFuture = (dayKey: keyof DailyTask['days'], taskTime: string): boolean => {
     const now = new Date();
     const visibleDays = getVisibleDays();
-    const todayIndex = visibleDays.indexOf(today as keyof DailyTask['days']);
     const dayIndex = visibleDays.indexOf(dayKey);
 
     // If viewing a past week, nothing is in the future
@@ -1348,9 +1383,14 @@ function LSWContent() {
       return true;
     }
 
-    // Same week: compare day index and time
-    if (dayIndex > todayIndex) return true; // Future day
-    if (dayIndex < todayIndex) return false; // Past day
+    // Same week: use full day ordering so weekends (outside visible Mon-Fri)
+    // correctly compare against weekdays instead of returning -1
+    const allDays: Array<keyof DailyTask['days']> = ['M', 'T', 'W', 'H', 'F', 'S1', 'S2'];
+    const todayAllIndex = allDays.indexOf(today as keyof DailyTask['days']);
+    const dayAllIndex = allDays.indexOf(dayKey);
+
+    if (dayAllIndex > todayAllIndex) return true; // Future day
+    if (dayAllIndex < todayAllIndex) return false; // Past day
     // Same day: check time
     const [h, m] = taskTime.split(':').map(Number);
     const taskMinutes = h * 60 + (m || 0);

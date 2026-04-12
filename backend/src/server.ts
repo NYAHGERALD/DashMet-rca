@@ -183,9 +183,8 @@ app.use(errorHandler);
 // Create HTTP server for both Express and WebSocket
 const httpServer = createServer(app);
 
-// Initialize WebSocket server
-const corsOriginsArray = Array.isArray(corsOptions.origin) ? corsOptions.origin : [corsOptions.origin];
-websocketService.initialize(httpServer, corsOriginsArray as string[]);
+// Initialize WebSocket server — pass the actual origin strings, not the CORS callback
+websocketService.initialize(httpServer, ALLOWED_ORIGINS);
 
 // Initialize Yjs WebSocket server for Canvas AI whiteboard collaboration
 import { initializeYjsWebSocket } from './services/yjsService';
