@@ -255,6 +255,11 @@ interface WebSocketContextType {
   onLswCompletionChanged: (callback: (data: { weekNumber: number; year: number }) => void) => () => void;
 
   // ========================================
+  // LSW PROJECT EVENTS
+  // ========================================
+  onLswProjectChanged: (callback: (data: any) => void) => () => void;
+
+  // ========================================
   // VIDEO CALL EVENTS
   // ========================================
   // Video call started notification
@@ -368,6 +373,9 @@ export function WebSocketProvider({ children }: { children: React.ReactNode }) {
 
   // LSW completion callbacks
   const lswCompletionChangedCallbacks = useRef<Set<(data: any) => void>>(new Set());
+
+  // LSW project callbacks
+  const lswProjectChangedCallbacks = useRef<Set<(data: any) => void>>(new Set());
 
   const connect = useCallback(async (userId: string, organizationId: string) => {
     // Prevent multiple connection attempts
@@ -910,6 +918,10 @@ export function WebSocketProvider({ children }: { children: React.ReactNode }) {
       lswCompletionChangedCallbacks.current.forEach(cb => cb(data));
     });
 
+    newSocket.on('lsw:project-changed', (data: any) => {
+      lswProjectChangedCallbacks.current.forEach(cb => cb(data));
+    });
+
     // Handle incident participants list
     newSocket.on('incident:participants', (data: { incidentId: string; participants: any[] }) => {
       const onlineIds = data.participants.filter(p => p.isOnline).map(p => p.id);
@@ -1379,6 +1391,11 @@ export function WebSocketProvider({ children }: { children: React.ReactNode }) {
     return () => { lswCompletionChangedCallbacks.current.delete(callback); };
   }, []);
 
+  const onLswProjectChanged = useCallback((callback: (data: any) => void) => {
+    lswProjectChangedCallbacks.current.add(callback);
+    return () => { lswProjectChangedCallbacks.current.delete(callback); };
+  }, []);
+
   const emitRCAModalState = useCallback((incidentId: string, action: 'opened' | 'closed' | 'method-selected' | 'visibility-changed' | 'analyzing', data?: { selectedMethod?: string; visibility?: string }) => {
     if (socket?.connected) {
       socket.emit('rca:modal-state', { incidentId, action, ...data });
@@ -1720,6 +1737,8 @@ export function WebSocketProvider({ children }: { children: React.ReactNode }) {
         onIncidentEvidenceAdded,
         // LSW completion
         onLswCompletionChanged,
+        // LSW projects
+        onLswProjectChanged,
       }}
     >
       {children}

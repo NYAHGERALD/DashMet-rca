@@ -307,7 +307,7 @@ function getWeekOffsetText(selectedWeek: number, selectedYear: number, config?: 
 
 function LSWContent() {
   const { user } = useAuth();
-  const { onLswCompletionChanged } = useWebSocket();
+  const { onLswCompletionChanged, onLswProjectChanged } = useWebSocket();
   const [calendarConfig, setCalendarConfig] = useState<LswCalendarConfig>({ calendarYearStartMonth: 1, calendarYearStartDay: 1 });
   const [workDaysPerWeek, setWorkDaysPerWeek] = useState<number>(5);
   const [currentWeek, setCurrentWeek] = useState(getWeekNumber(new Date()));
@@ -1044,6 +1044,60 @@ function LSWContent() {
     });
     return unsub;
   }, [onLswCompletionChanged, currentWeek, currentYear, loadLswData]);
+
+  // Real-time sync: apply project changes instantly from WebSocket events
+  useEffect(() => {
+    const unsub = onLswProjectChanged((data: any) => {
+      switch (data.action) {
+        case 'project-created':
+          if (data.project) {
+            setProjects(prev => {
+              if (prev.some(p => p.id === data.project.id)) return prev;
+              return [...prev, mapProjectFromDb(data.project)];
+            });
+          }
+          break;
+        case 'project-updated':
+          if (data.project) {
+            setProjects(prev => prev.map(p => p.id === data.project.id ? mapProjectFromDb(data.project) : p));
+          }
+          break;
+        case 'project-deleted':
+          if (data.projectId) {
+            setProjects(prev => prev.filter(p => p.id !== data.projectId));
+          }
+          break;
+        case 'update-created':
+          if (data.projectId && data.update) {
+            setProjects(prev => prev.map(p => {
+              if (p.id !== data.projectId) return p;
+              if (p.updates.some(u => u.id === data.update.id)) return p;
+              return { ...p, updates: [...p.updates, { id: data.update.id, text: data.update.text, fontColor: data.update.fontColor ?? undefined, fontItalic: data.update.fontItalic || undefined, cellColor: data.update.cellColor ?? undefined, cellColorIntensity: data.update.cellColorIntensity ?? undefined }] };
+            }));
+          }
+          break;
+        case 'update-updated':
+          if (data.update) {
+            setProjects(prev => prev.map(p => ({
+              ...p,
+              updates: p.updates.map(u => u.id === data.update.id ? { ...u, text: data.update.text, fontColor: data.update.fontColor ?? undefined, fontItalic: data.update.fontItalic || undefined, cellColor: data.update.cellColor ?? undefined, cellColorIntensity: data.update.cellColorIntensity ?? undefined } : u),
+            })));
+          }
+          break;
+        case 'update-deleted':
+          if (data.updateId) {
+            setProjects(prev => prev.map(p => ({
+              ...p,
+              updates: p.updates.filter(u => u.id !== data.updateId),
+            })));
+          }
+          break;
+        default:
+          loadLswData();
+      }
+    });
+    return unsub;
+  }, [onLswProjectChanged, loadLswData]);
 
   // Cross-platform sync: refetch only when tab becomes visible (no periodic polling)
   useEffect(() => {

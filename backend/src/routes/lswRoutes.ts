@@ -249,6 +249,9 @@ router.post('/projects', async (req: AuthRequest, res: Response) => {
   try {
     const project = await lswService.createProject({ ...req.body, userId: req.user!.id });
     res.status(201).json({ success: true, data: project });
+    websocketService.emitToUser(req.user!.id, 'lsw:project-changed', {
+      action: 'project-created', project,
+    });
   } catch (error: any) {
     res.status(500).json({ success: false, error: error.message });
   }
@@ -258,6 +261,9 @@ router.put('/projects/:id', async (req: AuthRequest, res: Response) => {
   try {
     const project = await lswService.updateProject(req.params.id, req.user!.id, req.body);
     res.json({ success: true, data: project });
+    websocketService.emitToUser(req.user!.id, 'lsw:project-changed', {
+      action: 'project-updated', project,
+    });
   } catch (error: any) {
     res.status(500).json({ success: false, error: error.message });
   }
@@ -267,6 +273,9 @@ router.delete('/projects/:id', async (req: AuthRequest, res: Response) => {
   try {
     await lswService.deleteProject(req.params.id, req.user!.id);
     res.json({ success: true });
+    websocketService.emitToUser(req.user!.id, 'lsw:project-changed', {
+      action: 'project-deleted', projectId: req.params.id,
+    });
   } catch (error: any) {
     res.status(500).json({ success: false, error: error.message });
   }
@@ -277,6 +286,9 @@ router.post('/projects/:projectId/updates', async (req: AuthRequest, res: Respon
   try {
     const update = await lswService.addProjectUpdate(req.params.projectId, req.body);
     res.status(201).json({ success: true, data: update });
+    websocketService.emitToUser(req.user!.id, 'lsw:project-changed', {
+      action: 'update-created', projectId: req.params.projectId, update,
+    });
   } catch (error: any) {
     res.status(500).json({ success: false, error: error.message });
   }
@@ -286,6 +298,9 @@ router.put('/project-updates/:id', async (req: AuthRequest, res: Response) => {
   try {
     const update = await lswService.updateProjectUpdate(req.params.id, req.body);
     res.json({ success: true, data: update });
+    websocketService.emitToUser(req.user!.id, 'lsw:project-changed', {
+      action: 'update-updated', updateId: req.params.id, update,
+    });
   } catch (error: any) {
     res.status(500).json({ success: false, error: error.message });
   }
@@ -295,6 +310,9 @@ router.delete('/project-updates/:id', async (req: AuthRequest, res: Response) =>
   try {
     await lswService.deleteProjectUpdate(req.params.id);
     res.json({ success: true });
+    websocketService.emitToUser(req.user!.id, 'lsw:project-changed', {
+      action: 'update-deleted', updateId: req.params.id,
+    });
   } catch (error: any) {
     res.status(500).json({ success: false, error: error.message });
   }
