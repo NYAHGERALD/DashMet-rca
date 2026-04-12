@@ -373,6 +373,9 @@ router.post('/follow-ups', async (req: AuthRequest, res: Response) => {
   try {
     const followUp = await lswService.createFollowUp({ ...req.body, userId: req.user!.id });
     res.status(201).json({ success: true, data: followUp });
+    websocketService.emitToUser(req.user!.id, 'lsw:follow-up-changed', {
+      action: 'follow-up-created', followUp,
+    });
   } catch (error: any) {
     res.status(500).json({ success: false, error: error.message });
   }
@@ -382,6 +385,9 @@ router.put('/follow-ups/:id', async (req: AuthRequest, res: Response) => {
   try {
     const followUp = await lswService.updateFollowUp(req.params.id, req.user!.id, req.body);
     res.json({ success: true, data: followUp });
+    websocketService.emitToUser(req.user!.id, 'lsw:follow-up-changed', {
+      action: 'follow-up-updated', followUp,
+    });
   } catch (error: any) {
     res.status(500).json({ success: false, error: error.message });
   }
@@ -391,6 +397,9 @@ router.delete('/follow-ups/:id', async (req: AuthRequest, res: Response) => {
   try {
     await lswService.deleteFollowUp(req.params.id, req.user!.id);
     res.json({ success: true });
+    websocketService.emitToUser(req.user!.id, 'lsw:follow-up-changed', {
+      action: 'follow-up-deleted', followUpId: req.params.id,
+    });
   } catch (error: any) {
     res.status(500).json({ success: false, error: error.message });
   }

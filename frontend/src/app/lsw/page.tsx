@@ -307,7 +307,7 @@ function getWeekOffsetText(selectedWeek: number, selectedYear: number, config?: 
 
 function LSWContent() {
   const { user } = useAuth();
-  const { connect, isConnected, onLswCompletionChanged, onLswProjectChanged } = useWebSocket();
+  const { connect, isConnected, onLswCompletionChanged, onLswProjectChanged, onLswFollowUpChanged } = useWebSocket();
   const [calendarConfig, setCalendarConfig] = useState<LswCalendarConfig>({ calendarYearStartMonth: 1, calendarYearStartDay: 1 });
   const [workDaysPerWeek, setWorkDaysPerWeek] = useState<number>(5);
   const [currentWeek, setCurrentWeek] = useState(getWeekNumber(new Date()));
@@ -1105,6 +1105,35 @@ function LSWContent() {
     });
     return unsub;
   }, [onLswProjectChanged, loadLswData]);
+
+  // Real-time sync: apply follow-up changes instantly from WebSocket events
+  useEffect(() => {
+    const unsub = onLswFollowUpChanged((data: any) => {
+      switch (data.action) {
+        case 'follow-up-created':
+          if (data.followUp) {
+            setFollowUps(prev => {
+              if (prev.some(f => f.id === data.followUp.id)) return prev;
+              return [...prev, mapFollowUpFromDb(data.followUp)];
+            });
+          }
+          break;
+        case 'follow-up-updated':
+          if (data.followUp) {
+            setFollowUps(prev => prev.map(f => f.id === data.followUp.id ? mapFollowUpFromDb(data.followUp) : f));
+          }
+          break;
+        case 'follow-up-deleted':
+          if (data.followUpId) {
+            setFollowUps(prev => prev.filter(f => f.id !== data.followUpId));
+          }
+          break;
+        default:
+          loadLswData();
+      }
+    });
+    return unsub;
+  }, [onLswFollowUpChanged, loadLswData]);
 
   // Cross-platform sync: refetch only when tab becomes visible (no periodic polling)
   useEffect(() => {
