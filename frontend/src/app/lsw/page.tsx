@@ -307,7 +307,7 @@ function getWeekOffsetText(selectedWeek: number, selectedYear: number, config?: 
 
 function LSWContent() {
   const { user } = useAuth();
-  const { onLswCompletionChanged, onLswProjectChanged } = useWebSocket();
+  const { connect, isConnected, onLswCompletionChanged, onLswProjectChanged } = useWebSocket();
   const [calendarConfig, setCalendarConfig] = useState<LswCalendarConfig>({ calendarYearStartMonth: 1, calendarYearStartDay: 1 });
   const [workDaysPerWeek, setWorkDaysPerWeek] = useState<number>(5);
   const [currentWeek, setCurrentWeek] = useState(getWeekNumber(new Date()));
@@ -413,6 +413,13 @@ function LSWContent() {
   
   // Live clock state
   const [currentTime, setCurrentTime] = useState(new Date());
+
+  // Connect WebSocket when user is available
+  useEffect(() => {
+    if (user && !isConnected) {
+      connect(user.id, user.organizationId);
+    }
+  }, [user, isConnected, connect]);
   
   // Update clock every second
   useEffect(() => {
