@@ -535,6 +535,9 @@ router.post('/rca-triggers', async (req: AuthRequest, res: Response) => {
       organizationId: req.user!.organizationId,
     });
     res.status(201).json({ success: true, data: trigger });
+    websocketService.emitToUser(req.user!.id, 'lsw:trigger-changed', {
+      action: 'trigger-created', trigger,
+    });
   } catch (error: any) {
     res.status(500).json({ success: false, error: error.message });
   }
@@ -544,6 +547,9 @@ router.put('/rca-triggers/:id', async (req: AuthRequest, res: Response) => {
   try {
     const trigger = await lswService.updateRcaTrigger(req.params.id, req.user!.id, req.body);
     res.json({ success: true, data: trigger });
+    websocketService.emitToUser(req.user!.id, 'lsw:trigger-changed', {
+      action: 'trigger-updated', trigger,
+    });
   } catch (error: any) {
     res.status(500).json({ success: false, error: error.message });
   }
@@ -553,6 +559,9 @@ router.delete('/rca-triggers/:id', async (req: AuthRequest, res: Response) => {
   try {
     await lswService.deleteRcaTrigger(req.params.id, req.user!.id);
     res.json({ success: true });
+    websocketService.emitToUser(req.user!.id, 'lsw:trigger-changed', {
+      action: 'trigger-deleted', triggerId: req.params.id,
+    });
   } catch (error: any) {
     res.status(500).json({ success: false, error: error.message });
   }

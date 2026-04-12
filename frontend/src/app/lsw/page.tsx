@@ -307,7 +307,7 @@ function getWeekOffsetText(selectedWeek: number, selectedYear: number, config?: 
 
 function LSWContent() {
   const { user } = useAuth();
-  const { connect, isConnected, onLswCompletionChanged, onLswProjectChanged, onLswFollowUpChanged } = useWebSocket();
+  const { connect, isConnected, onLswCompletionChanged, onLswProjectChanged, onLswFollowUpChanged, onLswTriggerChanged } = useWebSocket();
   const [calendarConfig, setCalendarConfig] = useState<LswCalendarConfig>({ calendarYearStartMonth: 1, calendarYearStartDay: 1 });
   const [workDaysPerWeek, setWorkDaysPerWeek] = useState<number>(5);
   const [currentWeek, setCurrentWeek] = useState(getWeekNumber(new Date()));
@@ -1134,6 +1134,35 @@ function LSWContent() {
     });
     return unsub;
   }, [onLswFollowUpChanged, loadLswData]);
+
+  // Real-time sync: apply trigger changes instantly from WebSocket events
+  useEffect(() => {
+    const unsub = onLswTriggerChanged((data: any) => {
+      switch (data.action) {
+        case 'trigger-created':
+          if (data.trigger) {
+            setRcaTriggers(prev => {
+              if (prev.some(t => t.id === data.trigger.id)) return prev;
+              return [...prev, mapTriggerFromDb(data.trigger)];
+            });
+          }
+          break;
+        case 'trigger-updated':
+          if (data.trigger) {
+            setRcaTriggers(prev => prev.map(t => t.id === data.trigger.id ? mapTriggerFromDb(data.trigger) : t));
+          }
+          break;
+        case 'trigger-deleted':
+          if (data.triggerId) {
+            setRcaTriggers(prev => prev.filter(t => t.id !== data.triggerId));
+          }
+          break;
+        default:
+          loadLswData();
+      }
+    });
+    return unsub;
+  }, [onLswTriggerChanged, loadLswData]);
 
   // Cross-platform sync: refetch only when tab becomes visible (no periodic polling)
   useEffect(() => {
