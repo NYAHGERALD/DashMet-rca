@@ -2,6 +2,7 @@ import { Request, Response, NextFunction } from 'express';
 import { adminAuth } from '../config/firebase-admin';
 import { AuthenticationError, AuthorizationError } from './errorHandler';
 import { prisma } from '../utils/prisma';
+import { phoneHashVariants } from '../utils/encryption';
 
 export interface AuthRequest extends Request {
   user?: {
@@ -121,6 +122,40 @@ export const authenticate = async (
       // If found by email, link this Firebase UID to the existing account
       if (user) {
         console.log('Linking Firebase UID to existing user account');
+        await prisma.user.update({
+          where: { id: user.id },
+          data: { firebaseUid: decodedToken.uid },
+        });
+        user.firebaseUid = decodedToken.uid;
+      }
+    }
+
+    // If still not found, try phone number (handles phone auth where UID changed)
+    if (!user && decodedToken.phone_number) {
+      const hashes = phoneHashVariants(decodedToken.phone_number);
+      user = await prisma.user.findFirst({
+        where: {
+          phoneHash: { in: hashes },
+          isActive: true,
+        },
+        select: {
+          id: true,
+          email: true,
+          firstName: true,
+          lastName: true,
+          role: true,
+          organizationId: true,
+          firebaseUid: true,
+          isActive: true,
+          profilePicture: true,
+          loginAttempts: true,
+          lockedUntil: true,
+        },
+      });
+
+      // If found by phone, link this Firebase UID to the existing account
+      if (user) {
+        console.log(`Linking Firebase UID to user ${user.id} via phone match`);
         await prisma.user.update({
           where: { id: user.id },
           data: { firebaseUid: decodedToken.uid },
