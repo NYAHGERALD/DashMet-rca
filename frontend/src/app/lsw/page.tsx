@@ -511,7 +511,10 @@ function LSWContent() {
         comments: '',
       });
       const mapped = mapFollowUpFromDb(created);
-      setFollowUps(prev => [...prev, mapped]);
+      setFollowUps(prev => {
+        if (prev.some(f => f.id === mapped.id)) return prev;
+        return [...prev, mapped];
+      });
       setEditingFollowUpId(mapped.id);
       setEditingFollowUpValues({ task: '', dueDate: mapped.dueDate, responsible: '', comments: '' });
       setTimeout(() => followUpTaskInputRef.current?.focus(), 50);
@@ -565,7 +568,10 @@ function LSWContent() {
         comments: undefined,
       });
       const mapped = mapTriggerFromDb(created);
-      setRcaTriggers(prev => [...prev, mapped]);
+      setRcaTriggers(prev => {
+        if (prev.some(t => t.id === mapped.id)) return prev;
+        return [...prev, mapped];
+      });
       setEditingTriggerId(mapped.id);
       setEditingTriggerValues({ trigger: '', eventDate: '', comments: '' });
       setTimeout(() => triggerInputRef.current?.focus(), 50);
