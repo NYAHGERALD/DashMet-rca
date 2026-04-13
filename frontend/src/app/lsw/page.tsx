@@ -260,6 +260,20 @@ function getWeekDates(weekNumber: number, year: number, config?: LswCalendarConf
   return { start, end };
 }
 
+// Get max weeks in an org year
+function getMaxOrgWeeks(year: number, config?: LswCalendarConfig): number {
+  if (!config || (config.calendarYearStartMonth === 1 && config.calendarYearStartDay === 1)) {
+    // ISO: check if year has 53 weeks
+    const jan1 = new Date(year, 0, 1);
+    const dec31 = new Date(year, 11, 31);
+    return (jan1.getDay() === 4 || dec31.getDay() === 4) ? 53 : 52;
+  }
+  const cycleStart = new Date(year, config.calendarYearStartMonth - 1, config.calendarYearStartDay);
+  const nextCycleStart = new Date(year + 1, config.calendarYearStartMonth - 1, config.calendarYearStartDay);
+  const diffDays = Math.floor((nextCycleStart.getTime() - cycleStart.getTime()) / 86400000);
+  return Math.ceil(diffDays / 7);
+}
+
 // Format date as "Feb 17, 2026"
 function formatDate(date: Date): string {
   return date.toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' });
@@ -1967,8 +1981,9 @@ function LSWContent() {
                 <button
                   onClick={() => {
                     if (currentWeek === 1) {
-                      setCurrentYear(y => y - 1);
-                      setCurrentWeek(52);
+                      const prevYear = currentYear - 1;
+                      setCurrentYear(prevYear);
+                      setCurrentWeek(getMaxOrgWeeks(prevYear, calendarConfig));
                     } else {
                       setCurrentWeek(w => w - 1);
                     }
@@ -1984,13 +1999,14 @@ function LSWContent() {
                     ref={weekInputRef}
                     type="number"
                     min={1}
-                    max={52}
+                    max={getMaxOrgWeeks(currentYear, calendarConfig)}
                     value={weekInputValue}
                     onChange={(e) => setWeekInputValue(e.target.value)}
                     onKeyDown={(e) => {
                       if (e.key === 'Enter') {
                         const val = parseInt(weekInputValue);
-                        if (val >= 1 && val <= 52) {
+                        const maxW = getMaxOrgWeeks(currentYear, calendarConfig);
+                        if (val >= 1 && val <= maxW) {
                           setCurrentWeek(val);
                         }
                         setEditingWeek(false);
@@ -2000,7 +2016,8 @@ function LSWContent() {
                     }}
                     onBlur={() => {
                       const val = parseInt(weekInputValue);
-                      if (val >= 1 && val <= 52) {
+                      const maxW = getMaxOrgWeeks(currentYear, calendarConfig);
+                      if (val >= 1 && val <= maxW) {
                         setCurrentWeek(val);
                       }
                       setEditingWeek(false);
@@ -2023,7 +2040,8 @@ function LSWContent() {
                 )}
                 <button
                   onClick={() => {
-                    if (currentWeek === 52) {
+                    const maxWeeks = getMaxOrgWeeks(currentYear, calendarConfig);
+                    if (currentWeek >= maxWeeks) {
                       setCurrentYear(y => y + 1);
                       setCurrentWeek(1);
                     } else {
