@@ -57,23 +57,23 @@ export async function generateLswExcelReport(
     setCellValue(ws, `A${row}`, task.minutes || '');
     setCellValue(ws, `B${row}`, task.task || '');
     setCellValue(ws, `C${row}`, task.time || '');
-    setCellValue(ws, `D${row}`, checkbox(task.monday));
-    setCellValue(ws, `E${row}`, checkbox(task.tuesday));
-    setCellValue(ws, `F${row}`, checkbox(task.wednesday));
-    setCellValue(ws, `G${row}`, checkbox(task.thursday));
-    setCellValue(ws, `H${row}`, checkbox(task.friday));
-    setCellValue(ws, `I${row}`, checkbox(task.saturday));
-    setCellValue(ws, `J${row}`, checkbox(task.sunday));
+    setCheckboxCell(ws, `D${row}`, task.monday);
+    setCheckboxCell(ws, `E${row}`, task.tuesday);
+    setCheckboxCell(ws, `F${row}`, task.wednesday);
+    setCheckboxCell(ws, `G${row}`, task.thursday);
+    setCheckboxCell(ws, `H${row}`, task.friday);
+    setCheckboxCell(ws, `I${row}`, task.saturday);
+    setCheckboxCell(ws, `J${row}`, task.sunday);
   }, (row) => {
     for (const c of ['A', 'B', 'C']) setCellValue(ws, `${c}${row}`, '');
-    for (const c of ['D', 'E', 'F', 'G', 'H', 'I', 'J']) setCellValue(ws, `${c}${row}`, '☐');
+    for (const c of ['D', 'E', 'F', 'G', 'H', 'I', 'J']) setCheckboxCell(ws, `${c}${row}`, false);
   }, 2, (overflow, row) => {
     setCellValue(ws, `B${row}`, `(+${overflow} more tasks)`);
   });
 
   // ─── TO DO ITEMS (Rows 2-12, Cols L-M) ───
   fillCapped(todoItems, MAX.TODO_ITEMS, (todo, row) => {
-    setCellValue(ws, `L${row}`, checkbox(todo.completed));
+    setCheckboxCell(ws, `L${row}`, todo.completed);
     const cell = ws.getCell(`M${row}`);
     cell.value = todo.task || '';
     const ea = cell.alignment || {};
@@ -83,7 +83,7 @@ export async function generateLswExcelReport(
       cell.font = { ...ef, strike: true };
     }
   }, (row) => {
-    setCellValue(ws, `L${row}`, '☐');
+    setCheckboxCell(ws, `L${row}`, false);
     setCellValue(ws, `M${row}`, '');
   }, 2, (overflow, row) => {
     setCellValue(ws, `M${row}`, `(+${overflow} more items)`);
@@ -117,11 +117,11 @@ export async function generateLswExcelReport(
 
   // ─── MEETING RAILS (Rows 21-23, Cols O-Q) ───
   fillCapped(meetingRails, MAX.MEETING_RAILS, (rail, row) => {
-    setCellValue(ws, `O${row}`, checkbox(rail.completed));
+    setCheckboxCell(ws, `O${row}`, rail.completed);
     setCellValue(ws, `P${row}`, rail.rail || '');
     setCellNoWrap(ws, `Q${row}`, formatDate(rail.dueDate));
   }, (row) => {
-    setCellValue(ws, `O${row}`, '☐');
+    setCheckboxCell(ws, `O${row}`, false);
     setCellValue(ws, `P${row}`, '');
     setCellValue(ws, `Q${row}`, '');
   }, 21, (overflow, row) => {
@@ -130,13 +130,13 @@ export async function generateLswExcelReport(
 
   // ─── FOLLOW UPS (Rows 26-30, Cols A-M) ───
   fillCapped(followUps, MAX.FOLLOW_UPS, (followUp, row) => {
-    setCellValue(ws, `A${row}`, checkbox(followUp.completed));
+    setCheckboxCell(ws, `A${row}`, followUp.completed);
     setCellValue(ws, `B${row}`, followUp.task || '');
     setCellNoWrap(ws, `C${row}`, formatDate(followUp.dueDate));
     setCellValue(ws, `F${row}`, followUp.responsibleName || '');
     setCellValue(ws, `J${row}`, followUp.comments || '');
   }, (row) => {
-    setCellValue(ws, `A${row}`, '☐');
+    setCheckboxCell(ws, `A${row}`, false);
     setCellValue(ws, `B${row}`, '');
     setCellValue(ws, `C${row}`, '');
     setCellValue(ws, `F${row}`, '');
@@ -194,11 +194,11 @@ export async function generateLswExcelReport(
 
   // ─── PERSONAL GOALS (Rows 33-37, Cols O-Q) ───
   fillCapped(personalGoals, MAX.PERSONAL_GOALS, (goal, row) => {
-    setCellValue(ws, `O${row}`, checkbox((goal as any).progress >= 100));
+    setCheckboxCell(ws, `O${row}`, (goal as any).progress >= 100);
     setCellValue(ws, `P${row}`, (goal as any).objective || '');
     setCellNoWrap(ws, `Q${row}`, formatDate((goal as any).dueDate));
   }, (row) => {
-    setCellValue(ws, `O${row}`, '☐');
+    setCheckboxCell(ws, `O${row}`, false);
     setCellValue(ws, `P${row}`, '');
     setCellValue(ws, `Q${row}`, '');
   }, 33, (overflow, row) => {
@@ -316,6 +316,23 @@ function fillFrequencyBlock(
 
 function checkbox(value: any): string {
   return value ? '☑' : '☐';
+}
+
+/**
+ * Set a cell as an editable checkbox using data validation dropdown.
+ * User can click the cell and pick ☑ or ☐ from a dropdown list.
+ */
+function setCheckboxCell(ws: ExcelJS.Worksheet, cellRef: string, value: any): void {
+  const cell = ws.getCell(cellRef);
+  cell.value = value ? '☑' : '☐';
+  cell.dataValidation = {
+    type: 'list',
+    allowBlank: false,
+    formulae: ['"☑,☐"'],
+    showDropDown: false,
+  };
+  const ea = cell.alignment || {};
+  cell.alignment = { ...ea, horizontal: 'center', vertical: 'middle' };
 }
 
 function formatDate(date: any): string {
