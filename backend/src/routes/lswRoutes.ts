@@ -199,7 +199,9 @@ router.delete('/todo-items/:id', async (req: AuthRequest, res: Response) => {
 // ─────────────────────────────────────────────────────────────────────────────
 router.get('/frequency-tasks', async (req: AuthRequest, res: Response) => {
   try {
-    const tasks = await lswService.getFrequencyTasks(req.user!.id);
+    const weekNumber = req.query.weekNumber ? parseInt(req.query.weekNumber as string) : undefined;
+    const year = req.query.year ? parseInt(req.query.year as string) : undefined;
+    const tasks = await lswService.getFrequencyTasks(req.user!.id, weekNumber, year);
     res.json({ success: true, data: tasks });
   } catch (error: any) {
     res.status(500).json({ success: false, error: error.message });
@@ -256,7 +258,9 @@ router.delete('/frequency-tasks/:id', async (req: AuthRequest, res: Response) =>
 // ─────────────────────────────────────────────────────────────────────────────
 router.get('/projects', async (req: AuthRequest, res: Response) => {
   try {
-    const projects = await lswService.getProjects(req.user!.id);
+    const weekNumber = req.query.weekNumber ? parseInt(req.query.weekNumber as string) : undefined;
+    const year = req.query.year ? parseInt(req.query.year as string) : undefined;
+    const projects = await lswService.getProjects(req.user!.id, weekNumber, year);
     res.json({ success: true, data: projects });
   } catch (error: any) {
     res.status(500).json({ success: false, error: error.message });
@@ -341,7 +345,9 @@ router.delete('/project-updates/:id', async (req: AuthRequest, res: Response) =>
 // ─────────────────────────────────────────────────────────────────────────────
 router.get('/meeting-rails', async (req: AuthRequest, res: Response) => {
   try {
-    const rails = await lswService.getMeetingRails(req.user!.id);
+    const weekNumber = req.query.weekNumber ? parseInt(req.query.weekNumber as string) : undefined;
+    const year = req.query.year ? parseInt(req.query.year as string) : undefined;
+    const rails = await lswService.getMeetingRails(req.user!.id, weekNumber, year);
     res.json({ success: true, data: rails });
   } catch (error: any) {
     res.status(500).json({ success: false, error: error.message });
@@ -389,7 +395,9 @@ router.delete('/meeting-rails/:id', async (req: AuthRequest, res: Response) => {
 // ─────────────────────────────────────────────────────────────────────────────
 router.get('/follow-ups', async (req: AuthRequest, res: Response) => {
   try {
-    const followUps = await lswService.getFollowUps(req.user!.id);
+    const weekNumber = req.query.weekNumber ? parseInt(req.query.weekNumber as string) : undefined;
+    const year = req.query.year ? parseInt(req.query.year as string) : undefined;
+    const followUps = await lswService.getFollowUps(req.user!.id, weekNumber, year);
     res.json({ success: true, data: followUps });
   } catch (error: any) {
     res.status(500).json({ success: false, error: error.message });
@@ -508,7 +516,9 @@ router.delete('/key-results/:id', async (req: AuthRequest, res: Response) => {
 // ─────────────────────────────────────────────────────────────────────────────
 router.get('/personal-goals', async (req: AuthRequest, res: Response) => {
   try {
-    const goals = await lswService.getPersonalGoals(req.user!.id);
+    const weekNumber = req.query.weekNumber ? parseInt(req.query.weekNumber as string) : undefined;
+    const year = req.query.year ? parseInt(req.query.year as string) : undefined;
+    const goals = await lswService.getPersonalGoals(req.user!.id, weekNumber, year);
     res.json({ success: true, data: goals });
   } catch (error: any) {
     res.status(500).json({ success: false, error: error.message });
@@ -556,7 +566,9 @@ router.delete('/personal-goals/:id', async (req: AuthRequest, res: Response) => 
 // ─────────────────────────────────────────────────────────────────────────────
 router.get('/rca-triggers', async (req: AuthRequest, res: Response) => {
   try {
-    const triggers = await lswService.getRcaTriggers(req.user!.id, req.user!.organizationId);
+    const weekNumber = req.query.weekNumber ? parseInt(req.query.weekNumber as string) : undefined;
+    const year = req.query.year ? parseInt(req.query.year as string) : undefined;
+    const triggers = await lswService.getRcaTriggers(req.user!.id, req.user!.organizationId, weekNumber, year);
     res.json({ success: true, data: triggers });
   } catch (error: any) {
     res.status(500).json({ success: false, error: error.message });

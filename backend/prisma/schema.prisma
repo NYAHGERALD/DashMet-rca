@@ -3357,6 +3357,10 @@ model LswProject {
   defaultUpdateCellColor      String?            @default("#10b981")
   defaultUpdateCellColorIntensity Int            @default(10)
   
+  // Week Scoping
+  weekNumber                  Int?
+  year                        Int?
+  
   // Ordering
   sortOrder                   Int                @default(0)
   isActive                    Boolean            @default(true)
@@ -3371,6 +3375,7 @@ model LswProject {
   @@index([userId])
   @@index([facilityId])
   @@index([isActive])
+  @@index([weekNumber, year])
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -3465,6 +3470,10 @@ model LswFollowUp {
   completed         Boolean       @default(false)
   completedAt       DateTime?
   
+  // Week Scoping
+  weekNumber        Int?
+  year              Int?
+  
   // Ordering
   sortOrder         Int           @default(0)
   isActive          Boolean       @default(true)
@@ -3478,6 +3487,7 @@ model LswFollowUp {
   @@index([responsibleUserId])
   @@index([dueDate])
   @@index([completed])
+  @@index([weekNumber, year])
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -3563,6 +3573,10 @@ model LswPersonalGoal {
   dueDate         DateTime
   progress        Int           @default(0)  // 0-100 percentage
   
+  // Week Scoping
+  weekNumber      Int?
+  year            Int?
+  
   // Ordering
   sortOrder       Int           @default(0)
   isActive        Boolean       @default(true)
@@ -3574,6 +3588,7 @@ model LswPersonalGoal {
   @@index([userId])
   @@index([facilityId])
   @@index([dueDate])
+  @@index([weekNumber, year])
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -3596,6 +3611,10 @@ model LswRcaTrigger {
   eventDate       DateTime?
   comments        String?       @db.Text
   
+  // Week Scoping
+  weekNumber      Int?
+  year            Int?
+  
   // Ordering
   sortOrder       Int           @default(0)
   isActive        Boolean       @default(true)
@@ -3608,6 +3627,7 @@ model LswRcaTrigger {
   @@index([organizationId])
   @@index([facilityId])
   @@index([eventDate])
+  @@index([weekNumber, year])
 }
 
 // ─────────────────────────────────────────────────────────────────────────────

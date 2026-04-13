@@ -269,9 +269,14 @@ export async function deleteFrequencyTask(id: string, userId: string) {
 // ─────────────────────────────────────────────────────────────────────────────
 // Projects & Updates
 // ─────────────────────────────────────────────────────────────────────────────
-export async function getProjects(userId: string) {
+export async function getProjects(userId: string, weekNumber?: number, year?: number) {
+  const where: any = { userId, isActive: true };
+  if (weekNumber !== undefined && year !== undefined) {
+    where.weekNumber = weekNumber;
+    where.year = year;
+  }
   return prisma.lswProject.findMany({
-    where: { userId, isActive: true },
+    where,
     include: { updates: { orderBy: { sortOrder: 'asc' } } },
     orderBy: [{ sortOrder: 'asc' }, { createdAt: 'asc' }],
   });
@@ -284,6 +289,7 @@ export async function createProject(data: {
   defaultUpdateFontColor?: string; defaultUpdateFontItalic?: boolean;
   defaultUpdateCellColor?: string; defaultUpdateCellColorIntensity?: number;
   initialUpdateText?: string;
+  weekNumber?: number; year?: number;
 }) {
   const { initialUpdateText, ...projectData } = data;
   return prisma.lswProject.create({
@@ -407,9 +413,14 @@ export async function deleteMeetingRail(id: string, userId: string) {
 // ─────────────────────────────────────────────────────────────────────────────
 // Follow Ups
 // ─────────────────────────────────────────────────────────────────────────────
-export async function getFollowUps(userId: string) {
+export async function getFollowUps(userId: string, weekNumber?: number, year?: number) {
+  const where: any = { userId, isActive: true };
+  if (weekNumber !== undefined && year !== undefined) {
+    where.weekNumber = weekNumber;
+    where.year = year;
+  }
   return prisma.lswFollowUp.findMany({
-    where: { userId, isActive: true },
+    where,
     include: { responsibleUser: { select: { id: true, firstName: true, lastName: true, email: true } } },
     orderBy: [{ sortOrder: 'asc' }, { dueDate: 'asc' }],
   });
@@ -420,6 +431,7 @@ export async function createFollowUp(data: {
   task: string; dueDate: string;
   responsibleUserId?: string; responsibleName?: string;
   comments?: string; sortOrder?: number;
+  weekNumber?: number; year?: number;
 }) {
   return prisma.lswFollowUp.create({
     data: { ...data, dueDate: new Date(data.dueDate) },
@@ -513,9 +525,14 @@ export async function deleteKeyResult(id: string) {
 // ─────────────────────────────────────────────────────────────────────────────
 // Personal Goals
 // ─────────────────────────────────────────────────────────────────────────────
-export async function getPersonalGoals(userId: string) {
+export async function getPersonalGoals(userId: string, weekNumber?: number, year?: number) {
+  const where: any = { userId, isActive: true };
+  if (weekNumber !== undefined && year !== undefined) {
+    where.weekNumber = weekNumber;
+    where.year = year;
+  }
   return prisma.lswPersonalGoal.findMany({
-    where: { userId, isActive: true },
+    where,
     orderBy: [{ sortOrder: 'asc' }, { dueDate: 'asc' }],
   });
 }
@@ -523,6 +540,7 @@ export async function getPersonalGoals(userId: string) {
 export async function createPersonalGoal(data: {
   userId: string; facilityId?: string;
   objective: string; dueDate: string; progress?: number; sortOrder?: number;
+  weekNumber?: number; year?: number;
 }) {
   return prisma.lswPersonalGoal.create({
     data: { ...data, dueDate: new Date(data.dueDate) },
@@ -549,9 +567,14 @@ export async function deletePersonalGoal(id: string, userId: string) {
 // ─────────────────────────────────────────────────────────────────────────────
 // RCA Triggers
 // ─────────────────────────────────────────────────────────────────────────────
-export async function getRcaTriggers(userId: string, organizationId: string) {
+export async function getRcaTriggers(userId: string, organizationId: string, weekNumber?: number, year?: number) {
+  const where: any = { userId, organizationId, isActive: true };
+  if (weekNumber !== undefined && year !== undefined) {
+    where.weekNumber = weekNumber;
+    where.year = year;
+  }
   return prisma.lswRcaTrigger.findMany({
-    where: { userId, organizationId, isActive: true },
+    where,
     orderBy: [{ sortOrder: 'asc' }, { createdAt: 'asc' }],
   });
 }
@@ -559,6 +582,7 @@ export async function getRcaTriggers(userId: string, organizationId: string) {
 export async function createRcaTrigger(data: {
   userId: string; organizationId: string; facilityId?: string;
   trigger: string; eventDate?: string; comments?: string; sortOrder?: number;
+  weekNumber?: number; year?: number;
 }) {
   return prisma.lswRcaTrigger.create({
     data: {
@@ -648,12 +672,12 @@ export async function getFullLswData(userId: string, organizationId: string, wee
     getDailyTasks(userId, weekNumber, year),
     getTodoItems(userId, weekNumber, year),
     getFrequencyTasks(userId, weekNumber, year),
-    getProjects(userId),
+    getProjects(userId, weekNumber, year),
     getMeetingRails(userId, weekNumber, year),
-    getFollowUps(userId),
+    getFollowUps(userId, weekNumber, year),
     getKeyResultSets(userId, organizationId),
-    getPersonalGoals(userId),
-    getRcaTriggers(userId, organizationId),
+    getPersonalGoals(userId, weekNumber, year),
+    getRcaTriggers(userId, organizationId, weekNumber, year),
     getStylePresets(organizationId),
   ]);
 
