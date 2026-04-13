@@ -159,6 +159,13 @@ app.use('/uploads', (req, res, next) => {
   next();
 }, express.static(path.join(__dirname, '..', 'uploads')));
 
+// Serve static assets (logo, etc.) — public, long cache
+app.use('/assets', (req, res, next) => {
+  res.header('Access-Control-Allow-Methods', 'GET');
+  res.header('Cache-Control', 'public, max-age=86400');
+  next();
+}, express.static(path.join(__dirname, 'assets')));
+
 // Health check endpoint — minimal info (no version, uptime, or internals)
 app.get('/health', (req, res) => {
   res.status(200).json({

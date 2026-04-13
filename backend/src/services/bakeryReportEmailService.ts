@@ -633,14 +633,6 @@ export async function sendBakeryReportEmail(
   const attachments: any[] = [
     { filename, content: pdfBuffer.toString('base64'), contentType: 'application/pdf' },
   ];
-  if (logoBase64) {
-    attachments.push({
-      filename: 'dashmet-logo.png',
-      content: logoBase64,
-      contentType: 'image/png',
-      headers: { 'Content-ID': '<dashmet-logo>', 'Content-Disposition': 'inline' },
-    });
-  }
 
   const { data, error } = await resend.emails.send({
     from: process.env.EMAIL_FROM || 'DashMet <noreply@dashmet.com>',
@@ -667,6 +659,8 @@ function buildEmailHtml(recipientName: string, data: BakeryReportData, isAutomat
   const prodIcon = data.summary.productionStatus === 'ABOVE TARGET' ? '✅' : '📉';
   const weekDisplay = formatWeekDisplay(data.weekName);
   const reportWord = isAutomatic ? 'A new' : 'A saved';
+  const apiBase = process.env.BACKEND_URL || process.env.RENDER_EXTERNAL_URL || 'https://dashmet-rca-api.onrender.com';
+  const logoUrl = `${apiBase}/assets/logo.png`;
 
   return `<!DOCTYPE html>
 <html>
@@ -674,7 +668,7 @@ function buildEmailHtml(recipientName: string, data: BakeryReportData, isAutomat
 <body style="margin:0;padding:0;background:#f1f5f9;font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,sans-serif;">
   <div style="max-width:640px;margin:0 auto;background:#ffffff;">
     <div style="background:linear-gradient(135deg,#1e3a5f 0%,#1e40af 100%);padding:32px 40px;text-align:center;">
-      <img src="cid:dashmet-logo" alt="DashMet" style="height:40px;margin-bottom:12px;" />
+      <img src="${logoUrl}" alt="DashMet" style="height:40px;margin-bottom:12px;" />
       <h1 style="color:#ffffff;font-size:20px;font-weight:700;margin:0;">Bakery Production Report</h1>
       <p style="color:#93c5fd;font-size:13px;margin:6px 0 0;">${data.dayOfWeek} &bull; ${weekDisplay}</p>
     </div>
