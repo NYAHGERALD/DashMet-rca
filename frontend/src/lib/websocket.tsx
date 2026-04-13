@@ -270,6 +270,11 @@ interface WebSocketContextType {
   onLswTriggerChanged: (callback: (data: any) => void) => () => void;
 
   // ========================================
+  // LSW FREQ TASK EVENTS
+  // ========================================
+  onLswFreqTaskChanged: (callback: (data: any) => void) => () => void;
+
+  // ========================================
   // VIDEO CALL EVENTS
   // ========================================
   // Video call started notification
@@ -392,6 +397,9 @@ export function WebSocketProvider({ children }: { children: React.ReactNode }) {
 
   // LSW trigger callbacks
   const lswTriggerChangedCallbacks = useRef<Set<(data: any) => void>>(new Set());
+
+  // LSW freq task callbacks
+  const lswFreqTaskChangedCallbacks = useRef<Set<(data: any) => void>>(new Set());
 
   const connect = useCallback(async (userId: string, organizationId: string) => {
     // Prevent multiple connection attempts
@@ -946,6 +954,10 @@ export function WebSocketProvider({ children }: { children: React.ReactNode }) {
       lswTriggerChangedCallbacks.current.forEach(cb => cb(data));
     });
 
+    newSocket.on('lsw:freq-task-changed', (data: any) => {
+      lswFreqTaskChangedCallbacks.current.forEach(cb => cb(data));
+    });
+
     // Handle incident participants list
     newSocket.on('incident:participants', (data: { incidentId: string; participants: any[] }) => {
       const onlineIds = data.participants.filter(p => p.isOnline).map(p => p.id);
@@ -1430,6 +1442,11 @@ export function WebSocketProvider({ children }: { children: React.ReactNode }) {
     return () => { lswTriggerChangedCallbacks.current.delete(callback); };
   }, []);
 
+  const onLswFreqTaskChanged = useCallback((callback: (data: any) => void) => {
+    lswFreqTaskChangedCallbacks.current.add(callback);
+    return () => { lswFreqTaskChangedCallbacks.current.delete(callback); };
+  }, []);
+
   const emitRCAModalState = useCallback((incidentId: string, action: 'opened' | 'closed' | 'method-selected' | 'visibility-changed' | 'analyzing', data?: { selectedMethod?: string; visibility?: string }) => {
     if (socket?.connected) {
       socket.emit('rca:modal-state', { incidentId, action, ...data });
@@ -1777,6 +1794,8 @@ export function WebSocketProvider({ children }: { children: React.ReactNode }) {
         onLswFollowUpChanged,
         // LSW triggers
         onLswTriggerChanged,
+        // LSW freq tasks
+        onLswFreqTaskChanged,
       }}
     >
       {children}

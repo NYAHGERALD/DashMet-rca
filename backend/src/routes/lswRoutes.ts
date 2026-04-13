@@ -210,6 +210,9 @@ router.post('/frequency-tasks', async (req: AuthRequest, res: Response) => {
       year: year ? parseInt(year) : undefined,
     });
     res.status(201).json({ success: true, data: newTask });
+    websocketService.emitToUser(req.user!.id, 'lsw:freq-task-changed', {
+      action: 'freq-task-created', task: newTask,
+    });
   } catch (error: any) {
     res.status(500).json({ success: false, error: error.message });
   }
@@ -219,6 +222,9 @@ router.put('/frequency-tasks/:id', async (req: AuthRequest, res: Response) => {
   try {
     const task = await lswService.updateFrequencyTask(req.params.id, req.user!.id, req.body);
     res.json({ success: true, data: task });
+    websocketService.emitToUser(req.user!.id, 'lsw:freq-task-changed', {
+      action: 'freq-task-updated', task,
+    });
   } catch (error: any) {
     res.status(500).json({ success: false, error: error.message });
   }
@@ -228,6 +234,9 @@ router.delete('/frequency-tasks/:id', async (req: AuthRequest, res: Response) =>
   try {
     await lswService.deleteFrequencyTask(req.params.id, req.user!.id);
     res.json({ success: true });
+    websocketService.emitToUser(req.user!.id, 'lsw:freq-task-changed', {
+      action: 'freq-task-deleted', taskId: req.params.id,
+    });
   } catch (error: any) {
     res.status(500).json({ success: false, error: error.message });
   }

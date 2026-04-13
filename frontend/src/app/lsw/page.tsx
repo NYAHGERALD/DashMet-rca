@@ -307,7 +307,7 @@ function getWeekOffsetText(selectedWeek: number, selectedYear: number, config?: 
 
 function LSWContent() {
   const { user } = useAuth();
-  const { connect, isConnected, onLswCompletionChanged, onLswProjectChanged, onLswFollowUpChanged, onLswTriggerChanged } = useWebSocket();
+  const { connect, isConnected, onLswCompletionChanged, onLswProjectChanged, onLswFollowUpChanged, onLswTriggerChanged, onLswFreqTaskChanged } = useWebSocket();
   const [calendarConfig, setCalendarConfig] = useState<LswCalendarConfig>({ calendarYearStartMonth: 1, calendarYearStartDay: 1 });
   const [workDaysPerWeek, setWorkDaysPerWeek] = useState<number>(5);
   const [currentWeek, setCurrentWeek] = useState(getWeekNumber(new Date()));
@@ -627,7 +627,10 @@ function LSWContent() {
         year: currentYear,
       });
       const mapped = mapFreqTaskFromDb(created);
-      setFrequencyTasks(prev => [...prev, mapped]);
+      setFrequencyTasks(prev => {
+        if (prev.some(t => t.id === mapped.id)) return prev;
+        return [...prev, mapped];
+      });
       setEditingFreqTaskId(mapped.id);
       setEditingFreqTaskValues({ task: '', minutes: 60, dueDate: mapped.dueDate });
       setTimeout(() => freqTaskInputRef.current?.focus(), 50);
@@ -1169,6 +1172,35 @@ function LSWContent() {
     });
     return unsub;
   }, [onLswTriggerChanged, loadLswData]);
+
+  // Real-time sync: apply freq task changes instantly from WebSocket events
+  useEffect(() => {
+    const unsub = onLswFreqTaskChanged((data: any) => {
+      switch (data.action) {
+        case 'freq-task-created':
+          if (data.task) {
+            setFrequencyTasks(prev => {
+              if (prev.some(t => t.id === data.task.id)) return prev;
+              return [...prev, mapFreqTaskFromDb(data.task)];
+            });
+          }
+          break;
+        case 'freq-task-updated':
+          if (data.task) {
+            setFrequencyTasks(prev => prev.map(t => t.id === data.task.id ? mapFreqTaskFromDb(data.task) : t));
+          }
+          break;
+        case 'freq-task-deleted':
+          if (data.taskId) {
+            setFrequencyTasks(prev => prev.filter(t => t.id !== data.taskId));
+          }
+          break;
+        default:
+          loadLswData();
+      }
+    });
+    return unsub;
+  }, [onLswFreqTaskChanged, loadLswData]);
 
   // Cross-platform sync: refetch only when tab becomes visible (no periodic polling)
   useEffect(() => {
