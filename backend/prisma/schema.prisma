@@ -3259,6 +3259,17 @@ model LswTodoItem {
   completed       Boolean       @default(false)
   completedAt     DateTime?
   dueDate         String?       // Used as time HH:MM or date depending on context
+  note            String?
+  
+  // Organization
+  priority        String?       @default("none") // none, low, medium, high
+  category        String?
+  tags            String?       // JSON array of tag strings e.g. ["urgent","work"]
+  isFlagged       Boolean       @default(false)
+  
+  // Scheduling
+  reminderDate    DateTime?
+  recurrence      String?       @default("none") // none, daily, weekdays, weekly, biweekly, monthly, yearly
   
   // Week Context
   weekNumber      Int?
@@ -3276,6 +3287,7 @@ model LswTodoItem {
   @@index([departmentId])
   @@index([completed])
   @@index([weekNumber, year])
+  @@index([isFlagged])
 }
 
 // ─────────────────────────────────────────────────────────────────────────────

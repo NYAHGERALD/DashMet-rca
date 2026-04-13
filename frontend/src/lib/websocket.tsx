@@ -285,6 +285,11 @@ interface WebSocketContextType {
   onLswRailChanged: (callback: (data: any) => void) => () => void;
 
   // ========================================
+  // LSW TODO EVENTS
+  // ========================================
+  onLswTodoChanged: (callback: (data: any) => void) => () => void;
+
+  // ========================================
   // VIDEO CALL EVENTS
   // ========================================
   // Video call started notification
@@ -416,6 +421,9 @@ export function WebSocketProvider({ children }: { children: React.ReactNode }) {
 
   // LSW meeting rail callbacks
   const lswRailChangedCallbacks = useRef<Set<(data: any) => void>>(new Set());
+
+  // LSW todo callbacks
+  const lswTodoChangedCallbacks = useRef<Set<(data: any) => void>>(new Set());
 
   const connect = useCallback(async (userId: string, organizationId: string) => {
     // Prevent multiple connection attempts
@@ -982,6 +990,10 @@ export function WebSocketProvider({ children }: { children: React.ReactNode }) {
       lswRailChangedCallbacks.current.forEach(cb => cb(data));
     });
 
+    newSocket.on('lsw:todo-changed', (data: any) => {
+      lswTodoChangedCallbacks.current.forEach(cb => cb(data));
+    });
+
     // Handle incident participants list
     newSocket.on('incident:participants', (data: { incidentId: string; participants: any[] }) => {
       const onlineIds = data.participants.filter(p => p.isOnline).map(p => p.id);
@@ -1481,6 +1493,11 @@ export function WebSocketProvider({ children }: { children: React.ReactNode }) {
     return () => { lswRailChangedCallbacks.current.delete(callback); };
   }, []);
 
+  const onLswTodoChanged = useCallback((callback: (data: any) => void) => {
+    lswTodoChangedCallbacks.current.add(callback);
+    return () => { lswTodoChangedCallbacks.current.delete(callback); };
+  }, []);
+
   const emitRCAModalState = useCallback((incidentId: string, action: 'opened' | 'closed' | 'method-selected' | 'visibility-changed' | 'analyzing', data?: { selectedMethod?: string; visibility?: string }) => {
     if (socket?.connected) {
       socket.emit('rca:modal-state', { incidentId, action, ...data });
@@ -1834,6 +1851,8 @@ export function WebSocketProvider({ children }: { children: React.ReactNode }) {
         onLswGoalChanged,
         // LSW meeting rails
         onLswRailChanged,
+        // LSW todo items
+        onLswTodoChanged,
       }}
     >
       {children}

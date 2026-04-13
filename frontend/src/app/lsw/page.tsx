@@ -307,7 +307,7 @@ function getWeekOffsetText(selectedWeek: number, selectedYear: number, config?: 
 
 function LSWContent() {
   const { user } = useAuth();
-  const { connect, isConnected, onLswCompletionChanged, onLswProjectChanged, onLswFollowUpChanged, onLswTriggerChanged, onLswFreqTaskChanged, onLswGoalChanged, onLswRailChanged } = useWebSocket();
+  const { connect, isConnected, onLswCompletionChanged, onLswProjectChanged, onLswFollowUpChanged, onLswTriggerChanged, onLswFreqTaskChanged, onLswGoalChanged, onLswRailChanged, onLswTodoChanged } = useWebSocket();
   const [calendarConfig, setCalendarConfig] = useState<LswCalendarConfig>({ calendarYearStartMonth: 1, calendarYearStartDay: 1 });
   const [workDaysPerWeek, setWorkDaysPerWeek] = useState<number>(5);
   const [currentWeek, setCurrentWeek] = useState(getWeekNumber(new Date()));
@@ -1260,6 +1260,34 @@ function LSWContent() {
     return unsub;
   }, [onLswRailChanged, loadLswData]);
 
+  // WebSocket: listen for todo changes
+  useEffect(() => {
+    const unsub = onLswTodoChanged((data: any) => {
+      switch (data.action) {
+        case 'todo-created':
+          if (data.item) {
+            const mapped = mapTodoFromDb(data.item);
+            setTodoItems(prev => prev.some(t => t.id === mapped.id) ? prev : [...prev, mapped]);
+          }
+          break;
+        case 'todo-updated':
+          if (data.item) {
+            const mapped = mapTodoFromDb(data.item);
+            setTodoItems(prev => prev.map(t => t.id === mapped.id ? mapped : t));
+          }
+          break;
+        case 'todo-deleted':
+          if (data.itemId) {
+            setTodoItems(prev => prev.filter(t => t.id !== data.itemId));
+          }
+          break;
+        default:
+          loadLswData();
+      }
+    });
+    return unsub;
+  }, [onLswTodoChanged, loadLswData]);
+
   // Cross-platform sync: refetch only when tab becomes visible (no periodic polling)
   useEffect(() => {
     if (!user || !configReady) return;
@@ -1287,7 +1315,7 @@ function LSWContent() {
         year: currentYear,
       });
       const mapped = mapTodoFromDb(created);
-      setTodoItems(prev => [...prev, mapped]);
+      setTodoItems(prev => prev.some(t => t.id === mapped.id) ? prev : [...prev, mapped]);
       setEditingTodoId(mapped.id);
       setEditingTodoValues({ task: '', dueDate: '' });
       setTimeout(() => todoInputRef.current?.focus(), 50);

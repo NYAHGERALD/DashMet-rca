@@ -162,6 +162,9 @@ router.post('/todo-items', async (req: AuthRequest, res: Response) => {
   try {
     const item = await lswService.createTodoItem({ ...req.body, userId: req.user!.id });
     res.status(201).json({ success: true, data: item });
+    websocketService.emitToUser(req.user!.id, 'lsw:todo-changed', {
+      action: 'todo-created', item,
+    });
   } catch (error: any) {
     res.status(500).json({ success: false, error: error.message });
   }
@@ -171,6 +174,9 @@ router.put('/todo-items/:id', async (req: AuthRequest, res: Response) => {
   try {
     const item = await lswService.updateTodoItem(req.params.id, req.user!.id, req.body);
     res.json({ success: true, data: item });
+    websocketService.emitToUser(req.user!.id, 'lsw:todo-changed', {
+      action: 'todo-updated', item,
+    });
   } catch (error: any) {
     res.status(500).json({ success: false, error: error.message });
   }
@@ -180,6 +186,9 @@ router.delete('/todo-items/:id', async (req: AuthRequest, res: Response) => {
   try {
     await lswService.deleteTodoItem(req.params.id, req.user!.id);
     res.json({ success: true });
+    websocketService.emitToUser(req.user!.id, 'lsw:todo-changed', {
+      action: 'todo-deleted', itemId: req.params.id,
+    });
   } catch (error: any) {
     res.status(500).json({ success: false, error: error.message });
   }

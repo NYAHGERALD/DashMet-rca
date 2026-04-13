@@ -135,13 +135,21 @@ export async function getTodoItems(userId: string, weekNumber?: number, year?: n
 export async function createTodoItem(data: {
   userId: string; departmentId?: string;
   task: string; dueDate?: string;
+  note?: string; priority?: string; category?: string;
+  tags?: string; isFlagged?: boolean;
+  reminderDate?: string; recurrence?: string;
   weekNumber?: number; year?: number; sortOrder?: number;
 }) {
-  return prisma.lswTodoItem.create({ data });
+  const createData: any = { ...data };
+  if (data.reminderDate) createData.reminderDate = new Date(data.reminderDate);
+  return prisma.lswTodoItem.create({ data: createData });
 }
 
 export async function updateTodoItem(id: string, userId: string, data: Partial<{
   task: string; completed: boolean; completedAt: Date | null; dueDate: string;
+  note: string; priority: string; category: string;
+  tags: string; isFlagged: boolean;
+  reminderDate: string | null; recurrence: string;
   sortOrder: number; isActive: boolean;
 }>) {
   const existing = await prisma.lswTodoItem.findFirst({ where: { id, userId } });
@@ -152,7 +160,10 @@ export async function updateTodoItem(id: string, userId: string, data: Partial<{
   } else if (data.completed === false) {
     data.completedAt = null;
   }
-  return prisma.lswTodoItem.update({ where: { id }, data });
+  const updateData: any = { ...data };
+  if (data.reminderDate) updateData.reminderDate = new Date(data.reminderDate);
+  else if (data.reminderDate === null) updateData.reminderDate = null;
+  return prisma.lswTodoItem.update({ where: { id }, data: updateData });
 }
 
 export async function deleteTodoItem(id: string, userId: string) {
