@@ -343,6 +343,9 @@ router.post('/meeting-rails', async (req: AuthRequest, res: Response) => {
   try {
     const rail = await lswService.createMeetingRail({ ...req.body, userId: req.user!.id });
     res.status(201).json({ success: true, data: rail });
+    websocketService.emitToUser(req.user!.id, 'lsw:rail-changed', {
+      action: 'rail-created', rail,
+    });
   } catch (error: any) {
     res.status(500).json({ success: false, error: error.message });
   }
@@ -352,6 +355,9 @@ router.put('/meeting-rails/:id', async (req: AuthRequest, res: Response) => {
   try {
     const rail = await lswService.updateMeetingRail(req.params.id, req.user!.id, req.body);
     res.json({ success: true, data: rail });
+    websocketService.emitToUser(req.user!.id, 'lsw:rail-changed', {
+      action: 'rail-updated', rail,
+    });
   } catch (error: any) {
     res.status(500).json({ success: false, error: error.message });
   }
@@ -361,6 +367,9 @@ router.delete('/meeting-rails/:id', async (req: AuthRequest, res: Response) => {
   try {
     await lswService.deleteMeetingRail(req.params.id, req.user!.id);
     res.json({ success: true });
+    websocketService.emitToUser(req.user!.id, 'lsw:rail-changed', {
+      action: 'rail-deleted', railId: req.params.id,
+    });
   } catch (error: any) {
     res.status(500).json({ success: false, error: error.message });
   }

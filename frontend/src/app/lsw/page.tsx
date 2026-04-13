@@ -307,7 +307,7 @@ function getWeekOffsetText(selectedWeek: number, selectedYear: number, config?: 
 
 function LSWContent() {
   const { user } = useAuth();
-  const { connect, isConnected, onLswCompletionChanged, onLswProjectChanged, onLswFollowUpChanged, onLswTriggerChanged, onLswFreqTaskChanged, onLswGoalChanged } = useWebSocket();
+  const { connect, isConnected, onLswCompletionChanged, onLswProjectChanged, onLswFollowUpChanged, onLswTriggerChanged, onLswFreqTaskChanged, onLswGoalChanged, onLswRailChanged } = useWebSocket();
   const [calendarConfig, setCalendarConfig] = useState<LswCalendarConfig>({ calendarYearStartMonth: 1, calendarYearStartDay: 1 });
   const [workDaysPerWeek, setWorkDaysPerWeek] = useState<number>(5);
   const [currentWeek, setCurrentWeek] = useState(getWeekNumber(new Date()));
@@ -1231,6 +1231,35 @@ function LSWContent() {
     return unsub;
   }, [onLswGoalChanged, loadLswData]);
 
+  // Real-time sync: apply meeting rail changes instantly from WebSocket events
+  useEffect(() => {
+    const unsub = onLswRailChanged((data: any) => {
+      switch (data.action) {
+        case 'rail-created':
+          if (data.rail) {
+            setMeetingRails(prev => {
+              if (prev.some(r => r.id === data.rail.id)) return prev;
+              return [...prev, mapMeetingRailFromDb(data.rail)];
+            });
+          }
+          break;
+        case 'rail-updated':
+          if (data.rail) {
+            setMeetingRails(prev => prev.map(r => r.id === data.rail.id ? mapMeetingRailFromDb(data.rail) : r));
+          }
+          break;
+        case 'rail-deleted':
+          if (data.railId) {
+            setMeetingRails(prev => prev.filter(r => r.id !== data.railId));
+          }
+          break;
+        default:
+          loadLswData();
+      }
+    });
+    return unsub;
+  }, [onLswRailChanged, loadLswData]);
+
   // Cross-platform sync: refetch only when tab becomes visible (no periodic polling)
   useEffect(() => {
     if (!user || !configReady) return;
@@ -1378,7 +1407,10 @@ function LSWContent() {
         year: currentYear,
       });
       const mapped = mapMeetingRailFromDb(created);
-      setMeetingRails(prev => [...prev, mapped]);
+      setMeetingRails(prev => {
+        if (prev.some(r => r.id === mapped.id)) return prev;
+        return [...prev, mapped];
+      });
       setEditingRailId(mapped.id);
       setEditingRailValues({ rail: '', dueDate: mapped.dueDate });
       setTimeout(() => railInputRef.current?.focus(), 50);
