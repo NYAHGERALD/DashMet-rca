@@ -6,10 +6,10 @@ import dynamic from 'next/dynamic';
 import { useAuth } from '@/components/providers/AuthProvider';
 import { getMindMap, updateMindMap } from '@/lib/mindmapApi';
 import api from '@/lib/api';
-import { ArrowLeft, Save, Star, StarOff, Loader2, ZoomIn, ZoomOut, Maximize2, Plus, Trash2 } from 'lucide-react';
-import type { MindMapEditorHandle, MindMapData } from '@/components/mindmap/MindMapEditor';
+import { ArrowLeft, Save, Star, StarOff, Loader2 } from 'lucide-react';
+import type { MindMapEditorHandle, MindMapSaveData } from '@/components/mindmap/MindMapEditor';
 
-// jsMind must load client-side only (canvas + DOM)
+// React Flow must load client-side only
 const MindMapEditor = dynamic(
   () => import('@/components/mindmap/MindMapEditor'),
   { ssr: false },
@@ -25,7 +25,7 @@ export default function MindMapEditorPage() {
   const [saving, setSaving] = useState(false);
   const [lastSaved, setLastSaved] = useState<Date | null>(null);
   const [loading, setLoading] = useState(true);
-  const [initialData, setInitialData] = useState<MindMapData | null>(null);
+  const [initialData, setInitialData] = useState<MindMapSaveData | null>(null);
   const [error, setError] = useState<string | null>(null);
   const saveTimeoutRef = useRef<NodeJS.Timeout | null>(null);
   const hasLoadedRef = useRef(false);
@@ -116,45 +116,7 @@ export default function MindMapEditorPage() {
     }
   }, [id, isFavorite]);
 
-  // Zoom controls
-  const handleZoomIn = () => {
-    const jm = editorRef.current?.getInstance();
-    if (jm?.view) jm.view.zoomIn();
-  };
-  const handleZoomOut = () => {
-    const jm = editorRef.current?.getInstance();
-    if (jm?.view) jm.view.zoomOut();
-  };
-  const handleFitCenter = () => {
-    const jm = editorRef.current?.getInstance();
-    if (jm) {
-      try {
-        jm.scroll_node_to_center('root');
-      } catch (e) {
-        // fallback
-      }
-    }
-  };
 
-  // Node operations
-  const handleAddChild = () => {
-    const jm = editorRef.current?.getInstance();
-    if (!jm) return;
-    const selected = jm.get_selected_node();
-    if (!selected) return;
-    const nodeId = `n_${Date.now()}`;
-    jm.add_node(selected, nodeId, 'New Topic');
-    debouncedSave();
-  };
-
-  const handleDeleteNode = () => {
-    const jm = editorRef.current?.getInstance();
-    if (!jm) return;
-    const selected = jm.get_selected_node();
-    if (!selected || selected.isroot) return;
-    jm.remove_node(selected);
-    debouncedSave();
-  };
 
   if (!user) return null;
 
@@ -208,35 +170,7 @@ export default function MindMapEditorPage() {
           />
         </div>
 
-        {/* Center: node actions */}
-        <div className="hidden sm:flex items-center gap-1 bg-gray-100 dark:bg-gray-800 rounded-lg p-1">
-          <button
-            onClick={handleAddChild}
-            title="Add child node (Tab)"
-            className="flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium rounded-md hover:bg-white dark:hover:bg-gray-700 transition-colors text-gray-600 dark:text-gray-300"
-          >
-            <Plus size={14} />
-            Add Child
-          </button>
-          <button
-            onClick={handleDeleteNode}
-            title="Delete selected node (Delete)"
-            className="flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium rounded-md hover:bg-white dark:hover:bg-gray-700 transition-colors text-gray-600 dark:text-gray-300"
-          >
-            <Trash2 size={14} />
-            Delete
-          </button>
-          <div className="w-px h-5 bg-gray-300 dark:bg-gray-600 mx-1" />
-          <button onClick={handleZoomOut} title="Zoom out" className="p-1.5 rounded-md hover:bg-white dark:hover:bg-gray-700 transition-colors text-gray-500">
-            <ZoomOut size={14} />
-          </button>
-          <button onClick={handleZoomIn} title="Zoom in" className="p-1.5 rounded-md hover:bg-white dark:hover:bg-gray-700 transition-colors text-gray-500">
-            <ZoomIn size={14} />
-          </button>
-          <button onClick={handleFitCenter} title="Center view" className="p-1.5 rounded-md hover:bg-white dark:hover:bg-gray-700 transition-colors text-gray-500">
-            <Maximize2 size={14} />
-          </button>
-        </div>
+
 
         <div className="flex items-center gap-2">
           {/* Save status */}
@@ -274,93 +208,12 @@ export default function MindMapEditorPage() {
         </div>
       </div>
 
-      {/* jsMind CSS */}
-      <link rel="stylesheet" href="/jsmind.css" />
-      <style>{`
-        #jsmind_container {
-          background: #fafbfc;
-        }
-        .dark #jsmind_container {
-          background: #111827;
-        }
-        /* jsMind theme: primary */
-        jmnodes.theme-primary jmnode {
-          background-color: #f0f5ff;
-          border-color: #93b4f5;
-          color: #1e293b;
-          border-radius: 8px;
-          padding: 6px 16px;
-          font-size: 14px;
-          font-family: system-ui, -apple-system, sans-serif;
-          box-shadow: 0 1px 3px rgba(0,0,0,0.08);
-          transition: all 0.15s ease;
-        }
-        jmnodes.theme-primary jmnode:hover {
-          box-shadow: 0 2px 8px rgba(59,130,246,0.15);
-        }
-        jmnodes.theme-primary jmnode.selected {
-          background-color: #3b82f6;
-          color: #ffffff;
-          border-color: #2563eb;
-          box-shadow: 0 0 0 3px rgba(59,130,246,0.25);
-        }
-        jmnodes.theme-primary jmnode.root {
-          background-color: #3b82f6;
-          color: #ffffff;
-          border-color: #2563eb;
-          font-size: 16px;
-          font-weight: 600;
-          padding: 10px 24px;
-          border-radius: 12px;
-        }
-        jmnodes.theme-primary jmexpander {
-          border-color: #93b4f5;
-          background-color: #f0f5ff;
-        }
-        jmnodes.theme-primary jmexpander:hover {
-          border-color: #3b82f6;
-          background-color: #dbeafe;
-        }
-        /* Dark mode overrides */
-        .dark jmnodes.theme-primary jmnode {
-          background-color: #1e293b;
-          border-color: #475569;
-          color: #e2e8f0;
-        }
-        .dark jmnodes.theme-primary jmnode.selected {
-          background-color: #3b82f6;
-          color: #ffffff;
-          border-color: #60a5fa;
-        }
-        .dark jmnodes.theme-primary jmnode.root {
-          background-color: #3b82f6;
-          color: #ffffff;
-        }
-        .dark jmnodes.theme-primary jmexpander {
-          border-color: #475569;
-          background-color: #1e293b;
-        }
-      `}</style>
-
-      {/* Keyboard shortcuts help */}
-      <div className="absolute bottom-4 left-4 z-10 bg-white/90 dark:bg-gray-800/90 backdrop-blur-sm rounded-lg px-3 py-2 shadow-lg border border-gray-200 dark:border-gray-700">
-        <div className="flex flex-wrap gap-x-4 gap-y-1 text-[10px] text-gray-500 dark:text-gray-400">
-          <span><kbd className="px-1 py-0.5 bg-gray-100 dark:bg-gray-700 rounded text-[9px] font-mono">Tab</kbd> Add child</span>
-          <span><kbd className="px-1 py-0.5 bg-gray-100 dark:bg-gray-700 rounded text-[9px] font-mono">Enter</kbd> Add sibling</span>
-          <span><kbd className="px-1 py-0.5 bg-gray-100 dark:bg-gray-700 rounded text-[9px] font-mono">F2</kbd> Edit</span>
-          <span><kbd className="px-1 py-0.5 bg-gray-100 dark:bg-gray-700 rounded text-[9px] font-mono">Del</kbd> Delete</span>
-          <span><kbd className="px-1 py-0.5 bg-gray-100 dark:bg-gray-700 rounded text-[9px] font-mono">Space</kbd> Expand/Collapse</span>
-        </div>
-      </div>
-
       {/* Mind Map Canvas */}
       <div style={{ flex: 1, position: 'relative', overflow: 'hidden' }}>
         <MindMapEditor
           ref={editorRef}
           initialData={initialData}
           onChange={debouncedSave}
-          editable={true}
-          theme="primary"
         />
       </div>
     </div>
