@@ -35,6 +35,46 @@ export default function WhiteboardEditorPage() {
   const hasLoadedRef = useRef(false);
   const [templatePickerOpen, setTemplatePickerOpen] = useState(false);
   const [excalidrawReady, setExcalidrawReady] = useState(false);
+  const canvasContainerRef = useRef<HTMLDivElement>(null);
+
+  // Mouse wheel → zoom (instead of scroll)
+  useEffect(() => {
+    const container = canvasContainerRef.current;
+    if (!container || !excalidrawReady) return;
+
+    const handleWheel = (e: WheelEvent) => {
+      // Already ctrl/meta — Excalidraw handles zoom natively
+      if (e.ctrlKey || e.metaKey) return;
+      // Skip our own re-dispatched events
+      if ((e as any)._zoomRedispatched) return;
+
+      e.preventDefault();
+      e.stopPropagation();
+
+      // Re-dispatch as ctrl+wheel so Excalidraw zooms to cursor
+      const zoomEvent = new WheelEvent('wheel', {
+        deltaX: e.deltaX,
+        deltaY: e.deltaY,
+        deltaZ: e.deltaZ,
+        deltaMode: e.deltaMode,
+        clientX: e.clientX,
+        clientY: e.clientY,
+        screenX: e.screenX,
+        screenY: e.screenY,
+        ctrlKey: true,
+        altKey: e.altKey,
+        shiftKey: e.shiftKey,
+        metaKey: e.metaKey,
+        bubbles: true,
+        cancelable: true,
+      });
+      (zoomEvent as any)._zoomRedispatched = true;
+      e.target?.dispatchEvent(zoomEvent);
+    };
+
+    container.addEventListener('wheel', handleWheel, { passive: false, capture: true });
+    return () => container.removeEventListener('wheel', handleWheel, { capture: true } as any);
+  }, [excalidrawReady]);
 
   // Load bundled libraries into Excalidraw after API is ready
   useEffect(() => {
@@ -301,7 +341,7 @@ export default function WhiteboardEditorPage() {
       `}</style>
 
       {/* Canvas */}
-      <div style={{ flex: 1, position: 'relative', overflow: 'hidden' }}>
+      <div ref={canvasContainerRef} style={{ flex: 1, position: 'relative', overflow: 'hidden' }}>
         <div style={{ position: 'absolute', inset: 0, width: '100%', height: '100%' }}>
           <Excalidraw
             excalidrawAPI={(api) => { excalidrawAPIRef.current = api; setExcalidrawReady(true); }}
