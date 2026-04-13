@@ -6,7 +6,7 @@
 
 import { Resend } from 'resend';
 import { prisma } from '../utils/prisma';
-import puppeteer from 'puppeteer';
+import PDFDocument from 'pdfkit';
 import path from 'path';
 import fs from 'fs';
 
@@ -69,272 +69,324 @@ interface ShiftData {
 }
 
 // ─── Helpers ────────────────────────────────────────────────────────────────
-function fmt(val: number | null | undefined, suffix = '%', decimals = 1): string {
+function fmtVal(val: number | null | undefined, suffix = '%', decimals = 1): string {
   if (val === null || val === undefined) return '—';
   if (suffix === ' lbs') return `${Math.round(val).toLocaleString()} lbs`;
   return `${val.toFixed(decimals)}${suffix}`;
 }
 
-function statusBadge(status: string): string {
-  const colors: Record<string, { bg: string; text: string }> = {
-    'TARGET MET': { bg: '#dcfce7', text: '#166534' },
-    'ON TARGET': { bg: '#dcfce7', text: '#166534' },
-    'ABOVE TARGET': { bg: '#dcfce7', text: '#166534' },
-    'BELOW TARGET': { bg: '#fef2f2', text: '#991b1b' },
-    'GOOD': { bg: '#dcfce7', text: '#166534' },
-    'FAIR': { bg: '#fef9c3', text: '#854d0e' },
-    'POOR': { bg: '#fef2f2', text: '#991b1b' },
-    'No Data': { bg: '#f3f4f6', text: '#6b7280' },
-  };
-  const c = colors[status] || { bg: '#f3f4f6', text: '#6b7280' };
-  return `<span style="display:inline-block;padding:4px 12px;border-radius:20px;font-size:11px;font-weight:700;letter-spacing:0.5px;background:${c.bg};color:${c.text};">${status}</span>`;
-}
-
-function metricColor(val: number, target: number, isWaste = false): string {
-  if (isWaste) return val <= target ? '#166534' : '#dc2626';
-  return val >= target ? '#166534' : '#dc2626';
-}
-
-function kpiRow(
-  metric: string,
-  subMetric: string,
-  target: string,
-  first: string,
-  firstColor: string,
-  second: string,
-  secondColor: string,
-  both: string,
-  bothColor: string,
-  status: string
-): string {
-  return `
-    <tr>
-      <td style="padding:12px 16px;border-bottom:1px solid #e5e7eb;font-weight:600;color:#1e293b;">${metric}</td>
-      <td style="padding:12px 16px;border-bottom:1px solid #e5e7eb;color:#64748b;">${subMetric}<br/><span style="font-size:11px;color:#94a3b8;">${target}</span></td>
-      <td style="padding:12px 16px;border-bottom:1px solid #e5e7eb;text-align:center;font-weight:600;color:${firstColor};">${first}</td>
-      <td style="padding:12px 16px;border-bottom:1px solid #e5e7eb;text-align:center;font-weight:600;color:${secondColor};">${second}</td>
-      <td style="padding:12px 16px;border-bottom:1px solid #e5e7eb;text-align:center;font-weight:700;color:${bothColor};">${both}</td>
-      <td style="padding:12px 16px;border-bottom:1px solid #e5e7eb;text-align:center;">${statusBadge(status)}</td>
-    </tr>`;
+function isGood(val: number, target: number, isWaste = false): boolean {
+  return isWaste ? val <= target : val >= target;
 }
 
 // ═══════════════════════════════════════════════════════════════════════════
-// GENERATE PDF
+// GENERATE PDF with PDFKit (no Chrome required)
 // ═══════════════════════════════════════════════════════════════════════════
+
+// Colors
+const COLORS = {
+  primary: '#1e3a5f',
+  accent: '#1e40af',
+  green: '#166534',
+  red: '#dc2626',
+  gray: '#64748b',
+  lightGray: '#e5e7eb',
+  darkText: '#1e293b',
+  greenBg: '#dcfce7',
+  redBg: '#fef2f2',
+  yellowBg: '#fef9c3',
+  headerBg: '#1e3a5f',
+  rowAlt: '#f8fafc',
+};
+
 export async function generateBakeryReportPdf(data: BakeryReportData): Promise<Buffer> {
-  const fs = data.firstShift;
-  const ss = data.secondShift;
-  const bs = data.bothShifts;
-  const t = data.targets;
+  return new Promise((resolve, reject) => {
+    try {
+      const doc = new PDFDocument({ size: 'A4', layout: 'landscape', margin: 40 });
+      const chunks: Buffer[] = [];
+      doc.on('data', (chunk: Buffer) => chunks.push(chunk));
+      doc.on('end', () => resolve(Buffer.concat(chunks)));
+      doc.on('error', reject);
 
-  // Format week dates from weekName "04-06-2026_04-10-2026"
-  let weekDisplay = data.weekName;
-  if (data.weekName.includes('_')) {
-    const [startStr, endStr] = data.weekName.split('_');
-    const fmtDate = (s: string) => {
-      const [m, d, y] = s.split('-');
-      const date = new Date(parseInt(y), parseInt(m) - 1, parseInt(d));
-      return date.toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' });
-    };
-    weekDisplay = `${fmtDate(startStr)} – ${fmtDate(endStr)}`;
-  }
+      const fsd = data.firstShift;
+      const ssd = data.secondShift;
+      const bsd = data.bothShifts;
+      const t = data.targets;
+      const pageW = 841.89 - 80; // A4 landscape minus margins
 
-  const generatedAt = new Date().toLocaleString('en-US', {
-    year: 'numeric', month: 'long', day: 'numeric',
-    hour: '2-digit', minute: '2-digit', timeZoneName: 'short',
+      // Format week display
+      let weekDisplay = data.weekName;
+      if (data.weekName.includes('_')) {
+        const [startStr, endStr] = data.weekName.split('_');
+        const fmtDate = (s: string) => {
+          const [m, d, y] = s.split('-');
+          const date = new Date(parseInt(y), parseInt(m) - 1, parseInt(d));
+          return date.toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' });
+        };
+        weekDisplay = `${fmtDate(startStr)} - ${fmtDate(endStr)}`;
+      }
+
+      const generatedAt = new Date().toLocaleString('en-US', {
+        year: 'numeric', month: 'long', day: 'numeric',
+        hour: '2-digit', minute: '2-digit', timeZoneName: 'short',
+      });
+
+      // ─── Header ──────────────────────────────────────────────────────
+      // Logo
+      if (fs.existsSync(LOGO_PATH)) {
+        doc.image(LOGO_PATH, 40, 30, { height: 36 });
+      }
+
+      // Title
+      doc.font('Helvetica-Bold').fontSize(18).fillColor(COLORS.accent)
+        .text('Bakery Production Report', 90, 35);
+      doc.font('Helvetica').fontSize(9).fillColor(COLORS.gray)
+        .text('Daily KPI Performance Summary', 90, 56);
+
+      // Right side info
+      const rightX = pageW - 160;
+      doc.font('Helvetica-Bold').fontSize(9).fillColor(COLORS.darkText)
+        .text(data.organizationName, rightX, 30, { width: 200, align: 'right' });
+      doc.font('Helvetica').fontSize(8).fillColor(COLORS.gray)
+        .text(data.facilityName, rightX, 42, { width: 200, align: 'right' })
+        .text(`Week: ${weekDisplay}`, rightX, 53, { width: 200, align: 'right' })
+        .text(`Day: ${data.dayOfWeek}`, rightX, 64, { width: 200, align: 'right' })
+        .text(`Submitted by: ${data.submittedBy}`, rightX, 75, { width: 200, align: 'right' });
+
+      // Header line
+      doc.moveTo(40, 90).lineTo(pageW + 40, 90).strokeColor(COLORS.accent).lineWidth(2).stroke();
+
+      // ─── KPI Table ────────────────────────────────────────────────────
+      doc.font('Helvetica-Bold').fontSize(12).fillColor(COLORS.darkText)
+        .text('KPI Performance Breakdown', 40, 100);
+      doc.moveTo(40, 116).lineTo(pageW + 40, 116).strokeColor(COLORS.lightGray).lineWidth(1).stroke();
+
+      const tableTop = 124;
+      const colWidths = [120, 110, 110, 110, 110, 100]; // KPI, Target, 1st, 2nd, Both, Status
+      const colX = [40];
+      for (let i = 1; i <= 5; i++) colX.push(colX[i - 1] + colWidths[i - 1]);
+      const rowH = 28;
+
+      // Table header
+      doc.rect(40, tableTop, pageW, rowH).fill(COLORS.headerBg);
+      const headers = ['KPI Metric', 'Target', 'First Shift', 'Second Shift', 'Both Shifts', 'Status'];
+      doc.font('Helvetica-Bold').fontSize(8).fillColor('#ffffff');
+      headers.forEach((h, i) => {
+        doc.text(h, colX[i] + 8, tableTop + 9, { width: colWidths[i] - 16, align: i >= 2 ? 'center' : 'left' });
+      });
+
+      // Table rows
+      interface RowDef {
+        kpi: string;
+        target: string;
+        first: string;
+        second: string;
+        both: string;
+        status: string;
+        statusGood: boolean;
+        firstGood?: boolean;
+        secondGood?: boolean;
+        bothGood?: boolean;
+        isSectionHeader?: boolean;
+      }
+
+      const rows: RowDef[] = [
+        // OEE section
+        { kpi: 'OEE', target: '', first: '', second: '', both: '', status: '', statusGood: true, isSectionHeader: true },
+        {
+          kpi: '  Die Cut 1', target: `>= ${t.oee.die_cut_1}%`,
+          first: fmtVal(fsd?.dieCut1Oee), second: fmtVal(ssd?.dieCut1Oee), both: fmtVal(bsd?.dieCut1Oee),
+          status: isGood(bsd?.dieCut1Oee ?? 0, t.oee.die_cut_1) ? 'TARGET MET' : 'BELOW TARGET',
+          statusGood: isGood(bsd?.dieCut1Oee ?? 0, t.oee.die_cut_1),
+          firstGood: fsd ? isGood(fsd.dieCut1Oee, t.oee.die_cut_1) : undefined,
+          secondGood: ssd ? isGood(ssd.dieCut1Oee, t.oee.die_cut_1) : undefined,
+          bothGood: bsd ? isGood(bsd.dieCut1Oee, t.oee.die_cut_1) : undefined,
+        },
+        {
+          kpi: '  Die Cut 2', target: `>= ${t.oee.die_cut_2}%`,
+          first: fmtVal(fsd?.dieCut2Oee), second: fmtVal(ssd?.dieCut2Oee), both: fmtVal(bsd?.dieCut2Oee),
+          status: isGood(bsd?.dieCut2Oee ?? 0, t.oee.die_cut_2) ? 'TARGET MET' : 'BELOW TARGET',
+          statusGood: isGood(bsd?.dieCut2Oee ?? 0, t.oee.die_cut_2),
+          firstGood: fsd ? isGood(fsd.dieCut2Oee, t.oee.die_cut_2) : undefined,
+          secondGood: ssd ? isGood(ssd.dieCut2Oee, t.oee.die_cut_2) : undefined,
+          bothGood: bsd ? isGood(bsd.dieCut2Oee, t.oee.die_cut_2) : undefined,
+        },
+        {
+          kpi: '  Total OEE', target: `>= ${t.oee.total}%`,
+          first: fmtVal(fsd?.totalOee), second: fmtVal(ssd?.totalOee), both: fmtVal(bsd?.totalOee),
+          status: isGood(bsd?.totalOee ?? 0, t.oee.total) ? 'TARGET MET' : 'BELOW TARGET',
+          statusGood: isGood(bsd?.totalOee ?? 0, t.oee.total),
+          firstGood: fsd ? isGood(fsd.totalOee, t.oee.total) : undefined,
+          secondGood: ssd ? isGood(ssd.totalOee, t.oee.total) : undefined,
+          bothGood: bsd ? isGood(bsd.totalOee, t.oee.total) : undefined,
+        },
+        // Volume section
+        { kpi: 'VOLUME', target: '', first: '', second: '', both: '', status: '', statusGood: true, isSectionHeader: true },
+        {
+          kpi: '  Die Cut 1', target: `>= ${t.volume.die_cut_1.toLocaleString()} lbs`,
+          first: fmtVal(fsd?.dieCut1Lbs, ' lbs'), second: fmtVal(ssd?.dieCut1Lbs, ' lbs'), both: fmtVal(bsd?.dieCut1Lbs, ' lbs'),
+          status: isGood(bsd?.dieCut1Lbs ?? 0, t.volume.die_cut_1) ? 'ON TARGET' : 'BELOW TARGET',
+          statusGood: isGood(bsd?.dieCut1Lbs ?? 0, t.volume.die_cut_1),
+          bothGood: bsd ? isGood(bsd.dieCut1Lbs, t.volume.die_cut_1) : undefined,
+        },
+        {
+          kpi: '  Die Cut 2', target: `>= ${t.volume.die_cut_2.toLocaleString()} lbs`,
+          first: fmtVal(fsd?.dieCut2Lbs, ' lbs'), second: fmtVal(ssd?.dieCut2Lbs, ' lbs'), both: fmtVal(bsd?.dieCut2Lbs, ' lbs'),
+          status: isGood(bsd?.dieCut2Lbs ?? 0, t.volume.die_cut_2) ? 'ON TARGET' : 'BELOW TARGET',
+          statusGood: isGood(bsd?.dieCut2Lbs ?? 0, t.volume.die_cut_2),
+          bothGood: bsd ? isGood(bsd.dieCut2Lbs, t.volume.die_cut_2) : undefined,
+        },
+        {
+          kpi: '  Total Volume', target: `>= ${t.volume.total.toLocaleString()} lbs`,
+          first: fmtVal(fsd?.totalLbs, ' lbs'), second: fmtVal(ssd?.totalLbs, ' lbs'), both: fmtVal(bsd?.totalLbs, ' lbs'),
+          status: isGood(bsd?.totalLbs ?? 0, t.volume.total) ? 'ON TARGET' : 'BELOW TARGET',
+          statusGood: isGood(bsd?.totalLbs ?? 0, t.volume.total),
+          bothGood: bsd ? isGood(bsd.totalLbs, t.volume.total) : undefined,
+        },
+        // Waste section
+        { kpi: 'WASTE', target: '', first: '', second: '', both: '', status: '', statusGood: true, isSectionHeader: true },
+        {
+          kpi: '  Die Cut 1', target: `<= ${t.waste.die_cut_1}%`,
+          first: fmtVal(fsd?.dieCut1WastePct), second: fmtVal(ssd?.dieCut1WastePct), both: fmtVal(bsd?.dieCut1WastePct),
+          status: isGood(bsd?.dieCut1WastePct ?? 0, t.waste.die_cut_1, true) ? 'BELOW TARGET' : 'ABOVE TARGET',
+          statusGood: isGood(bsd?.dieCut1WastePct ?? 0, t.waste.die_cut_1, true),
+          firstGood: fsd ? isGood(fsd.dieCut1WastePct, t.waste.die_cut_1, true) : undefined,
+          secondGood: ssd ? isGood(ssd.dieCut1WastePct, t.waste.die_cut_1, true) : undefined,
+          bothGood: bsd ? isGood(bsd.dieCut1WastePct, t.waste.die_cut_1, true) : undefined,
+        },
+        {
+          kpi: '  Die Cut 2', target: `<= ${t.waste.die_cut_2}%`,
+          first: fmtVal(fsd?.dieCut2WastePct), second: fmtVal(ssd?.dieCut2WastePct), both: fmtVal(bsd?.dieCut2WastePct),
+          status: isGood(bsd?.dieCut2WastePct ?? 0, t.waste.die_cut_2, true) ? 'BELOW TARGET' : 'ABOVE TARGET',
+          statusGood: isGood(bsd?.dieCut2WastePct ?? 0, t.waste.die_cut_2, true),
+          firstGood: fsd ? isGood(fsd.dieCut2WastePct, t.waste.die_cut_2, true) : undefined,
+          secondGood: ssd ? isGood(ssd.dieCut2WastePct, t.waste.die_cut_2, true) : undefined,
+          bothGood: bsd ? isGood(bsd.dieCut2WastePct, t.waste.die_cut_2, true) : undefined,
+        },
+        {
+          kpi: '  Total Waste', target: `<= ${t.waste.total}%`,
+          first: fmtVal(fsd?.totalWastePct), second: fmtVal(ssd?.totalWastePct), both: fmtVal(bsd?.totalWastePct),
+          status: isGood(bsd?.totalWastePct ?? 0, t.waste.total, true) ? 'BELOW TARGET' : 'ABOVE TARGET',
+          statusGood: isGood(bsd?.totalWastePct ?? 0, t.waste.total, true),
+          firstGood: fsd ? isGood(fsd.totalWastePct, t.waste.total, true) : undefined,
+          secondGood: ssd ? isGood(ssd.totalWastePct, t.waste.total, true) : undefined,
+          bothGood: bsd ? isGood(bsd.totalWastePct, t.waste.total, true) : undefined,
+        },
+      ];
+
+      rows.forEach((row, idx) => {
+        const y = tableTop + rowH + idx * rowH;
+
+        // Alternate row background
+        if (row.isSectionHeader) {
+          doc.rect(40, y, pageW, rowH).fill('#eef2ff');
+        } else if (idx % 2 === 0) {
+          doc.rect(40, y, pageW, rowH).fill(COLORS.rowAlt);
+        }
+
+        // Row border
+        doc.moveTo(40, y + rowH).lineTo(pageW + 40, y + rowH).strokeColor(COLORS.lightGray).lineWidth(0.5).stroke();
+
+        const textY = y + 9;
+
+        if (row.isSectionHeader) {
+          // Section header row
+          doc.font('Helvetica-Bold').fontSize(9).fillColor(COLORS.accent)
+            .text(row.kpi, colX[0] + 8, textY, { width: colWidths[0] - 16 });
+        } else {
+          // KPI name
+          doc.font('Helvetica').fontSize(8).fillColor(COLORS.darkText)
+            .text(row.kpi, colX[0] + 8, textY, { width: colWidths[0] - 16 });
+
+          // Target
+          doc.font('Helvetica').fontSize(7.5).fillColor(COLORS.gray)
+            .text(row.target, colX[1] + 8, textY, { width: colWidths[1] - 16 });
+
+          // Value cells with color coding
+          const drawValueCell = (val: string, x: number, w: number, isGoodVal?: boolean) => {
+            const color = isGoodVal === undefined ? COLORS.darkText : isGoodVal ? COLORS.green : COLORS.red;
+            doc.font('Helvetica-Bold').fontSize(8).fillColor(color)
+              .text(val, x + 8, textY, { width: w - 16, align: 'center' });
+          };
+
+          drawValueCell(row.first, colX[2], colWidths[2], row.firstGood);
+          drawValueCell(row.second, colX[3], colWidths[3], row.secondGood);
+          drawValueCell(row.both, colX[4], colWidths[4], row.bothGood);
+
+          // Status badge
+          const badgeBg = row.statusGood ? COLORS.greenBg : COLORS.redBg;
+          const badgeText = row.statusGood ? COLORS.green : COLORS.red;
+          doc.font('Helvetica-Bold').fontSize(6);
+          const badgeW = Math.min(doc.widthOfString(row.status) + 14, colWidths[5] - 10);
+          const badgeX = colX[5] + (colWidths[5] - badgeW) / 2;
+          doc.roundedRect(badgeX, y + 7, badgeW, 14, 7).fill(badgeBg);
+          doc.font('Helvetica-Bold').fontSize(6).fillColor(badgeText)
+            .text(row.status, colX[5] + 4, textY + 1, { width: colWidths[5] - 8, align: 'center' });
+        }
+      });
+
+      // Table border
+      const tableH = rowH + rows.length * rowH;
+      doc.rect(40, tableTop, pageW, tableH).strokeColor(COLORS.lightGray).lineWidth(1).stroke();
+
+      // ─── Summary Cards ────────────────────────────────────────────────
+      const cardsY = tableTop + tableH + 20;
+      doc.font('Helvetica-Bold').fontSize(12).fillColor(COLORS.darkText)
+        .text('Performance Summary', 40, cardsY);
+      doc.moveTo(40, cardsY + 16).lineTo(pageW + 40, cardsY + 16).strokeColor(COLORS.lightGray).lineWidth(1).stroke();
+
+      const cardW = (pageW - 30) / 4;
+      const cardTop = cardsY + 24;
+      const cardH = 70;
+      const summaryCards = [
+        { label: 'OEE', value: `${data.summary.oeeValue.toFixed(1)}%`, status: data.summary.oeeStatus, target: `vs target (${t.oee.total}%)` },
+        { label: 'Waste', value: `${data.summary.wasteValue.toFixed(2)}%`, status: data.summary.wasteStatus, target: `vs target (${t.waste.total}%)` },
+        { label: 'Production', value: `${Math.round(data.summary.productionValue).toLocaleString()} lbs`, status: data.summary.productionStatus, target: 'daily output' },
+        { label: 'Efficiency', value: `${data.summary.efficiencyScore}/10`, status: data.summary.efficiencyStatus, target: 'composite index' },
+      ];
+
+      summaryCards.forEach((card, i) => {
+        const x = 40 + i * (cardW + 10);
+        doc.roundedRect(x, cardTop, cardW, cardH, 6).strokeColor(COLORS.lightGray).lineWidth(1).stroke();
+
+        // Status badge
+        const goodStatus = card.label === 'Waste'
+          ? card.status === 'BELOW TARGET'
+          : ['TARGET MET', 'ON TARGET', 'ABOVE TARGET', 'GOOD'].includes(card.status);
+        const sBg = goodStatus ? COLORS.greenBg : (['FAIR'].includes(card.status) ? COLORS.yellowBg : COLORS.redBg);
+        const sColor = goodStatus ? COLORS.green : (['FAIR'].includes(card.status) ? '#854d0e' : COLORS.red);
+
+        doc.font('Helvetica-Bold').fontSize(5.5);
+        const statusW = Math.min(doc.widthOfString(card.status) + 12, cardW - 20);
+        doc.roundedRect(x + (cardW - statusW) / 2, cardTop + 6, statusW, 12, 6).fill(sBg);
+        doc.font('Helvetica-Bold').fontSize(5.5).fillColor(sColor)
+          .text(card.status, x + 5, cardTop + 9, { width: cardW - 10, align: 'center' });
+
+        // Label
+        doc.font('Helvetica').fontSize(7).fillColor(COLORS.gray)
+          .text(card.label, x + 5, cardTop + 22, { width: cardW - 10, align: 'center' });
+
+        // Value
+        doc.font('Helvetica-Bold').fontSize(16).fillColor(COLORS.darkText)
+          .text(card.value, x + 5, cardTop + 33, { width: cardW - 10, align: 'center' });
+
+        // Target text
+        doc.font('Helvetica').fontSize(6.5).fillColor(COLORS.gray)
+          .text(card.target, x + 5, cardTop + 55, { width: cardW - 10, align: 'center' });
+      });
+
+      // ─── Footer ──────────────────────────────────────────────────────
+      const footerY = cardTop + cardH + 20;
+      doc.moveTo(40, footerY).lineTo(pageW + 40, footerY).strokeColor(COLORS.lightGray).lineWidth(0.5).stroke();
+      doc.font('Helvetica').fontSize(7).fillColor(COLORS.gray)
+        .text(`Generated by DashMet RCA  |  ${data.organizationName}  |  ${generatedAt}`, 40, footerY + 6, { width: pageW, align: 'center' })
+        .text('Confidential - For internal use only', 40, footerY + 16, { width: pageW, align: 'center' });
+
+      doc.end();
+    } catch (err) {
+      reject(err);
+    }
   });
-
-  // Determine statuses
-  const oeeStatus = bs && bs.totalOee >= t.oee.total ? 'TARGET MET' : 'BELOW TARGET';
-  const wasteStatus = bs && bs.totalWastePct <= t.waste.total ? 'BELOW TARGET' : 'ABOVE TARGET';
-  const prodStatus = bs && bs.totalLbs >= t.volume.total ? 'ON TARGET' : 'BELOW TARGET';
-
-  const html = `<!DOCTYPE html>
-<html>
-<head>
-  <meta charset="UTF-8">
-  <style>
-    * { margin: 0; padding: 0; box-sizing: border-box; }
-    body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; color: #1e293b; background: #fff; }
-    .page { padding: 40px; max-width: 900px; margin: 0 auto; }
-    .header { display: flex; justify-content: space-between; align-items: flex-start; margin-bottom: 32px; border-bottom: 3px solid #1e40af; padding-bottom: 20px; }
-    .header-left { display: flex; align-items: center; gap: 16px; }
-    .header-left img { height: 48px; }
-    .header-title { font-size: 22px; font-weight: 800; color: #1e40af; }
-    .header-subtitle { font-size: 13px; color: #64748b; margin-top: 2px; }
-    .header-right { text-align: right; font-size: 12px; color: #64748b; line-height: 1.8; }
-    .header-right strong { color: #1e293b; }
-    .section-title { font-size: 16px; font-weight: 700; color: #1e293b; margin: 28px 0 12px; padding-bottom: 6px; border-bottom: 2px solid #e5e7eb; }
-    .kpi-table { width: 100%; border-collapse: collapse; border: 1px solid #e5e7eb; border-radius: 8px; overflow: hidden; }
-    .kpi-table th { padding: 10px 16px; background: #1e3a5f; color: #fff; font-size: 11px; font-weight: 700; text-transform: uppercase; letter-spacing: 0.5px; text-align: center; }
-    .kpi-table th:first-child, .kpi-table th:nth-child(2) { text-align: left; }
-    .metric-label { display: flex; align-items: center; gap: 8px; }
-    .metric-icon { width: 32px; height: 32px; border-radius: 50%; display: flex; align-items: center; justify-content: center; font-size: 14px; }
-    .summary-cards { display: flex; gap: 16px; margin-top: 24px; }
-    .summary-card { flex: 1; padding: 20px; border-radius: 12px; border: 1px solid #e5e7eb; text-align: center; }
-    .summary-card .value { font-size: 28px; font-weight: 800; color: #1e293b; margin: 8px 0 4px; }
-    .summary-card .unit { font-size: 14px; color: #64748b; }
-    .summary-card .label { font-size: 12px; color: #64748b; margin-top: 4px; }
-    .footer { margin-top: 40px; padding-top: 16px; border-top: 1px solid #e5e7eb; text-align: center; font-size: 11px; color: #94a3b8; }
-    .badge { display: inline-block; padding: 3px 10px; border-radius: 12px; font-size: 10px; font-weight: 700; }
-  </style>
-</head>
-<body>
-  <div class="page">
-    <!-- Header -->
-    <div class="header">
-      <div class="header-left">
-        ${logoBase64 ? `<img src="${logoBase64}" alt="DashMet" />` : '<div style="font-size:24px;font-weight:900;color:#1e40af;">DASHMET</div>'}
-        <div>
-          <div class="header-title">Bakery Production Report</div>
-          <div class="header-subtitle">Daily KPI Performance Summary</div>
-        </div>
-      </div>
-      <div class="header-right">
-        <strong>${data.organizationName}</strong><br/>
-        ${data.facilityName}<br/>
-        <strong>Week:</strong> ${weekDisplay}<br/>
-        <strong>Day:</strong> ${data.dayOfWeek}<br/>
-        <strong>Submitted by:</strong> ${data.submittedBy}<br/>
-        <strong>Generated:</strong> ${generatedAt}
-      </div>
-    </div>
-
-    <!-- KPI Table -->
-    <div class="section-title">KPI Performance Breakdown</div>
-    <table class="kpi-table">
-      <thead>
-        <tr>
-          <th>KPI Metric</th>
-          <th>Target</th>
-          <th style="color:#f59e0b;">First Shift</th>
-          <th style="color:#8b5cf6;">Second Shift</th>
-          <th style="color:#10b981;">Both Shifts</th>
-          <th>Status</th>
-        </tr>
-      </thead>
-      <tbody>
-        <!-- OEE -->
-        ${kpiRow('', 'Die Cut 1', `≥ ${t.oee.die_cut_1}%`,
-          fmt(fs?.dieCut1Oee), metricColor(fs?.dieCut1Oee ?? 0, t.oee.die_cut_1),
-          fmt(ss?.dieCut1Oee), metricColor(ss?.dieCut1Oee ?? 0, t.oee.die_cut_1),
-          fmt(bs?.dieCut1Oee), metricColor(bs?.dieCut1Oee ?? 0, t.oee.die_cut_1),
-          (bs?.dieCut1Oee ?? 0) >= t.oee.die_cut_1 ? 'TARGET MET' : 'BELOW TARGET'
-        )}
-        ${kpiRow('', 'Die Cut 2', `≥ ${t.oee.die_cut_2}%`,
-          fmt(fs?.dieCut2Oee), metricColor(fs?.dieCut2Oee ?? 0, t.oee.die_cut_2),
-          fmt(ss?.dieCut2Oee), metricColor(ss?.dieCut2Oee ?? 0, t.oee.die_cut_2),
-          fmt(bs?.dieCut2Oee), metricColor(bs?.dieCut2Oee ?? 0, t.oee.die_cut_2),
-          (bs?.dieCut2Oee ?? 0) >= t.oee.die_cut_2 ? 'TARGET MET' : 'BELOW TARGET'
-        )}
-        ${kpiRow('<div class="metric-label"><div class="metric-icon" style="background:#eff6ff;color:#1e40af;">⚙</div><div><strong>OEE</strong><br/><span style="font-size:11px;color:#64748b;">Overall Equipment Effectiveness</span></div></div>', 
-          'Total', `≥ ${t.oee.total}%`,
-          fmt(fs?.totalOee), metricColor(fs?.totalOee ?? 0, t.oee.total),
-          fmt(ss?.totalOee), metricColor(ss?.totalOee ?? 0, t.oee.total),
-          fmt(bs?.totalOee), metricColor(bs?.totalOee ?? 0, t.oee.total),
-          oeeStatus
-        )}
-        
-        <!-- Volume -->
-        ${kpiRow('', 'Die Cut 1', `≥ ${t.volume.die_cut_1.toLocaleString()} lbs`,
-          fmt(fs?.dieCut1Lbs, ' lbs'), '#1e293b',
-          fmt(ss?.dieCut1Lbs, ' lbs'), '#1e293b',
-          fmt(bs?.dieCut1Lbs, ' lbs'), (bs?.dieCut1Lbs ?? 0) >= t.volume.die_cut_1 ? '#166534' : '#dc2626',
-          (bs?.dieCut1Lbs ?? 0) >= t.volume.die_cut_1 ? 'ON TARGET' : 'BELOW TARGET'
-        )}
-        ${kpiRow('', 'Die Cut 2', `≥ ${t.volume.die_cut_2.toLocaleString()} lbs`,
-          fmt(fs?.dieCut2Lbs, ' lbs'), '#1e293b',
-          fmt(ss?.dieCut2Lbs, ' lbs'), '#1e293b',
-          fmt(bs?.dieCut2Lbs, ' lbs'), (bs?.dieCut2Lbs ?? 0) >= t.volume.die_cut_2 ? '#166534' : '#dc2626',
-          (bs?.dieCut2Lbs ?? 0) >= t.volume.die_cut_2 ? 'ON TARGET' : 'BELOW TARGET'
-        )}
-        ${kpiRow('<div class="metric-label"><div class="metric-icon" style="background:#ecfdf5;color:#166534;">📦</div><div><strong>VOLUME</strong><br/><span style="font-size:11px;color:#64748b;">Production Output (lbs)</span></div></div>',
-          'Total', `≥ ${t.volume.total.toLocaleString()} lbs`,
-          fmt(fs?.totalLbs, ' lbs'), '#1e293b',
-          fmt(ss?.totalLbs, ' lbs'), '#1e293b',
-          fmt(bs?.totalLbs, ' lbs'), (bs?.totalLbs ?? 0) >= t.volume.total ? '#166534' : '#dc2626',
-          (bs?.totalLbs ?? 0) >= t.volume.total ? 'ON TARGET' : 'BELOW TARGET'
-        )}
-        
-        <!-- Waste -->
-        ${kpiRow('', 'Die Cut 1', `≤ ${t.waste.die_cut_1}%`,
-          fmt(fs?.dieCut1WastePct), metricColor(fs?.dieCut1WastePct ?? 0, t.waste.die_cut_1, true),
-          fmt(ss?.dieCut1WastePct), metricColor(ss?.dieCut1WastePct ?? 0, t.waste.die_cut_1, true),
-          fmt(bs?.dieCut1WastePct), metricColor(bs?.dieCut1WastePct ?? 0, t.waste.die_cut_1, true),
-          (bs?.dieCut1WastePct ?? 0) <= t.waste.die_cut_1 ? 'BELOW TARGET' : 'ABOVE TARGET'
-        )}
-        ${kpiRow('', 'Die Cut 2', `≤ ${t.waste.die_cut_2}%`,
-          fmt(fs?.dieCut2WastePct), metricColor(fs?.dieCut2WastePct ?? 0, t.waste.die_cut_2, true),
-          fmt(ss?.dieCut2WastePct), metricColor(ss?.dieCut2WastePct ?? 0, t.waste.die_cut_2, true),
-          fmt(bs?.dieCut2WastePct), metricColor(bs?.dieCut2WastePct ?? 0, t.waste.die_cut_2, true),
-          (bs?.dieCut2WastePct ?? 0) <= t.waste.die_cut_2 ? 'BELOW TARGET' : 'ABOVE TARGET'
-        )}
-        ${kpiRow('<div class="metric-label"><div class="metric-icon" style="background:#fef2f2;color:#dc2626;">🗑</div><div><strong>WASTE</strong><br/><span style="font-size:11px;color:#64748b;">Material Waste Percentage</span></div></div>',
-          'Total', `≤ ${t.waste.total}%`,
-          fmt(fs?.totalWastePct), metricColor(fs?.totalWastePct ?? 0, t.waste.total, true),
-          fmt(ss?.totalWastePct), metricColor(ss?.totalWastePct ?? 0, t.waste.total, true),
-          fmt(bs?.totalWastePct), metricColor(bs?.totalWastePct ?? 0, t.waste.total, true),
-          wasteStatus
-        )}
-      </tbody>
-    </table>
-
-    <!-- Summary Cards -->
-    <div class="section-title">Performance Summary</div>
-    <div class="summary-cards">
-      <div class="summary-card">
-        ${statusBadge(data.summary.oeeStatus)}
-        <div style="font-size:12px;color:#64748b;margin-top:8px;">Overall Equipment Effectiveness</div>
-        <div class="value">${data.summary.oeeValue.toFixed(1)} <span class="unit">%</span></div>
-        <div class="label">vs target (${t.oee.total}%)</div>
-      </div>
-      <div class="summary-card">
-        ${statusBadge(data.summary.wasteStatus)}
-        <div style="font-size:12px;color:#64748b;margin-top:8px;">Waste Percentage</div>
-        <div class="value">${data.summary.wasteValue.toFixed(2)} <span class="unit">%</span></div>
-        <div class="label">vs target (${t.waste.total}%)</div>
-      </div>
-      <div class="summary-card">
-        ${statusBadge(data.summary.productionStatus)}
-        <div style="font-size:12px;color:#64748b;margin-top:8px;">Production Volume</div>
-        <div class="value">${Math.round(data.summary.productionValue).toLocaleString()} <span class="unit">lbs</span></div>
-        <div class="label">daily output</div>
-      </div>
-      <div class="summary-card">
-        ${statusBadge(data.summary.efficiencyStatus)}
-        <div style="font-size:12px;color:#64748b;margin-top:8px;">Efficiency Score</div>
-        <div class="value">${data.summary.efficiencyScore.toFixed(1)} <span class="unit">/10</span></div>
-        <div class="label">composite index</div>
-      </div>
-    </div>
-
-    <!-- Footer -->
-    <div class="footer">
-      <p>This report was generated by <strong>DashMet RCA</strong> — ${data.organizationName}</p>
-      <p style="margin-top:4px;">Confidential — For internal use only</p>
-    </div>
-  </div>
-</body>
-</html>`;
-
-  // Render HTML to PDF via Puppeteer
-  const browser = await puppeteer.launch({
-    headless: true,
-    args: ['--no-sandbox', '--disable-setuid-sandbox', '--disable-dev-shm-usage'],
-  });
-  try {
-    const page = await browser.newPage();
-    await page.setContent(html, { waitUntil: 'networkidle0' });
-    const pdfBuffer = await page.pdf({
-      format: 'A4',
-      landscape: true,
-      printBackground: true,
-      margin: { top: '20px', right: '20px', bottom: '20px', left: '20px' },
-    });
-    return Buffer.from(pdfBuffer);
-  } finally {
-    await browser.close();
-  }
 }
 
 // ═══════════════════════════════════════════════════════════════════════════
