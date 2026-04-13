@@ -4,6 +4,7 @@ import bakeryMetricsService from '../services/bakeryMetricsService';
 import bakeryAdminService from '../services/bakeryAdminService';
 import { generateAiInsights, getCachedInsight, saveInsight, logInsightAction, getInsightLogs } from '../services/bakeryAiInsightsService';
 import { generateOperationalDailyReport, getSavedDailyReport, saveDailyReport } from '../services/operationalDailyReportService';
+import { buildBakeryReportData, generateBakeryReportPdf, sendBakeryReportEmail, sendBakeryReportToUsers, getOrgUsersForBakeryReport } from '../services/bakeryReportEmailService';
 import { authenticate, AuthRequest } from '../middleware/auth';
 import { requireAdmin } from '../middleware/rbac';
 
@@ -603,6 +604,23 @@ router.post('/submit', async (req: Request, res: Response) => {
     });
 
     res.status(201).json({ success: true, submission });
+
+    // ── Auto-email report to org users (fire-and-forget) ──
+    try {
+      const authReq = req as AuthRequest;
+      const orgId = authReq.user?.organizationId;
+      if (orgId) {
+        const orgUsers = await getOrgUsersForBakeryReport(orgId);
+        if (orgUsers.length > 0) {
+          const userIds = orgUsers.map(u => u.id);
+          sendBakeryReportToUsers(userIds, weekName, dayOfWeek, orgId)
+            .then(result => console.log(`[BakeryAutoEmail] Sent=${result.sent}, Failed=${result.failed}`))
+            .catch(err => console.error('[BakeryAutoEmail] Error:', err.message));
+        }
+      }
+    } catch (emailErr: any) {
+      console.error('[BakeryAutoEmail] Non-blocking error:', emailErr.message);
+    }
   } catch (error: any) {
     console.error('Error submitting metrics:', error);
     res.status(500).json({ success: false, error: error.message });
@@ -1013,6 +1031,73 @@ router.post('/operational-daily-report', authenticate, async (req: AuthRequest, 
   } catch (error: any) {
     console.error('[OpsDailyReport] Unhandled error:', error);
     res.status(500).json({ success: false, error: 'Internal error generating report.' });
+  }
+});
+
+// ─────────────────────────────────────────────────────────────────────────────
+// GET /api/bakery-metrics/email-eligible-users
+// Returns all active org users who can receive bakery report emails
+// ─────────────────────────────────────────────────────────────────────────────
+router.get('/email-eligible-users', async (req: Request, res: Response) => {
+  try {
+    const authReq = req as AuthRequest;
+    const orgId = authReq.user?.organizationId;
+    if (!orgId) {
+      res.status(400).json({ success: false, error: 'Organization not found' });
+      return;
+    }
+    const users = await getOrgUsersForBakeryReport(orgId);
+    res.json({ success: true, users });
+  } catch (error: any) {
+    console.error('Error fetching eligible users:', error);
+    res.status(500).json({ success: false, error: error.message });
+  }
+});
+
+// ─────────────────────────────────────────────────────────────────────────────
+// POST /api/bakery-metrics/send-report-email
+// Manually send bakery report email to selected users
+// Body: { weekName, dayOfWeek, userIds: string[] }
+// ─────────────────────────────────────────────────────────────────────────────
+router.post('/send-report-email', async (req: Request, res: Response) => {
+  try {
+    const authReq = req as AuthRequest;
+    const orgId = authReq.user?.organizationId;
+    if (!orgId) {
+      res.status(400).json({ success: false, error: 'Organization not found' });
+      return;
+    }
+
+    const { weekName, dayOfWeek, userIds } = req.body;
+
+    if (!weekName || !dayOfWeek) {
+      res.status(400).json({ success: false, error: 'weekName and dayOfWeek are required' });
+      return;
+    }
+    if (!Array.isArray(userIds) || userIds.length === 0) {
+      res.status(400).json({ success: false, error: 'At least one user must be selected' });
+      return;
+    }
+
+    // Check if data exists for this day
+    const reportData = await buildBakeryReportData(weekName, dayOfWeek, orgId);
+    if (!reportData) {
+      res.status(404).json({
+        success: false,
+        error: `No bakery metrics data found for ${dayOfWeek} in week ${weekName}. Please submit data first.`,
+      });
+      return;
+    }
+
+    const result = await sendBakeryReportToUsers(userIds, weekName, dayOfWeek, orgId);
+    res.json({
+      success: true,
+      message: `Report emailed to ${result.sent} user(s)${result.failed > 0 ? `, ${result.failed} failed` : ''}.`,
+      ...result,
+    });
+  } catch (error: any) {
+    console.error('Error sending report email:', error);
+    res.status(500).json({ success: false, error: error.message });
   }
 });
 

@@ -282,6 +282,15 @@ export default function BakeryMetricsReport({ onFilterInfo, triggerAction, onCon
   const [resolveReason, setResolveReason] = useState('');
   const [savingResolve, setSavingResolve] = useState(false);
 
+  // ─── Email Report state ───────────────────────────────────────────────
+  const [showEmailModal, setShowEmailModal] = useState(false);
+  const [emailEligibleUsers, setEmailEligibleUsers] = useState<{ id: string; email: string; firstName: string; lastName: string; role: string }[]>([]);
+  const [emailSelectedUsers, setEmailSelectedUsers] = useState<string[]>([]);
+  const [emailWeek, setEmailWeek] = useState('');
+  const [emailDay, setEmailDay] = useState('');
+  const [emailSending, setEmailSending] = useState(false);
+  const [emailLoadingUsers, setEmailLoadingUsers] = useState(false);
+
   // ─── Overlay positioning refs ──────────────────────────────────────────
   const tableWrapperRef = useRef<HTMLDivElement>(null);
   const firstShiftThRef = useRef<HTMLTableCellElement>(null);
@@ -302,6 +311,67 @@ export default function BakeryMetricsReport({ onFilterInfo, triggerAction, onCon
   }, []);
 
   // ─── Load shift resolutions ──────────────────────────────────────────────
+  // ─── Email Modal Handlers ──────────────────────────────────────────────
+  const openEmailModal = useCallback(async () => {
+    setShowEmailModal(true);
+    setEmailWeek(weekFilter);
+    setEmailDay(dayFilter);
+    setEmailSelectedUsers([]);
+    setEmailLoadingUsers(true);
+    try {
+      const res = await api.get('/bakery-metrics/email-eligible-users');
+      if (res.data?.success) {
+        setEmailEligibleUsers(res.data.users || []);
+      }
+    } catch {
+      showNotification('Failed to load users', 'error');
+    } finally {
+      setEmailLoadingUsers(false);
+    }
+  }, [weekFilter, dayFilter, showNotification]);
+
+  const handleSendEmail = useCallback(async () => {
+    if (emailSelectedUsers.length === 0) {
+      showNotification('Please select at least one user', 'warning');
+      return;
+    }
+    if (!emailWeek || !emailDay) {
+      showNotification('Please select a week and day', 'warning');
+      return;
+    }
+    setEmailSending(true);
+    try {
+      const res = await api.post('/bakery-metrics/send-report-email', {
+        weekName: emailWeek,
+        dayOfWeek: emailDay,
+        userIds: emailSelectedUsers,
+      });
+      if (res.data?.success) {
+        showNotification(res.data.message || 'Report emails sent successfully!', 'success');
+        setShowEmailModal(false);
+      } else {
+        showNotification(res.data?.error || 'Failed to send emails', 'error');
+      }
+    } catch (err: any) {
+      const msg = err.response?.data?.error || 'Failed to send report emails';
+      showNotification(msg, 'error');
+    } finally {
+      setEmailSending(false);
+    }
+  }, [emailSelectedUsers, emailWeek, emailDay, showNotification]);
+
+  const toggleUserSelection = useCallback((userId: string) => {
+    setEmailSelectedUsers(prev =>
+      prev.includes(userId) ? prev.filter(id => id !== userId) : [...prev, userId]
+    );
+  }, []);
+
+  const toggleAllUsers = useCallback(() => {
+    setEmailSelectedUsers(prev =>
+      prev.length === emailEligibleUsers.length ? [] : emailEligibleUsers.map(u => u.id)
+    );
+  }, [emailEligibleUsers]);
+
   const loadShiftResolutions = useCallback(async () => {
     try {
       const res = await api.get('/bakery-metrics/resolutions');
@@ -855,6 +925,14 @@ export default function BakeryMetricsReport({ onFilterInfo, triggerAction, onCon
               >
                 <RefreshCw className="w-3.5 h-3.5 inline mr-1" /> Refresh
               </button>
+
+              {/* Email Report */}
+              <button
+                onClick={openEmailModal}
+                className="px-3 py-2 text-xs bg-amber-500/80 border border-amber-400/50 rounded-lg text-white hover:bg-amber-600/80 transition-colors font-semibold whitespace-nowrap active:scale-95"
+              >
+                <Send className="w-3.5 h-3.5 inline mr-1" /> Email Report
+              </button>
           </div>
         </div>
 
@@ -1293,6 +1371,127 @@ export default function BakeryMetricsReport({ onFilterInfo, triggerAction, onCon
                   {savingResolve ? 'Saving...' : 'Submit Resolution'}
                 </button>
               </div>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* ═══ EMAIL REPORT MODAL ═══ */}
+      {showEmailModal && (
+        <div className="fixed inset-0 bg-black/50 backdrop-blur-sm z-50 flex items-center justify-center p-4" onClick={() => setShowEmailModal(false)}>
+          <div className="bg-white dark:bg-gray-800 rounded-2xl shadow-2xl w-full max-w-lg max-h-[85vh] overflow-hidden" onClick={e => e.stopPropagation()}>
+            {/* Modal Header */}
+            <div className="bg-gradient-to-r from-blue-600 to-indigo-600 px-6 py-4 flex items-center justify-between">
+              <div>
+                <h3 className="text-lg font-bold text-white flex items-center gap-2">
+                  <Send className="w-5 h-5" /> Email Report
+                </h3>
+                <p className="text-xs text-blue-200 mt-0.5">Send bakery production report to selected users</p>
+              </div>
+              <button onClick={() => setShowEmailModal(false)} className="text-white/70 hover:text-white transition-colors">
+                <X className="w-5 h-5" />
+              </button>
+            </div>
+
+            <div className="p-6 space-y-4 overflow-y-auto max-h-[calc(85vh-160px)]">
+              {/* Week & Day Selectors */}
+              <div className="grid grid-cols-2 gap-3">
+                <div>
+                  <label className="block text-xs font-semibold text-gray-700 dark:text-gray-300 mb-1">Week</label>
+                  <select
+                    value={emailWeek}
+                    onChange={e => setEmailWeek(e.target.value)}
+                    className="w-full rounded-lg border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-700 text-sm px-3 py-2 text-gray-900 dark:text-white focus:ring-2 focus:ring-blue-500"
+                  >
+                    <option value="">Select week</option>
+                    {weekOptions.map(w => <option key={w} value={w}>{w}</option>)}
+                  </select>
+                </div>
+                <div>
+                  <label className="block text-xs font-semibold text-gray-700 dark:text-gray-300 mb-1">Day</label>
+                  <select
+                    value={emailDay}
+                    onChange={e => setEmailDay(e.target.value)}
+                    className="w-full rounded-lg border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-700 text-sm px-3 py-2 text-gray-900 dark:text-white focus:ring-2 focus:ring-blue-500"
+                  >
+                    {['Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday'].map(d => (
+                      <option key={d} value={d}>{d}</option>
+                    ))}
+                  </select>
+                </div>
+              </div>
+
+              {/* User Selection */}
+              <div>
+                <div className="flex items-center justify-between mb-2">
+                  <label className="text-xs font-semibold text-gray-700 dark:text-gray-300">Select Recipients</label>
+                  <button
+                    type="button"
+                    onClick={toggleAllUsers}
+                    className="text-xs text-blue-600 dark:text-blue-400 hover:underline font-medium"
+                  >
+                    {emailSelectedUsers.length === emailEligibleUsers.length ? 'Deselect All' : 'Select All'}
+                  </button>
+                </div>
+                {emailLoadingUsers ? (
+                  <div className="flex items-center justify-center py-8">
+                    <Loader2 className="w-6 h-6 text-blue-600 animate-spin" />
+                    <span className="ml-2 text-sm text-gray-500">Loading users...</span>
+                  </div>
+                ) : emailEligibleUsers.length === 0 ? (
+                  <div className="text-center py-6 text-sm text-gray-500 dark:text-gray-400">
+                    <AlertCircle className="w-8 h-8 mx-auto mb-2 opacity-40" />
+                    No eligible users found
+                  </div>
+                ) : (
+                  <div className="border border-gray-200 dark:border-gray-600 rounded-lg max-h-52 overflow-y-auto divide-y divide-gray-100 dark:divide-gray-700">
+                    {emailEligibleUsers.map(u => (
+                      <label
+                        key={u.id}
+                        className={`flex items-center gap-3 px-3 py-2.5 cursor-pointer hover:bg-blue-50 dark:hover:bg-blue-900/20 transition-colors ${
+                          emailSelectedUsers.includes(u.id) ? 'bg-blue-50 dark:bg-blue-900/20' : ''
+                        }`}
+                      >
+                        <input
+                          type="checkbox"
+                          checked={emailSelectedUsers.includes(u.id)}
+                          onChange={() => toggleUserSelection(u.id)}
+                          className="w-4 h-4 rounded border-gray-300 text-blue-600 focus:ring-blue-500"
+                        />
+                        <div className="flex-1 min-w-0">
+                          <div className="text-sm font-medium text-gray-900 dark:text-white truncate">{u.firstName} {u.lastName}</div>
+                          <div className="text-xs text-gray-500 dark:text-gray-400 truncate">{u.email}</div>
+                        </div>
+                        <span className="text-[10px] font-bold uppercase px-2 py-0.5 rounded-full bg-gray-100 dark:bg-gray-700 text-gray-500 dark:text-gray-400">{u.role}</span>
+                      </label>
+                    ))}
+                  </div>
+                )}
+                {emailSelectedUsers.length > 0 && (
+                  <p className="text-xs text-gray-500 dark:text-gray-400 mt-1.5">{emailSelectedUsers.length} user(s) selected</p>
+                )}
+              </div>
+            </div>
+
+            {/* Modal Footer */}
+            <div className="px-6 py-4 border-t border-gray-200 dark:border-gray-700 flex items-center justify-end gap-3 bg-gray-50 dark:bg-gray-800/50">
+              <button
+                onClick={() => setShowEmailModal(false)}
+                className="px-4 py-2 text-sm font-medium text-gray-700 dark:text-gray-300 border border-gray-300 dark:border-gray-600 rounded-lg hover:bg-gray-100 dark:hover:bg-gray-700 transition-colors"
+              >
+                Cancel
+              </button>
+              <button
+                onClick={handleSendEmail}
+                disabled={emailSending || emailSelectedUsers.length === 0 || !emailWeek}
+                className="px-5 py-2 text-sm font-bold text-white bg-gradient-to-r from-blue-600 to-indigo-600 rounded-lg hover:from-blue-700 hover:to-indigo-700 transition-all disabled:opacity-50 disabled:cursor-not-allowed flex items-center gap-2"
+              >
+                {emailSending ? (
+                  <><Loader2 className="w-4 h-4 animate-spin" /> Sending...</>
+                ) : (
+                  <><Send className="w-4 h-4" /> Send Report</>
+                )}
+              </button>
             </div>
           </div>
         </div>
