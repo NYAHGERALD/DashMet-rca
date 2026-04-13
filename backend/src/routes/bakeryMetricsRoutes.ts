@@ -613,7 +613,7 @@ router.post('/submit', async (req: Request, res: Response) => {
         const orgUsers = await getOrgUsersForBakeryReport(orgId);
         if (orgUsers.length > 0) {
           const userIds = orgUsers.map(u => u.id);
-          sendBakeryReportToUsers(userIds, weekName, dayOfWeek, orgId)
+          sendBakeryReportToUsers(userIds, weekName, dayOfWeek, orgId, true)
             .then(result => console.log(`[BakeryAutoEmail] Sent=${result.sent}, Failed=${result.failed}`))
             .catch(err => console.error('[BakeryAutoEmail] Error:', err.message));
         }
@@ -1089,7 +1089,7 @@ router.post('/send-report-email', async (req: Request, res: Response) => {
       return;
     }
 
-    const result = await sendBakeryReportToUsers(userIds, weekName, dayOfWeek, orgId);
+    const result = await sendBakeryReportToUsers(userIds, weekName, dayOfWeek, orgId, false);
     res.json({
       success: true,
       message: `Report emailed to ${result.sent} user(s)${result.failed > 0 ? `, ${result.failed} failed` : ''}.`,
