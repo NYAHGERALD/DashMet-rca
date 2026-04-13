@@ -2,7 +2,10 @@
 
 import { MutableRefObject } from 'react';
 import { applyFishboneTemplate } from './templates/fishboneTemplate';
-import { X, Fish, LayoutTemplate } from 'lucide-react';
+import { applyFlowchartTemplate } from './templates/flowchartTemplate';
+import { applySwotTemplate } from './templates/swotTemplate';
+import { applyMindMapTemplate } from './templates/mindMapTemplate';
+import { X, Fish, GitBranch, Grid3X3, Network, LayoutTemplate } from 'lucide-react';
 
 import type { ExcalidrawImperativeAPI } from '@excalidraw/excalidraw/types';
 
@@ -90,6 +93,127 @@ function FishbonePreview() {
   );
 }
 
+/* ── Flowchart SVG Preview ─────────────────────────────────────────────────── */
+function FlowchartPreview() {
+  return (
+    <svg viewBox="0 0 280 160" className="w-full h-full" fill="none">
+      {/* Start oval */}
+      <ellipse cx="140" cy="18" rx="35" ry="14" fill="#d3f9d8" stroke="#22c55e" strokeWidth="1.5" />
+      <text x="140" y="22" textAnchor="middle" fontSize="8" fill="#22c55e" fontWeight="600">Start</text>
+
+      {/* Arrow down */}
+      <line x1="140" y1="32" x2="140" y2="46" stroke="currentColor" strokeWidth="1.2" />
+      <polygon points="140,48 137,43 143,43" fill="currentColor" />
+
+      {/* Process box */}
+      <rect x="100" y="48" width="80" height="24" rx="4" fill="#dbeafe" stroke="#3b82f6" strokeWidth="1.5" />
+      <text x="140" y="63" textAnchor="middle" fontSize="7" fill="#3b82f6" fontWeight="500">Process Step</text>
+
+      {/* Arrow down */}
+      <line x1="140" y1="72" x2="140" y2="84" stroke="currentColor" strokeWidth="1.2" />
+      <polygon points="140,86 137,81 143,81" fill="currentColor" />
+
+      {/* Decision diamond */}
+      <polygon points="140,86 175,103 140,120 105,103" fill="#ffe8cc" stroke="#f97316" strokeWidth="1.5" />
+      <text x="140" y="107" textAnchor="middle" fontSize="7" fill="#f97316" fontWeight="600">Decision?</text>
+
+      {/* Yes arrow down */}
+      <line x1="140" y1="120" x2="140" y2="133" stroke="currentColor" strokeWidth="1.2" />
+      <text x="147" y="130" fontSize="6" fill="#22c55e" fontWeight="600">Yes</text>
+
+      {/* End oval */}
+      <ellipse cx="140" cy="147" rx="30" ry="12" fill="#ffe3e3" stroke="#ef4444" strokeWidth="1.5" />
+      <text x="140" y="150" textAnchor="middle" fontSize="7" fill="#ef4444" fontWeight="600">End</text>
+
+      {/* No arrow right */}
+      <line x1="175" y1="103" x2="230" y2="103" stroke="currentColor" strokeWidth="1.2" />
+      <text x="195" y="99" fontSize="6" fill="#ef4444" fontWeight="600">No</text>
+      <rect x="230" y="91" width="40" height="24" rx="4" fill="#ffe3e3" stroke="#ef4444" strokeWidth="1" />
+      <text x="250" y="106" textAnchor="middle" fontSize="6" fill="#ef4444" fontWeight="500">Alt Path</text>
+    </svg>
+  );
+}
+
+/* ── SWOT SVG Preview ─────────────────────────────────────────────────────── */
+function SwotPreview() {
+  return (
+    <svg viewBox="0 0 280 160" className="w-full h-full" fill="none">
+      {/* S - top left */}
+      <rect x="20" y="15" width="115" height="60" rx="5" fill="none" stroke="#22c55e" strokeWidth="1.5" />
+      <rect x="20" y="15" width="115" height="18" rx="5" fill="#d3f9d8" />
+      <text x="77" y="28" textAnchor="middle" fontSize="8" fill="#22c55e" fontWeight="600">Strengths</text>
+      <text x="30" y="46" fontSize="6" fill="#555">• Advantage 1</text>
+      <text x="30" y="56" fontSize="6" fill="#555">• Advantage 2</text>
+      <text x="30" y="66" fontSize="6" fill="#555">• Advantage 3</text>
+
+      {/* W - top right */}
+      <rect x="145" y="15" width="115" height="60" rx="5" fill="none" stroke="#ef4444" strokeWidth="1.5" />
+      <rect x="145" y="15" width="115" height="18" rx="5" fill="#ffe3e3" />
+      <text x="202" y="28" textAnchor="middle" fontSize="8" fill="#ef4444" fontWeight="600">Weaknesses</text>
+      <text x="155" y="46" fontSize="6" fill="#555">• Weakness 1</text>
+      <text x="155" y="56" fontSize="6" fill="#555">• Weakness 2</text>
+      <text x="155" y="66" fontSize="6" fill="#555">• Weakness 3</text>
+
+      {/* O - bottom left */}
+      <rect x="20" y="85" width="115" height="60" rx="5" fill="none" stroke="#3b82f6" strokeWidth="1.5" />
+      <rect x="20" y="85" width="115" height="18" rx="5" fill="#dbeafe" />
+      <text x="77" y="98" textAnchor="middle" fontSize="8" fill="#3b82f6" fontWeight="600">Opportunities</text>
+      <text x="30" y="116" fontSize="6" fill="#555">• Opportunity 1</text>
+      <text x="30" y="126" fontSize="6" fill="#555">• Opportunity 2</text>
+      <text x="30" y="136" fontSize="6" fill="#555">• Opportunity 3</text>
+
+      {/* T - bottom right */}
+      <rect x="145" y="85" width="115" height="60" rx="5" fill="none" stroke="#f97316" strokeWidth="1.5" />
+      <rect x="145" y="85" width="115" height="18" rx="5" fill="#ffe8cc" />
+      <text x="202" y="98" textAnchor="middle" fontSize="8" fill="#f97316" fontWeight="600">Threats</text>
+      <text x="155" y="116" fontSize="6" fill="#555">• Threat 1</text>
+      <text x="155" y="126" fontSize="6" fill="#555">• Threat 2</text>
+      <text x="155" y="136" fontSize="6" fill="#555">• Threat 3</text>
+    </svg>
+  );
+}
+
+/* ── Mind Map SVG Preview ─────────────────────────────────────────────────── */
+function MindMapPreview() {
+  return (
+    <svg viewBox="0 0 280 160" className="w-full h-full" fill="none">
+      {/* Central node */}
+      <ellipse cx="140" cy="80" rx="40" ry="18" fill="#dbeafe" stroke="#3b82f6" strokeWidth="2" />
+      <text x="140" y="84" textAnchor="middle" fontSize="8" fill="#3b82f6" fontWeight="600">Central Idea</text>
+
+      {/* Topic A - top left */}
+      <line x1="108" y1="68" x2="55" y2="35" stroke="#ef4444" strokeWidth="1.2" />
+      <rect x="20" y="22" width="60" height="22" rx="4" fill="#ffe3e3" stroke="#ef4444" strokeWidth="1" />
+      <text x="50" y="36" textAnchor="middle" fontSize="7" fill="#ef4444" fontWeight="500">Topic A</text>
+
+      {/* Topic B - top right */}
+      <line x1="172" y1="68" x2="225" y2="35" stroke="#22c55e" strokeWidth="1.2" />
+      <rect x="200" y="22" width="60" height="22" rx="4" fill="#d3f9d8" stroke="#22c55e" strokeWidth="1" />
+      <text x="230" y="36" textAnchor="middle" fontSize="7" fill="#22c55e" fontWeight="500">Topic B</text>
+
+      {/* Topic C - bottom left */}
+      <line x1="108" y1="92" x2="55" y2="125" stroke="#f97316" strokeWidth="1.2" />
+      <rect x="20" y="116" width="60" height="22" rx="4" fill="#ffe8cc" stroke="#f97316" strokeWidth="1" />
+      <text x="50" y="130" textAnchor="middle" fontSize="7" fill="#f97316" fontWeight="500">Topic C</text>
+
+      {/* Topic D - bottom right */}
+      <line x1="172" y1="92" x2="225" y2="125" stroke="#8b5cf6" strokeWidth="1.2" />
+      <rect x="200" y="116" width="60" height="22" rx="4" fill="#ede9fe" stroke="#8b5cf6" strokeWidth="1" />
+      <text x="230" y="130" textAnchor="middle" fontSize="7" fill="#8b5cf6" fontWeight="500">Topic D</text>
+
+      {/* Topic E - left */}
+      <line x1="100" y1="80" x2="30" y2="80" stroke="#0ea5e9" strokeWidth="1.2" />
+      <rect x="2" y="70" width="30" height="20" rx="3" fill="#e0f2fe" stroke="#0ea5e9" strokeWidth="1" />
+      <text x="17" y="83" textAnchor="middle" fontSize="6" fill="#0ea5e9" fontWeight="500">E</text>
+
+      {/* Topic F - right */}
+      <line x1="180" y1="80" x2="250" y2="80" stroke="#ef4444" strokeWidth="1.2" />
+      <rect x="248" y="70" width="30" height="20" rx="3" fill="#ffe3e3" stroke="#ef4444" strokeWidth="1" />
+      <text x="263" y="83" textAnchor="middle" fontSize="6" fill="#ef4444" fontWeight="500">F</text>
+    </svg>
+  );
+}
+
 /* ── Template Definitions ─────────────────────────────────────────────────── */
 const TEMPLATES: TemplateDef[] = [
   {
@@ -99,6 +223,30 @@ const TEMPLATES: TemplateDef[] = [
     icon: <Fish size={24} />,
     preview: <FishbonePreview />,
     apply: applyFishboneTemplate,
+  },
+  {
+    id: 'flowchart',
+    name: 'Flowchart',
+    description: 'Process flow with start/end, steps, decision diamond, and branching paths',
+    icon: <GitBranch size={24} />,
+    preview: <FlowchartPreview />,
+    apply: applyFlowchartTemplate,
+  },
+  {
+    id: 'swot',
+    name: 'SWOT Analysis',
+    description: 'Strategic planning grid — Strengths, Weaknesses, Opportunities, Threats',
+    icon: <Grid3X3 size={24} />,
+    preview: <SwotPreview />,
+    apply: applySwotTemplate,
+  },
+  {
+    id: 'mindmap',
+    name: 'Mind Map',
+    description: 'Radial brainstorming layout — central idea with branching topics and sub-topics',
+    icon: <Network size={24} />,
+    preview: <MindMapPreview />,
+    apply: applyMindMapTemplate,
   },
 ];
 
@@ -232,18 +380,6 @@ export default function TemplatePicker({ open, onClose, excalidrawAPI }: Templat
                 onSelect={() => handleSelect(t)}
               />
             ))}
-
-            {/* "More coming" placeholder */}
-            <div className="
-              flex flex-col items-center justify-center
-              border-2 border-dashed border-gray-200 dark:border-gray-700
-              rounded-xl
-              min-h-[200px]
-              text-gray-400 dark:text-gray-600
-            ">
-              <LayoutTemplate size={32} className="mb-2 opacity-40" />
-              <span className="text-sm">More templates coming soon</span>
-            </div>
           </div>
         </div>
       </div>

@@ -2,286 +2,166 @@ import type { ExcalidrawImperativeAPI } from '@excalidraw/excalidraw/types';
 import type { ExcalidrawElement } from '@excalidraw/excalidraw/types';
 
 /* ────────────────────────────────────────────────────────────────────────────
- * Fishbone (Ishikawa) Diagram Template — Excalidraw version
+ * Fishbone (Ishikawa) 6M Diagram Template — Excalidraw 0.18+
  *
- * Professional 6M layout:
- *   Man · Machine · Method (top)
- *   Material · Measurement · Environment (bottom)
+ * Professional layout with clean geometry (roughness: 0),
+ * rounded category boxes, labeled sub-cause branches, and
+ * a prominent effect box.
  * ──────────────────────────────────────────────────────────────────────────── */
 
-// ─── Layout constants ────────────────────────────────────────────────────────
-const SPINE_Y   = 500;
-const SPINE_X0  = 100;
-const SPINE_X1  = 1500;
-const EFFECT_X  = 1520;
-const EFFECT_W  = 220;
-const EFFECT_H  = 80;
+let _id = 0;
+const uid = () => `fb_${Date.now()}_${++_id}`;
+const seed = () => Math.floor(Math.random() * 1e6);
 
-const RIB_DX    = 200;
-const RIB_DY    = 200;
-const CAT_W     = 150;
-const CAT_H     = 40;
-
-const SUB_DX    = 50;
-const SUB_DY    = 50;
-
-let _idCounter = 0;
-function genId(): string {
-  _idCounter += 1;
-  return `fishbone_${Date.now()}_${_idCounter}`;
-}
-
-// ─── Color mapping ───────────────────────────────────────────────────────────
-const COLORS: Record<string, string> = {
-  blue:    '#3b82f6',
-  red:     '#ef4444',
-  green:   '#22c55e',
-  orange:  '#f97316',
-  violet:  '#7c3aed',
-  yellow:  '#eab308',
-  black:   '#1e1e1e',
-  grey:    '#9ca3af',
+const COL: Record<string, string> = {
+  blue: '#1971c2', red: '#e03131', green: '#2f9e44',
+  orange: '#e8590c', violet: '#7048e8', teal: '#0c8599',
+  black: '#1e1e1e', gray: '#868e96',
+};
+const BG: Record<string, string> = {
+  blue: '#d0ebff', red: '#ffe3e3', green: '#d3f9d8',
+  orange: '#ffe8cc', violet: '#e5dbff', teal: '#c3fae8',
+  pink: '#ffe0f0',
 };
 
-const BG_COLORS: Record<string, string> = {
-  blue:    '#dbeafe',
-  red:     '#fee2e2',
-  green:   '#dcfce7',
-  orange:  '#ffedd5',
-  violet:  '#ede9fe',
-  yellow:  '#fef9c3',
-};
+interface Cat { name: string; color: string; attachX: number; side: 'top' | 'bottom' }
 
-// ─── Category definitions ────────────────────────────────────────────────────
-interface Category {
-  name: string;
-  color: string;
-  ribAttachX: number;
-  side: 'top' | 'bottom';
-}
-
-const CATEGORIES: Category[] = [
-  { name: 'Man',         color: 'blue',    ribAttachX: 350,  side: 'top' },
-  { name: 'Machine',     color: 'red',     ribAttachX: 700,  side: 'top' },
-  { name: 'Method',      color: 'green',   ribAttachX: 1050, side: 'top' },
-  { name: 'Material',    color: 'orange',  ribAttachX: 350,  side: 'bottom' },
-  { name: 'Measurement', color: 'violet',  ribAttachX: 700,  side: 'bottom' },
-  { name: 'Environment', color: 'yellow',  ribAttachX: 1050, side: 'bottom' },
+const CATS: Cat[] = [
+  { name: 'Man',         color: 'blue',   attachX: 380,  side: 'top' },
+  { name: 'Machine',     color: 'red',    attachX: 720,  side: 'top' },
+  { name: 'Method',      color: 'green',  attachX: 1060, side: 'top' },
+  { name: 'Material',    color: 'orange', attachX: 380,  side: 'bottom' },
+  { name: 'Measurement', color: 'violet', attachX: 720,  side: 'bottom' },
+  { name: 'Environment', color: 'teal',   attachX: 1060, side: 'bottom' },
 ];
 
-function makeBase(overrides: Partial<ExcalidrawElement> & { type: string }): any {
+// Spine layout
+const SY  = 480;          // spine Y
+const SX0 = 120;          // spine start X
+const SX1 = 1420;         // spine end X (arrow tip)
+const EX  = 1440;         // effect box X
+const EW  = 200, EH = 70; // effect box size
+
+// Rib geometry
+const RIB_DX = 180, RIB_DY = 195;
+const CAT_W = 140, CAT_H = 38;
+const SUB_DX = 55, SUB_DY = 48;
+
+function el(overrides: Partial<ExcalidrawElement> & { type: string }): any {
   return {
-    id: genId(),
-    fillStyle: 'solid',
-    strokeWidth: 2,
-    strokeStyle: 'solid',
-    roughness: 0,
-    opacity: 100,
-    angle: 0,
-    strokeColor: '#1e1e1e',
-    backgroundColor: 'transparent',
-    width: 0,
-    height: 0,
-    seed: Math.floor(Math.random() * 100000),
-    groupIds: [],
-    frameId: null,
-    boundElements: null,
-    updated: Date.now(),
-    link: null,
-    locked: false,
-    isDeleted: false,
-    version: 1,
-    versionNonce: Math.floor(Math.random() * 100000),
+    id: uid(), fillStyle: 'solid', strokeWidth: 2, strokeStyle: 'solid',
+    roughness: 0, opacity: 100, angle: 0,
+    strokeColor: COL.black, backgroundColor: 'transparent',
+    width: 0, height: 0, seed: seed(),
+    groupIds: [], frameId: null, boundElements: null,
+    updated: Date.now(), link: null, locked: false, isDeleted: false,
+    version: 1, versionNonce: seed(),
     ...overrides,
   };
 }
 
-// ─── Template builder ────────────────────────────────────────────────────────
-export function applyFishboneTemplate(excalidrawAPI: ExcalidrawImperativeAPI) {
-  _idCounter = 0;
-  const elements: any[] = [];
+export function applyFishboneTemplate(api: ExcalidrawImperativeAPI) {
+  _id = 0;
+  const elems: any[] = [];
 
-  // ── 1. Title ──
-  elements.push(makeBase({
-    type: 'text',
-    x: SPINE_X0,
-    y: SPINE_Y - RIB_DY - 160,
-    width: 500,
-    height: 40,
-    text: 'Fishbone (Ishikawa) Diagram',
-    fontSize: 28,
-    fontFamily: 1, // Excalidraw hand-drawn font
-    textAlign: 'left',
-    verticalAlign: 'top',
-    strokeColor: COLORS.black,
-    originalText: 'Fishbone (Ishikawa) Diagram',
-    autoResize: true,
-    lineHeight: 1.25,
+  // ── Title ──
+  elems.push(el({
+    type: 'text', x: SX0, y: SY - RIB_DY - 140, width: 480, height: 36,
+    text: 'Fishbone (Ishikawa) Diagram', originalText: 'Fishbone (Ishikawa) Diagram',
+    fontSize: 28, fontFamily: 3, textAlign: 'left', verticalAlign: 'top',
+    strokeColor: COL.black, autoResize: true, lineHeight: 1.25,
   }));
 
-  // ── 2. Spine (horizontal arrow) ──
-  elements.push(makeBase({
-    type: 'arrow',
-    x: SPINE_X0,
-    y: SPINE_Y,
-    width: SPINE_X1 - SPINE_X0,
-    height: 0,
-    strokeColor: COLORS.black,
-    strokeWidth: 3,
-    points: [[0, 0], [SPINE_X1 - SPINE_X0, 0]],
-    startArrowhead: null,
-    endArrowhead: 'triangle',
+  // ── Spine arrow ──
+  elems.push(el({
+    type: 'arrow', x: SX0, y: SY,
+    width: SX1 - SX0, height: 0,
+    strokeColor: COL.black, strokeWidth: 3,
+    points: [[0, 0], [SX1 - SX0, 0]],
+    startArrowhead: null, endArrowhead: 'triangle',
   }));
 
-  // ── 3. Effect box ──
-  elements.push(makeBase({
-    type: 'rectangle',
-    x: EFFECT_X,
-    y: SPINE_Y - EFFECT_H / 2,
-    width: EFFECT_W,
-    height: EFFECT_H,
-    strokeColor: COLORS.red,
-    backgroundColor: BG_COLORS.red,
-    fillStyle: 'solid',
-    strokeWidth: 2,
+  // ── Effect box ──
+  elems.push(el({
+    type: 'rectangle', x: EX, y: SY - EH / 2, width: EW, height: EH,
+    strokeColor: COL.red, backgroundColor: BG.red, strokeWidth: 2,
     roundness: { type: 3 },
   }));
-
-  // Effect label
-  elements.push(makeBase({
-    type: 'text',
-    x: EFFECT_X + 40,
-    y: SPINE_Y - 20,
-    width: 140,
-    height: 40,
-    text: 'EFFECT\n(Problem)',
-    fontSize: 16,
-    fontFamily: 1,
-    textAlign: 'center',
-    verticalAlign: 'middle',
-    strokeColor: COLORS.red,
-    originalText: 'EFFECT\n(Problem)',
-    autoResize: true,
-    lineHeight: 1.25,
+  elems.push(el({
+    type: 'text', x: EX + 30, y: SY - 18, width: EW - 60, height: 36,
+    text: 'EFFECT\n(Problem)', originalText: 'EFFECT\n(Problem)',
+    fontSize: 16, fontFamily: 3, textAlign: 'center', verticalAlign: 'middle',
+    strokeColor: COL.red, autoResize: true, lineHeight: 1.25,
   }));
 
-  // ── 4. Build each category rib ──
-  for (const cat of CATEGORIES) {
-    const isTop = cat.side === 'top';
-    const signY = isTop ? -1 : 1;
+  // ── Categories ──
+  for (const cat of CATS) {
+    const top = cat.side === 'top';
+    const dir = top ? -1 : 1;
+    const color = COL[cat.color] || COL.black;
+    const bg = BG[cat.color] || 'transparent';
 
-    const ribBaseX = cat.ribAttachX;
-    const ribBaseY = SPINE_Y;
-    const ribEndX  = ribBaseX - RIB_DX;
-    const ribEndY  = ribBaseY + signY * RIB_DY;
+    const ribX0 = cat.attachX - RIB_DX;
+    const ribY0 = SY + dir * RIB_DY;
+    const ribX1 = cat.attachX;
+    const ribY1 = SY;
 
-    const color = COLORS[cat.color] || COLORS.black;
-    const bgColor = BG_COLORS[cat.color] || 'transparent';
-
-    // ── Diagonal rib line ──
-    elements.push(makeBase({
-      type: 'line',
-      x: ribEndX,
-      y: ribEndY,
-      width: ribBaseX - ribEndX,
-      height: ribBaseY - ribEndY,
-      strokeColor: color,
-      strokeWidth: 2,
-      points: [[0, 0], [ribBaseX - ribEndX, ribBaseY - ribEndY]],
+    // Diagonal rib
+    elems.push(el({
+      type: 'line', x: ribX0, y: ribY0,
+      width: ribX1 - ribX0, height: ribY1 - ribY0,
+      strokeColor: color, strokeWidth: 2,
+      points: [[0, 0], [ribX1 - ribX0, ribY1 - ribY0]],
     }));
 
-    // ── Category label box ──
-    const boxX = ribEndX - CAT_W / 2;
-    const boxY = isTop ? ribEndY - CAT_H - 8 : ribEndY + 8;
-
-    elements.push(makeBase({
-      type: 'rectangle',
-      x: boxX,
-      y: boxY,
-      width: CAT_W,
-      height: CAT_H,
-      strokeColor: color,
-      backgroundColor: bgColor,
-      fillStyle: 'solid',
-      roundness: { type: 3 },
+    // Category rounded box
+    const bx = ribX0 - CAT_W / 2;
+    const by = top ? ribY0 - CAT_H - 10 : ribY0 + 10;
+    elems.push(el({
+      type: 'rectangle', x: bx, y: by, width: CAT_W, height: CAT_H,
+      strokeColor: color, backgroundColor: bg,
+      roundness: { type: 3 }, strokeWidth: 1.5,
+    }));
+    elems.push(el({
+      type: 'text', x: bx + 8, y: by + 8, width: CAT_W - 16, height: 22,
+      text: cat.name, originalText: cat.name,
+      fontSize: 16, fontFamily: 3, textAlign: 'center', verticalAlign: 'middle',
+      strokeColor: color, autoResize: true, lineHeight: 1.25,
     }));
 
-    // Category label text
-    elements.push(makeBase({
-      type: 'text',
-      x: boxX + 10,
-      y: boxY + 8,
-      width: CAT_W - 20,
-      height: 24,
-      text: cat.name,
-      fontSize: 16,
-      fontFamily: 1,
-      textAlign: 'center',
-      verticalAlign: 'middle',
-      strokeColor: color,
-      originalText: cat.name,
-      autoResize: true,
-      lineHeight: 1.25,
-    }));
-
-    // ── Sub-cause lines (3 per rib) ──
+    // Sub-cause branches (3 per rib)
     for (let i = 0; i < 3; i++) {
-      const t = 0.25 + i * 0.25;
-      const sx = ribEndX + t * (ribBaseX - ribEndX);
-      const sy = ribEndY + t * (ribBaseY - ribEndY);
-      const subEndX = sx - SUB_DX;
-      const subEndY = sy + signY * (-SUB_DY);
+      const t = 0.25 + i * 0.22;
+      const mx = ribX0 + t * (ribX1 - ribX0);
+      const my = ribY0 + t * (ribY1 - ribY0);
+      const ex = mx - SUB_DX;
+      const ey = my - dir * SUB_DY;
 
-      elements.push(makeBase({
-        type: 'line',
-        x: subEndX,
-        y: subEndY,
-        width: sx - subEndX,
-        height: sy - subEndY,
-        strokeColor: color,
-        strokeWidth: 1,
-        points: [[0, 0], [sx - subEndX, sy - subEndY]],
+      elems.push(el({
+        type: 'line', x: ex, y: ey,
+        width: mx - ex, height: my - ey,
+        strokeColor: color, strokeWidth: 1,
+        points: [[0, 0], [mx - ex, my - ey]],
       }));
-
-      // Sub-cause label
-      elements.push(makeBase({
-        type: 'text',
-        x: subEndX - 40,
-        y: isTop ? subEndY - 22 : subEndY + 4,
-        width: 80,
-        height: 18,
-        text: `Cause ${i + 1}`,
-        fontSize: 14,
-        fontFamily: 1,
-        textAlign: 'center',
-        verticalAlign: 'top',
-        strokeColor: color,
-        originalText: `Cause ${i + 1}`,
-        autoResize: true,
-        lineHeight: 1.25,
+      elems.push(el({
+        type: 'text', x: ex - 35, y: top ? ey - 20 : ey + 4,
+        width: 80, height: 16,
+        text: `Cause ${i + 1}`, originalText: `Cause ${i + 1}`,
+        fontSize: 13, fontFamily: 3, textAlign: 'center', verticalAlign: 'top',
+        strokeColor: color, autoResize: true, lineHeight: 1.25,
       }));
     }
   }
 
-  // ── 5. Instruction footnote ──
-  elements.push(makeBase({
-    type: 'text',
-    x: SPINE_X0,
-    y: SPINE_Y + RIB_DY + 120,
-    width: 800,
-    height: 20,
+  // ── Instruction ──
+  elems.push(el({
+    type: 'text', x: SX0, y: SY + RIB_DY + 100, width: 700, height: 18,
     text: 'Double-click any text to edit  ·  Drag shapes to rearrange  ·  Add more causes with the arrow or line tool',
-    fontSize: 14,
-    fontFamily: 1,
-    textAlign: 'left',
-    verticalAlign: 'top',
-    strokeColor: COLORS.grey,
     originalText: 'Double-click any text to edit  ·  Drag shapes to rearrange  ·  Add more causes with the arrow or line tool',
-    autoResize: true,
-    lineHeight: 1.25,
+    fontSize: 13, fontFamily: 3, textAlign: 'left', verticalAlign: 'top',
+    strokeColor: COL.gray, autoResize: true, lineHeight: 1.25,
   }));
 
-  // ── Apply to canvas ──
-  excalidrawAPI.updateScene({ elements });
-  excalidrawAPI.scrollToContent(undefined, { fitToViewport: true, animate: true });
+  api.updateScene({ elements: elems });
+  api.scrollToContent(undefined, { fitToViewport: true, animate: true });
 }
