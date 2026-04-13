@@ -13,8 +13,8 @@ router.use(authenticate);
 router.post('/', async (req: Request, res: Response) => {
   try {
     const { id: userId, organizationId } = (req as any).user;
-    const { title } = req.body;
-    const board = await boardService.createBoard(userId, organizationId, title);
+    const { title, type } = req.body;
+    const board = await boardService.createBoard(userId, organizationId, title, type);
     res.status(201).json({ success: true, data: board });
   } catch (error: any) {
     console.error('Error creating board:', error);
@@ -26,7 +26,8 @@ router.post('/', async (req: Request, res: Response) => {
 router.get('/', async (req: Request, res: Response) => {
   try {
     const { id: userId, organizationId } = (req as any).user;
-    const boards = await boardService.listBoards(userId, organizationId);
+    const type = req.query.type as string | undefined;
+    const boards = await boardService.listBoards(userId, organizationId, type as any);
     res.json({ success: true, data: boards });
   } catch (error: any) {
     console.error('Error listing boards:', error);

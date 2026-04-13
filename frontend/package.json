@@ -38,6 +38,7 @@
     "firebase": "^12.6.0",
     "framer-motion": "^10.16.16",
     "html2pdf.js": "^0.14.0",
+    "jsmind": "^0.9.1",
     "libheif-js": "^1.19.8",
     "libphonenumber-js": "^1.12.40",
     "lucide-react": "^0.298.0",

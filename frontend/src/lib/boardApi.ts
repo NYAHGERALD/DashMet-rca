@@ -34,7 +34,7 @@ export async function createBoard(title?: string): Promise<Board> {
 }
 
 export async function listBoards(): Promise<Board[]> {
-  const { data } = await api.get('/boards');
+  const { data } = await api.get('/boards', { params: { type: 'WHITEBOARD' } });
   return data.data;
 }
 

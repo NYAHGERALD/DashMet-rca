@@ -1,13 +1,14 @@
-import { PrismaClient, BoardVisibility, BoardCollaboratorRole } from '@prisma/client';
+import { PrismaClient, BoardVisibility, BoardCollaboratorRole, BoardType } from '@prisma/client';
 
 const prisma = new PrismaClient();
 
 // ─── Board CRUD ───
 
-export async function createBoard(userId: string, organizationId: string, title?: string) {
+export async function createBoard(userId: string, organizationId: string, title?: string, type: BoardType = 'WHITEBOARD') {
   return prisma.board.create({
     data: {
-      title: title || 'Untitled Board',
+      type,
+      title: title || (type === 'MINDMAP' ? 'Untitled Mind Map' : 'Untitled Board'),
       ownerId: userId,
       organizationId,
       collaborators: {
@@ -18,11 +19,12 @@ export async function createBoard(userId: string, organizationId: string, title?
   });
 }
 
-export async function listBoards(userId: string, organizationId: string) {
+export async function listBoards(userId: string, organizationId: string, type?: BoardType) {
   return prisma.board.findMany({
     where: {
       organizationId,
       isArchived: false,
+      ...(type ? { type } : {}),
       OR: [
         { ownerId: userId },
         { collaborators: { some: { userId } } },
@@ -90,6 +92,7 @@ export async function duplicateBoard(boardId: string, userId: string) {
 
   return prisma.board.create({
     data: {
+      type: original.type,
       title: `${original.title} (Copy)`,
       description: original.description,
       ownerId: userId,

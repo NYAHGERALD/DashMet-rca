@@ -4171,6 +4171,11 @@ model DayOfWeek {
 // CANVAS AI — Whiteboard Models
 // ═══════════════════════════════════════════════════════════════════════════
 
+enum BoardType {
+  WHITEBOARD
+  MINDMAP
+}
+
 enum BoardVisibility {
   PRIVATE
   TEAM
@@ -4185,6 +4190,7 @@ enum BoardCollaboratorRole {
 
 model Board {
   id              String           @id @default(uuid())
+  type            BoardType        @default(WHITEBOARD)
   title           String           @default("Untitled Board")
   description     String?          @db.Text
   thumbnail       String?          // S3 URL for board preview image
