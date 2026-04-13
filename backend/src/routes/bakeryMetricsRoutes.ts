@@ -1068,7 +1068,7 @@ router.post('/send-report-email', async (req: Request, res: Response) => {
       return;
     }
 
-    const { weekName, dayOfWeek, userIds } = req.body;
+    const { weekName, dayOfWeek, userIds, customMessage } = req.body;
 
     if (!weekName || !dayOfWeek) {
       res.status(400).json({ success: false, error: 'weekName and dayOfWeek are required' });
@@ -1078,6 +1078,11 @@ router.post('/send-report-email', async (req: Request, res: Response) => {
       res.status(400).json({ success: false, error: 'At least one user must be selected' });
       return;
     }
+
+    // Sanitize custom message (strip HTML tags to prevent injection)
+    const safeMessage = typeof customMessage === 'string' && customMessage.trim()
+      ? customMessage.trim().replace(/<[^>]*>/g, '').slice(0, 500)
+      : undefined;
 
     // Check if data exists for this day
     const reportData = await buildBakeryReportData(weekName, dayOfWeek, orgId);
@@ -1089,7 +1094,7 @@ router.post('/send-report-email', async (req: Request, res: Response) => {
       return;
     }
 
-    const result = await sendBakeryReportToUsers(userIds, weekName, dayOfWeek, orgId, false);
+    const result = await sendBakeryReportToUsers(userIds, weekName, dayOfWeek, orgId, false, safeMessage);
     res.json({
       success: true,
       message: `Report emailed to ${result.sent} user(s)${result.failed > 0 ? `, ${result.failed} failed` : ''}.`,

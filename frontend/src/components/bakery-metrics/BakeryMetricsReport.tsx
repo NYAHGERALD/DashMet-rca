@@ -290,6 +290,7 @@ export default function BakeryMetricsReport({ onFilterInfo, triggerAction, onCon
   const [emailDay, setEmailDay] = useState('');
   const [emailSending, setEmailSending] = useState(false);
   const [emailLoadingUsers, setEmailLoadingUsers] = useState(false);
+  const [emailCustomMessage, setEmailCustomMessage] = useState('');
 
   // ─── Overlay positioning refs ──────────────────────────────────────────
   const tableWrapperRef = useRef<HTMLDivElement>(null);
@@ -317,6 +318,7 @@ export default function BakeryMetricsReport({ onFilterInfo, triggerAction, onCon
     setEmailWeek(weekFilter);
     setEmailDay(dayFilter);
     setEmailSelectedUsers([]);
+    setEmailCustomMessage('');
     setEmailLoadingUsers(true);
     try {
       const res = await api.get('/bakery-metrics/email-eligible-users');
@@ -345,6 +347,7 @@ export default function BakeryMetricsReport({ onFilterInfo, triggerAction, onCon
         weekName: emailWeek,
         dayOfWeek: emailDay,
         userIds: emailSelectedUsers,
+        ...(emailCustomMessage.trim() && { customMessage: emailCustomMessage.trim() }),
       });
       if (res.data?.success) {
         showNotification(res.data.message || 'Report emails sent successfully!', 'success');
@@ -358,7 +361,7 @@ export default function BakeryMetricsReport({ onFilterInfo, triggerAction, onCon
     } finally {
       setEmailSending(false);
     }
-  }, [emailSelectedUsers, emailWeek, emailDay, showNotification]);
+  }, [emailSelectedUsers, emailWeek, emailDay, emailCustomMessage, showNotification]);
 
   const toggleUserSelection = useCallback((userId: string) => {
     setEmailSelectedUsers(prev =>
@@ -1419,6 +1422,19 @@ export default function BakeryMetricsReport({ onFilterInfo, triggerAction, onCon
                     ))}
                   </select>
                 </div>
+              </div>
+
+              {/* Email Message */}
+              <div>
+                <label className="block text-xs font-semibold text-gray-700 dark:text-gray-300 mb-1">Email Message <span className="font-normal text-gray-400">(optional)</span></label>
+                <textarea
+                  value={emailCustomMessage}
+                  onChange={e => setEmailCustomMessage(e.target.value)}
+                  placeholder={`A saved bakery production report has been submitted for ${emailDay || 'this day'}. Please find the detailed KPI report attached as a PDF.`}
+                  rows={3}
+                  className="w-full rounded-lg border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-700 text-sm px-3 py-2 text-gray-900 dark:text-white focus:ring-2 focus:ring-blue-500 resize-none placeholder:text-gray-400 dark:placeholder:text-gray-500"
+                />
+                <p className="text-[10px] text-gray-400 dark:text-gray-500 mt-0.5">Leave blank to use the default message</p>
               </div>
 
               {/* User Selection */}

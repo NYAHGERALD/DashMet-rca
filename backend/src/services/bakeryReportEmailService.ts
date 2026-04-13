@@ -620,7 +620,8 @@ export async function sendBakeryReportEmail(
   recipientName: string,
   reportData: BakeryReportData,
   pdfBuffer: Buffer,
-  isAutomatic: boolean = true
+  isAutomatic: boolean = true,
+  customMessage?: string
 ): Promise<{ success: boolean; reason?: string; messageId?: string }> {
   const resend = getResendClient();
   if (!resend) {
@@ -638,7 +639,7 @@ export async function sendBakeryReportEmail(
     from: process.env.EMAIL_FROM || 'DashMet <noreply@dashmet.com>',
     to: recipientEmail,
     subject: `📊 Bakery Production Report — ${reportData.dayOfWeek}, ${reportData.weekName.replace('_', ' to ')}`,
-    html: buildEmailHtml(recipientName, reportData, isAutomatic),
+    html: buildEmailHtml(recipientName, reportData, isAutomatic, customMessage),
     attachments,
   });
 
@@ -653,7 +654,7 @@ export async function sendBakeryReportEmail(
 // ═══════════════════════════════════════════════════════════════════════════
 // EMAIL HTML
 // ═══════════════════════════════════════════════════════════════════════════
-function buildEmailHtml(recipientName: string, data: BakeryReportData, isAutomatic: boolean): string {
+function buildEmailHtml(recipientName: string, data: BakeryReportData, isAutomatic: boolean, customMessage?: string): string {
   const oeeIcon = data.summary.oeeStatus === 'TARGET MET' ? '✅' : '⚠️';
   const wasteIcon = data.summary.wasteStatus === 'BELOW TARGET' ? '✅' : '🔴';
   const prodIcon = data.summary.productionStatus === 'ABOVE TARGET' ? '✅' : '📉';
@@ -661,6 +662,8 @@ function buildEmailHtml(recipientName: string, data: BakeryReportData, isAutomat
   const reportWord = isAutomatic ? 'A new' : 'A saved';
   const apiBase = process.env.BACKEND_URL || process.env.RENDER_EXTERNAL_URL || 'https://dashmet-rca-api.onrender.com';
   const logoUrl = `${apiBase}/assets/logo.png`;
+  const bodyMessage = customMessage
+    || `${reportWord} bakery production report has been submitted by <strong>${data.submittedBy}</strong> for <strong>${data.dayOfWeek}</strong>. Please find the detailed KPI report attached as a PDF.`;
 
   return `<!DOCTYPE html>
 <html>
@@ -675,8 +678,7 @@ function buildEmailHtml(recipientName: string, data: BakeryReportData, isAutomat
     <div style="padding:32px 40px;">
       <p style="font-size:15px;color:#334155;line-height:1.6;margin:0 0 20px;">Hello ${recipientName},</p>
       <p style="font-size:14px;color:#475569;line-height:1.6;margin:0 0 24px;">
-        ${reportWord} bakery production report has been submitted by <strong>${data.submittedBy}</strong> for <strong>${data.dayOfWeek}</strong>.
-        Please find the detailed KPI report attached as a PDF.
+        ${bodyMessage}
       </p>
       <div style="background:#f8fafc;border:1px solid #e2e8f0;border-radius:12px;padding:24px;margin-bottom:24px;">
         <h3 style="font-size:14px;color:#1e293b;margin:0 0 16px;font-weight:700;">📋 Performance Snapshot</h3>
@@ -735,7 +737,8 @@ export async function sendBakeryReportToUsers(
   weekName: string,
   dayOfWeek: string,
   organizationId: string,
-  isAutomatic: boolean = true
+  isAutomatic: boolean = true,
+  customMessage?: string
 ): Promise<{ sent: number; failed: number; errors: string[] }> {
   const reportData = await buildBakeryReportData(weekName, dayOfWeek, organizationId);
   if (!reportData) {
@@ -755,7 +758,7 @@ export async function sendBakeryReportToUsers(
 
   for (const user of users) {
     try {
-      const result = await sendBakeryReportEmail(user.email, user.firstName, reportData, pdfBuffer, isAutomatic);
+      const result = await sendBakeryReportEmail(user.email, user.firstName, reportData, pdfBuffer, isAutomatic, customMessage);
       if (result.success) {
         sent++;
       } else {
