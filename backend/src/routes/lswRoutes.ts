@@ -501,6 +501,9 @@ router.post('/personal-goals', async (req: AuthRequest, res: Response) => {
   try {
     const goal = await lswService.createPersonalGoal({ ...req.body, userId: req.user!.id });
     res.status(201).json({ success: true, data: goal });
+    websocketService.emitToUser(req.user!.id, 'lsw:goal-changed', {
+      action: 'goal-created', goal,
+    });
   } catch (error: any) {
     res.status(500).json({ success: false, error: error.message });
   }
@@ -510,6 +513,9 @@ router.put('/personal-goals/:id', async (req: AuthRequest, res: Response) => {
   try {
     const goal = await lswService.updatePersonalGoal(req.params.id, req.user!.id, req.body);
     res.json({ success: true, data: goal });
+    websocketService.emitToUser(req.user!.id, 'lsw:goal-changed', {
+      action: 'goal-updated', goal,
+    });
   } catch (error: any) {
     res.status(500).json({ success: false, error: error.message });
   }
@@ -519,6 +525,9 @@ router.delete('/personal-goals/:id', async (req: AuthRequest, res: Response) => 
   try {
     await lswService.deletePersonalGoal(req.params.id, req.user!.id);
     res.json({ success: true });
+    websocketService.emitToUser(req.user!.id, 'lsw:goal-changed', {
+      action: 'goal-deleted', goalId: req.params.id,
+    });
   } catch (error: any) {
     res.status(500).json({ success: false, error: error.message });
   }

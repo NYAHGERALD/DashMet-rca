@@ -401,6 +401,9 @@ export function WebSocketProvider({ children }: { children: React.ReactNode }) {
   // LSW freq task callbacks
   const lswFreqTaskChangedCallbacks = useRef<Set<(data: any) => void>>(new Set());
 
+  // LSW goal callbacks
+  const lswGoalChangedCallbacks = useRef<Set<(data: any) => void>>(new Set());
+
   const connect = useCallback(async (userId: string, organizationId: string) => {
     // Prevent multiple connection attempts
     if (socket?.connected || connectionAttempted.current) return;
@@ -958,6 +961,10 @@ export function WebSocketProvider({ children }: { children: React.ReactNode }) {
       lswFreqTaskChangedCallbacks.current.forEach(cb => cb(data));
     });
 
+    newSocket.on('lsw:goal-changed', (data: any) => {
+      lswGoalChangedCallbacks.current.forEach(cb => cb(data));
+    });
+
     // Handle incident participants list
     newSocket.on('incident:participants', (data: { incidentId: string; participants: any[] }) => {
       const onlineIds = data.participants.filter(p => p.isOnline).map(p => p.id);
@@ -1447,6 +1454,11 @@ export function WebSocketProvider({ children }: { children: React.ReactNode }) {
     return () => { lswFreqTaskChangedCallbacks.current.delete(callback); };
   }, []);
 
+  const onLswGoalChanged = useCallback((callback: (data: any) => void) => {
+    lswGoalChangedCallbacks.current.add(callback);
+    return () => { lswGoalChangedCallbacks.current.delete(callback); };
+  }, []);
+
   const emitRCAModalState = useCallback((incidentId: string, action: 'opened' | 'closed' | 'method-selected' | 'visibility-changed' | 'analyzing', data?: { selectedMethod?: string; visibility?: string }) => {
     if (socket?.connected) {
       socket.emit('rca:modal-state', { incidentId, action, ...data });
@@ -1796,6 +1808,8 @@ export function WebSocketProvider({ children }: { children: React.ReactNode }) {
         onLswTriggerChanged,
         // LSW freq tasks
         onLswFreqTaskChanged,
+        // LSW goals
+        onLswGoalChanged,
       }}
     >
       {children}

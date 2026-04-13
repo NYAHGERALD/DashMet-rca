@@ -307,7 +307,7 @@ function getWeekOffsetText(selectedWeek: number, selectedYear: number, config?: 
 
 function LSWContent() {
   const { user } = useAuth();
-  const { connect, isConnected, onLswCompletionChanged, onLswProjectChanged, onLswFollowUpChanged, onLswTriggerChanged, onLswFreqTaskChanged } = useWebSocket();
+  const { connect, isConnected, onLswCompletionChanged, onLswProjectChanged, onLswFollowUpChanged, onLswTriggerChanged, onLswFreqTaskChanged, onLswGoalChanged } = useWebSocket();
   const [calendarConfig, setCalendarConfig] = useState<LswCalendarConfig>({ calendarYearStartMonth: 1, calendarYearStartDay: 1 });
   const [workDaysPerWeek, setWorkDaysPerWeek] = useState<number>(5);
   const [currentWeek, setCurrentWeek] = useState(getWeekNumber(new Date()));
@@ -1202,6 +1202,35 @@ function LSWContent() {
     return unsub;
   }, [onLswFreqTaskChanged, loadLswData]);
 
+  // Real-time sync: apply goal changes instantly from WebSocket events
+  useEffect(() => {
+    const unsub = onLswGoalChanged((data: any) => {
+      switch (data.action) {
+        case 'goal-created':
+          if (data.goal) {
+            setPersonalGoals(prev => {
+              if (prev.some(g => g.id === data.goal.id)) return prev;
+              return [...prev, mapGoalFromDb(data.goal)];
+            });
+          }
+          break;
+        case 'goal-updated':
+          if (data.goal) {
+            setPersonalGoals(prev => prev.map(g => g.id === data.goal.id ? mapGoalFromDb(data.goal) : g));
+          }
+          break;
+        case 'goal-deleted':
+          if (data.goalId) {
+            setPersonalGoals(prev => prev.filter(g => g.id !== data.goalId));
+          }
+          break;
+        default:
+          loadLswData();
+      }
+    });
+    return unsub;
+  }, [onLswGoalChanged, loadLswData]);
+
   // Cross-platform sync: refetch only when tab becomes visible (no periodic polling)
   useEffect(() => {
     if (!user || !configReady) return;
@@ -1400,7 +1429,10 @@ function LSWContent() {
         progress: 0,
       });
       const mapped = mapGoalFromDb(created);
-      setPersonalGoals(prev => [...prev, mapped]);
+      setPersonalGoals(prev => {
+        if (prev.some(g => g.id === mapped.id)) return prev;
+        return [...prev, mapped];
+      });
       setEditingGoalInlineId(mapped.id);
       setEditingGoalValues({ objective: '', dueDate: mapped.dueDate });
       setTimeout(() => goalInputRef.current?.focus(), 50);
