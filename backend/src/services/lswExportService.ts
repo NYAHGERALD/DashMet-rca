@@ -205,6 +205,22 @@ export async function generateLswExcelReport(
     setCellValue(ws, `P${row}`, `(+${overflow} more goals)`);
   });
 
+  // ─── AUTO ROW HEIGHT for all data sections ───
+  // Remove fixed row heights so Excel auto-fits based on wrapText content
+  const dataRowRanges = [
+    { start: 2, end: 16 },   // Daily Tasks + To Do + Frequency Tasks
+    { start: 21, end: 23 },  // Projects + Meeting Rails
+    { start: 26, end: 31 },  // Follow Ups + Key Results
+    { start: 33, end: 37 },  // RCA Triggers + Personal Goals
+  ];
+  for (const range of dataRowRanges) {
+    for (let r = range.start; r <= range.end; r++) {
+      const row = ws.getRow(r);
+      // Clear fixed height — Excel will auto-calculate on open with wrapText
+      row.height = undefined as any;
+    }
+  }
+
   // Write to buffer
   const buffer = await workbook.xlsx.writeBuffer();
   return buffer;
