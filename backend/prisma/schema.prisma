@@ -4346,6 +4346,10 @@ model LswNotificationPreference {
 
   // ── Notification Frequency ──
   digestFrequency       String   @default("realtime") // realtime, hourly, daily, weekly
+  digestDays            Json     @default("[\"monday\",\"tuesday\",\"wednesday\",\"thursday\",\"friday\"]") // Days of week for daily digest
+  digestTime            String   @default("08:00")    // HH:MM — preferred delivery time for daily/weekly
+  customReminderMinutes Int?                           // User-typed custom minutes before
+  customReminderTime    String?                        // HH:MM — user-typed custom reminder time
   quietHoursStart       String?  // HH:MM — no notifications during this window
   quietHoursEnd         String?  // HH:MM
   timezone              String   @default("America/Chicago")

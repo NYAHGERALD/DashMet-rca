@@ -61,6 +61,10 @@ router.put('/', async (req: AuthRequest, res: Response) => {
       reminderWeeksBefore,
       reminderMonthsBefore,
       digestFrequency,
+      digestDays,
+      digestTime,
+      customReminderMinutes,
+      customReminderTime,
       quietHoursStart,
       quietHoursEnd,
       timezone,
@@ -149,6 +153,10 @@ router.put('/', async (req: AuthRequest, res: Response) => {
     if (reminderWeeksBefore !== undefined) updateData.reminderWeeksBefore = Number(reminderWeeksBefore);
     if (reminderMonthsBefore !== undefined) updateData.reminderMonthsBefore = Number(reminderMonthsBefore);
     if (digestFrequency !== undefined) updateData.digestFrequency = digestFrequency;
+    if (digestDays !== undefined) updateData.digestDays = digestDays;
+    if (digestTime !== undefined) updateData.digestTime = digestTime || '08:00';
+    if (customReminderMinutes !== undefined) updateData.customReminderMinutes = customReminderMinutes === null ? null : Math.min(1440, Math.max(1, Number(customReminderMinutes)));
+    if (customReminderTime !== undefined) updateData.customReminderTime = customReminderTime || null;
     if (quietHoursStart !== undefined) updateData.quietHoursStart = quietHoursStart || null;
     if (quietHoursEnd !== undefined) updateData.quietHoursEnd = quietHoursEnd || null;
     if (timezone !== undefined) updateData.timezone = timezone;

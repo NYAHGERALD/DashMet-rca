@@ -40,6 +40,10 @@ interface NotificationPreferences {
   reminderWeeksBefore: number;
   reminderMonthsBefore: number;
   digestFrequency: string;
+  digestDays: string[];
+  digestTime: string;
+  customReminderMinutes: number | null;
+  customReminderTime: string | null;
   quietHoursStart: string | null;
   quietHoursEnd: string | null;
   timezone: string;
@@ -94,6 +98,10 @@ const DEFAULT_PREFS: NotificationPreferences = {
   reminderWeeksBefore: 0,
   reminderMonthsBefore: 0,
   digestFrequency: 'realtime',
+  digestDays: ['monday', 'tuesday', 'wednesday', 'thursday', 'friday'],
+  digestTime: '08:00',
+  customReminderMinutes: null,
+  customReminderTime: null,
   quietHoursStart: null,
   quietHoursEnd: null,
   timezone: Intl.DateTimeFormat().resolvedOptions().timeZone || 'America/Chicago',
@@ -719,12 +727,48 @@ export default function LswNotificationSettings() {
                   </select>
                 </div>
               </div>
+
+              {/* Custom Minutes Input */}
+              <div className="border-t border-gray-200 dark:border-gray-600 pt-4 mt-2">
+                <label className="block text-xs font-medium text-gray-700 dark:text-gray-300 mb-2">Custom Reminder</label>
+                <p className="text-[11px] text-gray-500 dark:text-gray-400 mb-3">Type your own custom minutes or a specific time of day.</p>
+                <div className="grid grid-cols-2 gap-4">
+                  <div>
+                    <label className="block text-[11px] text-gray-500 dark:text-gray-400 mb-1">Custom Minutes Before</label>
+                    <div className="flex items-center gap-2">
+                      <input
+                        type="number"
+                        min="1"
+                        max="1440"
+                        placeholder="e.g. 45"
+                        value={prefs.customReminderMinutes ?? ''}
+                        onChange={(e) => updateField('customReminderMinutes', e.target.value ? Number(e.target.value) : null)}
+                        className="w-full px-3 py-2 text-sm border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-800 text-gray-900 dark:text-white focus:ring-2 focus:ring-primary-500 [appearance:textfield] [&::-webkit-outer-spin-button]:appearance-none [&::-webkit-inner-spin-button]:appearance-none"
+                      />
+                      <span className="text-xs text-gray-500 dark:text-gray-400 whitespace-nowrap">min</span>
+                    </div>
+                  </div>
+                  <div>
+                    <label className="block text-[11px] text-gray-500 dark:text-gray-400 mb-1">Custom Time of Day</label>
+                    <input
+                      type="time"
+                      value={prefs.customReminderTime ?? ''}
+                      onChange={(e) => updateField('customReminderTime', e.target.value || null)}
+                      className="w-full px-3 py-2 text-sm border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-800 text-gray-900 dark:text-white focus:ring-2 focus:ring-primary-500"
+                    />
+                  </div>
+                </div>
+                {prefs.customReminderMinutes && (
+                  <p className="text-[11px] text-primary-600 dark:text-primary-400 mt-2">Will remind {prefs.customReminderMinutes} min{prefs.customReminderMinutes >= 60 ? ` (${Math.floor(prefs.customReminderMinutes / 60)}h ${prefs.customReminderMinutes % 60}m)` : ''} before due time.</p>
+                )}
+                {prefs.customReminderTime && (
+                  <p className="text-[11px] text-primary-600 dark:text-primary-400 mt-1">Daily reminder at {prefs.customReminderTime}.</p>
+                )}
+              </div>
             </div>
           )}
         </div>
       </CollapsibleSection>
-
-      {/* ━━━ Alert Sound ━━━ */}
       <CollapsibleSection title="Alert Sound" icon="🔊" description="Force alert sounds to ensure you never miss a notification" defaultOpen={false} badge={prefs.soundEnabled ? 'Active' : 'Off'}>
         <div className={!isAnyChannelEnabled ? 'opacity-50 pointer-events-none' : ''}>
           <Toggle enabled={prefs.soundEnabled} onChange={(v) => updateField('soundEnabled', v)} label="Enable Alert Sounds" description="Play a sound when notifications arrive" disabled={!isAnyChannelEnabled} />
@@ -1032,6 +1076,96 @@ export default function LswNotificationSettings() {
               ))}
             </div>
           </div>
+
+          {/* Daily Digest — Day Selector */}
+          {prefs.digestFrequency === 'daily' && (
+            <div className="border-t border-gray-200 dark:border-gray-600 pt-4 mt-4">
+              <label className="block text-xs font-medium text-gray-700 dark:text-gray-300 mb-2">Which days should we send the daily digest?</label>
+              <div className="flex gap-1.5">
+                {DAYS_OF_WEEK.map((day) => {
+                  const isActive = (prefs.digestDays || []).includes(day.key);
+                  return (
+                    <button
+                      key={day.key}
+                      onClick={() => {
+                        const current = prefs.digestDays || [];
+                        const updated = current.includes(day.key)
+                          ? current.filter((d) => d !== day.key)
+                          : [...current, day.key];
+                        updateField('digestDays', updated);
+                      }}
+                      title={day.full}
+                      className={`flex-1 py-2.5 text-xs font-semibold rounded-lg border-2 transition-all duration-200 ${
+                        isActive
+                          ? 'border-primary-500 bg-primary-50 dark:bg-primary-900/20 text-primary-700 dark:text-primary-300'
+                          : 'border-gray-200 dark:border-gray-600 text-gray-500 dark:text-gray-400 hover:border-gray-300'
+                      }`}
+                    >
+                      {day.label}
+                    </button>
+                  );
+                })}
+              </div>
+              <div className="mt-3">
+                <label className="block text-[11px] text-gray-500 dark:text-gray-400 mb-1">Preferred Delivery Time</label>
+                <input
+                  type="time"
+                  value={prefs.digestTime || '08:00'}
+                  onChange={(e) => updateField('digestTime', e.target.value || '08:00')}
+                  className="px-3 py-2 text-sm border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-800 text-gray-900 dark:text-white focus:ring-2 focus:ring-primary-500"
+                />
+              </div>
+            </div>
+          )}
+
+          {/* Weekly Digest — Day + Time */}
+          {prefs.digestFrequency === 'weekly' && (
+            <div className="border-t border-gray-200 dark:border-gray-600 pt-4 mt-4">
+              <label className="block text-xs font-medium text-gray-700 dark:text-gray-300 mb-2">Deliver weekly digest on</label>
+              <div className="flex gap-1.5">
+                {DAYS_OF_WEEK.map((day) => {
+                  const isActive = (prefs.digestDays || []).includes(day.key);
+                  return (
+                    <button
+                      key={day.key}
+                      onClick={() => updateField('digestDays', [day.key])}
+                      title={day.full}
+                      className={`flex-1 py-2.5 text-xs font-semibold rounded-lg border-2 transition-all duration-200 ${
+                        isActive
+                          ? 'border-primary-500 bg-primary-50 dark:bg-primary-900/20 text-primary-700 dark:text-primary-300'
+                          : 'border-gray-200 dark:border-gray-600 text-gray-500 dark:text-gray-400 hover:border-gray-300'
+                      }`}
+                    >
+                      {day.label}
+                    </button>
+                  );
+                })}
+              </div>
+              <div className="mt-3">
+                <label className="block text-[11px] text-gray-500 dark:text-gray-400 mb-1">Delivery Time</label>
+                <input
+                  type="time"
+                  value={prefs.digestTime || '08:00'}
+                  onChange={(e) => updateField('digestTime', e.target.value || '08:00')}
+                  className="px-3 py-2 text-sm border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-800 text-gray-900 dark:text-white focus:ring-2 focus:ring-primary-500"
+                />
+              </div>
+            </div>
+          )}
+
+          {/* Hourly Digest — Delivery Time */}
+          {prefs.digestFrequency === 'hourly' && (
+            <div className="border-t border-gray-200 dark:border-gray-600 pt-4 mt-4">
+              <label className="block text-xs font-medium text-gray-700 dark:text-gray-300 mb-2">Start hourly digests at</label>
+              <input
+                type="time"
+                value={prefs.digestTime || '08:00'}
+                onChange={(e) => updateField('digestTime', e.target.value || '08:00')}
+                className="px-3 py-2 text-sm border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-800 text-gray-900 dark:text-white focus:ring-2 focus:ring-primary-500"
+              />
+              <p className="text-[11px] text-gray-500 dark:text-gray-400 mt-1">Digests are sent every hour starting from this time.</p>
+            </div>
+          )}
 
           {/* Legacy Quiet Hours */}
           <div className="border-t border-gray-200 dark:border-gray-600 pt-4 mt-4">
