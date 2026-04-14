@@ -405,15 +405,48 @@ async function logSentNotifications(userId: string, alerts: LswAlertItem[], chan
 // ─────────────────────────────────────────────────────────────────────────────
 
 function isInQuietHours(prefs: LswNotificationPreference, now: Date): boolean {
-  if (!prefs.quietHoursStart || !prefs.quietHoursEnd) return false;
+  // Check DND schedule first (more comprehensive)
+  if ((prefs as any).dndEnabled) {
+    const dndDays: string[] = typeof (prefs as any).dndDays === 'string'
+      ? JSON.parse((prefs as any).dndDays)
+      : ((prefs as any).dndDays || []);
+    const dayNames = ['sunday', 'monday', 'tuesday', 'wednesday', 'thursday', 'friday', 'saturday'];
+    const currentDay = dayNames[now.getDay()];
 
+    if ((prefs as any).dndMode === 'custom' && (prefs as any).dndCustomSlots) {
+      // Custom slots: check each { day, startTime, endTime }
+      const slots = typeof (prefs as any).dndCustomSlots === 'string'
+        ? JSON.parse((prefs as any).dndCustomSlots)
+        : (prefs as any).dndCustomSlots;
+      for (const slot of (slots || [])) {
+        if (slot.day === currentDay) {
+          if (isTimeInWindow(now, slot.startTime, slot.endTime)) return true;
+        }
+      }
+    } else {
+      // Scheduled mode
+      if (dndDays.includes(currentDay)) {
+        if ((prefs as any).dndAllDay) return true;
+        const start = (prefs as any).dndStartTime;
+        const end = (prefs as any).dndEndTime;
+        if (start && end && isTimeInWindow(now, start, end)) return true;
+      }
+    }
+  }
+
+  // Legacy quiet hours check
+  if (!prefs.quietHoursStart || !prefs.quietHoursEnd) return false;
+  return isTimeInWindow(now, prefs.quietHoursStart, prefs.quietHoursEnd);
+}
+
+function isTimeInWindow(now: Date, startHHMM: string, endHHMM: string): boolean {
   const currentMinutes = now.getHours() * 60 + now.getMinutes();
-  const [startH, startM] = prefs.quietHoursStart.split(':').map(Number);
-  const [endH, endM] = prefs.quietHoursEnd.split(':').map(Number);
+  const [startH, startM] = startHHMM.split(':').map(Number);
+  const [endH, endM] = endHHMM.split(':').map(Number);
   const startMinutes = startH * 60 + startM;
   const endMinutes = endH * 60 + endM;
 
-  // Handle overnight quiet hours (e.g., 22:00 - 07:00)
+  // Handle overnight windows (e.g., 22:00 - 07:00)
   if (startMinutes > endMinutes) {
     return currentMinutes >= startMinutes || currentMinutes < endMinutes;
   }
@@ -746,7 +779,11 @@ export async function getPendingBrowserNotifications(userId: string) {
     types.push('BAKERY_METRICS_SUBMITTED');
   }
 
-  if (types.length === 0) return [];
+  if (types.length === 0) return { notifications: [], soundPrefs: null };
+
+  // Check DND
+  const now = new Date();
+  if (prefs && isInQuietHours(prefs, now)) return { notifications: [], soundPrefs: null };
 
   // Return recent unread notifications
   const notifications = await prisma.notification.findMany({
@@ -760,7 +797,16 @@ export async function getPendingBrowserNotifications(userId: string) {
     take: 20,
   });
 
-  return notifications;
+  // Return sound preferences alongside notifications
+  const soundPrefs = prefs ? {
+    soundEnabled: (prefs as any).soundEnabled ?? true,
+    soundVolume: (prefs as any).soundVolume ?? 80,
+    soundType: (prefs as any).soundType ?? 'chime',
+    repeatSoundForOverdue: (prefs as any).repeatSoundForOverdue ?? true,
+    repeatSoundInterval: (prefs as any).repeatSoundInterval ?? 5,
+  } : null;
+
+  return { notifications, soundPrefs };
 }
 
 // ─────────────────────────────────────────────────────────────────────────────

@@ -64,6 +64,33 @@ router.put('/', async (req: AuthRequest, res: Response) => {
       quietHoursStart,
       quietHoursEnd,
       timezone,
+      // Force Alert Sound
+      soundEnabled,
+      soundVolume,
+      soundType,
+      repeatSoundForOverdue,
+      repeatSoundInterval,
+      // Per-Section Overrides
+      sectionDailyTasks,
+      sectionTodoItems,
+      sectionMeetingRails,
+      sectionFollowUps,
+      sectionFreqTasks,
+      sectionProjects,
+      sectionKeyResults,
+      sectionPersonalGoals,
+      // Do Not Disturb
+      dndEnabled,
+      dndMode,
+      dndDays,
+      dndAllDay,
+      dndStartTime,
+      dndEndTime,
+      dndCustomSlots,
+      // Escalation
+      escalationEnabled,
+      escalationMinutes,
+      escalationAction,
     } = req.body;
 
     // Validate digest frequency
@@ -125,6 +152,46 @@ router.put('/', async (req: AuthRequest, res: Response) => {
     if (quietHoursStart !== undefined) updateData.quietHoursStart = quietHoursStart || null;
     if (quietHoursEnd !== undefined) updateData.quietHoursEnd = quietHoursEnd || null;
     if (timezone !== undefined) updateData.timezone = timezone;
+
+    // Force Alert Sound
+    if (soundEnabled !== undefined) updateData.soundEnabled = Boolean(soundEnabled);
+    if (soundVolume !== undefined) updateData.soundVolume = Math.min(100, Math.max(0, Number(soundVolume)));
+    if (soundType !== undefined) {
+      const validSounds = ['chime', 'urgent', 'bell', 'ping', 'alarm'];
+      if (validSounds.includes(soundType)) updateData.soundType = soundType;
+    }
+    if (repeatSoundForOverdue !== undefined) updateData.repeatSoundForOverdue = Boolean(repeatSoundForOverdue);
+    if (repeatSoundInterval !== undefined) updateData.repeatSoundInterval = Math.min(60, Math.max(1, Number(repeatSoundInterval)));
+
+    // Per-Section Overrides (JSON)
+    if (sectionDailyTasks !== undefined) updateData.sectionDailyTasks = sectionDailyTasks;
+    if (sectionTodoItems !== undefined) updateData.sectionTodoItems = sectionTodoItems;
+    if (sectionMeetingRails !== undefined) updateData.sectionMeetingRails = sectionMeetingRails;
+    if (sectionFollowUps !== undefined) updateData.sectionFollowUps = sectionFollowUps;
+    if (sectionFreqTasks !== undefined) updateData.sectionFreqTasks = sectionFreqTasks;
+    if (sectionProjects !== undefined) updateData.sectionProjects = sectionProjects;
+    if (sectionKeyResults !== undefined) updateData.sectionKeyResults = sectionKeyResults;
+    if (sectionPersonalGoals !== undefined) updateData.sectionPersonalGoals = sectionPersonalGoals;
+
+    // Do Not Disturb
+    if (dndEnabled !== undefined) updateData.dndEnabled = Boolean(dndEnabled);
+    if (dndMode !== undefined) {
+      const validModes = ['scheduled', 'custom'];
+      if (validModes.includes(dndMode)) updateData.dndMode = dndMode;
+    }
+    if (dndDays !== undefined) updateData.dndDays = dndDays;
+    if (dndAllDay !== undefined) updateData.dndAllDay = Boolean(dndAllDay);
+    if (dndStartTime !== undefined) updateData.dndStartTime = dndStartTime || null;
+    if (dndEndTime !== undefined) updateData.dndEndTime = dndEndTime || null;
+    if (dndCustomSlots !== undefined) updateData.dndCustomSlots = dndCustomSlots;
+
+    // Escalation
+    if (escalationEnabled !== undefined) updateData.escalationEnabled = Boolean(escalationEnabled);
+    if (escalationMinutes !== undefined) updateData.escalationMinutes = Math.min(240, Math.max(5, Number(escalationMinutes)));
+    if (escalationAction !== undefined) {
+      const validActions = ['sound_repeat', 'email_resend', 'both'];
+      if (validActions.includes(escalationAction)) updateData.escalationAction = escalationAction;
+    }
 
     const prefs = await updateNotificationPreferences(userId, updateData);
     res.json({ success: true, data: prefs });

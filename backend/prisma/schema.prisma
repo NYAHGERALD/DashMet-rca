@@ -4350,6 +4350,38 @@ model LswNotificationPreference {
   quietHoursEnd         String?  // HH:MM
   timezone              String   @default("America/Chicago")
 
+  // ── Force Alert Sound ──
+  soundEnabled          Boolean  @default(true)       // Play alert sound on browser notifications
+  soundVolume           Int      @default(80)         // 0–100
+  soundType             String   @default("chime")    // chime, urgent, bell, ping, alarm
+  repeatSoundForOverdue Boolean  @default(true)       // Repeat sound every interval for overdue items
+  repeatSoundInterval   Int      @default(5)          // Minutes between sound repeats for overdue
+
+  // ── Per-Section Reminder Overrides (JSON) ──
+  // Each stores: { enabled, reminderMinutes, reminderDays, reminderWeeks, reminderMonths, soundType, escalate }
+  sectionDailyTasks     Json?    // Override for Daily Tasks section
+  sectionTodoItems      Json?    // Override for To-Do Items section
+  sectionMeetingRails   Json?    // Override for Meeting Rails section
+  sectionFollowUps      Json?    // Override for Follow-Ups section
+  sectionFreqTasks      Json?    // Override for Scheduled Tasks section
+  sectionProjects       Json?    // Override for Projects section
+  sectionKeyResults     Json?    // Override for Key Results section
+  sectionPersonalGoals  Json?    // Override for Personal Goals section
+
+  // ── Do Not Disturb Schedule ──
+  dndEnabled            Boolean  @default(false)      // Master DND toggle
+  dndMode               String   @default("scheduled") // scheduled, custom
+  dndDays               Json     @default("[\"saturday\",\"sunday\"]")  // Days of week DND is active
+  dndAllDay             Boolean  @default(false)      // When true, DND all day on selected days
+  dndStartTime          String?  // HH:MM — DND start time (used with dndDays)
+  dndEndTime            String?  // HH:MM — DND end time
+  dndCustomSlots        Json?    // Array of { day, startTime, endTime } for fine-grained DND
+
+  // ── Escalation Settings ──
+  escalationEnabled     Boolean  @default(true)       // Auto-escalate if item stays overdue
+  escalationMinutes     Int      @default(30)         // Minutes after overdue to escalate
+  escalationAction      String   @default("sound_repeat") // sound_repeat, email_resend, both
+
   // ── Last Check Timestamps (for cron to avoid duplicates) ──
   lastOverdueCheckAt    DateTime?
   lastReminderCheckAt   DateTime?
