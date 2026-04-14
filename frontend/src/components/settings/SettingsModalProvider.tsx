@@ -1,12 +1,13 @@
 'use client';
 
-import { createContext, useContext, useState, useCallback } from 'react';
+import { createContext, useContext, useCallback } from 'react';
+import { useRouter } from 'next/navigation';
 
 interface SettingsModalContextType {
   isOpen: boolean;
-  openSettings: (tab?: 'profile' | 'preferences' | 'security') => void;
+  openSettings: (tab?: 'profile' | 'preferences' | 'notifications' | 'security') => void;
   closeSettings: () => void;
-  initialTab: 'profile' | 'preferences' | 'security';
+  initialTab: 'profile' | 'preferences' | 'notifications' | 'security';
 }
 
 const SettingsModalContext = createContext<SettingsModalContextType>({
@@ -19,20 +20,18 @@ const SettingsModalContext = createContext<SettingsModalContextType>({
 export const useSettingsModal = () => useContext(SettingsModalContext);
 
 export function SettingsModalProvider({ children }: { children: React.ReactNode }) {
-  const [isOpen, setIsOpen] = useState(false);
-  const [initialTab, setInitialTab] = useState<'profile' | 'preferences' | 'security'>('profile');
+  const router = useRouter();
 
-  const openSettings = useCallback((tab?: 'profile' | 'preferences' | 'security') => {
-    if (tab) setInitialTab(tab);
-    setIsOpen(true);
-  }, []);
+  const openSettings = useCallback((tab?: 'profile' | 'preferences' | 'notifications' | 'security') => {
+    router.push(`/settings${tab ? `?tab=${tab}` : ''}`);
+  }, [router]);
 
   const closeSettings = useCallback(() => {
-    setIsOpen(false);
-  }, []);
+    router.back();
+  }, [router]);
 
   return (
-    <SettingsModalContext.Provider value={{ isOpen, openSettings, closeSettings, initialTab }}>
+    <SettingsModalContext.Provider value={{ isOpen: false, openSettings, closeSettings, initialTab: 'profile' }}>
       {children}
     </SettingsModalContext.Provider>
   );

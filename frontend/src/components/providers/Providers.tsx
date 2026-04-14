@@ -16,7 +16,6 @@ import { SupportStatusNotificationProvider } from '@/components/providers/Suppor
 import { VideoCallProvider } from '@/components/providers/VideoCallProvider';
 import { ToastProvider } from '@/components/ui/Toast';
 import { SettingsModalProvider } from '@/components/settings/SettingsModalProvider';
-import SettingsModal from '@/components/settings/SettingsModal';
 
 export function Providers({ children }: { children: React.ReactNode }) {
   const [queryClient] = useState(
@@ -46,7 +45,6 @@ export function Providers({ children }: { children: React.ReactNode }) {
                           <ToastProvider>
                             <SettingsModalProvider>
                               {children}
-                              <SettingsModal />
                             </SettingsModalProvider>
                           </ToastProvider>
                         </SupportStatusNotificationProvider>

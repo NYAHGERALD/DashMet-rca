@@ -109,7 +109,6 @@ export default function AppLayout({ children }: AppLayoutProps) {
   const isSystemAdmin = user?.role === 'SYSTEM_ADMIN';
   const router = useRouter();
   const [showDropdown, setShowDropdown] = useState(false);
-  const [showProfileModal, setShowProfileModal] = useState(false);
   const [sidebarOpen, setSidebarOpen] = useState(true);
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
   const [mobileMenuTab, setMobileMenuTab] = useState<'nav' | 'admin'>('nav');
@@ -186,7 +185,6 @@ export default function AppLayout({ children }: AppLayoutProps) {
   useEffect(() => {
     function handleEscape(event: KeyboardEvent) {
       if (event.key === 'Escape') {
-        setShowProfileModal(false);
         setShowDropdown(false);
       }
     }
@@ -329,7 +327,7 @@ export default function AppLayout({ children }: AppLayoutProps) {
                     <div className="py-1">
                       <button
                         onClick={() => {
-                          setShowProfileModal(true);
+                          openSettings('profile');
                           setShowDropdown(false);
                         }}
                         className="w-full text-left px-4 py-2.5 text-sm text-gray-700 dark:text-gray-300 hover:bg-gradient-to-r hover:from-blue-50 hover:to-indigo-50 dark:hover:from-blue-900/30 dark:hover:to-indigo-900/30 flex items-center gap-3 transition-colors"
@@ -608,101 +606,6 @@ export default function AppLayout({ children }: AppLayoutProps) {
                 </div>
               )}
             </nav>
-          </div>
-        </div>
-      )}
-
-      {/* Profile Modal */}
-      {showProfileModal && (
-        <div className="fixed inset-0 z-50 overflow-y-auto">
-          <div className="flex min-h-full items-center justify-center p-4">
-            {/* Backdrop */}
-            <div 
-              className="fixed inset-0 bg-black/50 transition-opacity"
-              onClick={() => setShowProfileModal(false)}
-            />
-            
-            {/* Modal */}
-            <div className="relative bg-white dark:bg-gray-800 rounded-xl shadow-2xl w-full max-w-md transform transition-all">
-              {/* Close button */}
-              <button
-                onClick={() => setShowProfileModal(false)}
-                className="absolute top-4 right-4 text-gray-400 hover:text-gray-600 dark:hover:text-gray-300"
-              >
-                <svg className="w-6 h-6" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
-                </svg>
-              </button>
-              
-              {/* Profile Header */}
-              <div className="bg-gradient-to-r from-primary-600 to-primary-700 px-6 py-8 rounded-t-xl text-center">
-                <div className="w-20 h-20 mx-auto rounded-full bg-white/20 overflow-hidden flex items-center justify-center text-white text-3xl font-bold mb-3">
-                  {user.profilePicture ? (
-                    <img
-                      src={user.profilePicture}
-                      alt={`${user.firstName} ${user.lastName}`}
-                      className="w-full h-full object-cover"
-                    />
-                  ) : (
-                    <span>{user.firstName.charAt(0)}{user.lastName.charAt(0)}</span>
-                  )}
-                </div>
-                <h3 className="text-xl font-semibold text-white">
-                  {user.firstName} {user.lastName}
-                </h3>
-                <p className="text-primary-100 text-sm mt-1">{user.email}</p>
-                <span className="inline-block mt-2 px-3 py-1 text-xs font-medium rounded-full bg-white/20 text-white">
-                  {user.role}
-                </span>
-              </div>
-              
-              {/* Profile Details */}
-              <div className="p-6 space-y-4">
-                <div className="flex justify-between items-center py-2 border-b border-gray-200 dark:border-gray-700">
-                  <span className="text-sm text-gray-500 dark:text-gray-400">{t('profile.organization')}</span>
-                  <span className="text-sm font-medium text-gray-900 dark:text-white">{user.organizationName || 'N/A'}</span>
-                </div>
-                <div className="flex justify-between items-center py-2 border-b border-gray-200 dark:border-gray-700">
-                  <span className="text-sm text-gray-500 dark:text-gray-400">{t('settings.theme')}</span>
-                  <span className="text-sm font-medium text-gray-900 dark:text-white capitalize">{user.theme}</span>
-                </div>
-                <div className="flex justify-between items-center py-2 border-b border-gray-200 dark:border-gray-700">
-                  <span className="text-sm text-gray-500 dark:text-gray-400">{t('settings.language')}</span>
-                  <span className="text-sm font-medium text-gray-900 dark:text-white uppercase">{user.language}</span>
-                </div>
-                
-                {/* Action Buttons */}
-                <div className="pt-4 space-y-3">
-                  {/* Admin-only: Manage Users */}
-                  {isAdmin && (
-                    <Link
-                      href="/admin"
-                      onClick={() => setShowProfileModal(false)}
-                      className="block w-full px-4 py-2 text-sm font-medium text-center text-white bg-warning-600 hover:bg-warning-700 rounded-lg transition-colors"
-                    >
-                      👥 {t('dashboard.manageUsers')}
-                    </Link>
-                  )}
-                  <div className="flex gap-3">
-                    <button
-                      onClick={() => { setShowProfileModal(false); openSettings(); }}
-                      className="flex-1 px-4 py-2 text-sm font-medium text-center text-gray-700 dark:text-gray-300 bg-gray-100 dark:bg-gray-700 hover:bg-gray-200 dark:hover:bg-gray-600 rounded-lg transition-colors"
-                    >
-                      {t('dashboard.editSettings')}
-                    </button>
-                    <button
-                      onClick={() => {
-                        setShowProfileModal(false);
-                        logout();
-                      }}
-                      className="flex-1 px-4 py-2 text-sm font-medium text-white bg-danger-600 hover:bg-danger-700 rounded-lg transition-colors"
-                    >
-                      {t('nav.logout')}
-                    </button>
-                  </div>
-                </div>
-              </div>
-            </div>
           </div>
         </div>
       )}
