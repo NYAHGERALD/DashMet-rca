@@ -5,6 +5,7 @@ import bakeryAdminService from '../services/bakeryAdminService';
 import { generateAiInsights, getCachedInsight, saveInsight, logInsightAction, getInsightLogs } from '../services/bakeryAiInsightsService';
 import { generateOperationalDailyReport, getSavedDailyReport, saveDailyReport } from '../services/operationalDailyReportService';
 import { buildBakeryReportData, generateBakeryReportPdf, sendBakeryReportEmail, sendBakeryReportToUsers, getOrgUsersForBakeryReport } from '../services/bakeryReportEmailService';
+import { notifyBakeryMetricsSubmitted } from '../services/smsService';
 import { authenticate, AuthRequest } from '../middleware/auth';
 import { requireAdmin } from '../middleware/rbac';
 
@@ -605,7 +606,7 @@ router.post('/submit', async (req: Request, res: Response) => {
 
     res.status(201).json({ success: true, submission });
 
-    // ── Auto-email report to org users (fire-and-forget) ──
+    // ── Auto-notifications (fire-and-forget) ──
     try {
       const authReq = req as AuthRequest;
       const orgId = authReq.user?.organizationId;
@@ -613,13 +614,53 @@ router.post('/submit', async (req: Request, res: Response) => {
         const orgUsers = await getOrgUsersForBakeryReport(orgId);
         if (orgUsers.length > 0) {
           const userIds = orgUsers.map(u => u.id);
-          sendBakeryReportToUsers(userIds, weekName, dayOfWeek, orgId, true)
-            .then(result => console.log(`[BakeryAutoEmail] Sent=${result.sent}, Failed=${result.failed}`))
-            .catch(err => console.error('[BakeryAutoEmail] Error:', err.message));
+
+          // Check each user's notification preferences
+          const userPrefs = await prisma.lswNotificationPreference.findMany({
+            where: { userId: { in: userIds } },
+          });
+          const prefsMap = new Map(userPrefs.map(p => [p.userId, p]));
+
+          // Filter users for email — only those with bakeryEmailEnabled (default true for new/missing prefs)
+          const emailUserIds = userIds.filter(uid => {
+            const p = prefsMap.get(uid);
+            return !p || p.bakeryEmailEnabled; // default true if no prefs record
+          });
+
+          if (emailUserIds.length > 0) {
+            sendBakeryReportToUsers(emailUserIds, weekName, dayOfWeek, orgId, true)
+              .then(result => console.log(`[BakeryAutoEmail] Sent=${result.sent}, Failed=${result.failed}`))
+              .catch(err => console.error('[BakeryAutoEmail] Error:', err.message));
+          }
+
+          // Create browser notifications for users with bakeryBrowserEnabled
+          const browserUserIds = userIds.filter(uid => {
+            const p = prefsMap.get(uid);
+            return !p || p.bakeryBrowserEnabled; // default true if no prefs record
+          });
+
+          if (browserUserIds.length > 0) {
+            prisma.notification.createMany({
+              data: browserUserIds.map(uid => ({
+                type: 'BAKERY_METRICS_SUBMITTED' as any,
+                title: '📊 Bakery Metrics Submitted',
+                message: `New bakery production report submitted for ${dayOfWeek} (${weekName}) by ${submittedBy}.`,
+                userId: uid,
+                isRead: false,
+              })),
+            })
+              .then(r => console.log(`[BakeryBrowserNotif] Created ${r.count} notifications`))
+              .catch(err => console.error('[BakeryBrowserNotif] Error:', err.message));
+          }
         }
+
+        // ── SMS notification via Twilio (fire-and-forget) ──
+        notifyBakeryMetricsSubmitted(weekName, dayOfWeek, submittedBy, orgId)
+          .then(result => console.log(`[BakeryAutoSMS] Sent=${result.sent}, Failed=${result.failed}`))
+          .catch(err => console.error('[BakeryAutoSMS] Error:', err.message));
       }
     } catch (emailErr: any) {
-      console.error('[BakeryAutoEmail] Non-blocking error:', emailErr.message);
+      console.error('[BakeryAutoNotif] Non-blocking error:', emailErr.message);
     }
   } catch (error: any) {
     console.error('Error submitting metrics:', error);

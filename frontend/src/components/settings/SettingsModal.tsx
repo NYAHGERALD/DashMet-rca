@@ -9,6 +9,7 @@ import { useAuth } from '@/components/providers/AuthProvider';
 import { useTheme } from '@/components/providers/ThemeProvider';
 import { useI18n } from '@/lib/i18n/I18nProvider';
 import { useSettingsModal } from './SettingsModalProvider';
+import LswNotificationSettings from './LswNotificationSettings';
 import { formatDateTime } from '@/lib/dateUtils';
 import api from '@/lib/api';
 
@@ -736,6 +737,14 @@ export default function SettingsModal() {
                   {loading ? `${t('common.loading')}` : t('settings.savePreferences')}
                 </button>
               </div>
+            </div>
+
+            {/* Divider */}
+            <hr className="border-gray-200 dark:border-gray-700" />
+
+            {/* NOTIFICATIONS */}
+            <div>
+              <LswNotificationSettings />
             </div>
 
             {/* Divider */}

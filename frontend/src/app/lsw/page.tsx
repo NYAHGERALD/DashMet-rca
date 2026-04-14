@@ -4,6 +4,7 @@ import { useState, useEffect, useRef, useCallback, Fragment } from 'react';
 import { useAuth } from '@/components/providers/AuthProvider';
 import { useWebSocket } from '@/lib/websocket';
 import ProtectedRoute from '@/components/auth/ProtectedRoute';
+import { useLswBrowserNotifications } from '@/hooks/useLswBrowserNotifications';
 import Link from 'next/link';
 import {
   fetchLswData, updateLswBoard,
@@ -322,6 +323,7 @@ function getWeekOffsetText(selectedWeek: number, selectedYear: number, config?: 
 function LSWContent() {
   const { user } = useAuth();
   const { connect, isConnected, onLswCompletionChanged, onLswProjectChanged, onLswFollowUpChanged, onLswTriggerChanged, onLswFreqTaskChanged, onLswGoalChanged, onLswRailChanged, onLswTodoChanged } = useWebSocket();
+  useLswBrowserNotifications();
   const [calendarConfig, setCalendarConfig] = useState<LswCalendarConfig>({ calendarYearStartMonth: 1, calendarYearStartDay: 1 });
   const [workDaysPerWeek, setWorkDaysPerWeek] = useState<number>(5);
   const [currentWeek, setCurrentWeek] = useState(getWeekNumber(new Date()));

@@ -11,6 +11,7 @@ import { useAuth } from '@/components/providers/AuthProvider';
 import { useTheme } from '@/components/providers/ThemeProvider';
 import { useI18n } from '@/lib/i18n/I18nProvider';
 import api from '@/lib/api';
+import LswNotificationSettings from '@/components/settings/LswNotificationSettings';
 
 // Dynamically import the cropper to avoid SSR issues
 const ProfilePictureCropper = dynamic(
@@ -18,7 +19,7 @@ const ProfilePictureCropper = dynamic(
   { ssr: false }
 );
 
-type Tab = 'profile' | 'preferences' | 'security';
+type Tab = 'profile' | 'preferences' | 'notifications' | 'security';
 
 interface Preferences {
   theme: 'LIGHT' | 'DARK' | 'SYSTEM';
@@ -287,6 +288,7 @@ function SettingsContent() {
   const tabs = [
     { id: 'profile', label: t('settings.profile'), icon: '👤' },
     { id: 'preferences', label: t('settings.preferences'), icon: '⚙️' },
+    { id: 'notifications', label: 'Notifications', icon: '🔔' },
     { id: 'security', label: t('settings.security'), icon: '🔒' },
   ];
 
@@ -555,6 +557,10 @@ function SettingsContent() {
                   </button>
                 </div>
               </div>
+            )}
+
+            {activeTab === 'notifications' && (
+              <LswNotificationSettings />
             )}
 
             {activeTab === 'security' && (

@@ -164,7 +164,7 @@ export default function AcceptInvitePage() {
     }
 
     try {
-      // 1. Create Firebase account with the invitation email
+      // 1. Create Firebase account
       await createUserWithEmailAndPassword(auth, invitation.email, password);
 
       // 2. Create profile in PostgreSQL using invitation token
@@ -175,7 +175,10 @@ export default function AcceptInvitePage() {
           firstName: firstName.trim(),
           lastName: lastName.trim(),
           invitationToken: token,
-          ...(phoneDigits.length >= 10 ? { phone: phoneDigits, countryCode: selectedCountry.code } : {}),
+          ...(phoneDigits.length >= 10 ? {
+            phone: phoneDigits,
+            countryCode: selectedCountry.code,
+          } : {}),
         },
         { headers: { Authorization: `Bearer ${idToken}` } }
       );
@@ -219,7 +222,10 @@ export default function AcceptInvitePage() {
           firstName: firstName.trim(),
           lastName: lastName.trim(),
           invitationToken: token,
-          ...(phoneDigits.length >= 10 ? { phone: phoneDigits, countryCode: selectedCountry.code } : {}),
+          ...(phoneDigits.length >= 10 ? {
+            phone: phoneDigits,
+            countryCode: selectedCountry.code,
+          } : {}),
         },
         { headers: { Authorization: `Bearer ${idToken}` } }
       );

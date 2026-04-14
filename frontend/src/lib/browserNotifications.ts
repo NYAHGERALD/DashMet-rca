@@ -13,7 +13,14 @@ export type NotificationType =
   | 'team_invitation' 
   | 'chat_message' 
   | 'incident_update'
-  | 'mention';
+  | 'mention'
+  | 'lsw_task_overdue'
+  | 'lsw_todo_overdue'
+  | 'lsw_meeting_overdue'
+  | 'lsw_followup_overdue'
+  | 'lsw_upcoming_reminder'
+  | 'lsw_frequency_task_due'
+  | 'bakery_metrics_submitted';
 
 export interface BrowserNotification {
   id: string;
@@ -29,6 +36,7 @@ export interface BrowserNotification {
     url?: string;
     senderId?: string;
     senderName?: string;
+    lswNotificationId?: string;
   };
   createdAt: number;
   expiresAt?: number;
@@ -266,6 +274,41 @@ class BrowserNotificationService {
         senderId: data.senderId,
         senderName: data.senderName,
         url: `/incidents/${data.incidentId}`,
+      },
+      createdAt: Date.now(),
+    };
+
+    return this.showNotification(notification);
+  }
+
+  /**
+   * Show an LSW notification (overdue or reminder)
+   */
+  async showLswNotification(data: {
+    id: string;
+    type: string;
+    title: string;
+    message: string;
+  }): Promise<boolean> {
+    const typeMap: Record<string, NotificationType> = {
+      LSW_TASK_OVERDUE: 'lsw_task_overdue',
+      LSW_TODO_OVERDUE: 'lsw_todo_overdue',
+      LSW_MEETING_OVERDUE: 'lsw_meeting_overdue',
+      LSW_FOLLOWUP_OVERDUE: 'lsw_followup_overdue',
+      LSW_UPCOMING_REMINDER: 'lsw_upcoming_reminder',
+      LSW_FREQUENCY_TASK_DUE: 'lsw_frequency_task_due',
+      BAKERY_METRICS_SUBMITTED: 'bakery_metrics_submitted',
+    };
+
+    const notification: BrowserNotification = {
+      id: `lsw_${data.id}`,
+      type: typeMap[data.type] || 'lsw_task_overdue',
+      title: data.title,
+      body: data.message,
+      tag: `lsw_${data.type}_${data.id}`,
+      data: {
+        url: '/lsw',
+        lswNotificationId: data.id,
       },
       createdAt: Date.now(),
     };

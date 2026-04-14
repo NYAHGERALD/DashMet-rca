@@ -387,6 +387,7 @@ router.post('/create-profile', authenticateFirebaseOnly, async (req: FirebaseAut
     invitationToken,     // Required: 64-char hex token from invitation email
     phone,               // Optional: raw phone digits (e.g. "5551234567")
     countryCode,         // Optional: country dial code (e.g. "1", "52")
+    // phoneVerificationCode not needed — phone saved directly during registration
     // Legacy fields kept for backward compatibility but IGNORED when invitationToken is present
     role: _legacyRole, 
     organizationId: _legacyOrgId, 

@@ -8,7 +8,7 @@ export async function createBoard(userId: string, organizationId: string, title?
   return prisma.board.create({
     data: {
       type,
-      title: title || (type === 'MINDMAP' ? 'Untitled Mind Map' : 'Untitled Board'),
+      title: title || 'Untitled Board',
       ownerId: userId,
       organizationId,
       collaborators: {

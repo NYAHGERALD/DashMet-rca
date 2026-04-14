@@ -36,6 +36,9 @@ console.log('✅ WebSocket service loaded');
 import { startAutoWeekCron } from './services/bakeryAutoWeekCron';
 console.log('✅ AutoWeek cron loaded');
 
+import { startLswNotificationCron } from './services/lswNotificationCron';
+console.log('✅ LSW notification cron loaded');
+
 // Add comprehensive error handling
 process.on('uncaughtException', (error) => {
   console.error('💥 Uncaught Exception:', error);
@@ -207,6 +210,9 @@ const server = httpServer.listen(PORT, HOST, () => {
 
   // Start auto-week cron job
   startAutoWeekCron();
+
+  // Start LSW notification cron job
+  startLswNotificationCron();
 });
 
 // Graceful shutdown

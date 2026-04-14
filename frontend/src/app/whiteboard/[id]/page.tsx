@@ -47,6 +47,14 @@ export default function WhiteboardEditorPage() {
       if (e.ctrlKey || e.metaKey) return;
       // Skip our own re-dispatched events
       if ((e as any)._zoomRedispatched) return;
+      // Only process events targeting the canvas, not portals/modals
+      const isInsideContainer = container.contains(e.target as Node);
+      console.log('[page.tsx] wheel handler fired', {
+        targetTag: (e.target as HTMLElement)?.tagName,
+        isInsideContainer,
+        willProcess: isInsideContainer,
+      });
+      if (!isInsideContainer) return;
 
       e.preventDefault();
       e.stopPropagation();
@@ -377,13 +385,13 @@ export default function WhiteboardEditorPage() {
           >
             <LayoutTemplate size={18} />
           </button>
-          <TemplatePicker
-            open={templatePickerOpen}
-            onClose={() => setTemplatePickerOpen(false)}
-            excalidrawAPI={excalidrawAPIRef}
-          />
         </div>
       </div>
+      <TemplatePicker
+        open={templatePickerOpen}
+        onClose={() => setTemplatePickerOpen(false)}
+        excalidrawAPI={excalidrawAPIRef}
+      />
     </div>
   );
 }

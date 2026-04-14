@@ -466,7 +466,6 @@ const API_ROUTE_TO_NAV_KEY: Record<string, string> = {
   '/api/operations': 'nav.operations',
   '/api/action-items': 'nav.action_items',
   '/api/boards': 'nav.canvas_ai',
-  '/api/mindmaps': 'nav.canvas_ai',
   '/api/organizations': 'nav.admin_organizations',
   '/api/facilities': 'nav.admin_facilities',
   '/api/departments': 'nav.admin_departments',

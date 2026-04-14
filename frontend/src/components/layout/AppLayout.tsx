@@ -53,7 +53,6 @@ import {
   FileKey,
   LayoutDashboard,
   UserPlus,
-  Network,
 } from 'lucide-react';
 
 interface AppLayoutProps {
@@ -82,7 +81,6 @@ const PATH_TO_NAV_KEY: Record<string, string> = {
   '/operations': NAV_PRIVILEGES.OPERATIONS,
   '/assigned-actions': NAV_PRIVILEGES.ACTION_ITEMS,
   '/whiteboard': NAV_PRIVILEGES.CANVAS_AI,
-  '/mindmaps': NAV_PRIVILEGES.CANVAS_AI,
   '/admin/organizations': NAV_PRIVILEGES.ADMIN_ORGANIZATIONS,
   '/admin/facilities': NAV_PRIVILEGES.ADMIN_FACILITIES,
   '/admin/departments': NAV_PRIVILEGES.ADMIN_DEPARTMENTS,
@@ -410,7 +408,6 @@ export default function AppLayout({ children }: AppLayoutProps) {
             { href: '/operations', icon: <Wrench size={18} strokeWidth={1.8} />, label: 'Operations', show: hasNavAccess(NAV_PRIVILEGES.OPERATIONS) },
             { href: '/assigned-actions', icon: <Pin size={18} strokeWidth={1.8} />, label: 'My Action Items', show: hasNavAccess(NAV_PRIVILEGES.ACTION_ITEMS) },
             { href: '/whiteboard', icon: <PenTool size={18} strokeWidth={1.8} />, label: 'Whiteboard', show: hasNavAccess(NAV_PRIVILEGES.CANVAS_AI) },
-            { href: '/mindmaps', icon: <Network size={18} strokeWidth={1.8} />, label: 'Mind Maps', show: hasNavAccess(NAV_PRIVILEGES.CANVAS_AI) },
             { icon: <Settings size={18} strokeWidth={1.8} />, label: t('nav.settings'), onClick: () => openSettings() },
           ]}
         />
@@ -536,7 +533,6 @@ export default function AppLayout({ children }: AppLayoutProps) {
                     { href: '/operations', icon: <Wrench size={18} strokeWidth={1.8} />, label: 'Operations', show: hasNavAccess(NAV_PRIVILEGES.OPERATIONS) },
                     { href: '/assigned-actions', icon: <Pin size={18} strokeWidth={1.8} />, label: 'My Action Items', show: hasNavAccess(NAV_PRIVILEGES.ACTION_ITEMS) },
                     { href: '/whiteboard', icon: <PenTool size={18} strokeWidth={1.8} />, label: 'Whiteboard', show: hasNavAccess(NAV_PRIVILEGES.CANVAS_AI) },
-                    { href: '/mindmaps', icon: <Network size={18} strokeWidth={1.8} />, label: 'Mind Maps', show: hasNavAccess(NAV_PRIVILEGES.CANVAS_AI) },
                     { icon: <Settings size={18} strokeWidth={1.8} />, label: t('nav.settings'), onClick: () => { openSettings(); setMobileMenuOpen(false); } },
                   ]).filter(link => !('show' in link) || link.show !== false).map((link, idx) => (
                     link.onClick ? (

@@ -253,6 +253,10 @@ router.use('/recordings', recordingsRoutes);
 import lswRoutes from './lswRoutes';
 router.use('/lsw', lswRoutes);
 
+// LSW Notification Preferences routes - authenticated
+import lswNotificationRoutes from './lswNotificationRoutes';
+router.use('/lsw/notification-preferences', lswNotificationRoutes);
+
 // Equipment Registry routes - authenticated
 import equipmentRoutes from './equipmentRoutes';
 router.use('/equipment', equipmentRoutes);
