@@ -459,6 +459,7 @@ function DocumentsTab({ caseData, onUpdate, userId }: {
   const [ocrResult, setOcrResult] = useState<OCRResult | null>(null);
   const [ocrError, setOcrError] = useState('');
   const [reviewTab, setReviewTab] = useState<'original' | 'translated' | 'cleaned' | 'images'>('cleaned');
+  const [fileLoading, setFileLoading] = useState(false);
 
   // Preview state
   const [selectedDoc, setSelectedDoc] = useState<CaseDocument | null>(null);
@@ -483,6 +484,7 @@ function DocumentsTab({ caseData, onUpdate, userId }: {
     setImageNames([]);
     setSourceLanguage('English');
     setProcessing(false);
+    setFileLoading(false);
     setOcrResult(null);
     setOcrError('');
     setReviewTab('cleaned');
@@ -493,47 +495,58 @@ function DocumentsTab({ caseData, onUpdate, userId }: {
     const files = Array.from(e.target.files || []);
     if (files.length === 0) return;
 
+    setFileLoading(true);
+    setOcrError('');
     const newImages: string[] = [];
     const newNames: string[] = [];
 
-    for (const file of files) {
-      if (file.type === 'application/pdf') {
-        // For PDFs: render each page to an image via canvas
-        const arrayBuffer = await file.arrayBuffer();
-        const pdfModule = await import('pdfjs-dist');
-        pdfModule.GlobalWorkerOptions.workerSrc = `//cdnjs.cloudflare.com/ajax/libs/pdf.js/${pdfModule.version}/pdf.worker.min.js`;
-        const pdf = await pdfModule.getDocument({ data: arrayBuffer }).promise;
-        for (let i = 1; i <= pdf.numPages; i++) {
-          const page = await pdf.getPage(i);
-          const viewport = page.getViewport({ scale: 2 });
-          const canvas = document.createElement('canvas');
-          canvas.width = viewport.width;
-          canvas.height = viewport.height;
-          const ctx = canvas.getContext('2d')!;
-          await page.render({ canvasContext: ctx, viewport }).promise;
-          const base64 = canvas.toDataURL('image/jpeg', 0.85).replace(/^data:image\/jpeg;base64,/, '');
+    try {
+      for (const file of files) {
+        if (file.type === 'application/pdf') {
+          // For PDFs: render each page to an image via canvas
+          const arrayBuffer = await file.arrayBuffer();
+          const pdfModule = await import('pdfjs-dist');
+          if (typeof window !== 'undefined' && !pdfModule.GlobalWorkerOptions.workerSrc) {
+            pdfModule.GlobalWorkerOptions.workerSrc = '/pdf.worker.min.mjs';
+          }
+          const pdf = await pdfModule.getDocument({ data: new Uint8Array(arrayBuffer) }).promise;
+          for (let i = 1; i <= pdf.numPages; i++) {
+            const page = await pdf.getPage(i);
+            const viewport = page.getViewport({ scale: 2 });
+            const canvas = document.createElement('canvas');
+            canvas.width = viewport.width;
+            canvas.height = viewport.height;
+            const ctx = canvas.getContext('2d')!;
+            await page.render({ canvasContext: ctx, viewport }).promise;
+            const base64 = canvas.toDataURL('image/jpeg', 0.85).replace(/^data:image\/jpeg;base64,/, '');
+            newImages.push(base64);
+            newNames.push(`${file.name} - Page ${i}`);
+          }
+        } else {
+          // Image files: read as base64
+          const base64 = await new Promise<string>((resolve) => {
+            const reader = new FileReader();
+            reader.onload = () => {
+              const result = reader.result as string;
+              resolve(result.replace(/^data:image\/[^;]+;base64,/, ''));
+            };
+            reader.readAsDataURL(file);
+          });
           newImages.push(base64);
-          newNames.push(`${file.name} - Page ${i}`);
+          newNames.push(file.name);
         }
-      } else {
-        // Image files: read as base64
-        const base64 = await new Promise<string>((resolve) => {
-          const reader = new FileReader();
-          reader.onload = () => {
-            const result = reader.result as string;
-            resolve(result.replace(/^data:image\/[^;]+;base64,/, ''));
-          };
-          reader.readAsDataURL(file);
-        });
-        newImages.push(base64);
-        newNames.push(file.name);
       }
-    }
 
-    setUploadedImages(prev => [...prev, ...newImages]);
-    setImageNames(prev => [...prev, ...newNames]);
-    // Reset file input
-    e.target.value = '';
+      setUploadedImages(prev => [...prev, ...newImages]);
+      setImageNames(prev => [...prev, ...newNames]);
+    } catch (err: any) {
+      console.error('File processing error:', err);
+      setOcrError(`Failed to process file: ${err?.message || 'Unknown error'}. Try uploading images (JPG/PNG) instead.`);
+    } finally {
+      setFileLoading(false);
+      // Reset file input
+      e.target.value = '';
+    }
   };
 
   const removeImage = (index: number) => {
@@ -805,20 +818,27 @@ function DocumentsTab({ caseData, onUpdate, userId }: {
               <div className="space-y-4">
                 {/* File input */}
                 <div>
-                  <div className="relative">
-                    <input
-                      type="file"
-                      accept="image/*,.pdf"
-                      multiple
-                      onChange={handleFileSelect}
-                      title="Upload images or PDF"
-                      className="absolute inset-0 opacity-0 cursor-pointer"
-                    />
-                    <div className="flex items-center justify-center gap-2 px-4 py-8 rounded-xl border-2 border-dashed border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-700/50 text-sm text-gray-500 cursor-pointer hover:border-blue-400 hover:bg-blue-50/50 dark:hover:bg-blue-900/10 transition-all">
-                      <FileUp className="w-5 h-5" />
-                      <span>Click to select images or PDF files</span>
+                  {fileLoading ? (
+                    <div className="flex flex-col items-center justify-center gap-2 px-4 py-8 rounded-xl border-2 border-dashed border-blue-300 dark:border-blue-600 bg-blue-50/50 dark:bg-blue-900/10">
+                      <Loader2 className="w-6 h-6 text-blue-500 animate-spin" />
+                      <span className="text-sm text-blue-600 dark:text-blue-400 font-medium">Processing file...</span>
                     </div>
-                  </div>
+                  ) : (
+                    <div className="relative">
+                      <input
+                        type="file"
+                        accept="image/*,.pdf"
+                        multiple
+                        onChange={handleFileSelect}
+                        title="Upload images or PDF"
+                        className="absolute inset-0 opacity-0 cursor-pointer"
+                      />
+                      <div className="flex items-center justify-center gap-2 px-4 py-8 rounded-xl border-2 border-dashed border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-700/50 text-sm text-gray-500 cursor-pointer hover:border-blue-400 hover:bg-blue-50/50 dark:hover:bg-blue-900/10 transition-all">
+                        <FileUp className="w-5 h-5" />
+                        <span>Click to select images or PDF files</span>
+                      </div>
+                    </div>
+                  )}
                 </div>
 
                 {/* Uploaded images preview */}
