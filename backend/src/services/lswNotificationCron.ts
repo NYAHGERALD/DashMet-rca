@@ -29,12 +29,11 @@ export function startLswNotificationCron() {
 
     isRunning = true;
     try {
+      console.log('[LSW Cron] Running notification check...');
       const result = await processAllLswNotifications();
-      if (result.totalSent > 0) {
-        console.log(
-          `[LSW Cron] Processed ${result.usersProcessed} users, sent ${result.totalSent} notifications`
-        );
-      }
+      console.log(
+        `[LSW Cron] Done — ${result.usersProcessed} users, ${result.totalSent} notifications sent`
+      );
     } catch (err) {
       console.error('[LSW Cron] Error processing notifications:', err);
     } finally {

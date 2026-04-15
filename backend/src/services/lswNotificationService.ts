@@ -733,26 +733,35 @@ export async function processUserLswNotifications(userId: string): Promise<numbe
   if (!user) return 0;
 
   const prefs = user.LswNotificationPreference;
-  if (!prefs) return 0;
-  if (!prefs.emailEnabled && !prefs.browserEnabled) return 0;
+  if (!prefs) { console.log(`[LSW] User ${userId}: no prefs, skipping`); return 0; }
+  if (!prefs.emailEnabled && !prefs.browserEnabled) { console.log(`[LSW] User ${user.email}: email+browser disabled, skipping`); return 0; }
 
   // Respect quiet hours
-  if (isInQuietHours(prefs, now)) return 0;
+  if (isInQuietHours(prefs, now)) { console.log(`[LSW] User ${user.email}: in quiet hours, skipping`); return 0; }
 
-  // Check digest frequency throttle
-  if (!shouldSendNow(prefs, now)) return 0;
+  // Digest throttle only applies to overdue batch notifications, NOT upcoming reminders
+  const digestThrottled = !shouldSendNow(prefs, now);
+  if (digestThrottled) {
+    console.log(`[LSW] User ${user.email}: digest throttled (${prefs.digestFrequency}) — will still check upcoming reminders`);
+  }
 
-  // Collect alerts
+  console.log(`[LSW] Processing user ${user.email} — upcomingEnabled=${prefs.upcomingReminderEnabled}, minutesBefore=${prefs.reminderMinutesBefore}`);
+
+  // Collect alerts — always check upcoming, only check overdue if not throttled
   const [overdueAlerts, reminderAlerts] = await Promise.all([
-    findOverdueItems(userId, prefs, now),
+    digestThrottled ? Promise.resolve([]) : findOverdueItems(userId, prefs, now),
     findUpcomingItems(userId, prefs, now),
   ]);
+
+  console.log(`[LSW] User ${user.email}: ${overdueAlerts.length} overdue, ${reminderAlerts.length} upcoming found`);
 
   // Filter already sent
   const [newOverdue, newReminders] = await Promise.all([
     filterAlreadySent(userId, overdueAlerts),
     filterAlreadySent(userId, reminderAlerts),
   ]);
+
+  console.log(`[LSW] User ${user.email}: ${newOverdue.length} new overdue, ${newReminders.length} new reminders after dedup`);
 
   let sentCount = 0;
 
@@ -802,12 +811,13 @@ export async function processUserLswNotifications(userId: string): Promise<numbe
   }
 
   // Update last check timestamps
+  // Only update lastDigestSentAt when overdue items were sent (not for reminders)
   await prisma.lswNotificationPreference.update({
     where: { userId },
     data: {
       lastOverdueCheckAt: now,
       lastReminderCheckAt: now,
-      ...(sentCount > 0 ? { lastDigestSentAt: now } : {}),
+      ...(newOverdue.length > 0 ? { lastDigestSentAt: now } : {}),
     },
   });
 
