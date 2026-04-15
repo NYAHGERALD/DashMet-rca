@@ -252,6 +252,35 @@ export interface PaginatedResponse<T> {
 
 // ─── API Functions ────────────────────────────────────────────────────────────
 
+// --- Departments & Shifts (for dropdowns) ---
+
+export interface DepartmentOption {
+  id: string;
+  name: string;
+  facilityId: string;
+  Facility?: { id: string; name: string };
+}
+
+export interface ShiftOption {
+  id: string;
+  name: string;
+  startTime: string;
+  endTime: string;
+  facilityId?: string;
+  Facility?: { id: string; name: string };
+}
+
+export async function fetchDepartments(facilityId?: string): Promise<DepartmentOption[]> {
+  const params = facilityId ? { facilityId } : {};
+  const { data } = await api.get('/facilities/departments', { params });
+  return data.data?.departments ?? [];
+}
+
+export async function fetchShifts(params?: { facilityId?: string; departmentId?: string }): Promise<ShiftOption[]> {
+  const { data } = await api.get('/facilities/shifts', { params: params ?? {} });
+  return data.data?.shifts ?? [];
+}
+
 // --- Conflict Cases ---
 
 export async function fetchCases(params: {

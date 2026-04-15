@@ -30,6 +30,10 @@ import {
   Trash2,
   Upload,
   BookOpen,
+  UserPlus,
+  UserMinus,
+  Briefcase,
+  Hash,
 } from 'lucide-react';
 import {
   ConflictCase,
@@ -37,6 +41,8 @@ import {
   CaseAnalytics,
   CaseStatus,
   CaseType,
+  DepartmentOption,
+  ShiftOption,
   fetchCases,
   createCase,
   deleteCase,
@@ -44,6 +50,8 @@ import {
   createPolicy,
   deletePolicy,
   fetchAnalytics,
+  fetchDepartments,
+  fetchShifts,
   generateCaseNumber,
   getStatusColor,
   getStatusLabel,
@@ -90,6 +98,29 @@ function CreateCaseModal({ isOpen, onClose, onCreated, organizationId, userId }:
   const [shift, setShift] = useState('');
   const [description, setDescription] = useState('');
   const [loading, setLoading] = useState(false);
+  const [validationError, setValidationError] = useState('');
+
+  // Department + Shift dropdowns (fetched from backend, same as iOS)
+  const [departments, setDepartments] = useState<DepartmentOption[]>([]);
+  const [shifts, setShifts] = useState<ShiftOption[]>([]);
+  const [dropdownsLoading, setDropdownsLoading] = useState(false);
+  const [shiftsLoading, setShiftsLoading] = useState(false);
+
+  // Involved Employees (iOS requires ≥2 complainants)
+  interface EmployeeEntry {
+    name: string;
+    employeeId: string;
+    role: string;
+    department: string;
+    isComplainant: boolean;
+  }
+  const [employees, setEmployees] = useState<EmployeeEntry[]>([]);
+  const [showAddEmployee, setShowAddEmployee] = useState(false);
+  const [newEmpName, setNewEmpName] = useState('');
+  const [newEmpId, setNewEmpId] = useState('');
+  const [newEmpRole, setNewEmpRole] = useState('');
+  const [newEmpDept, setNewEmpDept] = useState('');
+  const [newEmpIsComplainant, setNewEmpIsComplainant] = useState(true);
 
   const caseTypes = [
     { value: 'conflict', label: 'Workplace Conflict', icon: Users, color: 'border-purple-500 bg-purple-50 dark:bg-purple-900/20' },
@@ -98,8 +129,89 @@ function CreateCaseModal({ isOpen, onClose, onCreated, organizationId, userId }:
     { value: 'other', label: 'Other', icon: FileText, color: 'border-gray-500 bg-gray-50 dark:bg-gray-900/20' },
   ];
 
+  // Fetch departments on open
+  useEffect(() => {
+    if (!isOpen) return;
+    const load = async () => {
+      setDropdownsLoading(true);
+      try {
+        const depts = await fetchDepartments();
+        setDepartments(depts);
+      } catch (err) {
+        console.error('Failed to load departments:', err);
+      } finally {
+        setDropdownsLoading(false);
+      }
+    };
+    load();
+  }, [isOpen]);
+
+  // When department changes, fetch shifts for that department
+  const selectedDept = departments.find(d => d.name === department);
+  useEffect(() => {
+    if (!selectedDept) {
+      setShifts([]);
+      setShift('');
+      return;
+    }
+    const loadShifts = async () => {
+      setShiftsLoading(true);
+      setShift('');
+      try {
+        const shiftList = await fetchShifts({ departmentId: selectedDept.id });
+        setShifts(shiftList);
+      } catch (err) {
+        console.error('Failed to load shifts:', err);
+      } finally {
+        setShiftsLoading(false);
+      }
+    };
+    loadShifts();
+  }, [selectedDept?.id]);
+
+  const isEmployeeFormValid =
+    newEmpName.trim() !== '' &&
+    newEmpId.trim() !== '' &&
+    newEmpRole.trim() !== '' &&
+    newEmpDept.trim() !== '';
+
+  const addEmployee = () => {
+    if (!isEmployeeFormValid) return;
+    setEmployees(prev => [...prev, {
+      name: newEmpName.trim(),
+      employeeId: newEmpId.trim(),
+      role: newEmpRole.trim(),
+      department: newEmpDept.trim(),
+      isComplainant: newEmpIsComplainant,
+    }]);
+    setNewEmpName('');
+    setNewEmpId('');
+    setNewEmpRole('');
+    setNewEmpDept('');
+    setNewEmpIsComplainant(true);
+    setShowAddEmployee(false);
+  };
+
+  const removeEmployee = (index: number) => {
+    setEmployees(prev => prev.filter((_, i) => i !== index));
+  };
+
+  const complainantCount = employees.filter(e => e.isComplainant).length;
+  const isFormValid =
+    incidentDate.trim() !== '' &&
+    location.trim() !== '' &&
+    department.trim() !== '' &&
+    employees.length >= 2 &&
+    complainantCount >= 2;
+
   const handleSubmit = async () => {
-    if (!incidentDate) return;
+    setValidationError('');
+    if (!incidentDate) { setValidationError('Incident date is required.'); return; }
+    if (!location.trim()) { setValidationError('Location is required.'); return; }
+    if (!department.trim()) { setValidationError('Department is required.'); return; }
+    if (employees.length < 2) { setValidationError('At least 2 involved employees are required.'); return; }
+    if (complainantCount < 2) { setValidationError('At least 2 employees must be marked as complainants.'); return; }
+
     setLoading(true);
     try {
       const newCase = await createCase({
@@ -108,15 +220,32 @@ function CreateCaseModal({ isOpen, onClose, onCreated, organizationId, userId }:
         organizationId,
         caseType,
         incidentDate: new Date(incidentDate).toISOString(),
-        location: location || undefined,
-        department: department || undefined,
+        location,
+        department,
         shift: shift || undefined,
         description: description || undefined,
+        employeesJson: employees.map(e => ({
+          name: e.name,
+          role: e.role,
+          department: e.department,
+          employeeId: e.employeeId,
+          isComplainant: e.isComplainant,
+        })),
       });
       onCreated(newCase);
       onClose();
+      // Reset form
+      setCaseType('conflict');
+      setIncidentDate('');
+      setLocation('');
+      setDepartment('');
+      setShift('');
+      setDescription('');
+      setEmployees([]);
+      setValidationError('');
     } catch (err) {
       console.error('Failed to create case:', err);
+      setValidationError('Failed to create case. Please try again.');
     } finally {
       setLoading(false);
     }
@@ -132,7 +261,7 @@ function CreateCaseModal({ isOpen, onClose, onCreated, organizationId, userId }:
         <div className="sticky top-0 z-10 flex items-center justify-between px-8 py-5 bg-white dark:bg-gray-800 border-b border-gray-200 dark:border-gray-700 rounded-t-2xl">
           <div>
             <h2 className="text-xl font-bold text-gray-900 dark:text-white">New Case</h2>
-            <p className="text-sm text-gray-500 dark:text-gray-400 mt-0.5">Create a new HR conflict resolution case</p>
+            <p className="text-sm text-gray-500 dark:text-gray-400 mt-0.5">Create a new conflict resolution case with system-assisted analysis</p>
           </div>
           <button onClick={onClose} title="Close" className="p-2 rounded-lg hover:bg-gray-100 dark:hover:bg-gray-700 transition-colors">
             <X className="w-5 h-5 text-gray-500" />
@@ -141,9 +270,17 @@ function CreateCaseModal({ isOpen, onClose, onCreated, organizationId, userId }:
 
         {/* Body */}
         <div className="px-8 py-6 space-y-6">
+          {/* Validation Error */}
+          {validationError && (
+            <div className="flex items-center gap-2 p-3 rounded-xl bg-red-50 dark:bg-red-900/20 border border-red-200 dark:border-red-800 text-red-700 dark:text-red-300 text-sm">
+              <AlertTriangle className="w-4 h-4 flex-shrink-0" />
+              {validationError}
+            </div>
+          )}
+
           {/* Case Type */}
           <div>
-            <label className="block text-sm font-semibold text-gray-700 dark:text-gray-300 mb-3">Case Type</label>
+            <label className="block text-xs font-semibold text-gray-500 dark:text-gray-400 uppercase tracking-wider mb-3">Case Type</label>
             <div className="grid grid-cols-2 gap-3">
               {caseTypes.map(ct => (
                 <button
@@ -164,24 +301,29 @@ function CreateCaseModal({ isOpen, onClose, onCreated, organizationId, userId }:
             </div>
           </div>
 
-          {/* Incident Date */}
+          {/* Incident Details Section */}
           <div>
-            <label className="block text-sm font-semibold text-gray-700 dark:text-gray-300 mb-2">
-              Incident Date <span className="text-red-500">*</span>
-            </label>
-            <input
-              type="date"
-              value={incidentDate}
-              onChange={e => setIncidentDate(e.target.value)}
-              title="Incident Date"
-              className="w-full px-4 py-3 rounded-xl border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-700 text-gray-900 dark:text-white focus:ring-2 focus:ring-blue-500 focus:border-blue-500 transition-colors"
-            />
-          </div>
+            <label className="block text-xs font-semibold text-gray-500 dark:text-gray-400 uppercase tracking-wider mb-3">Incident Details</label>
 
-          {/* Location + Department */}
-          <div className="grid grid-cols-2 gap-4">
-            <div>
-              <label className="block text-sm font-semibold text-gray-700 dark:text-gray-300 mb-2">Location</label>
+            {/* Date + Time */}
+            <div className="mb-4">
+              <label className="block text-sm font-semibold text-gray-700 dark:text-gray-300 mb-2">
+                Date of Incident <span className="text-red-500">*</span>
+              </label>
+              <input
+                type="datetime-local"
+                value={incidentDate}
+                onChange={e => setIncidentDate(e.target.value)}
+                title="Date of Incident"
+                className="w-full px-4 py-3 rounded-xl border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-700 text-gray-900 dark:text-white focus:ring-2 focus:ring-blue-500 focus:border-blue-500 transition-colors"
+              />
+            </div>
+
+            {/* Location */}
+            <div className="mb-4">
+              <label className="block text-sm font-semibold text-gray-700 dark:text-gray-300 mb-2">
+                Location <span className="text-red-500">*</span>
+              </label>
               <input
                 type="text"
                 value={location}
@@ -190,59 +332,238 @@ function CreateCaseModal({ isOpen, onClose, onCreated, organizationId, userId }:
                 className="w-full px-4 py-3 rounded-xl border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-700 text-gray-900 dark:text-white placeholder-gray-400 focus:ring-2 focus:ring-blue-500 focus:border-blue-500 transition-colors"
               />
             </div>
-            <div>
-              <label className="block text-sm font-semibold text-gray-700 dark:text-gray-300 mb-2">Department</label>
-              <input
-                type="text"
-                value={department}
-                onChange={e => setDepartment(e.target.value)}
-                placeholder="e.g. Production, QA"
-                className="w-full px-4 py-3 rounded-xl border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-700 text-gray-900 dark:text-white placeholder-gray-400 focus:ring-2 focus:ring-blue-500 focus:border-blue-500 transition-colors"
-              />
+
+            {/* Department + Shift (dropdowns) */}
+            <div className="grid grid-cols-2 gap-4">
+              <div>
+                <label className="block text-sm font-semibold text-gray-700 dark:text-gray-300 mb-2">
+                  Department <span className="text-red-500">*</span>
+                </label>
+                <select
+                  value={department}
+                  onChange={e => setDepartment(e.target.value)}
+                  title="Department"
+                  disabled={dropdownsLoading}
+                  className="w-full px-4 py-3 rounded-xl border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-700 text-gray-900 dark:text-white focus:ring-2 focus:ring-blue-500 focus:border-blue-500 transition-colors disabled:opacity-50"
+                >
+                  <option value="">{dropdownsLoading ? 'Loading...' : 'Select Department'}</option>
+                  {departments.map(d => (
+                    <option key={d.id} value={d.name}>{d.name}</option>
+                  ))}
+                </select>
+              </div>
+              <div>
+                <label className="block text-sm font-semibold text-gray-700 dark:text-gray-300 mb-2">
+                  Shift <span className="text-gray-400 font-normal">(Optional)</span>
+                </label>
+                <select
+                  value={shift}
+                  onChange={e => setShift(e.target.value)}
+                  title="Shift"
+                  disabled={shiftsLoading || !department}
+                  className="w-full px-4 py-3 rounded-xl border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-700 text-gray-900 dark:text-white focus:ring-2 focus:ring-blue-500 focus:border-blue-500 transition-colors disabled:opacity-50"
+                >
+                  <option value="">{shiftsLoading ? 'Loading...' : !department ? 'Select Department first' : 'Select Shift'}</option>
+                  {shifts.map(s => (
+                    <option key={s.id} value={s.name}>{s.name}</option>
+                  ))}
+                </select>
+              </div>
             </div>
           </div>
 
-          {/* Shift */}
+          {/* Involved Employees */}
           <div>
-            <label className="block text-sm font-semibold text-gray-700 dark:text-gray-300 mb-2">Shift</label>
-            <input
-              type="text"
-              value={shift}
-              onChange={e => setShift(e.target.value)}
-              placeholder="e.g. Day, Night, Swing"
-              className="w-full px-4 py-3 rounded-xl border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-700 text-gray-900 dark:text-white placeholder-gray-400 focus:ring-2 focus:ring-blue-500 focus:border-blue-500 transition-colors"
-            />
-          </div>
+            <div className="flex items-center justify-between mb-3">
+              <label className="block text-xs font-semibold text-gray-500 dark:text-gray-400 uppercase tracking-wider">
+                Involved Employees <span className="text-red-500">*</span>
+                <span className="ml-2 text-xs font-normal normal-case text-gray-400">(min. 2 complainants)</span>
+              </label>
+              <button
+                onClick={() => setShowAddEmployee(true)}
+                className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-medium text-blue-600 dark:text-blue-400 bg-blue-50 dark:bg-blue-900/20 hover:bg-blue-100 dark:hover:bg-blue-900/30 transition-colors"
+              >
+                <UserPlus className="w-3.5 h-3.5" />
+                Add Employee
+              </button>
+            </div>
 
-          {/* Description */}
-          <div>
-            <label className="block text-sm font-semibold text-gray-700 dark:text-gray-300 mb-2">Initial Description</label>
-            <textarea
-              value={description}
-              onChange={e => setDescription(e.target.value)}
-              rows={3}
-              placeholder="Brief summary of the incident..."
-              className="w-full px-4 py-3 rounded-xl border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-700 text-gray-900 dark:text-white placeholder-gray-400 focus:ring-2 focus:ring-blue-500 focus:border-blue-500 transition-colors resize-none"
-            />
+            {/* Employee List */}
+            {employees.length === 0 ? (
+              <div className="rounded-xl border-2 border-dashed border-gray-200 dark:border-gray-600 p-6 text-center">
+                <Users className="w-8 h-8 text-gray-300 dark:text-gray-600 mx-auto mb-2" />
+                <p className="text-sm text-gray-400 dark:text-gray-500">No employees added yet</p>
+                <p className="text-xs text-gray-400 dark:text-gray-500 mt-1">Add at least 2 involved employees to create a case</p>
+              </div>
+            ) : (
+              <div className="space-y-2">
+                {employees.map((emp, idx) => (
+                  <div key={idx} className="flex items-center justify-between p-3 rounded-xl bg-gray-50 dark:bg-gray-700/50 border border-gray-200 dark:border-gray-600">
+                    <div className="flex items-center gap-3 min-w-0">
+                      <div className={`w-8 h-8 rounded-full flex items-center justify-center text-xs font-bold ${
+                        emp.isComplainant
+                          ? 'bg-orange-100 dark:bg-orange-900/30 text-orange-600 dark:text-orange-400'
+                          : 'bg-blue-100 dark:bg-blue-900/30 text-blue-600 dark:text-blue-400'
+                      }`}>
+                        {emp.name.charAt(0).toUpperCase()}
+                      </div>
+                      <div className="min-w-0">
+                        <p className="text-sm font-medium text-gray-900 dark:text-white truncate">{emp.name}</p>
+                        <p className="text-xs text-gray-500 dark:text-gray-400 truncate">
+                          {emp.role} · {emp.department} · {emp.employeeId}
+                        </p>
+                      </div>
+                    </div>
+                    <div className="flex items-center gap-2 flex-shrink-0">
+                      <span className={`px-2 py-0.5 rounded-full text-xs font-medium ${
+                        emp.isComplainant
+                          ? 'bg-orange-100 dark:bg-orange-900/30 text-orange-700 dark:text-orange-300'
+                          : 'bg-blue-100 dark:bg-blue-900/30 text-blue-700 dark:text-blue-300'
+                      }`}>
+                        {emp.isComplainant ? 'Complainant' : 'Witness'}
+                      </span>
+                      <button
+                        onClick={() => removeEmployee(idx)}
+                        title="Remove employee"
+                        className="p-1 rounded-lg text-gray-400 hover:text-red-500 hover:bg-red-50 dark:hover:bg-red-900/20 transition-colors"
+                      >
+                        <UserMinus className="w-4 h-4" />
+                      </button>
+                    </div>
+                  </div>
+                ))}
+              </div>
+            )}
+
+            {/* Add Employee Form (inline) */}
+            {showAddEmployee && (
+              <div className="mt-3 p-4 rounded-xl border border-blue-200 dark:border-blue-800 bg-blue-50/50 dark:bg-blue-900/10 space-y-3">
+                <div className="flex items-center justify-between">
+                  <h4 className="text-sm font-semibold text-gray-900 dark:text-white">Add Employee</h4>
+                  <button onClick={() => setShowAddEmployee(false)} title="Cancel" className="p-1 rounded hover:bg-gray-200 dark:hover:bg-gray-600">
+                    <X className="w-4 h-4 text-gray-500" />
+                  </button>
+                </div>
+
+                {/* Role Toggle */}
+                <div className="flex items-center gap-2">
+                  <button
+                    onClick={() => setNewEmpIsComplainant(true)}
+                    className={`flex-1 py-2 px-3 rounded-lg text-sm font-medium transition-colors ${
+                      newEmpIsComplainant
+                        ? 'bg-orange-500 text-white'
+                        : 'bg-gray-100 dark:bg-gray-700 text-gray-600 dark:text-gray-400 hover:bg-gray-200 dark:hover:bg-gray-600'
+                    }`}
+                  >
+                    Complainant
+                  </button>
+                  <button
+                    onClick={() => setNewEmpIsComplainant(false)}
+                    className={`flex-1 py-2 px-3 rounded-lg text-sm font-medium transition-colors ${
+                      !newEmpIsComplainant
+                        ? 'bg-blue-500 text-white'
+                        : 'bg-gray-100 dark:bg-gray-700 text-gray-600 dark:text-gray-400 hover:bg-gray-200 dark:hover:bg-gray-600'
+                    }`}
+                  >
+                    Witness
+                  </button>
+                </div>
+
+                {/* Name + Employee ID */}
+                <div className="grid grid-cols-2 gap-3">
+                  <div>
+                    <label className="block text-xs font-medium text-gray-600 dark:text-gray-400 mb-1">
+                      Name <span className="text-red-500">*</span>
+                    </label>
+                    <input
+                      type="text"
+                      value={newEmpName}
+                      onChange={e => setNewEmpName(e.target.value)}
+                      placeholder="Full name"
+                      className="w-full px-3 py-2 rounded-lg border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-700 text-gray-900 dark:text-white text-sm placeholder-gray-400 focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
+                    />
+                  </div>
+                  <div>
+                    <label className="block text-xs font-medium text-gray-600 dark:text-gray-400 mb-1">
+                      Employee ID / File No. <span className="text-red-500">*</span>
+                    </label>
+                    <input
+                      type="text"
+                      value={newEmpId}
+                      onChange={e => setNewEmpId(e.target.value)}
+                      placeholder="e.g. EMP-12345"
+                      className="w-full px-3 py-2 rounded-lg border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-700 text-gray-900 dark:text-white text-sm placeholder-gray-400 focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
+                    />
+                  </div>
+                </div>
+
+                {/* Role + Department */}
+                <div className="grid grid-cols-2 gap-3">
+                  <div>
+                    <label className="block text-xs font-medium text-gray-600 dark:text-gray-400 mb-1">
+                      Role / Position <span className="text-red-500">*</span>
+                    </label>
+                    <input
+                      type="text"
+                      value={newEmpRole}
+                      onChange={e => setNewEmpRole(e.target.value)}
+                      placeholder="e.g. Manager"
+                      className="w-full px-3 py-2 rounded-lg border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-700 text-gray-900 dark:text-white text-sm placeholder-gray-400 focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
+                    />
+                  </div>
+                  <div>
+                    <label className="block text-xs font-medium text-gray-600 dark:text-gray-400 mb-1">
+                      Department <span className="text-red-500">*</span>
+                    </label>
+                    <select
+                      value={newEmpDept}
+                      onChange={e => setNewEmpDept(e.target.value)}
+                      title="Employee Department"
+                      className="w-full px-3 py-2 rounded-lg border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-700 text-gray-900 dark:text-white text-sm focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
+                    >
+                      <option value="">Select</option>
+                      {departments.map(d => (
+                        <option key={d.id} value={d.name}>{d.name}</option>
+                      ))}
+                    </select>
+                  </div>
+                </div>
+
+                {/* Add Button */}
+                <button
+                  onClick={addEmployee}
+                  disabled={!isEmployeeFormValid}
+                  className="w-full py-2 rounded-lg text-sm font-medium text-white bg-blue-600 hover:bg-blue-700 disabled:opacity-50 disabled:cursor-not-allowed transition-colors flex items-center justify-center gap-2"
+                >
+                  <UserPlus className="w-4 h-4" />
+                  Add to Case
+                </button>
+              </div>
+            )}
           </div>
         </div>
 
         {/* Footer */}
-        <div className="sticky bottom-0 flex items-center justify-end gap-3 px-8 py-5 bg-gray-50 dark:bg-gray-800/80 border-t border-gray-200 dark:border-gray-700 rounded-b-2xl">
-          <button
-            onClick={onClose}
-            className="px-6 py-2.5 rounded-xl text-sm font-medium text-gray-600 dark:text-gray-400 hover:bg-gray-100 dark:hover:bg-gray-700 transition-colors"
-          >
-            Cancel
-          </button>
-          <button
-            onClick={handleSubmit}
-            disabled={!incidentDate || loading}
-            className="px-6 py-2.5 rounded-xl text-sm font-semibold text-white bg-blue-600 hover:bg-blue-700 disabled:opacity-50 disabled:cursor-not-allowed transition-colors flex items-center gap-2 shadow-lg shadow-blue-600/25"
-          >
-            {loading ? <Loader2 className="w-4 h-4 animate-spin" /> : <Plus className="w-4 h-4" />}
-            Create Case
-          </button>
+        <div className="sticky bottom-0 flex items-center justify-between px-8 py-5 bg-gray-50 dark:bg-gray-800/80 border-t border-gray-200 dark:border-gray-700 rounded-b-2xl">
+          <p className="text-xs text-gray-400 dark:text-gray-500">
+            {employees.length} employee{employees.length !== 1 ? 's' : ''} · {complainantCount} complainant{complainantCount !== 1 ? 's' : ''}
+          </p>
+          <div className="flex items-center gap-3">
+            <button
+              onClick={onClose}
+              className="px-6 py-2.5 rounded-xl text-sm font-medium text-gray-600 dark:text-gray-400 hover:bg-gray-100 dark:hover:bg-gray-700 transition-colors"
+            >
+              Cancel
+            </button>
+            <button
+              onClick={handleSubmit}
+              disabled={!isFormValid || loading}
+              className="px-6 py-2.5 rounded-xl text-sm font-semibold text-white bg-blue-600 hover:bg-blue-700 disabled:opacity-50 disabled:cursor-not-allowed transition-colors flex items-center gap-2 shadow-lg shadow-blue-600/25"
+            >
+              {loading ? <Loader2 className="w-4 h-4 animate-spin" /> : <Plus className="w-4 h-4" />}
+              Create Case
+            </button>
+          </div>
         </div>
       </div>
     </div>

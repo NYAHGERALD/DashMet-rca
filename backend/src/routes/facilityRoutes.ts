@@ -391,7 +391,7 @@ router.delete('/facilities/lines/:id', requireMinimumRole(UserRole.ADMIN), async
 
 // GET /api/facilities/shifts - List shifts (filtered by user's organization)
 router.get('/facilities/shifts', async (req: any, res) => {
-  const { facilityId, lineId } = req.query;
+  const { facilityId, lineId, departmentId } = req.query;
   const user = req.user;
   
   // Build filter based on user's organization
@@ -404,6 +404,17 @@ router.get('/facilities/shifts', async (req: any, res) => {
       ...orgFilter,
       ...(facilityId && { facilityId: String(facilityId) }),
       ...(lineId && { ShiftLine: { some: { lineId: String(lineId) } } }),
+      ...(departmentId && {
+        ShiftLine: {
+          some: {
+            Line: {
+              Area: {
+                departmentId: String(departmentId),
+              },
+            },
+          },
+        },
+      }),
     },
     include: {
       Facility: {
