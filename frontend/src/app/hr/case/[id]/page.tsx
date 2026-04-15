@@ -503,13 +503,11 @@ function DocumentsTab({ caseData, onUpdate, userId }: {
     try {
       for (const file of files) {
         if (file.type === 'application/pdf') {
-          // For PDFs: render each page to an image via canvas
+          // For PDFs: render each page to an image via canvas using pdfjs-dist v3
           const arrayBuffer = await file.arrayBuffer();
-          const pdfModule = await import('pdfjs-dist');
-          if (typeof window !== 'undefined' && !pdfModule.GlobalWorkerOptions.workerSrc) {
-            pdfModule.GlobalWorkerOptions.workerSrc = '/pdf.worker.min.mjs';
-          }
-          const pdf = await pdfModule.getDocument({ data: new Uint8Array(arrayBuffer) }).promise;
+          const pdfjsLib = await import('pdfjs-dist/legacy/build/pdf');
+          pdfjsLib.GlobalWorkerOptions.workerSrc = '/pdf.worker.min.js';
+          const pdf = await pdfjsLib.getDocument({ data: new Uint8Array(arrayBuffer) }).promise;
           for (let i = 1; i <= pdf.numPages; i++) {
             const page = await pdf.getPage(i);
             const viewport = page.getViewport({ scale: 2 });
