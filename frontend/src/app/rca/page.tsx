@@ -4,9 +4,9 @@ import { useState, useEffect } from 'react';
 import { useRouter } from 'next/navigation';
 import Link from 'next/link';
 import LoadingState from '@/components/ui/LoadingState';
-import Image from 'next/image';
 import api from '@/lib/api';
 import { formatDate } from '@/lib/dateUtils';
+import ProtectedRoute from '@/components/auth/ProtectedRoute';
 
 interface RCAAnalysis {
   id: string;
@@ -36,7 +36,7 @@ interface RCAAnalysis {
   };
 }
 
-export default function RCAListPage() {
+function RCAListContent() {
   const router = useRouter();
   const [analyses, setAnalyses] = useState<RCAAnalysis[]>([]);
   const [loading, setLoading] = useState(true);
@@ -129,22 +129,17 @@ export default function RCAListPage() {
   }
 
   return (
-    <div className="min-h-screen bg-gray-50 dark:bg-gray-900">
+    <div className="min-h-full">
       <div className="w-full px-4 sm:px-6 lg:px-8 py-8">
         {/* Header */}
         <div className="flex justify-between items-center mb-8">
-          <div className="flex items-center gap-4">
-            <div className="relative w-10 h-10">
-              <Image src="/images/logo.png" alt="DASHMET Logo" fill className="object-contain" />
-            </div>
-            <div>
-              <h1 className="text-3xl font-bold text-gray-900 dark:text-white">
-                RCA Workspace
-              </h1>
-              <p className="mt-1 text-gray-500 dark:text-gray-400">
-                Root Cause Analysis dashboard
-              </p>
-            </div>
+          <div>
+            <h1 className="text-3xl font-bold text-gray-900 dark:text-white">
+              RCA Workspace
+            </h1>
+            <p className="mt-1 text-gray-500 dark:text-gray-400">
+              Root Cause Analysis dashboard
+            </p>
           </div>
           <Link
             href="/incidents"
@@ -312,5 +307,13 @@ export default function RCAListPage() {
         )}
       </div>
     </div>
+  );
+}
+
+export default function RCAListPage() {
+  return (
+    <ProtectedRoute>
+      <RCAListContent />
+    </ProtectedRoute>
   );
 }

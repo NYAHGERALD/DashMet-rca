@@ -15,6 +15,7 @@ import { useAuth } from '@/components/providers/AuthProvider';
 import { useWebSocket } from '@/lib/websocket';
 import { usePrivileges, RCA_PRIVILEGES } from '@/lib/usePrivileges';
 import { useAccessDeniedModal, handlePrivilegeError } from '@/components/modals/AccessDeniedModal';
+import ProtectedRoute from '@/components/auth/ProtectedRoute';
 
 interface Participant {
   id: string;
@@ -184,7 +185,15 @@ interface AIRecommendation {
   };
 }
 
-export default function RCAWorkspacePage() {
+export default function RCAWorkspacePageWrapper() {
+  return (
+    <ProtectedRoute>
+      <RCAWorkspaceContent />
+    </ProtectedRoute>
+  );
+}
+
+function RCAWorkspaceContent() {
   const params = useParams();
   const router = useRouter();
   const rcaId = params.id as string;
@@ -583,7 +592,7 @@ export default function RCAWorkspacePage() {
 
   if (!rca) {
     return (
-      <div className="min-h-screen bg-gray-50 dark:bg-gray-900 flex items-center justify-center">
+      <div className="min-h-full flex items-center justify-center">
         <div className="text-center">
           <h2 className="text-2xl font-bold text-gray-900 dark:text-white">RCA Not Found</h2>
         </div>
@@ -594,7 +603,7 @@ export default function RCAWorkspacePage() {
   // Safety check: ensure incident data exists
   if (!rca.incident) {
     return (
-      <div className="min-h-screen bg-gray-50 dark:bg-gray-900 flex items-center justify-center">
+      <div className="min-h-full flex items-center justify-center">
         <div className="text-center">
           <h2 className="text-2xl font-bold text-gray-900 dark:text-white">Incident Data Not Available</h2>
           <p className="mt-2 text-gray-500 dark:text-gray-400">The incident associated with this RCA could not be loaded.</p>
@@ -604,7 +613,7 @@ export default function RCAWorkspacePage() {
   }
 
   return (
-    <div className="min-h-screen bg-gray-50 dark:bg-gray-900">
+    <div className="min-h-full">
       {/* Header */}
       <div className="bg-white dark:bg-gray-800 shadow">
         <div className="w-full px-3 sm:px-4 md:px-6 lg:px-8 py-3 sm:py-4">
