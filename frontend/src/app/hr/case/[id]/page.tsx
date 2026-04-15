@@ -732,8 +732,8 @@ function DocumentsTab({ caseData, onUpdate, userId }: {
                       )}
                     </div>
                   )}
-                  <div className="prose prose-sm dark:prose-invert max-w-none">
-                    <pre className="whitespace-pre-wrap text-sm text-gray-700 dark:text-gray-300 font-sans leading-relaxed">
+                  <div className="prose prose-sm dark:prose-invert max-w-none max-h-[70vh] overflow-y-auto">
+                    <pre className="whitespace-pre-wrap text-sm text-gray-700 dark:text-gray-300 font-sans leading-relaxed p-0 m-0 bg-transparent">
                       {previewTab === 'original' && (selectedDoc.originalText || 'No original text')}
                       {previewTab === 'translated' && (selectedDoc.translatedText || 'No translated text')}
                       {previewTab === 'cleaned' && (selectedDoc.cleanedText || selectedDoc.originalText || 'No text content')}
@@ -960,7 +960,7 @@ function DocumentsTab({ caseData, onUpdate, userId }: {
                 </div>
 
                 {/* Review content */}
-                <div className="rounded-lg border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-800 p-4 max-h-80 overflow-y-auto">
+                <div className="rounded-lg border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-800 p-4 max-h-[70vh] overflow-y-auto">
                   {reviewTab === 'images' ? (
                     <div className="grid grid-cols-2 sm:grid-cols-3 gap-3">
                       {uploadedImages.map((img, idx) => (
@@ -1964,7 +1964,7 @@ function CaseDetailContent() {
   return (
     <div className="min-h-screen bg-gray-50 dark:bg-gray-900">
       {/* Header */}
-      <div className="bg-white dark:bg-gray-800 border-b border-gray-200 dark:border-gray-700">
+      <div className="sticky top-0 z-20 bg-white dark:bg-gray-800 border-b border-gray-200 dark:border-gray-700 shadow-sm">
         <div className="w-full px-6 lg:px-8 py-5">
           <div className="flex items-center gap-4">
             <div className="flex-1">
