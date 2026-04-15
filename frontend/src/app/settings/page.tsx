@@ -353,7 +353,7 @@ function SettingsPage() {
 
   return (
     <div className={"min-h-full p-4 sm:p-6 lg:p-8 transition-opacity duration-500 " + (mounted ? "opacity-100" : "opacity-0")}>
-      <div className="max-w-5xl mx-auto space-y-6">
+      <div className="w-full space-y-6">
 
         {/* ── Profile Hero Card ── */}
         <div className={"relative overflow-hidden rounded-2xl bg-gradient-to-r from-primary-600 via-primary-700 to-indigo-700 shadow-xl transform transition-all duration-700 " + (mounted ? "translate-y-0 opacity-100" : "-translate-y-8 opacity-0")}>

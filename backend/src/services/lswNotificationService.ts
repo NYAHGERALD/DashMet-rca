@@ -249,10 +249,93 @@ async function findUpcomingItems(userId: string, prefs: LswNotificationPreferenc
     ? new Date(now.getTime() + prefs.reminderMonthsBefore * 30 * 24 * 60 * 60 * 1000)
     : null;
 
+  // Also check custom reminder minutes if set
+  const customMinutesWindow = (prefs as any).customReminderMinutes > 0
+    ? new Date(now.getTime() + (prefs as any).customReminderMinutes * 60 * 1000)
+    : null;
+
   // The farthest look-ahead window
-  const maxWindow = [minutesWindow, daysWindow, weeksWindow, monthsWindow]
+  const maxWindow = [minutesWindow, daysWindow, weeksWindow, monthsWindow, customMinutesWindow]
     .filter(Boolean)
     .reduce((max, d) => (d! > max ? d! : max), now);
+
+  // ── Daily Tasks upcoming ──
+  // Daily tasks use HH:MM + day-of-week columns, not a DateTime dueDate
+  const dayCol = getDayColumn(now);
+  const currentTimeHHMM = `${String(now.getHours()).padStart(2, '0')}:${String(now.getMinutes()).padStart(2, '0')}`;
+  // Calculate the max look-ahead time for today in HH:MM
+  const maxMinutesAhead = Math.ceil((maxWindow.getTime() - now.getTime()) / (60 * 1000));
+  const maxLookAheadDate = new Date(now.getTime() + Math.min(maxMinutesAhead, 24 * 60) * 60 * 1000);
+  // Only look at same-day tasks (can't look ahead to tomorrow with HH:MM fields)
+  const maxTimeHHMM = maxLookAheadDate.getDate() === now.getDate()
+    ? `${String(maxLookAheadDate.getHours()).padStart(2, '0')}:${String(maxLookAheadDate.getMinutes()).padStart(2, '0')}`
+    : '23:59';
+
+  const upcomingDailyTasks = await prisma.lswDailyTask.findMany({
+    where: {
+      userId,
+      isActive: true,
+      [dayCol]: true,
+      time: {
+        gt: currentTimeHHMM, // Not yet due
+        lte: maxTimeHHMM,    // Within reminder window
+      },
+    },
+    select: { id: true, task: true, time: true },
+  });
+
+  for (const task of upcomingDailyTasks) {
+    const [h, m] = task.time.split(':').map(Number);
+    const dueAt = new Date(now);
+    dueAt.setHours(h, m, 0, 0);
+    const timeUntil = dueAt.getTime() - now.getTime();
+    const reminderType = getReminderType(timeUntil, prefs);
+    if (reminderType) {
+      alerts.push({
+        entityType: 'dailyTask',
+        entityId: task.id,
+        taskName: task.task,
+        dueAt,
+        notificationType: reminderType,
+      });
+    }
+  }
+
+  // ── Todo Items upcoming ──
+  const upcomingTodos = await prisma.lswTodoItem.findMany({
+    where: {
+      userId,
+      isActive: true,
+      completed: false,
+      dueDate: { not: null },
+    },
+    select: { id: true, task: true, dueDate: true },
+  });
+
+  for (const todo of upcomingTodos) {
+    if (!todo.dueDate) continue;
+    let dueAt: Date;
+    if (/^\d{2}:\d{2}$/.test(todo.dueDate)) {
+      const [h, m] = todo.dueDate.split(':').map(Number);
+      dueAt = new Date(now);
+      dueAt.setHours(h, m, 0, 0);
+    } else {
+      dueAt = new Date(todo.dueDate);
+    }
+    // Only upcoming (not already past)
+    if (dueAt <= now || dueAt > maxWindow) continue;
+    const timeUntil = dueAt.getTime() - now.getTime();
+    const reminderType = getReminderType(timeUntil, prefs);
+    if (reminderType) {
+      alerts.push({
+        entityType: 'todoItem',
+        entityId: todo.id,
+        taskName: todo.task,
+        dueAt,
+        notificationType: reminderType,
+      });
+    }
+  }
 
   // Meeting Rails upcoming
   const upcomingMeetings = await prisma.lswMeetingRail.findMany({
@@ -339,6 +422,12 @@ function getReminderType(timeUntilMs: number, prefs: LswNotificationPreference):
   const days = timeUntilMs / (24 * 60 * 60 * 1000);
   const weeks = days / 7;
   const months = days / 30;
+
+  // Check custom minutes first (most specific user-defined window)
+  const customMins = (prefs as any).customReminderMinutes;
+  if (customMins > 0 && mins <= customMins && mins > 0) {
+    return `reminder_${customMins}min`;
+  }
 
   // Check from most specific to least
   if (prefs.reminderMinutesBefore > 0 && mins <= prefs.reminderMinutesBefore && mins > 0) {
