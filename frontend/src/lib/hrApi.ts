@@ -390,6 +390,36 @@ export async function removeDocument(caseId: string, documentId: string, userId?
   await api.delete(`/conflict-cases/${caseId}/documents/${documentId}`, { params: { userId } });
 }
 
+// --- Document OCR ---
+
+export interface OCRResult {
+  originalText: string;
+  translatedText: string | null;
+  cleanedText: string;
+  detectedLanguage: string;
+  isHandwritten: boolean;
+  keyPoints: string[];
+  mentionedNames: string[];
+  mentionedDates: string[];
+  summary: string;
+  corrections: string[];
+  pageCount: number;
+  confidence: number;
+}
+
+export async function processDocumentOCR(payload: {
+  images: string[];
+  documentType: string;
+  sourceLanguage?: string;
+}): Promise<OCRResult> {
+  const result = await apiWithExtendedTimeout<{ success: boolean; data: OCRResult }>({
+    method: 'POST',
+    url: '/document-ocr/process',
+    data: payload,
+  }, 300000); // 5 min timeout for multi-page OCR
+  return result.data;
+}
+
 // --- Audit ---
 
 export async function fetchAudit(caseId: string): Promise<AuditEntry[]> {

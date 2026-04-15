@@ -45,6 +45,10 @@ import {
   Award,
   Flag,
   BarChart3,
+  Image,
+  Languages,
+  Globe,
+  Type,
 } from 'lucide-react';
 import {
   ConflictCase,
@@ -71,6 +75,8 @@ import {
   removeEmployee,
   addDocument,
   removeDocument,
+  processDocumentOCR,
+  OCRResult,
   fetchAudit,
   fetchPolicies,
   saveDocumentEdit,
@@ -429,15 +435,34 @@ function OverviewTab({ caseData, onUpdate, userId }: {
 
 // ─── DOCUMENTS TAB ────────────────────────────────────────────────────────────
 
+const SUPPORTED_LANGUAGES = [
+  'English', 'Spanish', 'French', 'German', 'Portuguese', 'Italian', 'Dutch', 'Polish',
+  'Russian', 'Arabic', 'Persian', 'Pashto', 'Dari', 'Chinese', 'Japanese', 'Korean',
+  'Vietnamese', 'Tagalog', 'Hindi',
+];
+
 function DocumentsTab({ caseData, onUpdate, userId }: {
   caseData: ConflictCase; onUpdate: () => void; userId: string;
 }) {
+  // Upload flow state
   const [showUpload, setShowUpload] = useState(false);
+  const [uploadMode, setUploadMode] = useState<'scan' | 'manual' | null>(null);
   const [docType, setDocType] = useState<DocumentType>('complaint_a');
   const [docContent, setDocContent] = useState('');
-  const [docName, setDocName] = useState('');
   const [saving, setSaving] = useState(false);
+
+  // OCR flow state
+  const [uploadedImages, setUploadedImages] = useState<string[]>([]); // base64 images
+  const [imageNames, setImageNames] = useState<string[]>([]);
+  const [sourceLanguage, setSourceLanguage] = useState('English');
+  const [processing, setProcessing] = useState(false);
+  const [ocrResult, setOcrResult] = useState<OCRResult | null>(null);
+  const [ocrError, setOcrError] = useState('');
+  const [reviewTab, setReviewTab] = useState<'original' | 'translated' | 'cleaned' | 'images'>('cleaned');
+
+  // Preview state
   const [selectedDoc, setSelectedDoc] = useState<CaseDocument | null>(null);
+  const [previewTab, setPreviewTab] = useState<'original' | 'translated' | 'cleaned'>('cleaned');
 
   const docTypeLabels: Record<DocumentType, string> = {
     complaint_a: 'Complaint A',
@@ -450,33 +475,124 @@ function DocumentsTab({ caseData, onUpdate, userId }: {
     other: 'Other',
   };
 
-  const handleUpload = async () => {
-    if (!docContent.trim()) return;
-    setSaving(true);
-    try {
-      await addDocument(caseData.id, {
-        type: docType,
-        content: docContent.trim(),
-        name: docName || docTypeLabels[docType],
-        userId,
-      });
-      onUpdate();
-      setShowUpload(false);
-      setDocContent(''); setDocName('');
-    } catch (err) { console.error(err); }
-    finally { setSaving(false); }
+  const resetUpload = () => {
+    setShowUpload(false);
+    setUploadMode(null);
+    setDocContent('');
+    setUploadedImages([]);
+    setImageNames([]);
+    setSourceLanguage('English');
+    setProcessing(false);
+    setOcrResult(null);
+    setOcrError('');
+    setReviewTab('cleaned');
   };
 
-  const handleFileUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
-    const file = e.target.files?.[0];
-    if (!file) return;
-    const reader = new FileReader();
-    reader.onload = (ev) => {
-      const text = ev.target?.result as string;
-      setDocContent(text);
-      setDocName(file.name);
-    };
-    reader.readAsText(file);
+  // Handle file selection — convert images/PDFs to base64
+  const handleFileSelect = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const files = Array.from(e.target.files || []);
+    if (files.length === 0) return;
+
+    const newImages: string[] = [];
+    const newNames: string[] = [];
+
+    for (const file of files) {
+      if (file.type === 'application/pdf') {
+        // For PDFs: render each page to an image via canvas
+        const arrayBuffer = await file.arrayBuffer();
+        const pdfModule = await import('pdfjs-dist');
+        pdfModule.GlobalWorkerOptions.workerSrc = `//cdnjs.cloudflare.com/ajax/libs/pdf.js/${pdfModule.version}/pdf.worker.min.js`;
+        const pdf = await pdfModule.getDocument({ data: arrayBuffer }).promise;
+        for (let i = 1; i <= pdf.numPages; i++) {
+          const page = await pdf.getPage(i);
+          const viewport = page.getViewport({ scale: 2 });
+          const canvas = document.createElement('canvas');
+          canvas.width = viewport.width;
+          canvas.height = viewport.height;
+          const ctx = canvas.getContext('2d')!;
+          await page.render({ canvasContext: ctx, viewport }).promise;
+          const base64 = canvas.toDataURL('image/jpeg', 0.85).replace(/^data:image\/jpeg;base64,/, '');
+          newImages.push(base64);
+          newNames.push(`${file.name} - Page ${i}`);
+        }
+      } else {
+        // Image files: read as base64
+        const base64 = await new Promise<string>((resolve) => {
+          const reader = new FileReader();
+          reader.onload = () => {
+            const result = reader.result as string;
+            resolve(result.replace(/^data:image\/[^;]+;base64,/, ''));
+          };
+          reader.readAsDataURL(file);
+        });
+        newImages.push(base64);
+        newNames.push(file.name);
+      }
+    }
+
+    setUploadedImages(prev => [...prev, ...newImages]);
+    setImageNames(prev => [...prev, ...newNames]);
+    // Reset file input
+    e.target.value = '';
+  };
+
+  const removeImage = (index: number) => {
+    setUploadedImages(prev => prev.filter((_, i) => i !== index));
+    setImageNames(prev => prev.filter((_, i) => i !== index));
+  };
+
+  // OCR processing
+  const handleProcess = async () => {
+    if (uploadedImages.length === 0) return;
+    setProcessing(true);
+    setOcrError('');
+    try {
+      const result = await processDocumentOCR({
+        images: uploadedImages,
+        documentType: docTypeLabels[docType],
+        sourceLanguage,
+      });
+      setOcrResult(result);
+      setReviewTab(result.translatedText ? 'translated' : 'cleaned');
+    } catch (err: any) {
+      setOcrError(err?.response?.data?.message || err?.message || 'Failed to process document');
+    } finally {
+      setProcessing(false);
+    }
+  };
+
+  // Save document (both manual and OCR)
+  const handleSave = async () => {
+    setSaving(true);
+    try {
+      if (uploadMode === 'manual') {
+        await addDocument(caseData.id, {
+          type: docType,
+          originalText: docContent.trim(),
+          cleanedText: docContent.trim(),
+          name: docTypeLabels[docType],
+          userId,
+        });
+      } else if (ocrResult) {
+        await addDocument(caseData.id, {
+          type: docType,
+          originalText: ocrResult.originalText,
+          cleanedText: ocrResult.cleanedText,
+          translatedText: ocrResult.translatedText || undefined,
+          detectedLanguage: ocrResult.detectedLanguage,
+          isHandwritten: ocrResult.isHandwritten,
+          pageCount: ocrResult.pageCount,
+          name: docTypeLabels[docType],
+          userId,
+        });
+      }
+      onUpdate();
+      resetUpload();
+    } catch (err) {
+      console.error('Failed to save document:', err);
+    } finally {
+      setSaving(false);
+    }
   };
 
   const handleRemoveDoc = async (docId: string) => {
@@ -507,7 +623,7 @@ function DocumentsTab({ caseData, onUpdate, userId }: {
         actions={
           !caseData.isLocked && (
             <button onClick={() => setShowUpload(true)} className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-semibold text-blue-600 dark:text-blue-400 hover:bg-blue-50 dark:hover:bg-blue-900/20 transition-colors">
-              <Upload className="w-3.5 h-3.5" /> Upload
+              <Upload className="w-3.5 h-3.5" /> Add Document
             </button>
           )
         }
@@ -532,7 +648,7 @@ function DocumentsTab({ caseData, onUpdate, userId }: {
                   {groupDocs.map(doc => (
                     <button
                       key={doc.id}
-                      onClick={() => setSelectedDoc(doc)}
+                      onClick={() => { setSelectedDoc(doc); setPreviewTab('cleaned'); }}
                       className={`w-full text-left p-3 rounded-lg mb-1 transition-all ${
                         selectedDoc?.id === doc.id
                           ? 'bg-blue-50 dark:bg-blue-900/20 border border-blue-200 dark:border-blue-700'
@@ -550,7 +666,15 @@ function DocumentsTab({ caseData, onUpdate, userId }: {
                           </button>
                         )}
                       </div>
-                      <p className="text-xs text-gray-400 dark:text-gray-500 mt-0.5">{formatDate(doc.createdAt)}</p>
+                      <div className="flex items-center gap-2 mt-0.5">
+                        <p className="text-xs text-gray-400 dark:text-gray-500">{formatDate(doc.createdAt)}</p>
+                        {doc.detectedLanguage && doc.detectedLanguage.toLowerCase() !== 'english' && (
+                          <span className="text-[10px] px-1.5 py-0.5 rounded bg-purple-100 dark:bg-purple-900/20 text-purple-600 dark:text-purple-400">{doc.detectedLanguage}</span>
+                        )}
+                        {doc.isHandwritten && (
+                          <span className="text-[10px] px-1.5 py-0.5 rounded bg-amber-100 dark:bg-amber-900/20 text-amber-600 dark:text-amber-400">Handwritten</span>
+                        )}
+                      </div>
                     </button>
                   ))}
                 </div>
@@ -565,24 +689,45 @@ function DocumentsTab({ caseData, onUpdate, userId }: {
                     <h4 className="text-sm font-semibold text-gray-900 dark:text-white capitalize">{selectedDoc.type.replace(/_/g, ' ')}</h4>
                     <span className="text-xs text-gray-400">{formatDateTime(selectedDoc.createdAt)}</span>
                   </div>
+                  {/* Preview tabs */}
+                  {(selectedDoc.translatedText || (selectedDoc.originalText && selectedDoc.cleanedText && selectedDoc.originalText !== selectedDoc.cleanedText)) && (
+                    <div className="flex gap-1 mb-3 bg-gray-100 dark:bg-gray-800 rounded-lg p-1">
+                      {selectedDoc.originalText && (
+                        <button onClick={() => setPreviewTab('original')} className={`flex-1 px-3 py-1.5 rounded-md text-xs font-medium transition-colors ${previewTab === 'original' ? 'bg-white dark:bg-gray-700 text-gray-900 dark:text-white shadow-sm' : 'text-gray-500 dark:text-gray-400 hover:text-gray-700'}`}>
+                          Original
+                        </button>
+                      )}
+                      {selectedDoc.translatedText && (
+                        <button onClick={() => setPreviewTab('translated')} className={`flex-1 px-3 py-1.5 rounded-md text-xs font-medium transition-colors ${previewTab === 'translated' ? 'bg-white dark:bg-gray-700 text-gray-900 dark:text-white shadow-sm' : 'text-gray-500 dark:text-gray-400 hover:text-gray-700'}`}>
+                          Translated
+                        </button>
+                      )}
+                      {selectedDoc.cleanedText && (
+                        <button onClick={() => setPreviewTab('cleaned')} className={`flex-1 px-3 py-1.5 rounded-md text-xs font-medium transition-colors ${previewTab === 'cleaned' ? 'bg-white dark:bg-gray-700 text-gray-900 dark:text-white shadow-sm' : 'text-gray-500 dark:text-gray-400 hover:text-gray-700'}`}>
+                          Cleaned
+                        </button>
+                      )}
+                    </div>
+                  )}
                   {selectedDoc.detectedLanguage && (
-                    <Badge className="bg-gray-100 text-gray-600 dark:bg-gray-700 dark:text-gray-400 mb-3">
-                      Language: {selectedDoc.detectedLanguage}
-                    </Badge>
+                    <div className="flex items-center gap-2 mb-3">
+                      <Badge className="bg-gray-100 text-gray-600 dark:bg-gray-700 dark:text-gray-400">
+                        <Globe className="w-3 h-3" /> {selectedDoc.detectedLanguage}
+                      </Badge>
+                      {selectedDoc.isHandwritten && (
+                        <Badge className="bg-amber-100 text-amber-700 dark:bg-amber-900/30 dark:text-amber-400">
+                          Handwritten
+                        </Badge>
+                      )}
+                    </div>
                   )}
                   <div className="prose prose-sm dark:prose-invert max-w-none">
                     <pre className="whitespace-pre-wrap text-sm text-gray-700 dark:text-gray-300 font-sans leading-relaxed">
-                      {selectedDoc.originalText || selectedDoc.cleanedText || 'No text content'}
+                      {previewTab === 'original' && (selectedDoc.originalText || 'No original text')}
+                      {previewTab === 'translated' && (selectedDoc.translatedText || 'No translated text')}
+                      {previewTab === 'cleaned' && (selectedDoc.cleanedText || selectedDoc.originalText || 'No text content')}
                     </pre>
                   </div>
-                  {selectedDoc.translatedText && (
-                    <div className="mt-4 pt-4 border-t border-gray-200 dark:border-gray-700">
-                      <p className="text-xs font-semibold text-gray-500 dark:text-gray-400 uppercase mb-2">Translated Version</p>
-                      <pre className="whitespace-pre-wrap text-sm text-gray-700 dark:text-gray-300 font-sans leading-relaxed">
-                        {selectedDoc.translatedText}
-                      </pre>
-                    </div>
-                  )}
                 </div>
               ) : (
                 <div className="flex items-center justify-center h-48 rounded-xl border border-dashed border-gray-300 dark:border-gray-600">
@@ -593,46 +738,255 @@ function DocumentsTab({ caseData, onUpdate, userId }: {
           </div>
         )}
 
-        {/* Upload Form */}
+        {/* ─── Upload Modal ─────────────────────────────────────────────── */}
         {showUpload && (
           <div className="mt-4 p-5 rounded-xl border-2 border-dashed border-blue-300 dark:border-blue-700 bg-blue-50/50 dark:bg-blue-900/10">
-            <h4 className="text-sm font-semibold text-gray-900 dark:text-white mb-3">Upload Document</h4>
-            <div className="grid md:grid-cols-2 gap-3 mb-3">
+            <div className="flex items-center justify-between mb-4">
+              <h4 className="text-sm font-semibold text-gray-900 dark:text-white">Add Document</h4>
+              <button onClick={resetUpload} title="Close" className="p-1 rounded hover:bg-gray-200 dark:hover:bg-gray-700"><X className="w-4 h-4 text-gray-400" /></button>
+            </div>
+
+            {/* Step 1: Document Type */}
+            <div className="mb-4">
+              <label className="text-xs font-medium text-gray-600 dark:text-gray-400 mb-1 block">Document Type</label>
               <select
                 value={docType}
                 onChange={e => setDocType(e.target.value as DocumentType)}
                 title="Document type"
-                className="px-3 py-2.5 rounded-lg border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-700 text-sm text-gray-900 dark:text-white focus:ring-2 focus:ring-blue-500"
+                className="w-full px-3 py-2.5 rounded-lg border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-700 text-sm text-gray-900 dark:text-white focus:ring-2 focus:ring-blue-500"
               >
                 {Object.entries(docTypeLabels).map(([v, l]) => <option key={v} value={v}>{l}</option>)}
               </select>
-              <div className="relative">
-                <input
-                  type="file"
-                  accept=".txt,.doc,.docx,.pdf,.md"
-                  onChange={handleFileUpload}
-                  title="Upload file"
-                  className="absolute inset-0 opacity-0 cursor-pointer"
+            </div>
+
+            {/* Step 2: Input Method */}
+            {!uploadMode && !ocrResult && (
+              <div className="grid grid-cols-2 gap-3">
+                <button
+                  onClick={() => setUploadMode('scan')}
+                  className="flex flex-col items-center gap-2 p-6 rounded-xl border-2 border-gray-200 dark:border-gray-600 hover:border-blue-400 dark:hover:border-blue-500 hover:bg-blue-50 dark:hover:bg-blue-900/10 transition-all"
+                >
+                  <Image className="w-8 h-8 text-blue-500" />
+                  <span className="text-sm font-semibold text-gray-900 dark:text-white">Upload File</span>
+                  <span className="text-xs text-gray-500 dark:text-gray-400 text-center">Upload images or PDFs for AI text extraction</span>
+                </button>
+                <button
+                  onClick={() => setUploadMode('manual')}
+                  className="flex flex-col items-center gap-2 p-6 rounded-xl border-2 border-gray-200 dark:border-gray-600 hover:border-blue-400 dark:hover:border-blue-500 hover:bg-blue-50 dark:hover:bg-blue-900/10 transition-all"
+                >
+                  <Type className="w-8 h-8 text-green-500" />
+                  <span className="text-sm font-semibold text-gray-900 dark:text-white">Type Manually</span>
+                  <span className="text-xs text-gray-500 dark:text-gray-400 text-center">Type or paste document text directly</span>
+                </button>
+              </div>
+            )}
+
+            {/* ─── Manual Entry Mode ──────────────────────────────── */}
+            {uploadMode === 'manual' && (
+              <div>
+                <textarea
+                  value={docContent}
+                  onChange={e => setDocContent(e.target.value)}
+                  rows={8}
+                  placeholder="Type or paste document content here..."
+                  className="w-full px-3 py-2.5 rounded-lg border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-700 text-sm text-gray-900 dark:text-white placeholder-gray-400 focus:ring-2 focus:ring-blue-500 resize-none"
                 />
-                <div className="flex items-center gap-2 px-3 py-2.5 rounded-lg border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-700 text-sm text-gray-400 cursor-pointer hover:border-blue-400 transition-colors">
-                  <FileUp className="w-4 h-4" />
-                  <span>{docName || 'Choose file (txt/doc)...'}</span>
+                <div className="flex items-center justify-end gap-2 mt-3">
+                  <button onClick={resetUpload} className="px-3 py-1.5 rounded-lg text-xs font-medium text-gray-500 hover:bg-gray-100 dark:hover:bg-gray-700 transition-colors">Cancel</button>
+                  <button onClick={handleSave} disabled={!docContent.trim() || saving} className="px-4 py-1.5 rounded-lg text-xs font-semibold text-white bg-blue-600 hover:bg-blue-700 disabled:opacity-50 transition-colors flex items-center gap-1.5">
+                    {saving ? <Loader2 className="w-3 h-3 animate-spin" /> : <Upload className="w-3 h-3" />} Add Document
+                  </button>
                 </div>
               </div>
-            </div>
-            <textarea
-              value={docContent}
-              onChange={e => setDocContent(e.target.value)}
-              rows={6}
-              placeholder="Paste or type document content here..."
-              className="w-full px-3 py-2.5 rounded-lg border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-700 text-sm text-gray-900 dark:text-white placeholder-gray-400 focus:ring-2 focus:ring-blue-500 resize-none font-mono"
-            />
-            <div className="flex items-center justify-end gap-2 mt-3">
-              <button onClick={() => { setShowUpload(false); setDocContent(''); setDocName(''); }} className="px-3 py-1.5 rounded-lg text-xs font-medium text-gray-500 hover:bg-gray-100 dark:hover:bg-gray-700 transition-colors">Cancel</button>
-              <button onClick={handleUpload} disabled={!docContent.trim() || saving} className="px-4 py-1.5 rounded-lg text-xs font-semibold text-white bg-blue-600 hover:bg-blue-700 disabled:opacity-50 transition-colors flex items-center gap-1.5">
-                {saving ? <Loader2 className="w-3 h-3 animate-spin" /> : <Upload className="w-3 h-3" />} Upload
-              </button>
-            </div>
+            )}
+
+            {/* ─── Scan/Upload Mode ──────────────────────────────── */}
+            {uploadMode === 'scan' && !ocrResult && (
+              <div className="space-y-4">
+                {/* File input */}
+                <div>
+                  <div className="relative">
+                    <input
+                      type="file"
+                      accept="image/*,.pdf"
+                      multiple
+                      onChange={handleFileSelect}
+                      title="Upload images or PDF"
+                      className="absolute inset-0 opacity-0 cursor-pointer"
+                    />
+                    <div className="flex items-center justify-center gap-2 px-4 py-8 rounded-xl border-2 border-dashed border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-700/50 text-sm text-gray-500 cursor-pointer hover:border-blue-400 hover:bg-blue-50/50 dark:hover:bg-blue-900/10 transition-all">
+                      <FileUp className="w-5 h-5" />
+                      <span>Click to select images or PDF files</span>
+                    </div>
+                  </div>
+                </div>
+
+                {/* Uploaded images preview */}
+                {uploadedImages.length > 0 && (
+                  <div>
+                    <p className="text-xs font-medium text-gray-600 dark:text-gray-400 mb-2">{uploadedImages.length} page{uploadedImages.length > 1 ? 's' : ''} selected</p>
+                    <div className="grid grid-cols-4 sm:grid-cols-6 gap-2">
+                      {uploadedImages.map((img, idx) => (
+                        <div key={idx} className="relative group">
+                          <img
+                            src={`data:image/jpeg;base64,${img}`}
+                            alt={imageNames[idx]}
+                            className="w-full h-20 object-cover rounded-lg border border-gray-200 dark:border-gray-600"
+                          />
+                          <button
+                            onClick={() => removeImage(idx)}
+                            title="Remove page"
+                            className="absolute -top-1.5 -right-1.5 w-5 h-5 rounded-full bg-red-500 text-white flex items-center justify-center opacity-0 group-hover:opacity-100 transition-opacity"
+                          >
+                            <X className="w-3 h-3" />
+                          </button>
+                          <p className="text-[9px] text-gray-400 truncate mt-0.5">{imageNames[idx]}</p>
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+                )}
+
+                {/* Language selection */}
+                {uploadedImages.length > 0 && (
+                  <div>
+                    <label className="text-xs font-medium text-gray-600 dark:text-gray-400 mb-1 flex items-center gap-1.5">
+                      <Languages className="w-3.5 h-3.5" /> Document Language
+                    </label>
+                    <select
+                      value={sourceLanguage}
+                      onChange={e => setSourceLanguage(e.target.value)}
+                      title="Source language"
+                      className="w-full px-3 py-2.5 rounded-lg border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-700 text-sm text-gray-900 dark:text-white focus:ring-2 focus:ring-blue-500"
+                    >
+                      {SUPPORTED_LANGUAGES.map(lang => <option key={lang} value={lang}>{lang}</option>)}
+                    </select>
+                  </div>
+                )}
+
+                {/* Error display */}
+                {ocrError && (
+                  <div className="p-3 rounded-lg bg-red-50 dark:bg-red-900/20 border border-red-200 dark:border-red-800 text-sm text-red-600 dark:text-red-400">
+                    {ocrError}
+                  </div>
+                )}
+
+                {/* Action buttons */}
+                <div className="flex items-center justify-end gap-2">
+                  <button onClick={resetUpload} className="px-3 py-1.5 rounded-lg text-xs font-medium text-gray-500 hover:bg-gray-100 dark:hover:bg-gray-700 transition-colors">Cancel</button>
+                  <button
+                    onClick={handleProcess}
+                    disabled={uploadedImages.length === 0 || processing}
+                    className="px-4 py-2 rounded-lg text-xs font-semibold text-white bg-blue-600 hover:bg-blue-700 disabled:opacity-50 transition-colors flex items-center gap-1.5"
+                  >
+                    {processing ? (
+                      <>
+                        <Loader2 className="w-3.5 h-3.5 animate-spin" />
+                        Processing {uploadedImages.length} page{uploadedImages.length > 1 ? 's' : ''}...
+                      </>
+                    ) : (
+                      <>
+                        <Sparkles className="w-3.5 h-3.5" />
+                        Process {uploadedImages.length} Page{uploadedImages.length > 1 ? 's' : ''}
+                      </>
+                    )}
+                  </button>
+                </div>
+              </div>
+            )}
+
+            {/* ─── OCR Review ────────────────────────────────────── */}
+            {ocrResult && (
+              <div className="space-y-4">
+                {/* Info badges */}
+                <div className="flex items-center gap-2 flex-wrap">
+                  <Badge className="bg-green-100 text-green-700 dark:bg-green-900/30 dark:text-green-400">
+                    <CheckCircle2 className="w-3 h-3" /> Processed
+                  </Badge>
+                  <Badge className="bg-gray-100 text-gray-600 dark:bg-gray-700 dark:text-gray-400">
+                    {ocrResult.pageCount} page{ocrResult.pageCount > 1 ? 's' : ''}
+                  </Badge>
+                  {ocrResult.detectedLanguage && (
+                    <Badge className="bg-purple-100 text-purple-700 dark:bg-purple-900/30 dark:text-purple-400">
+                      <Globe className="w-3 h-3" /> {ocrResult.detectedLanguage}
+                    </Badge>
+                  )}
+                  {ocrResult.isHandwritten && (
+                    <Badge className="bg-amber-100 text-amber-700 dark:bg-amber-900/30 dark:text-amber-400">
+                      Handwritten
+                    </Badge>
+                  )}
+                  {ocrResult.confidence > 0 && (
+                    <Badge className="bg-blue-100 text-blue-700 dark:bg-blue-900/30 dark:text-blue-400">
+                      {Math.round(ocrResult.confidence * 100)}% confidence
+                    </Badge>
+                  )}
+                </div>
+
+                {/* Review tabs */}
+                <div className="flex gap-1 bg-gray-100 dark:bg-gray-800 rounded-lg p-1">
+                  <button onClick={() => setReviewTab('original')} className={`flex-1 px-3 py-1.5 rounded-md text-xs font-medium transition-colors ${reviewTab === 'original' ? 'bg-white dark:bg-gray-700 text-gray-900 dark:text-white shadow-sm' : 'text-gray-500 dark:text-gray-400 hover:text-gray-700'}`}>
+                    Original
+                  </button>
+                  {ocrResult.translatedText && (
+                    <button onClick={() => setReviewTab('translated')} className={`flex-1 px-3 py-1.5 rounded-md text-xs font-medium transition-colors ${reviewTab === 'translated' ? 'bg-white dark:bg-gray-700 text-gray-900 dark:text-white shadow-sm' : 'text-gray-500 dark:text-gray-400 hover:text-gray-700'}`}>
+                      Translated
+                    </button>
+                  )}
+                  <button onClick={() => setReviewTab('cleaned')} className={`flex-1 px-3 py-1.5 rounded-md text-xs font-medium transition-colors ${reviewTab === 'cleaned' ? 'bg-white dark:bg-gray-700 text-gray-900 dark:text-white shadow-sm' : 'text-gray-500 dark:text-gray-400 hover:text-gray-700'}`}>
+                    Cleaned
+                  </button>
+                  <button onClick={() => setReviewTab('images')} className={`flex-1 px-3 py-1.5 rounded-md text-xs font-medium transition-colors ${reviewTab === 'images' ? 'bg-white dark:bg-gray-700 text-gray-900 dark:text-white shadow-sm' : 'text-gray-500 dark:text-gray-400 hover:text-gray-700'}`}>
+                    Images
+                  </button>
+                </div>
+
+                {/* Review content */}
+                <div className="rounded-lg border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-800 p-4 max-h-80 overflow-y-auto">
+                  {reviewTab === 'images' ? (
+                    <div className="grid grid-cols-2 sm:grid-cols-3 gap-3">
+                      {uploadedImages.map((img, idx) => (
+                        <div key={idx}>
+                          <img
+                            src={`data:image/jpeg;base64,${img}`}
+                            alt={`Page ${idx + 1}`}
+                            className="w-full rounded-lg border border-gray-200 dark:border-gray-600"
+                          />
+                          <p className="text-[10px] text-gray-400 text-center mt-1">Page {idx + 1}</p>
+                        </div>
+                      ))}
+                    </div>
+                  ) : (
+                    <pre className="whitespace-pre-wrap text-sm text-gray-700 dark:text-gray-300 font-sans leading-relaxed">
+                      {reviewTab === 'original' && (ocrResult.originalText || 'No text extracted')}
+                      {reviewTab === 'translated' && (ocrResult.translatedText || 'No translation')}
+                      {reviewTab === 'cleaned' && (ocrResult.cleanedText || 'No cleaned text')}
+                    </pre>
+                  )}
+                </div>
+
+                {/* Summary */}
+                {ocrResult.summary && (
+                  <div className="p-3 rounded-lg bg-blue-50 dark:bg-blue-900/10 border border-blue-200 dark:border-blue-800">
+                    <p className="text-xs font-semibold text-blue-600 dark:text-blue-400 mb-1">Summary</p>
+                    <p className="text-sm text-gray-700 dark:text-gray-300">{ocrResult.summary}</p>
+                  </div>
+                )}
+
+                {/* Action buttons */}
+                <div className="flex items-center justify-end gap-2">
+                  <button onClick={resetUpload} className="px-3 py-1.5 rounded-lg text-xs font-medium text-gray-500 hover:bg-gray-100 dark:hover:bg-gray-700 transition-colors">Cancel</button>
+                  <button
+                    onClick={handleSave}
+                    disabled={saving}
+                    className="px-4 py-2 rounded-lg text-xs font-semibold text-white bg-green-600 hover:bg-green-700 disabled:opacity-50 transition-colors flex items-center gap-1.5"
+                  >
+                    {saving ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <CheckCircle2 className="w-3.5 h-3.5" />}
+                    Accept &amp; Save Document
+                  </button>
+                </div>
+              </div>
+            )}
           </div>
         )}
       </SectionCard>
