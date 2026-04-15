@@ -80,6 +80,11 @@ const nextConfig = {
   },
   // Prevent source maps in production
   productionBrowserSourceMaps: false,
+  webpack: (config) => {
+    // pdfjs-dist optionally requires 'canvas' (Node.js only) — not needed in browser
+    config.resolve.alias.canvas = false;
+    return config;
+  },
 };
 
 module.exports = nextConfig;
