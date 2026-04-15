@@ -2,7 +2,7 @@
 
 import React, { useState, useEffect } from 'react';
 import { useRouter } from 'next/navigation';
-import Image from 'next/image';
+import ProtectedRoute from '@/components/auth/ProtectedRoute';
 import { auth } from '@/lib/firebase';
 import { onAuthStateChanged, User } from 'firebase/auth';
 import Link from 'next/link';
@@ -119,7 +119,7 @@ interface PredictionData {
   };
 }
 
-export default function AnalyticsPage() {
+function AnalyticsContent() {
   const router = useRouter();
   const [user, setUser] = useState<User | null>(null);
   const [loading, setLoading] = useState(true);
@@ -295,7 +295,7 @@ export default function AnalyticsPage() {
 
   if (loading) {
     return (
-      <div className="min-h-screen bg-gray-50 flex items-center justify-center">
+      <div className="min-h-full flex items-center justify-center">
         <div className="flex flex-col items-center justify-center">
           <div className="relative mb-8">
             <div className="absolute inset-0 w-20 h-20 rounded-full border-4 border-blue-200 dark:border-blue-900/50" />
@@ -319,22 +319,7 @@ export default function AnalyticsPage() {
   }
 
   return (
-    <div className="min-h-screen bg-gray-50">
-      {/* Header */}
-      <header className="bg-white shadow">
-        <div className="w-full px-4 py-6 sm:px-6 lg:px-8 flex justify-between items-center">
-          <div className="flex items-center gap-4">
-            <div className="relative w-10 h-10">
-              <Image src="/images/logo.png" alt="DASHMET Logo" fill className="object-contain" />
-            </div>
-            <div>
-              <h1 className="text-2xl font-bold text-gray-900">Analytics & Intelligence</h1>
-              <p className="text-sm text-gray-500">Phase 12: Trends, predictions, and insights</p>
-            </div>
-          </div>
-
-        </div>
-      </header>
+    <div className="min-h-full">
 
       <main className="w-full px-4 sm:px-6 lg:px-8 py-8">
         {/* Tabs */}
@@ -710,5 +695,13 @@ export default function AnalyticsPage() {
         )}
       </main>
     </div>
+  );
+}
+
+export default function AnalyticsPage() {
+  return (
+    <ProtectedRoute>
+      <AnalyticsContent />
+    </ProtectedRoute>
   );
 }

@@ -2,7 +2,7 @@
 
 import React, { useState, useEffect } from 'react';
 import { useRouter } from 'next/navigation';
-import Image from 'next/image';
+import ProtectedRoute from '@/components/auth/ProtectedRoute';
 import LoadingState from '@/components/ui/LoadingState';
 import { useAuth } from '@/components/providers/AuthProvider';
 import { formatDate, formatDateTime } from '@/lib/dateUtils';
@@ -61,7 +61,7 @@ interface Facility {
   name: string;
 }
 
-export default function ReportsPage() {
+function ReportsContent() {
   const router = useRouter();
   const { user, loading: authLoading, getIdToken } = useAuth();
   
@@ -364,23 +364,7 @@ export default function ReportsPage() {
   }
 
   return (
-    <div className="min-h-screen bg-gray-50 dark:bg-gray-900">
-      {/* Header */}
-      <header className="bg-white dark:bg-gray-800 shadow-sm border-b dark:border-gray-700">
-        <div className="w-full px-4 sm:px-6 lg:px-8 py-4">
-          <div className="flex items-center justify-between">
-            <div className="flex items-center gap-4">
-              <div className="relative w-10 h-10">
-                <Image src="/images/logo.png" alt="DASHMET Logo" fill className="object-contain" />
-              </div>
-              <div>
-                <h1 className="text-2xl font-bold text-gray-900 dark:text-white">Reports & Compliance</h1>
-                <p className="text-sm text-gray-500 dark:text-gray-400">Phase 11: Generate reports and compliance documentation</p>
-              </div>
-            </div>
-          </div>
-        </div>
-      </header>
+    <div className="min-h-full">
 
       <main className="w-full px-4 sm:px-6 lg:px-8 py-8">
         {/* Tab Navigation */}
@@ -1423,5 +1407,13 @@ export default function ReportsPage() {
         )}
       </main>
     </div>
+  );
+}
+
+export default function ReportsPage() {
+  return (
+    <ProtectedRoute>
+      <ReportsContent />
+    </ProtectedRoute>
   );
 }

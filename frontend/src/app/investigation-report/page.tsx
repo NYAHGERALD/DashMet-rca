@@ -3,6 +3,7 @@
 import { useState, useEffect, useCallback } from 'react';
 import { useRouter } from 'next/navigation';
 import { useAuth } from '@/components/providers/AuthProvider';
+import ProtectedRoute from '@/components/auth/ProtectedRoute';
 import { useLanguage } from '@/components/providers/LanguageProvider';
 import {
   FileText,
@@ -55,7 +56,7 @@ const INCIDENT_STATUSES = [
   { value: 'CLOSED', label: 'Closed' },
 ];
 
-export default function InvestigationReportPage() {
+function InvestigationReportContent() {
   const router = useRouter();
   const { user, getIdToken } = useAuth();
   const { t } = useLanguage();
@@ -516,5 +517,13 @@ export default function InvestigationReportPage() {
         </div>
       )}
     </div>
+  );
+}
+
+export default function InvestigationReportPage() {
+  return (
+    <ProtectedRoute>
+      <InvestigationReportContent />
+    </ProtectedRoute>
   );
 }
