@@ -68,6 +68,7 @@ const nextConfig = {
               "font-src 'self' https://fonts.gstatic.com",
               "img-src 'self' data: blob: https://firebasestorage.googleapis.com https://storage.googleapis.com https://*.googleusercontent.com",
               `connect-src 'self' ${backendOrigin} ${wsOrigin} https://*.googleapis.com https://*.firebaseio.com wss://*.firebaseio.com https://identitytoolkit.googleapis.com https://securetoken.googleapis.com `,
+              "media-src 'self' blob:",
               "frame-src 'self' https://*.firebaseapp.com",
               "object-src 'none'",
               "base-uri 'self'",

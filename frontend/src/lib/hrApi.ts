@@ -52,6 +52,7 @@ export interface ConflictCase {
   recommendationResult?: string | null;
   policyMatchingResult?: string | null;
   selectedTargetEmployeeIds?: string | null;
+  companyLogoUrl?: string | null;
 }
 
 export interface InvolvedEmployee {
@@ -121,6 +122,11 @@ export interface PolicySection {
   content: string;
   type: string;
   keywords: string[];
+  orderIndex?: number;
+  firstProgression?: string | null;
+  secondProgression?: string | null;
+  thirdProgression?: string | null;
+  fourthProgression?: string | null;
 }
 
 export interface DocumentEdit {
@@ -199,10 +205,18 @@ export interface Recommendation {
 
 export interface RecommendationResult {
   recommendations: Recommendation[];
+  employeeRecommendations?: EmployeeRecommendationGroup[];
   primaryRecommendation: string;
   supervisorGuidance: string;
   generatedAt: string;
   employeeNames: { complaintA: string; complaintB: string };
+}
+
+export interface EmployeeRecommendationGroup {
+  employeeName: string;
+  assessment: string;
+  recommendations: Recommendation[];
+  primaryRecommendation: string;
 }
 
 export interface GeneratedActionDocument {
@@ -300,6 +314,11 @@ export async function fetchCase(id: string): Promise<ConflictCase> {
   return data.data;
 }
 
+export async function fetchCaseDocuments(caseId: string): Promise<any[]> {
+  const { data } = await api.get(`/conflict-cases/${caseId}/documents`);
+  return data.data;
+}
+
 export async function createCase(payload: {
   caseNumber: string;
   creatorId: string;
@@ -381,6 +400,12 @@ export async function addDocument(caseId: string, payload: {
   employeeId?: string;
   submittedBy?: string;
   userId?: string;
+  signatureImageData?: string;
+  employeeReviewTimestamp?: string;
+  employeeSignatureTimestamp?: string;
+  supervisorCertificationTimestamp?: string;
+  supervisorId?: string;
+  supervisorName?: string;
 }): Promise<CaseDocument> {
   const { data } = await api.post(`/conflict-cases/${caseId}/documents`, payload);
   return data.data;
@@ -418,6 +443,70 @@ export async function processDocumentOCR(payload: {
     data: payload,
   }, 300000); // 5 min timeout for multi-page OCR
   return result.data;
+}
+
+// --- Document Text-to-Speech ---
+
+export async function documentTextToSpeech(payload: {
+  text: string;
+  employeeName: string;
+  documentType?: string;
+  languageCode?: string;
+  skipIntro?: boolean;
+}): Promise<{ audioBlob: Blob; languageCode: string; introWordCount: number }> {
+  const baseURL = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:5002/api';
+  const token = typeof window !== 'undefined' ? localStorage.getItem('firebaseToken') : null;
+  const res = await fetch(`${baseURL}/document-ocr/text-to-speech`, {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+      ...(token ? { Authorization: `Bearer ${token}` } : {}),
+    },
+    body: JSON.stringify(payload),
+  });
+  if (!res.ok) {
+    const err = await res.json().catch(() => ({ message: 'TTS failed' }));
+    throw new Error(err.message || 'Text-to-speech failed');
+  }
+  const audioBlob = await res.blob();
+  const languageCode = res.headers.get('X-Language-Code') || 'en-US';
+  const introWordCount = parseInt(res.headers.get('X-Intro-Word-Count') || '0', 10);
+  return { audioBlob, languageCode, introWordCount };
+}
+
+// --- Document Audit Log ---
+
+export async function submitDocumentAuditLog(payload: {
+  complaintId: string;
+  documentId: string;
+  originalText: string;
+  cleanedText: string;
+  translatedText?: string;
+  signatureImageBase64: string;
+  employeeReviewTimestamp: string;
+  employeeSignatureTimestamp: string;
+  supervisorCertificationTimestamp: string;
+  supervisorId?: string;
+  supervisorName?: string;
+  submittedBy: string;
+  submittedById?: string;
+  deviceId: string;
+  appVersion: string;
+  versionHash: string;
+}): Promise<void> {
+  const baseURL = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:5002/api';
+  const token = typeof window !== 'undefined' ? localStorage.getItem('firebaseToken') : null;
+  const res = await fetch(`${baseURL}/document-ocr/audit-log`, {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+      ...(token ? { Authorization: `Bearer ${token}` } : {}),
+    },
+    body: JSON.stringify(payload),
+  });
+  if (!res.ok) {
+    console.error('Audit log submission failed:', await res.text().catch(() => ''));
+  }
 }
 
 // --- Audit ---

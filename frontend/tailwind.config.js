@@ -97,6 +97,7 @@ module.exports = {
         'slide-in-right': 'slideInRight 0.5s cubic-bezier(0.16, 1, 0.3, 1) forwards',
         'slide-in-left': 'slideInLeft 0.3s cubic-bezier(0.16, 1, 0.3, 1) forwards',
         'shrink-width': 'shrinkWidth 5s linear forwards',
+        'modal-bounce': 'modalBounce 0.5s cubic-bezier(0.34, 1.56, 0.64, 1) forwards',
       },
       keyframes: {
         float: {
@@ -152,6 +153,12 @@ module.exports = {
           '50%': { transform: 'scale(1.05)' },
           '70%': { transform: 'scale(0.9)' },
           '100%': { opacity: '1', transform: 'scale(1)' },
+        },
+        modalBounce: {
+          '0%': { opacity: '0', transform: 'scale(0.92) translateY(8px)' },
+          '50%': { opacity: '1', transform: 'scale(1.02) translateY(-2px)' },
+          '75%': { transform: 'scale(0.995) translateY(1px)' },
+          '100%': { opacity: '1', transform: 'scale(1) translateY(0)' },
         },
         dropBounce: {
           '0%': { transform: 'scaleY(0.95) translateY(-4px)', opacity: '0.8' },

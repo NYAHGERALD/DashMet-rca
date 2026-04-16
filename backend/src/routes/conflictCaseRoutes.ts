@@ -415,9 +415,12 @@ router.get('/', async (req: Request, res: Response) => {
             select: { id: true, name: true },
           },
           involvedEmployees: true,
-          documents: true,  // Include actual documents, not just count
+          documents: {
+            select: { id: true, type: true, caseId: true, createdAt: true, detectedLanguage: true, isHandwritten: true, pageCount: true },
+          },
           auditLog: {
             orderBy: { timestamp: 'desc' },
+            take: 5,
           },
         },
         orderBy: { createdAt: 'desc' },
@@ -465,6 +468,7 @@ router.get('/:id', async (req: Request, res: Response, next) => {
   
   try {
     const { id } = req.params;
+    const start = Date.now();
 
     const conflictCase = await prisma.conflictCase.findUnique({
       where: { id },
@@ -481,12 +485,33 @@ router.get('/:id', async (req: Request, res: Response, next) => {
         involvedEmployees: true,
         documents: {
           orderBy: { createdAt: 'desc' },
+          select: {
+            id: true,
+            caseId: true,
+            type: true,
+            detectedLanguage: true,
+            isHandwritten: true,
+            pageCount: true,
+            employeeId: true,
+            submittedBy: true,
+            employeeReviewTimestamp: true,
+            employeeSignatureTimestamp: true,
+            supervisorCertificationTimestamp: true,
+            supervisorId: true,
+            supervisorName: true,
+            submittedById: true,
+            versionHash: true,
+            createdAt: true,
+            updatedAt: true,
+          },
         },
         auditLog: {
           orderBy: { timestamp: 'desc' },
+          take: 20,
         },
       },
     });
+    console.log(`⏱️ Case query took ${Date.now() - start}ms`);
 
     if (!conflictCase) {
       return res.status(404).json({
@@ -496,7 +521,7 @@ router.get('/:id', async (req: Request, res: Response, next) => {
     }
 
     const decryptedCase = decryptCaseData(conflictCase);
-    console.log('🎯 Returning case - selectedTargetEmployeeIds:', decryptedCase.selectedTargetEmployeeIds);
+    console.log(`⏱️ Case query + decrypt took ${Date.now() - start}ms`);
     
     res.json({
       success: true,
@@ -1262,6 +1287,61 @@ router.delete('/:id/employees/:employeeId', async (req: Request, res: Response) 
       error: 'Failed to remove employee',
       details: error.message,
     });
+  }
+});
+
+// ============================================================================
+// GET /api/conflict-cases/:id/documents
+// Get full document content for a case (lazy-loaded)
+// ============================================================================
+router.get('/:id/documents', async (req: Request, res: Response) => {
+  try {
+    const { id } = req.params;
+    const start = Date.now();
+
+    const documents = await prisma.conflictCaseDocument.findMany({
+      where: { caseId: id },
+      orderBy: { createdAt: 'desc' },
+      select: {
+        id: true,
+        caseId: true,
+        type: true,
+        originalText: true,
+        translatedText: true,
+        cleanedText: true,
+        originalImageUrls: true,
+        detectedLanguage: true,
+        isHandwritten: true,
+        pageCount: true,
+        employeeId: true,
+        submittedBy: true,
+        employeeReviewTimestamp: true,
+        employeeSignatureTimestamp: true,
+        supervisorCertificationTimestamp: true,
+        supervisorId: true,
+        supervisorName: true,
+        submittedById: true,
+        versionHash: true,
+        createdAt: true,
+        updatedAt: true,
+      },
+    });
+    console.log(`⏱️ Documents query took ${Date.now() - start}ms`);
+
+    // Decrypt document fields
+    const decryptedDocs = documents.map((doc: any) => ({
+      ...doc,
+      originalText: doc.originalText ? decrypt(doc.originalText) : doc.originalText,
+      translatedText: doc.translatedText ? decrypt(doc.translatedText) : doc.translatedText,
+      cleanedText: doc.cleanedText ? decrypt(doc.cleanedText) : doc.cleanedText,
+      originalImageUrls: doc.originalImageUrls ? decrypt(doc.originalImageUrls) : doc.originalImageUrls,
+      supervisorName: doc.supervisorName ? decrypt(doc.supervisorName) : doc.supervisorName,
+    }));
+
+    res.json({ success: true, data: decryptedDocs });
+  } catch (error: any) {
+    console.error('Error fetching documents:', error);
+    res.status(500).json({ success: false, error: 'Failed to fetch documents', details: error.message });
   }
 });
 

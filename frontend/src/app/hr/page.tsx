@@ -1,6 +1,6 @@
 'use client';
 
-import { useState, useEffect, useCallback, useMemo } from 'react';
+import { useState, useEffect, useCallback, useMemo, useRef } from 'react';
 import { useRouter } from 'next/navigation';
 import { useAuth } from '@/components/providers/AuthProvider';
 import ProtectedRoute from '@/components/auth/ProtectedRoute';
@@ -34,10 +34,21 @@ import {
   UserMinus,
   Briefcase,
   Hash,
+  ChevronDown,
+  ChevronUp,
+  AlertCircle,
+  FileUp,
+  Gavel,
+  Target,
+  MessageSquare,
+  HelpCircle,
+  GripHorizontal,
+  Sparkles,
 } from 'lucide-react';
 import {
   ConflictCase,
   WorkplacePolicy,
+  PolicySection,
   CaseAnalytics,
   CaseStatus,
   CaseType,
@@ -49,6 +60,7 @@ import {
   fetchPolicies,
   createPolicy,
   deletePolicy,
+  updatePolicy,
   fetchAnalytics,
   fetchDepartments,
   fetchShifts,
@@ -916,9 +928,121 @@ function CasesTab({ cases, loading, onRefresh, onCreateCase, onDeleteCase, organ
 // ────────────────────────────────────────────────────────────────────────────────
 // POLICIES TAB
 // ────────────────────────────────────────────────────────────────────────────────
+
+const sectionTypeIcons: Record<string, any> = {
+  OVERVIEW: Eye,
+  DEFINITIONS: BookOpen,
+  GUIDELINES: FileText,
+  PROCEDURES: Target,
+  VIOLATIONS: AlertTriangle,
+  CONSEQUENCES: Gavel,
+  REPORTING: FileUp,
+  APPEALS: MessageSquare,
+  OTHER: HelpCircle,
+};
+
+const sectionTypeLabels: Record<string, string> = {
+  OVERVIEW: 'Overview',
+  DEFINITIONS: 'Definitions',
+  GUIDELINES: 'Guidelines',
+  PROCEDURES: 'Procedures',
+  VIOLATIONS: 'Violations',
+  CONSEQUENCES: 'Consequences',
+  REPORTING: 'Reporting',
+  APPEALS: 'Appeals',
+  OTHER: 'Other',
+};
+
+const progressionColors = [
+  'bg-green-100 text-green-700 dark:bg-green-900/30 dark:text-green-400 border-green-200 dark:border-green-800',
+  'bg-yellow-100 text-yellow-700 dark:bg-yellow-900/30 dark:text-yellow-400 border-yellow-200 dark:border-yellow-800',
+  'bg-orange-100 text-orange-700 dark:bg-orange-900/30 dark:text-orange-400 border-orange-200 dark:border-orange-800',
+  'bg-red-100 text-red-700 dark:bg-red-900/30 dark:text-red-400 border-red-200 dark:border-red-800',
+];
+
+const progressionLabels = ['1st Offense', '2nd Offense', '3rd Offense', '4th Offense'];
+
 function PoliciesTab({ policies, loading, onRefresh, onCreatePolicy, onDeletePolicy }: {
   policies: WorkplacePolicy[]; loading: boolean; onRefresh: () => void; onCreatePolicy: () => void; onDeletePolicy: (id: string) => void;
 }) {
+  const [selectedPolicy, setSelectedPolicy] = useState<WorkplacePolicy | null>(null);
+  const [expandedSection, setExpandedSection] = useState<string | null>(null);
+  const [sectionSearch, setSectionSearch] = useState('');
+  const [sectionTypeFilter, setSectionTypeFilter] = useState<string>('ALL');
+  const [pdPos, setPdPos] = useState({ x: 0, y: 0 });
+  const [pdCentered, setPdCentered] = useState(false);
+  const [activating, setActivating] = useState(false);
+  const pdDragRef = useRef<HTMLDivElement>(null);
+  const pdPosRef = useRef({ x: 0, y: 0 });
+
+  // Center modal on open
+  useEffect(() => {
+    if (selectedPolicy) {
+      const pos = { x: Math.max(0, (window.innerWidth - 720) / 2), y: Math.max(20, (window.innerHeight - window.innerHeight * 0.85) / 2) };
+      setPdPos(pos);
+      pdPosRef.current = pos;
+      setPdCentered(false);
+      requestAnimationFrame(() => setPdCentered(true));
+    }
+  }, [selectedPolicy]);
+
+  const onPdDragStart = useCallback((e: React.MouseEvent) => {
+    e.preventDefault();
+    const startX = e.clientX - pdPosRef.current.x;
+    const startY = e.clientY - pdPosRef.current.y;
+    const onMove = (ev: MouseEvent) => {
+      const next = { x: ev.clientX - startX, y: ev.clientY - startY };
+      pdPosRef.current = next;
+      setPdPos(next);
+    };
+    const onUp = () => { window.removeEventListener('mousemove', onMove); window.removeEventListener('mouseup', onUp); };
+    window.addEventListener('mousemove', onMove);
+    window.addEventListener('mouseup', onUp);
+  }, []);
+
+  const handleActivatePolicy = async () => {
+    if (!selectedPolicy) return;
+    setActivating(true);
+    try {
+      const updated = await updatePolicy(selectedPolicy.id, { status: 'ACTIVE' });
+      setSelectedPolicy(updated);
+      onRefresh();
+    } catch (err) { console.error('Failed to activate policy:', err); }
+    finally { setActivating(false); }
+  };
+
+  const sections: PolicySection[] = (() => {
+    const raw = selectedPolicy?.sections;
+    if (!raw) return [];
+    if (Array.isArray(raw)) return raw;
+    if (typeof raw === 'string') { try { const parsed = JSON.parse(raw); return Array.isArray(parsed) ? parsed : []; } catch { return []; } }
+    return [];
+  })();
+  const sectionTypeCounts = sections.reduce<Record<string, number>>((acc, s) => {
+    const t = s.type || 'OTHER';
+    acc[t] = (acc[t] || 0) + 1;
+    return acc;
+  }, {});
+
+  const filteredSections = sections
+    .filter(s => {
+      if (sectionTypeFilter !== 'ALL' && (s.type || 'OTHER') !== sectionTypeFilter) return false;
+      if (sectionSearch.trim()) {
+        const q = sectionSearch.toLowerCase();
+        return (
+          s.title?.toLowerCase().includes(q) ||
+          s.content?.toLowerCase().includes(q) ||
+          s.sectionNumber?.toLowerCase().includes(q) ||
+          s.firstProgression?.toLowerCase().includes(q) ||
+          s.secondProgression?.toLowerCase().includes(q) ||
+          s.thirdProgression?.toLowerCase().includes(q) ||
+          s.fourthProgression?.toLowerCase().includes(q)
+        );
+      }
+      return true;
+    })
+    .sort((a, b) => (a.orderIndex ?? 0) - (b.orderIndex ?? 0));
+
   return (
     <div className="space-y-6">
       <div className="flex items-center justify-between">
@@ -955,7 +1079,11 @@ function PoliciesTab({ policies, loading, onRefresh, onCreatePolicy, onDeletePol
       ) : (
         <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-3">
           {policies.map(p => (
-            <div key={p.id} className="rounded-2xl bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-700 p-6 hover:shadow-lg transition-all">
+            <div
+              key={p.id}
+              onClick={() => { setSelectedPolicy(p); setExpandedSection(null); setSectionSearch(''); setSectionTypeFilter('ALL'); }}
+              className="rounded-2xl bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-700 p-6 hover:shadow-lg hover:border-blue-300 dark:hover:border-blue-700 transition-all cursor-pointer"
+            >
               <div className="flex items-start justify-between">
                 <div className="flex items-center gap-3">
                   <div className="p-2.5 rounded-xl bg-blue-100 dark:bg-blue-900/30">
@@ -986,13 +1114,221 @@ function PoliciesTab({ policies, loading, onRefresh, onCreatePolicy, onDeletePol
                 {p.effectiveDate && <span>Effective: {formatDate(p.effectiveDate)}</span>}
                 <span>Created: {formatDate(p.createdAt)}</span>
               </div>
-              {p.originalText && (
+              {p.sections && p.sections.length > 0 && (
+                <div className="mt-3 flex items-center gap-2">
+                  <span className="px-2.5 py-1 rounded-lg text-xs font-medium bg-purple-100 text-purple-700 dark:bg-purple-900/30 dark:text-purple-400">
+                    {p.sections.length} {p.sections.length === 1 ? 'section' : 'sections'}
+                  </span>
+                </div>
+              )}
+              {!p.sections?.length && p.originalText && (
                 <div className="mt-3 p-3 rounded-lg bg-gray-50 dark:bg-gray-700/50 max-h-24 overflow-hidden">
                   <p className="text-xs text-gray-500 dark:text-gray-400 line-clamp-3 font-mono">{p.originalText}</p>
                 </div>
               )}
             </div>
           ))}
+        </div>
+      )}
+
+      {/* ─── Policy Detail Modal ─── */}
+      {selectedPolicy && (
+        <div className="fixed inset-0 z-50 pointer-events-none">
+          <div
+            ref={pdDragRef}
+            className={`absolute bg-white dark:bg-gray-800 rounded-2xl shadow-2xl border border-gray-200 dark:border-gray-700 w-full max-w-3xl max-h-[85vh] flex flex-col overflow-hidden pointer-events-auto ${pdCentered ? 'animate-[bounceIn_0.35s_cubic-bezier(0.34,1.56,0.64,1)_forwards]' : 'opacity-0 scale-95'}`}
+            style={{ left: pdPos.x, top: pdPos.y }}
+          >
+            {/* Drag Handle */}
+            <div
+              className="flex items-center justify-between px-6 py-4 border-b border-gray-200 dark:border-gray-700 flex-shrink-0 cursor-grab active:cursor-grabbing select-none"
+              onMouseDown={onPdDragStart}
+            >
+              <div className="flex items-center gap-3 min-w-0 flex-1">
+                <GripHorizontal className="w-4 h-4 text-gray-400 flex-shrink-0" />
+                <div className="p-2.5 rounded-xl bg-purple-100 dark:bg-purple-900/30 flex-shrink-0">
+                  <Shield className="w-5 h-5 text-purple-600 dark:text-purple-400" />
+                </div>
+                <div className="min-w-0">
+                  <h3 className="text-base font-bold text-gray-900 dark:text-white truncate">{selectedPolicy.name}</h3>
+                  <div className="flex items-center gap-2 mt-0.5">
+                    <span className="text-xs text-gray-500 dark:text-gray-400">v{selectedPolicy.version}</span>
+                    {selectedPolicy.documentFileName && (
+                      <span className="text-xs text-gray-400 dark:text-gray-500 truncate">• {selectedPolicy.documentFileName}</span>
+                    )}
+                  </div>
+                </div>
+              </div>
+              <button
+                onClick={() => setSelectedPolicy(null)}
+                className="p-2 rounded-xl hover:bg-gray-100 dark:hover:bg-gray-700 transition-colors flex-shrink-0"
+                title="Close"
+              >
+                <X className="w-5 h-5 text-gray-500" />
+              </button>
+            </div>
+
+            {/* Stats Row */}
+            <div className="flex items-center border-b border-gray-200 dark:border-gray-700 flex-shrink-0">
+              <div className="flex-1 text-center py-3 border-r border-gray-200 dark:border-gray-700">
+                <p className="text-lg font-bold text-purple-600 dark:text-purple-400">{sections.length}</p>
+                <p className="text-[11px] font-medium text-gray-500 dark:text-gray-400">Sections</p>
+              </div>
+              <div className="flex-1 text-center py-3 border-r border-gray-200 dark:border-gray-700">
+                <p className="text-xs font-medium text-gray-900 dark:text-white">{selectedPolicy.effectiveDate ? formatDate(selectedPolicy.effectiveDate) : '—'}</p>
+                <p className="text-[11px] font-medium text-gray-500 dark:text-gray-400">Effective</p>
+              </div>
+              <div className="flex-1 text-center py-3">
+                <span className={`px-2.5 py-0.5 rounded-full text-xs font-semibold ${
+                  selectedPolicy.status === 'ACTIVE' ? 'bg-green-100 text-green-700 dark:bg-green-900/30 dark:text-green-400' : 'bg-gray-100 text-gray-600 dark:bg-gray-700 dark:text-gray-400'
+                }`}>
+                  {selectedPolicy.status}
+                </span>
+              </div>
+            </div>
+
+            {/* Activate Policy Button — shown when DRAFT */}
+            {selectedPolicy.status !== 'ACTIVE' && (
+              <div className="px-5 py-3 border-b border-gray-200 dark:border-gray-700 flex-shrink-0">
+                <button
+                  onClick={handleActivatePolicy}
+                  disabled={activating}
+                  className="w-full flex items-center justify-between px-5 py-3 rounded-xl text-sm font-semibold text-white bg-gradient-to-r from-purple-600 to-indigo-600 hover:from-purple-700 hover:to-indigo-700 disabled:opacity-50 transition-all shadow-lg shadow-purple-600/25"
+                >
+                  <div className="flex items-center gap-2">
+                    {activating ? <Loader2 className="w-4 h-4 animate-spin" /> : <Sparkles className="w-4 h-4" />}
+                    {activating ? 'Activating...' : 'Activate This Policy'}
+                  </div>
+                  <ChevronRight className="w-4 h-4" />
+                </button>
+              </div>
+            )}
+
+            {/* Active Policy Banner */}
+            {selectedPolicy.status === 'ACTIVE' && (
+              <div className="px-5 py-2.5 bg-green-50 dark:bg-green-900/10 border-b border-green-200 dark:border-green-800/50 flex-shrink-0">
+                <div className="flex items-center gap-2">
+                  <CheckCircle2 className="w-4 h-4 text-green-600 dark:text-green-400" />
+                  <span className="text-sm font-medium text-green-700 dark:text-green-400">Active Policy</span>
+                </div>
+              </div>
+            )}
+
+            {/* Content */}
+            <div className="flex-1 overflow-y-auto">
+              {sections.length > 0 ? (
+                <div className="p-5 space-y-4">
+                  {/* Search */}
+                  <div className="relative">
+                    <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-gray-400" />
+                    <input
+                      type="text"
+                      value={sectionSearch}
+                      onChange={e => setSectionSearch(e.target.value)}
+                      placeholder="Search sections..."
+                      className="w-full pl-9 pr-4 py-2.5 rounded-xl border border-gray-200 dark:border-gray-700 bg-gray-50 dark:bg-gray-900/50 text-sm text-gray-900 dark:text-white placeholder-gray-400 focus:ring-2 focus:ring-purple-500 focus:border-transparent"
+                    />
+                  </div>
+
+                  {/* Section Type Filter Chips */}
+                  <div className="flex items-center gap-2 overflow-x-auto pb-1 -mx-1 px-1">
+                    <button
+                      onClick={() => setSectionTypeFilter('ALL')}
+                      className={`px-3 py-1.5 rounded-full text-xs font-semibold whitespace-nowrap transition-colors ${
+                        sectionTypeFilter === 'ALL' ? 'bg-purple-600 text-white' : 'bg-gray-100 dark:bg-gray-700 text-gray-600 dark:text-gray-400 hover:bg-gray-200 dark:hover:bg-gray-600'
+                      }`}
+                    >
+                      All ({sections.length})
+                    </button>
+                    {Object.entries(sectionTypeCounts).map(([type, count]) => (
+                      <button
+                        key={type}
+                        onClick={() => setSectionTypeFilter(type)}
+                        className={`px-3 py-1.5 rounded-full text-xs font-semibold whitespace-nowrap transition-colors ${
+                          sectionTypeFilter === type ? 'bg-purple-600 text-white' : 'bg-gray-100 dark:bg-gray-700 text-gray-600 dark:text-gray-400 hover:bg-gray-200 dark:hover:bg-gray-600'
+                        }`}
+                      >
+                        {sectionTypeLabels[type] || type} ({count})
+                      </button>
+                    ))}
+                  </div>
+
+                  {/* Sections List */}
+                  <div className="space-y-2">
+                    {filteredSections.map(s => {
+                      const isExpanded = expandedSection === s.id;
+                      const TypeIcon = sectionTypeIcons[s.type || 'OTHER'] || FileText;
+                      const hasProgression = s.firstProgression || s.secondProgression || s.thirdProgression || s.fourthProgression;
+                      const progressions = [s.firstProgression, s.secondProgression, s.thirdProgression, s.fourthProgression];
+
+                      return (
+                        <div key={s.id} className="rounded-xl border border-gray-200 dark:border-gray-700 overflow-hidden transition-colors">
+                          {/* Section Header */}
+                          <button
+                            onClick={() => setExpandedSection(isExpanded ? null : s.id)}
+                            className="w-full flex items-center gap-3 px-4 py-3 text-left hover:bg-gray-50 dark:hover:bg-gray-700/30 transition-colors"
+                          >
+                            <TypeIcon className="w-4 h-4 text-purple-500 flex-shrink-0" />
+                            <div className="flex-1 min-w-0">
+                              <div className="flex items-center gap-2">
+                                <span className="text-[11px] font-semibold text-gray-400 dark:text-gray-500">
+                                  {s.sectionNumber ? `Section ${s.sectionNumber}` : ''}
+                                </span>
+                              </div>
+                              <p className="text-sm font-semibold text-gray-900 dark:text-white truncate">{s.title}</p>
+                            </div>
+                            {isExpanded ? <ChevronUp className="w-4 h-4 text-gray-400 flex-shrink-0" /> : <ChevronDown className="w-4 h-4 text-gray-400 flex-shrink-0" />}
+                          </button>
+
+                          {/* Expanded Content */}
+                          {isExpanded && (
+                            <div className="px-4 pb-4 space-y-3 border-t border-gray-100 dark:border-gray-700/50 pt-3">
+                              <p className="text-sm text-gray-700 dark:text-gray-300 leading-relaxed whitespace-pre-wrap">{s.content}</p>
+
+                              {/* Progressive Discipline */}
+                              {hasProgression && (
+                                <div className="mt-3">
+                                  <p className="text-xs font-semibold text-gray-500 dark:text-gray-400 uppercase tracking-wide mb-2">Progressive Discipline</p>
+                                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
+                                    {progressions.map((prog, idx) => prog ? (
+                                      <div key={idx} className={`p-3 rounded-xl border text-sm ${progressionColors[idx]}`}>
+                                        <p className="text-[11px] font-bold uppercase tracking-wide mb-1 opacity-80">{progressionLabels[idx]}</p>
+                                        <p className="leading-relaxed">{prog}</p>
+                                      </div>
+                                    ) : null)}
+                                  </div>
+                                </div>
+                              )}
+                            </div>
+                          )}
+                        </div>
+                      );
+                    })}
+
+                    {filteredSections.length === 0 && sectionSearch.trim() && (
+                      <div className="text-center py-8">
+                        <Search className="w-8 h-8 text-gray-300 dark:text-gray-600 mx-auto mb-2" />
+                        <p className="text-sm text-gray-500 dark:text-gray-400">No sections match &ldquo;{sectionSearch}&rdquo;</p>
+                      </div>
+                    )}
+                  </div>
+                </div>
+              ) : selectedPolicy.originalText ? (
+                <div className="p-5">
+                  <p className="text-xs font-semibold text-gray-500 dark:text-gray-400 uppercase tracking-wide mb-2">Original Text</p>
+                  <div className="p-4 rounded-xl bg-gray-50 dark:bg-gray-900/50 border border-gray-200 dark:border-gray-700 max-h-[50vh] overflow-y-auto">
+                    <p className="text-sm text-gray-700 dark:text-gray-300 whitespace-pre-wrap font-mono leading-relaxed">{selectedPolicy.originalText}</p>
+                  </div>
+                </div>
+              ) : (
+                <div className="flex flex-col items-center justify-center py-16 text-center">
+                  <AlertCircle className="w-10 h-10 text-gray-300 dark:text-gray-600 mb-3" />
+                  <p className="text-sm font-medium text-gray-500 dark:text-gray-400">No sections or text available</p>
+                  <p className="text-xs text-gray-400 dark:text-gray-500 mt-1">Upload a policy document to extract sections</p>
+                </div>
+              )}
+            </div>
+          </div>
         </div>
       )}
     </div>

@@ -358,6 +358,74 @@
   animation: blob 7s infinite;
 }
 
+/* ─── Processing Overlay Animations ─────────────────────── */
+@keyframes processingOverlayIn {
+  0% { opacity: 0; }
+  100% { opacity: 1; }
+}
+.animate-processing-overlay-in {
+  animation: processingOverlayIn 0.4s ease-out forwards;
+}
+
+@keyframes processingBounceIn {
+  0% { opacity: 0; transform: scale(0.5) translateY(30px); }
+  50% { opacity: 1; transform: scale(1.05) translateY(-5px); }
+  70% { transform: scale(0.97) translateY(2px); }
+  100% { opacity: 1; transform: scale(1) translateY(0); }
+}
+.animate-processing-bounce-in {
+  animation: processingBounceIn 0.7s cubic-bezier(0.34, 1.56, 0.64, 1) forwards;
+}
+
+@keyframes processingGlow {
+  0%, 100% { box-shadow: 0 0 20px rgba(59, 130, 246, 0.2), 0 0 60px rgba(139, 92, 246, 0.1); }
+  50% { box-shadow: 0 0 40px rgba(59, 130, 246, 0.4), 0 0 80px rgba(139, 92, 246, 0.2); }
+}
+.animate-processing-glow {
+  animation: processingGlow 2s ease-in-out infinite;
+}
+
+@keyframes processingIconPop {
+  0% { opacity: 0; transform: scale(0.3) rotate(-15deg); }
+  60% { opacity: 1; transform: scale(1.2) rotate(5deg); }
+  100% { opacity: 1; transform: scale(1) rotate(0deg); }
+}
+.animate-processing-icon-pop {
+  animation: processingIconPop 0.5s cubic-bezier(0.68, -0.55, 0.265, 1.55) forwards;
+}
+
+@keyframes processingTextIn {
+  0% { opacity: 0; transform: translateY(8px); }
+  100% { opacity: 1; transform: translateY(0); }
+}
+.animate-processing-text-in {
+  animation: processingTextIn 0.4s ease-out forwards;
+}
+
+@keyframes processingArc {
+  0% { opacity: 0.7; }
+  50% { opacity: 1; }
+  100% { opacity: 0.7; }
+}
+.animate-processing-arc {
+  animation: processingArc 2s ease-in-out infinite;
+}
+
+/* ─── TTS Word Highlighting (flicker-free) ──────────────── */
+.tts-word {
+  transition: background-color 0.2s ease, color 0.2s ease;
+  border-radius: 2px;
+  padding: 0 1px;
+}
+.tts-word-active {
+  background-color: rgba(253, 224, 71, 0.7);
+  color: #111827;
+}
+:is(.dark) .tts-word-active {
+  background-color: rgba(234, 179, 8, 0.3);
+  color: #f9fafb;
+}
+
 /* Subtle pulse */
 @keyframes pulseSoft {
   0%, 100% {
