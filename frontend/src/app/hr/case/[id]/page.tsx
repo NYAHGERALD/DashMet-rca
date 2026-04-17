@@ -61,6 +61,7 @@ import {
   ShieldCheck,
   Search,
   Lightbulb,
+  Download,
 } from 'lucide-react';
 import {
   ConflictCase,
@@ -3337,6 +3338,26 @@ function AnalysisTab({ caseData, onUpdate, userId, onSwitchTab }: {
         </div>
       )}
 
+      {/* ─── Start Analysis Button (when no results yet) ─── */}
+      {canAnalyze && !comparisonResult && !comparisonAnalyzing && (
+        <div className="rounded-2xl bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-700 p-8 text-center">
+          <div className="w-16 h-16 rounded-2xl bg-gradient-to-br from-blue-500 to-indigo-600 flex items-center justify-center mx-auto mb-4">
+            <Brain className="w-8 h-8 text-white" />
+          </div>
+          <h3 className="text-lg font-bold text-gray-900 dark:text-white mb-2">Ready to Analyze</h3>
+          <p className="text-sm text-gray-500 dark:text-gray-400 mb-6 max-w-md mx-auto">
+            Both complaints are uploaded. Run the AI analysis to compare statements, match policies, and get recommendations.
+          </p>
+          <button
+            onClick={handleRunComparison}
+            disabled={step > 0}
+            className="px-8 py-3 rounded-xl text-sm font-bold text-white bg-gradient-to-r from-blue-600 to-indigo-600 hover:from-blue-700 hover:to-indigo-700 disabled:opacity-50 transition-all flex items-center justify-center gap-2 shadow-lg shadow-blue-600/25 mx-auto"
+          >
+            {step > 0 ? <Loader2 className="w-4 h-4 animate-spin" /> : <Sparkles className="w-4 h-4" />} Run Analysis
+          </button>
+        </div>
+      )}
+
       {/* ─── Comparison Analysis Loading Overlay ─── */}
       {comparisonAnalyzing && (
         <div ref={comparisonOverlayRef} className="relative rounded-2xl bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-700 overflow-hidden" style={{ minHeight: 360 }}>
@@ -3762,6 +3783,26 @@ function AnalysisTab({ caseData, onUpdate, userId, onSwitchTab }: {
               </div>
             </div>
           </div>
+        </div>
+      )}
+
+      {/* ─── Run Policy Matching Button (when comparison done but no policy result yet) ─── */}
+      {comparisonResult && !policyResult && !policyAnalyzing && !comparisonAnalyzing && (
+        <div className="rounded-2xl bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-700 p-8 text-center">
+          <div className="w-16 h-16 rounded-2xl bg-gradient-to-br from-purple-500 to-pink-600 flex items-center justify-center mx-auto mb-4">
+            <Shield className="w-8 h-8 text-white" />
+          </div>
+          <h3 className="text-lg font-bold text-gray-900 dark:text-white mb-2">Match Policies</h3>
+          <p className="text-sm text-gray-500 dark:text-gray-400 mb-6 max-w-md mx-auto">
+            Run policy matching to identify which company policies apply to this case based on the complaint analysis.
+          </p>
+          <button
+            onClick={handleRunPolicyMatching}
+            disabled={step > 0}
+            className="px-8 py-3 rounded-xl text-sm font-bold text-white bg-gradient-to-r from-purple-600 to-pink-600 hover:from-purple-700 hover:to-pink-700 disabled:opacity-50 transition-all flex items-center justify-center gap-2 shadow-lg shadow-purple-600/25 mx-auto"
+          >
+            {step > 0 ? <Loader2 className="w-4 h-4 animate-spin" /> : <Sparkles className="w-4 h-4" />} Run Policy Matching
+          </button>
         </div>
       )}
 
@@ -4201,24 +4242,106 @@ function AnalysisTab({ caseData, onUpdate, userId, onSwitchTab }: {
 
             {/* Action Buttons */}
             <div className="mt-5 space-y-3">
-              {!caseData.isLocked && (
-                <button
-                  onClick={() => { setRecommendationResult(null); setSelectedRecommendation(null); handleRunRecommendations(); }}
-                  className="w-full flex items-center justify-center gap-2 py-2 text-sm font-medium text-indigo-600 dark:text-indigo-400 hover:bg-indigo-50 dark:hover:bg-indigo-900/10 rounded-xl transition-colors"
-                >
-                  <RefreshCw className="w-4 h-4" /> Regenerate Options
-                </button>
+              {docGenerating ? (
+                <>
+                  {/* Document is being generated */}
+                  <div className="flex items-center gap-3 p-4 rounded-xl bg-blue-50 dark:bg-blue-900/10 border border-blue-200 dark:border-blue-800">
+                    <Loader2 className="w-5 h-5 text-blue-600 dark:text-blue-400 animate-spin flex-shrink-0" />
+                    <div>
+                      <p className="text-sm font-semibold text-blue-800 dark:text-blue-300">Generating Document...</p>
+                      <p className="text-xs text-blue-600 dark:text-blue-400">This may take a moment. Please wait.</p>
+                    </div>
+                  </div>
+                </>
+              ) : generatedDoc ? (
+                <>
+                  {/* Document Generated - show document actions */}
+                  <div className="flex items-center gap-2 p-3 rounded-xl bg-green-50 dark:bg-green-900/10 mb-1">
+                    <CheckCircle2 className="w-5 h-5 text-green-600 dark:text-green-400" />
+                    <div>
+                      <p className="text-sm font-semibold text-green-800 dark:text-green-300">Document Generated</p>
+                      <p className="text-xs text-green-600 dark:text-green-400">Review, edit, and download your document</p>
+                    </div>
+                  </div>
+                  <button
+                    onClick={handleOpenReviewModal}
+                    className="w-full py-3 rounded-xl text-sm font-semibold text-white bg-gradient-to-r from-green-600 to-emerald-600 hover:from-green-700 hover:to-emerald-700 transition-all flex items-center justify-center gap-2 shadow-lg shadow-green-600/25"
+                  >
+                    <Eye className="w-4 h-4" /> View &amp; Edit Document
+                  </button>
+                  <div className="flex gap-2">
+                    <button
+                      onClick={() => onSwitchTab('comments')}
+                      className="flex-1 py-2.5 rounded-xl text-xs font-semibold text-blue-600 dark:text-blue-400 bg-blue-50 dark:bg-blue-900/10 hover:bg-blue-100 dark:hover:bg-blue-900/20 transition-all flex items-center justify-center gap-1.5 border border-blue-200 dark:border-blue-800"
+                    >
+                      <MessageSquare className="w-3.5 h-3.5" /> Comments
+                    </button>
+                    <button
+                      onClick={() => onSwitchTab('history')}
+                      className="flex-1 py-2.5 rounded-xl text-xs font-semibold text-gray-600 dark:text-gray-400 bg-gray-50 dark:bg-gray-800 hover:bg-gray-100 dark:hover:bg-gray-700 transition-all flex items-center justify-center gap-1.5 border border-gray-200 dark:border-gray-700"
+                    >
+                      <Clock className="w-3.5 h-3.5" /> History
+                    </button>
+                  </div>
+                  {!caseData.isLocked && (
+                    <div className="flex gap-2">
+                      <button
+                        onClick={handleRegenerateDocument}
+                        className="flex-1 py-2.5 rounded-xl text-xs font-semibold text-orange-600 dark:text-orange-400 bg-orange-50 dark:bg-orange-900/10 hover:bg-orange-100 dark:hover:bg-orange-900/20 transition-all flex items-center justify-center gap-1.5 border border-orange-200 dark:border-orange-800"
+                      >
+                        <RefreshCw className="w-3.5 h-3.5" /> Re-Generate
+                      </button>
+                      <button
+                        onClick={handleDeleteDocument}
+                        className="flex-1 py-2.5 rounded-xl text-xs font-semibold text-red-600 dark:text-red-400 bg-red-50 dark:bg-red-900/10 hover:bg-red-100 dark:hover:bg-red-900/20 transition-all flex items-center justify-center gap-1.5 border border-red-200 dark:border-red-800"
+                      >
+                        <Trash2 className="w-3.5 h-3.5" /> Delete
+                      </button>
+                    </div>
+                  )}
+                </>
+              ) : (
+                <>
+                  {!caseData.isLocked && (
+                    <button
+                      onClick={() => { setRecommendationResult(null); setSelectedRecommendation(null); handleRunRecommendations(); }}
+                      className="w-full flex items-center justify-center gap-2 py-2 text-sm font-medium text-indigo-600 dark:text-indigo-400 hover:bg-indigo-50 dark:hover:bg-indigo-900/10 rounded-xl transition-colors"
+                    >
+                      <RefreshCw className="w-4 h-4" /> Regenerate Options
+                    </button>
+                  )}
+                  <button
+                    onClick={() => { /* Decide Later – no action, user can revisit */ }}
+                    className="w-full py-3 rounded-xl text-sm font-semibold text-white bg-gradient-to-r from-blue-600 to-blue-500 hover:from-blue-700 hover:to-blue-600 transition-all shadow-lg shadow-blue-600/20"
+                  >
+                    Decide Later
+                  </button>
+                </>
               )}
-              <button
-                onClick={() => { /* Decide Later – no action, user can revisit */ }}
-                className="w-full py-3 rounded-xl text-sm font-semibold text-white bg-gradient-to-r from-blue-600 to-blue-500 hover:from-blue-700 hover:to-blue-600 transition-all shadow-lg shadow-blue-600/20"
-              >
-                Decide Later
-              </button>
             </div>
           </div>
         );
       })()}
+
+      {/* ─── Run Recommendations Button (when policy done but no recommendations yet) ─── */}
+      {policyResult && !recommendationResult && !recommendationAnalyzing && !policyAnalyzing && (
+        <div className="rounded-2xl bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-700 p-8 text-center">
+          <div className="w-16 h-16 rounded-2xl bg-gradient-to-br from-emerald-500 to-teal-600 flex items-center justify-center mx-auto mb-4">
+            <Lightbulb className="w-8 h-8 text-white" />
+          </div>
+          <h3 className="text-lg font-bold text-gray-900 dark:text-white mb-2">Get Recommendations</h3>
+          <p className="text-sm text-gray-500 dark:text-gray-400 mb-6 max-w-md mx-auto">
+            Generate AI-powered recommendations for corrective actions based on the complaint analysis and matched policies.
+          </p>
+          <button
+            onClick={handleRunRecommendations}
+            disabled={step > 0}
+            className="px-8 py-3 rounded-xl text-sm font-bold text-white bg-gradient-to-r from-emerald-600 to-teal-600 hover:from-emerald-700 hover:to-teal-700 disabled:opacity-50 transition-all flex items-center justify-center gap-2 shadow-lg shadow-emerald-600/25 mx-auto"
+          >
+            {step > 0 ? <Loader2 className="w-4 h-4 animate-spin" /> : <Sparkles className="w-4 h-4" />} Get Recommendations
+          </button>
+        </div>
+      )}
 
       {/* ─── Decision Support Loading Overlay ─── */}
       {recommendationAnalyzing && (
@@ -5634,6 +5757,31 @@ function ActionsTab({ caseData, onUpdate, userId, onSwitchTab }: {
               escalate: { bg: 'bg-red-100 dark:bg-red-900/30', text: 'text-red-600 dark:text-red-400', icon: 'text-red-600' },
             };
             const tc = actionTypeColors[generatedDoc.actionType] || actionTypeColors.coaching;
+
+            // Build sections for Word download
+            const getActionsDocSections = (): { id: string; title: string; content: string }[] => {
+              if (!generatedDoc?.document) return [];
+              let d = typeof generatedDoc.document === 'string' ? (() => { try { return JSON.parse(generatedDoc.document as string); } catch { return null; } })() : generatedDoc.document;
+              if (!d || typeof d !== 'object') return [];
+              const at = (generatedDoc.actionType || '').toLowerCase();
+              if (at && d[at] && typeof d[at] === 'object' && !Array.isArray(d[at])) {
+                d = { ...d[at], ...(d.title ? { title: d.title } : {}), ...(d.documentDate ? { documentDate: d.documentDate } : {}) };
+              }
+              return Object.entries(d).filter(([k]) => k !== 'title' && k !== 'documentDate').map(([k, v]) => ({
+                id: k,
+                title: k.replace(/([A-Z])/g, ' $1').replace(/^./, s => s.toUpperCase()),
+                content: typeof v === 'string' ? v : Array.isArray(v) ? v.map(i => typeof i === 'object' ? JSON.stringify(i) : String(i)).join('\n• ') : typeof v === 'object' ? JSON.stringify(v) : String(v ?? ''),
+              }));
+            };
+            const docSections = getActionsDocSections();
+            const targetEmployee = selectedTargetNames.length > 0
+              ? employees.find(e => selectedTargetNames.includes(e.name)) || null
+              : employees[0] || null;
+            const incidentDate = caseData.incidentDate ? new Date(caseData.incidentDate) : new Date();
+            let docData = typeof generatedDoc.document === 'string' ? (() => { try { return JSON.parse(generatedDoc.document as string); } catch { return {}; } })() : (generatedDoc.document || {});
+            const at = (generatedDoc.actionType || '').toLowerCase();
+            if (at && docData[at] && typeof docData[at] === 'object') docData = { ...docData[at], ...docData };
+
             return (
               <div className="rounded-2xl bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-700 p-5">
                 <div className="flex items-center gap-3 mb-4">
@@ -5665,6 +5813,24 @@ function ActionsTab({ caseData, onUpdate, userId, onSwitchTab }: {
                     className={`w-full py-3 rounded-xl text-sm font-semibold text-white transition-all flex items-center justify-center gap-2 shadow-lg ${tc.bg.includes('orange') ? 'bg-orange-500 hover:bg-orange-600 shadow-orange-500/20' : tc.bg.includes('green') ? 'bg-green-600 hover:bg-green-700 shadow-green-600/20' : tc.bg.includes('blue') ? 'bg-blue-600 hover:bg-blue-700 shadow-blue-600/20' : 'bg-red-600 hover:bg-red-700 shadow-red-600/20'}`}
                   >
                     <Eye className="w-4 h-4" /> View Document
+                  </button>
+                  <button
+                    onClick={() => downloadDocx({
+                      actionType: generatedDoc.actionType,
+                      documentData: docData,
+                      sections: docSections,
+                      docEdits: [],
+                      employee: targetEmployee ? { name: targetEmployee.name, role: targetEmployee.role, department: targetEmployee.department, employeeFileNo: targetEmployee.employeeFileNo } : null,
+                      caseNumber: caseData.caseNumber,
+                      department: caseData.department || '',
+                      location: caseData.location || '',
+                      incidentDate,
+                      todayDate: new Date(),
+                      companyLogoUrl: caseData.companyLogoUrl || null,
+                    })}
+                    className="w-full py-3 rounded-xl text-sm font-semibold text-white bg-gradient-to-r from-indigo-600 to-purple-600 hover:from-indigo-700 hover:to-purple-700 transition-all flex items-center justify-center gap-2 shadow-lg shadow-indigo-600/25"
+                  >
+                    <Download className="w-4 h-4" /> Download Word Document
                   </button>
                   <div className="flex gap-2">
                     <button
