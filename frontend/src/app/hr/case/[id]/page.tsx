@@ -518,6 +518,9 @@ function DocumentsTab({ caseData, onUpdate, userId, userName }: {
   const [selectedDoc, setSelectedDoc] = useState<CaseDocument | null>(null);
   const [previewTab, setPreviewTab] = useState<'original' | 'translated' | 'cleaned' | 'images'>('cleaned');
 
+  // Image lightbox state (replaces target="_blank" which Chrome blocks for data: URLs)
+  const [lightboxSrc, setLightboxSrc] = useState<string | null>(null);
+
   // Document Acceptance workflow state (3-step)
   const [showAcceptance, setShowAcceptance] = useState(false);
   const [acceptanceStep, setAcceptanceStep] = useState(0); // 0=Employee Review, 1=Digital Signature, 2=Supervisor Certification
@@ -1099,19 +1102,17 @@ function DocumentsTab({ caseData, onUpdate, userId, userName }: {
                           try {
                             const urls: string[] = JSON.parse(selectedDoc.originalImageUrls || '[]');
                             if (urls.length > 0) return (
-                              <a
-                                href={urls.length === 1
-                                  ? (urls[0].startsWith('data:') || urls[0].startsWith('http') ? urls[0] : `data:image/jpeg;base64,${urls[0]}`)
-                                  : `data:image/jpeg;base64,${urls[0]}`
-                                }
-                                target="_blank"
-                                rel="noopener noreferrer"
+                              <button
+                                onClick={() => {
+                                  const src = urls[0].startsWith('data:') || urls[0].startsWith('http') ? urls[0] : `data:image/jpeg;base64,${urls[0]}`;
+                                  setLightboxSrc(src);
+                                }}
                                 className="sticky top-0 z-10 ml-auto flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-medium text-blue-600 dark:text-blue-400 bg-blue-50 dark:bg-blue-900/30 hover:bg-blue-100 dark:hover:bg-blue-900/50 border border-blue-200 dark:border-blue-800 transition-colors shadow-sm"
-                                title="Open images in full view"
+                                title="Open image in full view"
                               >
                                 <Maximize2 className="w-3.5 h-3.5" />
                                 Full View
-                              </a>
+                              </button>
                             );
                             return null;
                           } catch { return null; }
@@ -1123,9 +1124,9 @@ function DocumentsTab({ caseData, onUpdate, userId, userName }: {
                               const imgSrc = url.startsWith('data:') || url.startsWith('http') ? url : `data:image/jpeg;base64,${url}`;
                               return (
                                 <div key={idx} className="rounded-lg border border-gray-200 dark:border-gray-700 overflow-hidden bg-white dark:bg-gray-800">
-                                  <a href={imgSrc} target="_blank" rel="noopener noreferrer" title="Click to view full size">
+                                  <button onClick={() => setLightboxSrc(imgSrc)} className="w-full" title="Click to view full size">
                                     <img src={imgSrc} alt={`Page ${idx + 1}`} className="w-full h-auto cursor-pointer hover:opacity-90 transition-opacity" />
-                                  </a>
+                                  </button>
                                   <p className="text-[10px] text-gray-400 text-center py-1">Page {idx + 1}</p>
                                 </div>
                               );
@@ -1419,13 +1420,13 @@ function DocumentsTab({ caseData, onUpdate, userId, userName }: {
                       <div className="grid grid-cols-4 sm:grid-cols-6 gap-2">
                         {uploadedImages.map((img, idx) => (
                           <div key={idx} className="relative group">
-                            <a href={`data:image/jpeg;base64,${img}`} target="_blank" rel="noopener noreferrer" title="Click to view full size">
+                            <button onClick={() => setLightboxSrc(`data:image/jpeg;base64,${img}`)} className="w-full" title="Click to view full size">
                               <img
                                 src={`data:image/jpeg;base64,${img}`}
                                 alt={imageNames[idx]}
                                 className="w-full h-20 object-cover rounded-lg border border-gray-200 dark:border-gray-600 cursor-pointer hover:ring-2 hover:ring-blue-400 transition-all"
                               />
-                            </a>
+                            </button>
                             <button onClick={() => removeImage(idx)} title="Remove page" className="absolute -top-1.5 -right-1.5 w-5 h-5 rounded-full bg-red-500 text-white flex items-center justify-center opacity-0 group-hover:opacity-100 transition-opacity">
                               <X className="w-3 h-3" />
                             </button>
@@ -1550,10 +1551,9 @@ function DocumentsTab({ caseData, onUpdate, userId, userName }: {
                       <div className="grid grid-cols-2 sm:grid-cols-3 gap-3">
                         {uploadedImages.map((img, idx) => (
                           <div key={idx}>
-                            <a
-                              href={`data:image/jpeg;base64,${img}`}
-                              target="_blank"
-                              rel="noopener noreferrer"
+                            <button
+                              onClick={() => setLightboxSrc(`data:image/jpeg;base64,${img}`)}
+                              className="w-full"
                             >
                               <img
                                 src={`data:image/jpeg;base64,${img}`}
@@ -1561,7 +1561,7 @@ function DocumentsTab({ caseData, onUpdate, userId, userName }: {
                                 className="w-full rounded-lg border border-gray-200 dark:border-gray-600 cursor-pointer hover:ring-2 hover:ring-blue-400 hover:shadow-lg transition-all"
                                 title="Click to view full size"
                               />
-                            </a>
+                            </button>
                             <p className="text-[10px] text-gray-400 text-center mt-1">Page {idx + 1}</p>
                           </div>
                         ))}
@@ -6297,6 +6297,29 @@ function AnalysisTab({ caseData, onUpdate, userId }: {
             </div>
           );
         })(),
+        document.body
+      )}
+
+      {/* ─── Image Lightbox Modal ─── */}
+      {lightboxSrc && typeof document !== 'undefined' && createPortal(
+        <div
+          className="fixed inset-0 z-[9999] flex items-center justify-center bg-black/80 backdrop-blur-sm"
+          onClick={() => setLightboxSrc(null)}
+        >
+          <button
+            onClick={() => setLightboxSrc(null)}
+            className="absolute top-4 right-4 z-10 w-10 h-10 rounded-full bg-white/20 hover:bg-white/40 flex items-center justify-center transition-colors"
+            title="Close"
+          >
+            <X className="w-6 h-6 text-white" />
+          </button>
+          <img
+            src={lightboxSrc}
+            alt="Full size preview"
+            className="max-w-[90vw] max-h-[90vh] object-contain rounded-lg shadow-2xl"
+            onClick={e => e.stopPropagation()}
+          />
+        </div>,
         document.body
       )}
     </div>
