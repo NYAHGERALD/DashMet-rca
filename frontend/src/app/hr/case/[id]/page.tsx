@@ -1,6 +1,7 @@
 'use client';
 
 import { useState, useEffect, useCallback, useMemo, useRef } from 'react';
+import { createPortal } from 'react-dom';
 import { useRouter, useParams } from 'next/navigation';
 import { useAuth } from '@/components/providers/AuthProvider';
 import ProtectedRoute from '@/components/auth/ProtectedRoute';
@@ -72,6 +73,8 @@ import {
   WorkplacePolicy,
   ComparisonResult,
   PolicyMatchResult,
+  PolicyMatch,
+  PolicySection,
   RecommendationResult,
   Recommendation,
   EmployeeRecommendationGroup,
@@ -2197,8 +2200,8 @@ function DocumentsTab({ caseData, onUpdate, userId, userName }: {
 
 // ─── ANALYSIS TAB ─────────────────────────────────────────────────────────────
 
-function AnalysisTab({ caseData, onUpdate, userId, onSwitchTab }: {
-  caseData: ConflictCase; onUpdate: () => void; userId: string; onSwitchTab?: (tab: string) => void;
+function AnalysisTab({ caseData, onUpdate, userId }: {
+  caseData: ConflictCase; onUpdate: () => void; userId: string;
 }) {
   const [comparisonResult, setComparisonResult] = useState<ComparisonResult | null>(null);
   const [policyResult, setPolicyResult] = useState<PolicyMatchResult | null>(null);
@@ -2211,6 +2214,7 @@ function AnalysisTab({ caseData, onUpdate, userId, onSwitchTab }: {
   const [analysisModalTab, setAnalysisModalTab] = useState<'summary' | 'compare' | 'details'>('summary');
   const [expandedRec, setExpandedRec] = useState<string | null>(null);
   const [expandedPolicyMatch, setExpandedPolicyMatch] = useState<number | null>(null);
+  const [policyDeleteTarget, setPolicyDeleteTarget] = useState<{ index: number; match: PolicyMatch } | null>(null);
 
   // ─── Post-Selection Flow States ─────────────────────────────────────────────
   const [confirmRec, setConfirmRec] = useState<Recommendation | null>(null); // null = modal hidden
@@ -2219,6 +2223,7 @@ function AnalysisTab({ caseData, onUpdate, userId, onSwitchTab }: {
   const docGenStepRef = useRef(0);
   const docGenTimerRef = useRef<ReturnType<typeof setInterval> | null>(null);
   const docGenOverlayRef = useRef<HTMLDivElement | null>(null);
+  const [generatingRec, setGeneratingRec] = useState<Recommendation | null>(null);
   const [generatedDoc, setGeneratedDoc] = useState<GeneratedActionDocument | null>(null);
   const [docPhase, setDocPhase] = useState<'none' | 'generated' | 'review' | 'approval'>('none');
   const [editingSectionId, setEditingSectionId] = useState<string | null>(null);
@@ -2291,6 +2296,30 @@ function AnalysisTab({ caseData, onUpdate, userId, onSwitchTab }: {
     { label: 'Finding agreement points', icon: '🤝' },
     { label: 'Building neutral summary', icon: '📊' },
     { label: 'Finalizing analysis', icon: '✨' },
+  ];
+
+  // ─── Review Active Policy Modal State ─────────────────────────────────────────
+  const [showPolicyReviewModal, setShowPolicyReviewModal] = useState(false);
+  const [policyReviewSearch, setPolicyReviewSearch] = useState('');
+  const [policyReviewSelected, setPolicyReviewSelected] = useState<Set<string>>(new Set());
+  const [policyReviewPos, setPolicyReviewPos] = useState({ x: 80, y: 60 });
+  const [policyReviewSize, setPolicyReviewSize] = useState({ w: 1250, h: 600 });
+  const policyReviewDragRef = useRef<{ startX: number; startY: number; origX: number; origY: number } | null>(null);
+
+  // AI validation flow for manually-added policy sections
+  const [prValidating, setPrValidating] = useState(false);
+  const [prValidationStep, setPrValidationStep] = useState(0);
+  const prValidationStepRef = useRef(0);
+  const prValidationTimerRef = useRef<ReturnType<typeof setInterval> | null>(null);
+  const [prValidationResults, setPrValidationResults] = useState<PolicyMatch[] | null>(null);
+  const [prShowResults, setPrShowResults] = useState(false);
+
+  const PR_VALIDATION_STEPS = [
+    { label: 'Reviewing selected sections', icon: '📋' },
+    { label: 'Analyzing complaint statements', icon: '📝' },
+    { label: 'Checking witness accounts', icon: '👥' },
+    { label: 'Evaluating relevance to case', icon: '⚖️' },
+    { label: 'Generating assessment', icon: '✨' },
   ];
 
   // Evidence expansion state
@@ -2636,7 +2665,12 @@ function AnalysisTab({ caseData, onUpdate, userId, onSwitchTab }: {
     if (!caseData.organizationId) return;
     try {
       const data = await fetchPolicies({ organizationId: caseData.organizationId });
-      setPolicies(Array.isArray(data) ? data : []);
+      const list = Array.isArray(data) ? data : [];
+      // Ensure sections is parsed if it came as a JSON string
+      setPolicies(list.map(p => ({
+        ...p,
+        sections: typeof p.sections === 'string' ? (() => { try { return JSON.parse(p.sections as string); } catch { return null; } })() : p.sections,
+      })));
     } catch {}
   }, [caseData.organizationId]);
 
@@ -2816,29 +2850,31 @@ function AnalysisTab({ caseData, onUpdate, userId, onSwitchTab }: {
     const rec = confirmRec;
     setConfirmRec(null);
     setSelectedRecommendation(rec.id);
-    try {
-      const targetIds = rec.targetEmployeeNames?.map(name => {
-        const emp = employees.find(e => e.name.toLowerCase().includes(name.toLowerCase()));
-        return emp?.id;
-      }).filter(Boolean) || [];
-      await updateCase(caseData.id, {
-        selectedActionType: rec.type,
-        selectedTargetEmployeeIdsJson: targetIds,
-        status: 'awaiting_action',
-        userId,
-      });
-      onUpdate();
-      // Auto-generate document after confirmation
-      await handleGenerateDocument(rec);
-    } catch (err) { console.error(err); }
+
+    // Save selection to backend in parallel (don't block the modal)
+    const targetIds = rec.targetEmployeeNames?.map(name => {
+      const emp = employees.find(e => e.name.toLowerCase().includes(name.toLowerCase()));
+      return emp?.id;
+    }).filter(Boolean) || [];
+    updateCase(caseData.id, {
+      selectedActionType: rec.type,
+      selectedTargetEmployeeIdsJson: targetIds,
+      status: 'awaiting_action',
+      userId,
+    }).then(() => onUpdate()).catch(err => console.error('[ConfirmSelection] updateCase error:', err));
+
+    // Show progress modal and generate document IMMEDIATELY
+    await handleGenerateDocument(rec);
   };
 
   const handleGenerateDocument = async (rec: Recommendation) => {
+    console.log('[DocGen] Starting generation for:', rec.title, rec.type);
+    setGeneratingRec(rec);
     setDocGenerating(true);
+    console.log('[DocGen] docGenerating set to true');
     setDocGenStep(0);
     docGenStepRef.current = 0;
     setError('');
-    setTimeout(() => docGenOverlayRef.current?.scrollIntoView({ behavior: 'smooth', block: 'center' }), 100);
     docGenTimerRef.current = setInterval(() => {
       docGenStepRef.current++;
       if (docGenStepRef.current < DOC_GEN_STEPS.length) {
@@ -2870,10 +2906,14 @@ function AnalysisTab({ caseData, onUpdate, userId, onSwitchTab }: {
       await updateCase(caseData.id, { generatedActionDocJson: result, fullGeneratedDocumentResultJson: result, status: 'pending_review', userId });
       onUpdate();
     } catch (err: any) {
+      console.error('[DocGen] Error:', err);
       setError(err?.response?.data?.error || err?.message || 'Document generation failed');
     } finally {
+      console.log('[DocGen] Finishing steps...');
       await finishSteps(docGenStepRef.current, DOC_GEN_STEPS.length, (s) => { docGenStepRef.current = s; setDocGenStep(s); }, docGenTimerRef);
+      console.log('[DocGen] Setting docGenerating to false');
       setDocGenerating(false);
+      setGeneratingRec(null);
     }
   };
 
@@ -2895,10 +2935,11 @@ function AnalysisTab({ caseData, onUpdate, userId, onSwitchTab }: {
 
   const handleDeleteDocument = async () => {
     setGeneratedDoc(null);
+    setSelectedRecommendation(null);
     setDocPhase('none');
     setDocEdits([]);
     try {
-      await updateCase(caseData.id, { generatedActionDocJson: null, fullGeneratedDocumentResultJson: null, status: 'awaiting_action', userId });
+      await updateCase(caseData.id, { generatedActionDocJson: null, fullGeneratedDocumentResultJson: null, selectedActionType: null, status: 'awaiting_action', userId });
       onUpdate();
     } catch (err) { console.error(err); }
   };
@@ -3905,34 +3946,19 @@ function AnalysisTab({ caseData, onUpdate, userId, onSwitchTab }: {
             <div className="w-12 h-12 rounded-full bg-purple-100 dark:bg-purple-900/30 flex items-center justify-center flex-shrink-0">
               <BookOpen className="w-6 h-6 text-purple-600 dark:text-purple-400" />
             </div>
-            <div>
+            <div className="flex-1">
               <h3 className="text-base font-bold text-gray-900 dark:text-white">Policy Alignment</h3>
               <p className="text-xs text-gray-500 dark:text-gray-400">Identify relevant policy sections</p>
             </div>
+            {policies.length > 0 && (
+              <button
+                onClick={() => { setPolicyReviewSelected(new Set()); setPolicyReviewSearch(''); setShowPolicyReviewModal(true); }}
+                className="flex items-center gap-1.5 px-3 py-1.5 text-xs font-semibold text-purple-600 dark:text-purple-400 bg-purple-50 dark:bg-purple-900/20 hover:bg-purple-100 dark:hover:bg-purple-900/30 rounded-lg transition-colors"
+              >
+                <Eye className="w-3.5 h-3.5" /> Review Active Policy
+              </button>
+            )}
           </div>
-
-          {/* Stats Row */}
-          {(() => {
-            const matches = policyResult.matches || [];
-            const highCount = matches.filter(m => m.matchConfidence >= 0.8).length;
-            const moderateCount = matches.filter(m => m.matchConfidence >= 0.65 && m.matchConfidence < 0.8).length;
-            return (
-              <div className="flex items-center gap-0 mb-5 rounded-xl border border-gray-200 dark:border-gray-700 overflow-hidden">
-                <div className="flex-1 text-center py-3 border-r border-gray-200 dark:border-gray-700">
-                  <p className="text-2xl font-bold text-purple-600 dark:text-purple-400">{matches.length}</p>
-                  <p className="text-[11px] font-medium text-gray-500 dark:text-gray-400">Relevant</p>
-                </div>
-                <div className="flex-1 text-center py-3 border-r border-gray-200 dark:border-gray-700">
-                  <p className="text-2xl font-bold text-green-600 dark:text-green-400">{highCount}</p>
-                  <p className="text-[11px] font-medium text-gray-500 dark:text-gray-400">High</p>
-                </div>
-                <div className="flex-1 text-center py-3">
-                  <p className="text-2xl font-bold text-orange-500 dark:text-orange-400">{moderateCount}</p>
-                  <p className="text-[11px] font-medium text-gray-500 dark:text-gray-400">Moderate</p>
-                </div>
-              </div>
-            );
-          })()}
 
           {/* Policy Match Cards */}
           <div className="space-y-3">
@@ -3960,14 +3986,25 @@ function AnalysisTab({ caseData, onUpdate, userId, onSwitchTab }: {
                     onClick={() => setExpandedPolicyMatch(isExpanded ? null : i)}
                     className="w-full px-4 py-3.5 flex flex-col gap-2 text-left hover:bg-gray-100 dark:hover:bg-gray-700/30 transition-colors"
                   >
-                    {/* Section number + relevance badge */}
+                    {/* Section number + relevance badge + delete */}
                     <div className="flex items-center justify-between w-full">
                       <span className="text-xs font-semibold text-gray-500 dark:text-gray-400">
                         {m.sectionNumber ? `Section ${m.sectionNumber}` : 'Policy Section'}
                       </span>
-                      <span className={`px-2.5 py-0.5 rounded-full text-[11px] font-semibold ${badgeColor}`}>
-                        {levelLabel}
-                      </span>
+                      <div className="flex items-center gap-2">
+                        <span className={`px-2.5 py-0.5 rounded-full text-[11px] font-semibold ${badgeColor}`}>
+                          {levelLabel}
+                        </span>
+                        <div
+                          role="button"
+                          tabIndex={0}
+                          onClick={(e) => { e.stopPropagation(); setPolicyDeleteTarget({ index: i, match: m }); }}
+                          onKeyDown={(e) => { if (e.key === 'Enter') { e.stopPropagation(); setPolicyDeleteTarget({ index: i, match: m }); } }}
+                          className="p-1 rounded-md hover:bg-red-100 dark:hover:bg-red-900/30 transition-colors group/del"
+                        >
+                          <Trash2 className="w-3.5 h-3.5 text-gray-400 group-hover/del:text-red-500 transition-colors" />
+                        </div>
+                      </div>
                     </div>
                     {/* Dot + Title + chevron */}
                     <div className="flex items-start gap-2 w-full">
@@ -4042,6 +4079,113 @@ function AnalysisTab({ caseData, onUpdate, userId, onSwitchTab }: {
         </div>
       )}
 
+      {/* ─── Policy Section Delete Confirmation Modal ─── */}
+      {policyDeleteTarget && typeof document !== 'undefined' && createPortal(
+        (() => {
+          const m = policyDeleteTarget.match;
+          const conf = m.matchConfidence;
+          const isLowRelevance = conf < 0.65;
+          const isNotRelevant = conf < 0.5;
+          const level = conf >= 0.8 ? 'high' : conf >= 0.65 ? 'moderate' : conf >= 0.5 ? 'low' : 'not_relevant';
+
+          return (
+            <div className="fixed inset-0 z-[9999] flex items-center justify-center bg-black/40 backdrop-blur-sm animate-in fade-in duration-200">
+              <div className="bg-white dark:bg-gray-800 rounded-2xl shadow-2xl border border-gray-200 dark:border-gray-700 max-w-md w-full mx-4 overflow-hidden animate-in zoom-in-95 duration-200">
+                {/* Icon Header */}
+                <div className={`px-6 pt-6 pb-4 flex flex-col items-center text-center ${isLowRelevance ? 'bg-orange-50 dark:bg-orange-900/10' : 'bg-red-50 dark:bg-red-900/10'}`}>
+                  <div className={`w-14 h-14 rounded-full flex items-center justify-center mb-3 ${isLowRelevance ? 'bg-orange-100 dark:bg-orange-900/30' : 'bg-red-100 dark:bg-red-900/30'}`}>
+                    {isLowRelevance
+                      ? <AlertTriangle className="w-7 h-7 text-orange-500" />
+                      : <Trash2 className="w-7 h-7 text-red-500" />
+                    }
+                  </div>
+                  <h4 className="text-base font-bold text-gray-900 dark:text-white">
+                    {isNotRelevant ? 'Remove Low-Relevance Section?' : isLowRelevance ? 'Remove This Section?' : 'Delete Policy Section?'}
+                  </h4>
+                  <p className="text-xs text-gray-500 dark:text-gray-400 mt-1">
+                    Section {m.sectionNumber || 'N/A'} — {Math.round(conf * 100)}% relevance
+                  </p>
+                </div>
+
+                {/* Body */}
+                <div className="px-6 py-4 space-y-3">
+                  {/* Dynamic message based on relevance */}
+                  {isNotRelevant ? (
+                    <div className="p-3 rounded-xl bg-green-50 dark:bg-green-900/10 border border-green-200 dark:border-green-800/40">
+                      <div className="flex items-start gap-2">
+                        <CheckCircle2 className="w-4 h-4 text-green-500 mt-0.5 flex-shrink-0" />
+                        <p className="text-sm text-green-800 dark:text-green-300 leading-relaxed">
+                          <span className="font-semibold">Good choice.</span> This section has low relevancy and is a better candidate for removal since it doesn&apos;t directly relate to the conflict at hand.
+                        </p>
+                      </div>
+                    </div>
+                  ) : isLowRelevance ? (
+                    <div className="p-3 rounded-xl bg-orange-50 dark:bg-orange-900/10 border border-orange-200 dark:border-orange-800/40">
+                      <div className="flex items-start gap-2">
+                        <AlertTriangle className="w-4 h-4 text-orange-500 mt-0.5 flex-shrink-0" />
+                        <p className="text-sm text-orange-800 dark:text-orange-300 leading-relaxed">
+                          This section has <span className="font-semibold">moderate-to-low relevance</span> to this case. It may still provide supporting context, but removing it is reasonable if it doesn&apos;t align with the core issues.
+                        </p>
+                      </div>
+                    </div>
+                  ) : (
+                    <div className="p-3 rounded-xl bg-red-50 dark:bg-red-900/10 border border-red-200 dark:border-red-800/40">
+                      <div className="flex items-start gap-2">
+                        <AlertCircle className="w-4 h-4 text-red-500 mt-0.5 flex-shrink-0" />
+                        <p className="text-sm text-red-800 dark:text-red-300 leading-relaxed">
+                          <span className="font-semibold">Caution:</span> This section has <span className="font-semibold">{level === 'high' ? 'high' : 'moderate'} relevance</span> to this case and is likely important for the policy alignment analysis. Removing it could weaken the assessment.
+                        </p>
+                      </div>
+                    </div>
+                  )}
+
+                  {/* Section preview */}
+                  <div className="p-3 rounded-xl bg-gray-100 dark:bg-gray-700/50">
+                    <p className="text-xs font-semibold text-gray-500 dark:text-gray-400 mb-1">Section to remove:</p>
+                    <p className="text-sm text-gray-900 dark:text-white line-clamp-2">{m.sectionTitle}</p>
+                  </div>
+
+                  {/* Permanent warning */}
+                  <p className="text-xs text-gray-500 dark:text-gray-400 text-center leading-relaxed">
+                    This action is <span className="font-semibold text-red-500">permanent</span> and cannot be undone. The section will be removed from the Policy Alignment analysis.
+                  </p>
+                </div>
+
+                {/* Actions */}
+                <div className="px-6 pb-5 flex items-center gap-3">
+                  <button
+                    onClick={() => setPolicyDeleteTarget(null)}
+                    className="flex-1 px-4 py-2.5 text-sm font-semibold text-gray-700 dark:text-gray-300 bg-gray-100 dark:bg-gray-700 hover:bg-gray-200 dark:hover:bg-gray-600 rounded-xl transition-colors"
+                  >
+                    Cancel
+                  </button>
+                  <button
+                    onClick={() => {
+                      if (policyResult) {
+                        const updated = (policyResult.matches || []).filter((_, idx) => idx !== policyDeleteTarget.index);
+                        const updatedResult = { ...policyResult, matches: updated };
+                        setPolicyResult(updatedResult);
+                        if (expandedPolicyMatch === policyDeleteTarget.index) setExpandedPolicyMatch(null);
+                        else if (expandedPolicyMatch !== null && expandedPolicyMatch > policyDeleteTarget.index) setExpandedPolicyMatch(expandedPolicyMatch - 1);
+                        // Persist to database
+                        updateCase(caseData.id, { policyMatchesJson: updatedResult, policyMatchingResultJson: updatedResult, userId })
+                          .then(() => onUpdate())
+                          .catch(err => console.error('[DeletePolicySection] updateCase error:', err));
+                      }
+                      setPolicyDeleteTarget(null);
+                    }}
+                    className="flex-1 flex items-center justify-center gap-2 px-4 py-2.5 text-sm font-bold text-white bg-red-600 hover:bg-red-700 rounded-xl transition-colors"
+                  >
+                    <Trash2 className="w-4 h-4" /> Delete Section
+                  </button>
+                </div>
+              </div>
+            </div>
+          );
+        })(),
+        document.body
+      )}
+
       {/* ─── Decision Support (Recommendations) ─── */}
       {recommendationResult && !comparisonAnalyzing && !policyAnalyzing && !recommendationAnalyzing && (() => {
         // Build per-employee groups (backward compat: fallback to flat list grouped by target)
@@ -4090,10 +4234,19 @@ function AnalysisTab({ caseData, onUpdate, userId, onSwitchTab }: {
               <div className="w-11 h-11 rounded-full bg-indigo-100 dark:bg-indigo-900/30 flex items-center justify-center">
                 <Lightbulb className="w-6 h-6 text-indigo-600 dark:text-indigo-400" />
               </div>
-              <div>
+              <div className="flex-1">
                 <h3 className="text-base font-semibold text-gray-900 dark:text-white">Decision Support</h3>
                 <p className="text-xs text-gray-500 dark:text-gray-400">System-powered action recommendations</p>
               </div>
+              {!caseData.isLocked && (
+                <button
+                  onClick={handleRunRecommendations}
+                  disabled={step > 0}
+                  className="py-2 px-4 rounded-xl text-xs font-semibold text-orange-600 dark:text-orange-400 bg-orange-50 dark:bg-orange-900/10 hover:bg-orange-100 dark:hover:bg-orange-900/20 disabled:opacity-50 transition-all flex items-center gap-1.5 border border-orange-200 dark:border-orange-800"
+                >
+                  <RefreshCw className="w-3.5 h-3.5" /> Re-Generate
+                </button>
+              )}
             </div>
 
             {/* Per-Employee Recommendation Groups */}
@@ -4293,92 +4446,11 @@ function AnalysisTab({ caseData, onUpdate, userId, onSwitchTab }: {
                     </div>
                   </div>
 
-                  {/* Document Generated Badge */}
-                  <div className="flex items-center justify-center gap-2 py-2">
-                    <CheckCircle2 className="w-5 h-5 text-green-600 dark:text-green-400" />
-                    <p className="text-sm font-semibold text-green-800 dark:text-green-300">Document Generated</p>
-                  </div>
-
-                  {/* Action Buttons */}
-                  <div className="space-y-2.5">
-                    {!caseData.isLocked && (
-                      <button
-                        onClick={handleRegenerateDocument}
-                        className="w-full py-3 rounded-xl text-sm font-semibold text-white bg-orange-500 hover:bg-orange-600 transition-all flex items-center justify-center gap-2 shadow-lg shadow-orange-500/25"
-                      >
-                        <RefreshCw className="w-4 h-4" /> Re-Generate Document
-                      </button>
-                    )}
-                    <button
-                      onClick={handleOpenReviewModal}
-                      className="w-full py-3 rounded-xl text-sm font-semibold text-white bg-gradient-to-r from-green-500 to-green-600 hover:from-green-600 hover:to-green-700 transition-all flex items-center justify-center gap-2 shadow-lg shadow-green-600/25"
-                    >
-                      <ArrowRight className="w-4 h-4" /> Continue to Review
-                    </button>
-                    {!caseData.isLocked && (
-                      <button
-                        onClick={handleDeleteDocument}
-                        className="w-full py-2.5 rounded-xl text-sm font-medium text-red-600 dark:text-red-400 hover:bg-red-50 dark:hover:bg-red-900/10 transition-all flex items-center justify-center gap-2"
-                      >
-                        <Trash2 className="w-4 h-4" /> Delete Document
-                      </button>
-                    )}
-                  </div>
-                </div>
-              );
-
-              if (generatedDoc) return (
-                <div className="mt-5 space-y-3">
-                  <div className="flex items-center gap-2 p-3 rounded-xl bg-green-50 dark:bg-green-900/10 mb-1">
-                    <CheckCircle2 className="w-5 h-5 text-green-600 dark:text-green-400" />
-                    <div>
-                      <p className="text-sm font-semibold text-green-800 dark:text-green-300">Document Generated</p>
-                    </div>
-                  </div>
-                  <button
-                    onClick={handleOpenReviewModal}
-                    className="w-full py-3 rounded-xl text-sm font-semibold text-white bg-gradient-to-r from-green-500 to-green-600 hover:from-green-600 hover:to-green-700 transition-all flex items-center justify-center gap-2 shadow-lg shadow-green-600/25"
-                  >
-                    <ArrowRight className="w-4 h-4" /> Continue to Review
-                  </button>
-                  {!caseData.isLocked && (
-                    <>
-                      <button
-                        onClick={handleRegenerateDocument}
-                        className="w-full py-3 rounded-xl text-sm font-semibold text-white bg-orange-500 hover:bg-orange-600 transition-all flex items-center justify-center gap-2 shadow-lg shadow-orange-500/25"
-                      >
-                        <RefreshCw className="w-4 h-4" /> Re-Generate Document
-                      </button>
-                      <button
-                        onClick={handleDeleteDocument}
-                        className="w-full py-2.5 rounded-xl text-sm font-medium text-red-600 dark:text-red-400 hover:bg-red-50 dark:hover:bg-red-900/10 transition-all flex items-center justify-center gap-2"
-                      >
-                        <Trash2 className="w-4 h-4" /> Delete Document
-                      </button>
-                    </>
-                  )}
                 </div>
               );
 
               // Default: no document yet
-              return (
-                <div className="mt-5 space-y-3">
-                  {!caseData.isLocked && (
-                    <button
-                      onClick={() => { setRecommendationResult(null); setSelectedRecommendation(null); handleRunRecommendations(); }}
-                      className="w-full flex items-center justify-center gap-2 py-2 text-sm font-medium text-indigo-600 dark:text-indigo-400 hover:bg-indigo-50 dark:hover:bg-indigo-900/10 rounded-xl transition-colors"
-                    >
-                      <RefreshCw className="w-4 h-4" /> Regenerate Options
-                    </button>
-                  )}
-                  <button
-                    onClick={() => { /* Decide Later – no action, user can revisit */ }}
-                    className="w-full py-3 rounded-xl text-sm font-semibold text-white bg-gradient-to-r from-blue-600 to-blue-500 hover:from-blue-700 hover:to-blue-600 transition-all shadow-lg shadow-blue-600/20"
-                  >
-                    Decide Later
-                  </button>
-                </div>
-              );
+              return null;
             })()}
           </div>
         );
@@ -4543,70 +4615,6 @@ function AnalysisTab({ caseData, onUpdate, userId, onSwitchTab }: {
         </div>
       )}
 
-      {/* ─── Document Generation Loading Overlay ─── */}
-      {docGenerating && (
-        <div ref={docGenOverlayRef} className="relative rounded-2xl bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-700 overflow-hidden" style={{ minHeight: 360 }}>
-          <div className="absolute inset-0 z-20 flex items-center justify-center animate-processing-overlay-in">
-            <div className="absolute inset-0 bg-white/95 dark:bg-gray-900/95 backdrop-blur-2xl" style={{ borderRadius: 'inherit' }} />
-            <div className="absolute inset-0 overflow-hidden" style={{ borderRadius: 'inherit' }}>
-              <div className="absolute -top-20 -left-20 w-64 h-64 bg-orange-400/20 dark:bg-orange-500/15 rounded-full blur-3xl animate-blob" />
-              <div className="absolute -bottom-20 -right-20 w-64 h-64 bg-amber-400/20 dark:bg-amber-500/15 rounded-full blur-3xl animate-blob" style={{ animationDelay: '2s' }} />
-              <div className="absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 w-48 h-48 bg-teal-400/10 dark:bg-teal-500/10 rounded-full blur-3xl animate-blob" style={{ animationDelay: '4s' }} />
-            </div>
-            <div className="relative z-10 flex flex-col items-center gap-6 animate-processing-bounce-in">
-              <div className="relative w-32 h-32">
-                <div className="absolute inset-0 rounded-full animate-processing-glow" />
-                <svg className="w-32 h-32 -rotate-90" viewBox="0 0 120 120">
-                  <circle cx="60" cy="60" r="52" fill="none" stroke="currentColor" strokeWidth="6" className="text-gray-200/60 dark:text-gray-700/60" />
-                  <circle
-                    cx="60" cy="60" r="52"
-                    fill="none" strokeWidth="6" strokeLinecap="round"
-                    className="text-orange-500 dark:text-orange-400 animate-processing-arc"
-                    style={{
-                      strokeDasharray: `${2 * Math.PI * 52}`,
-                      strokeDashoffset: `${2 * Math.PI * 52 * (1 - ((docGenStep + 1) / DOC_GEN_STEPS.length))}`,
-                      stroke: 'url(#docgen-gradient)',
-                      transition: 'stroke-dashoffset 1.2s cubic-bezier(0.4, 0, 0.2, 1)',
-                    }}
-                  />
-                  <defs>
-                    <linearGradient id="docgen-gradient" x1="0%" y1="0%" x2="100%" y2="100%">
-                      <stop offset="0%" stopColor="#f97316" />
-                      <stop offset="50%" stopColor="#f59e0b" />
-                      <stop offset="100%" stopColor="#14b8a6" />
-                    </linearGradient>
-                  </defs>
-                </svg>
-                <div className="absolute inset-0 flex items-center justify-center">
-                  <span className="text-3xl animate-processing-icon-pop" key={docGenStep}>
-                    {DOC_GEN_STEPS[docGenStep]?.icon}
-                  </span>
-                </div>
-              </div>
-              <div className="text-center space-y-2">
-                <p className="text-lg font-bold text-gray-800 dark:text-gray-100">Generating Document...</p>
-                <p className="text-sm text-gray-500 dark:text-gray-400">Our system is creating your document</p>
-              </div>
-              {/* Step checklist */}
-              <div className="space-y-2 w-64">
-                {DOC_GEN_STEPS.map((s, i) => (
-                  <div key={i} className="flex items-center gap-2.5">
-                    {i < docGenStep ? (
-                      <CheckCircle2 className="w-4 h-4 text-green-500 flex-shrink-0" />
-                    ) : i === docGenStep ? (
-                      <Loader2 className="w-4 h-4 text-orange-500 animate-spin flex-shrink-0" />
-                    ) : (
-                      <div className="w-4 h-4 rounded-full border-2 border-gray-300 dark:border-gray-600 flex-shrink-0" />
-                    )}
-                    <span className={`text-sm ${i <= docGenStep ? 'text-gray-800 dark:text-gray-200 font-medium' : 'text-gray-400 dark:text-gray-500'}`}>{s.label}</span>
-                  </div>
-                ))}
-              </div>
-            </div>
-          </div>
-        </div>
-      )}
-
       {/* ─── Generated Document Card (inline) ─── */}
       {generatedDoc && !showReviewModal && !docGenerating && !comparisonAnalyzing && !policyAnalyzing && !recommendationAnalyzing && (() => {
         const actionTypeLabels: Record<string, string> = { coaching: 'Coaching Guide', counseling: 'Counseling Document', warning: 'Written Warning', escalate: 'Escalation Package' };
@@ -4651,32 +4659,113 @@ function AnalysisTab({ caseData, onUpdate, userId, onSwitchTab }: {
             </div>
 
             {/* Action Buttons */}
-            <div className="space-y-2.5">
+            <div className="flex items-center justify-end gap-2">
+              <button
+                onClick={() => { setSelectedRecommendation(null); setGeneratedDoc(null); setDocPhase('none'); setDocEdits([]); }}
+                className="px-4 py-2 rounded-xl text-xs font-semibold text-blue-600 dark:text-blue-400 bg-blue-50 dark:bg-blue-900/10 hover:bg-blue-100 dark:hover:bg-blue-900/20 transition-all flex items-center gap-1.5 border border-blue-200 dark:border-blue-800"
+              >
+                <Clock className="w-3.5 h-3.5" /> Decide Later
+              </button>
+              <button
+                onClick={handleDeleteDocument}
+                className="px-4 py-2 rounded-xl text-xs font-semibold text-red-600 dark:text-red-400 bg-red-50 dark:bg-red-900/10 hover:bg-red-100 dark:hover:bg-red-900/20 transition-all flex items-center gap-1.5 border border-red-200 dark:border-red-800"
+              >
+                <Trash2 className="w-3.5 h-3.5" /> Delete
+              </button>
               <button
                 onClick={handleOpenReviewModal}
-                className="w-full py-3 rounded-xl text-sm font-semibold text-white bg-gradient-to-r from-green-500 to-green-600 hover:from-green-600 hover:to-green-700 transition-all flex items-center justify-center gap-2 shadow-lg shadow-green-600/25"
+                className="px-5 py-2 rounded-xl text-xs font-semibold text-white bg-gradient-to-r from-green-500 to-green-600 hover:from-green-600 hover:to-green-700 transition-all flex items-center gap-1.5 shadow-lg shadow-green-600/25"
               >
-                <ArrowRight className="w-4 h-4" /> Continue to Review
+                <ArrowRight className="w-3.5 h-3.5" /> Continue to Review
               </button>
-              <div className="flex gap-2">
-                <button
-                  onClick={handleRegenerateDocument}
-                  className="flex-1 py-2.5 rounded-xl text-xs font-semibold text-orange-600 dark:text-orange-400 bg-orange-50 dark:bg-orange-900/10 hover:bg-orange-100 dark:hover:bg-orange-900/20 transition-all flex items-center justify-center gap-1.5 border border-orange-200 dark:border-orange-800"
-                >
-                  <RefreshCw className="w-3.5 h-3.5" /> Re-Generate
-                </button>
-                <button
-                  onClick={handleDeleteDocument}
-                  className="flex-1 py-2.5 rounded-xl text-xs font-semibold text-red-600 dark:text-red-400 bg-red-50 dark:bg-red-900/10 hover:bg-red-100 dark:hover:bg-red-900/20 transition-all flex items-center justify-center gap-1.5 border border-red-200 dark:border-red-800"
-                >
-                  <Trash2 className="w-3.5 h-3.5" /> Delete
-                </button>
-              </div>
             </div>
           </div>
         );
       })()}
       </>)}
+
+      {/* ─── Document Generation Modal (iOS-style full-screen, portalled to body) ─── */}
+      {docGenerating && typeof document !== 'undefined' && createPortal(
+        (() => {
+          const actionTypeLabelsGen: Record<string, string> = { coaching: 'coaching guide', counseling: 'documented counseling document', warning: 'written warning', escalate: 'escalation package' };
+          const genTitle = generatingRec?.title || 'Action Document';
+          const genTypeLabel = actionTypeLabelsGen[generatingRec?.type || ''] || 'document';
+          return (
+            <div className="fixed inset-0 z-[9999] flex flex-col bg-gray-100 dark:bg-gray-900" style={{ position: 'fixed', top: 0, left: 0, right: 0, bottom: 0, zIndex: 9999 }}>
+              {/* Top Bar */}
+              <div className="flex items-center justify-between px-5 py-3.5 bg-white dark:bg-gray-800 border-b border-gray-200 dark:border-gray-700">
+                <button
+                  onClick={() => {}}
+                  className="text-sm font-medium text-blue-600 dark:text-blue-400"
+                >
+                  Back
+                </button>
+                <h2 className="text-base font-bold text-gray-900 dark:text-white">Generated Document</h2>
+                <div className="w-10" />
+              </div>
+
+              {/* Content */}
+              <div className="flex-1 flex flex-col items-center justify-center px-6">
+                {/* Document Info Card */}
+                <div className="w-full max-w-md mb-8">
+                  <div className="rounded-2xl bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-700 p-4 flex items-center gap-3">
+                    <div className="w-10 h-10 rounded-lg bg-blue-100 dark:bg-blue-900/30 flex items-center justify-center flex-shrink-0">
+                      <FileText className="w-5 h-5 text-blue-600 dark:text-blue-400" />
+                    </div>
+                    <div className="flex-1 min-w-0">
+                      <p className="text-sm font-bold text-gray-900 dark:text-white truncate">{genTitle}</p>
+                      <p className="text-xs text-gray-500 dark:text-gray-400">Case {caseData.caseNumber}</p>
+                    </div>
+                  </div>
+                </div>
+
+                {/* Progress Area */}
+                <div className="w-full max-w-sm rounded-2xl bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-700 p-8 flex flex-col items-center">
+                  {/* Circular Progress */}
+                  <div className="relative w-20 h-20 mb-5">
+                    <svg className="w-20 h-20 -rotate-90" viewBox="0 0 80 80">
+                      <circle cx="40" cy="40" r="34" fill="none" stroke="currentColor" strokeWidth="4" className="text-gray-200 dark:text-gray-700" />
+                      <circle
+                        cx="40" cy="40" r="34"
+                        fill="none" strokeWidth="4" strokeLinecap="round"
+                        className="text-blue-500"
+                        style={{
+                          strokeDasharray: `${2 * Math.PI * 34}`,
+                          strokeDashoffset: `${2 * Math.PI * 34 * (1 - ((docGenStep + 1) / DOC_GEN_STEPS.length))}`,
+                          transition: 'stroke-dashoffset 1s ease-out',
+                        }}
+                      />
+                    </svg>
+                    <div className="absolute inset-0 flex items-center justify-center">
+                      <FileText className="w-7 h-7 text-blue-500" />
+                    </div>
+                  </div>
+
+                  <p className="text-lg font-bold text-gray-900 dark:text-white mb-1">Generating Document...</p>
+                  <p className="text-sm text-gray-500 dark:text-gray-400 mb-6 text-center">Our System is creating your {genTypeLabel}</p>
+
+                  {/* Step Checklist */}
+                  <div className="space-y-3 w-full">
+                    {DOC_GEN_STEPS.map((s, i) => (
+                      <div key={i} className="flex items-center gap-3">
+                        {i < docGenStep ? (
+                          <CheckCircle2 className="w-5 h-5 text-green-500 flex-shrink-0" />
+                        ) : i === docGenStep ? (
+                          <Loader2 className="w-5 h-5 text-blue-500 animate-spin flex-shrink-0" />
+                        ) : (
+                          <div className="w-5 h-5 rounded-full border-2 border-gray-300 dark:border-gray-600 flex-shrink-0" />
+                        )}
+                        <span className={`text-sm ${i < docGenStep ? 'text-gray-800 dark:text-gray-200 font-medium' : i === docGenStep ? 'text-gray-900 dark:text-white font-semibold' : 'text-gray-400 dark:text-gray-500'}`}>{s.label}</span>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              </div>
+            </div>
+          );
+        })(),
+        document.body
+      )}
 
       {/* ─── Review Document (full content area view, matches iOS SupervisorReviewView) ─── */}
       {showReviewModal && !showDocPreview && generatedDoc && (() => {
@@ -5667,6 +5756,549 @@ function AnalysisTab({ caseData, onUpdate, userId, onSwitchTab }: {
           </div>
         </div>
       )}
+
+      {/* ─── Review Active Policy Modal (portalled, movable) ─── */}
+      {showPolicyReviewModal && typeof document !== 'undefined' && createPortal(
+        (() => {
+          const activePolicy = policies.find(p => p.status === 'ACTIVE') || policies[0];
+          const hasSections = activePolicy && activePolicy.sections && (Array.isArray(activePolicy.sections) ? activePolicy.sections.length > 0 : typeof activePolicy.sections === 'object' && Object.keys(activePolicy.sections).length > 0);
+          if (!activePolicy || !hasSections) {
+            return (
+              <div className="fixed inset-0 z-[9998] flex items-center justify-center bg-black/30">
+                <div className="bg-white dark:bg-gray-800 rounded-2xl p-8 shadow-2xl max-w-sm text-center">
+                  <p className="text-sm text-gray-600 dark:text-gray-400">No active policy with sections found.</p>
+                  <button onClick={() => setShowPolicyReviewModal(false)} className="mt-4 px-4 py-2 text-sm font-semibold text-white bg-gray-600 rounded-lg hover:bg-gray-700">Close</button>
+                </div>
+              </div>
+            );
+          }
+
+          const rawSections = activePolicy.sections;
+          const sectionsArray: PolicySection[] = Array.isArray(rawSections)
+            ? rawSections
+            : rawSections && typeof rawSections === 'object'
+            ? Object.values(rawSections) as PolicySection[]
+            : [];
+
+          const matchedSectionIds = new Set((policyResult?.matches || []).map(m => m.sectionId));
+          const matchedSectionNumbers = new Set((policyResult?.matches || []).map(m => m.sectionNumber));
+          // Build confidence lookup by sectionId and sectionNumber
+          const matchConfidenceById = new Map<string, number>();
+          const matchConfidenceByNumber = new Map<string, number>();
+          (policyResult?.matches || []).forEach(m => {
+            matchConfidenceById.set(m.sectionId, m.matchConfidence);
+            matchConfidenceByNumber.set(m.sectionNumber, m.matchConfidence);
+          });
+          const getMatchLevel = (sectionId: string, sectionNumber: string): 'high' | 'moderate' | 'low' | null => {
+            const conf = matchConfidenceById.get(sectionId) ?? matchConfidenceByNumber.get(sectionNumber) ?? null;
+            if (conf === null) return null;
+            if (conf >= 0.8) return 'high';
+            if (conf >= 0.65) return 'moderate';
+            return 'low';
+          };
+          // Keep legacy sets for backward compat
+          const highRelevanceSectionIds = new Set(
+            (policyResult?.matches || []).filter(m => m.matchConfidence >= 0.8).map(m => m.sectionId)
+          );
+          const highRelevanceSectionNumbers = new Set(
+            (policyResult?.matches || []).filter(m => m.matchConfidence >= 0.8).map(m => m.sectionNumber)
+          );
+
+          const searchLower = policyReviewSearch.toLowerCase();
+          const filteredSections = sectionsArray.filter(s => {
+            if (!searchLower) return true;
+            return (
+              s.sectionNumber.toLowerCase().includes(searchLower) ||
+              s.title.toLowerCase().includes(searchLower) ||
+              s.content.toLowerCase().includes(searchLower) ||
+              (s.firstProgression || '').toLowerCase().includes(searchLower) ||
+              (s.secondProgression || '').toLowerCase().includes(searchLower) ||
+              (s.thirdProgression || '').toLowerCase().includes(searchLower) ||
+              (s.fourthProgression || '').toLowerCase().includes(searchLower)
+            );
+          });
+
+          const toggleSection = (sectionId: string) => {
+            setPolicyReviewSelected(prev => {
+              const next = new Set(prev);
+              if (next.has(sectionId)) next.delete(sectionId); else next.add(sectionId);
+              return next;
+            });
+          };
+
+          const handleAddSelectedViolations = async () => {
+            if (!policyResult || policyReviewSelected.size === 0) return;
+
+            // Gather selected sections
+            const selectedSections = sectionsArray.filter(s => policyReviewSelected.has(s.id));
+            if (selectedSections.length === 0) return;
+
+            // Start AI validation progress
+            setPrValidating(true);
+            setPrValidationStep(0);
+            setPrShowResults(false);
+            setPrValidationResults(null);
+            prValidationStepRef.current = 0;
+            prValidationTimerRef.current = setInterval(() => {
+              prValidationStepRef.current++;
+              if (prValidationStepRef.current < PR_VALIDATION_STEPS.length) {
+                setPrValidationStep(prValidationStepRef.current);
+              } else if (prValidationTimerRef.current) {
+                clearInterval(prValidationTimerRef.current);
+              }
+            }, 3000);
+
+            try {
+              const result = await runPolicyMatching({
+                caseDetails: {
+                  caseType: caseData.type,
+                  incidentDate: caseData.incidentDate || '',
+                  location: caseData.location || '',
+                  department: caseData.department || '',
+                },
+                complaintA: {
+                  employeeName: complainantA?.name || 'Party A',
+                  text: complaintA?.cleanedText || complaintA?.originalText || '',
+                },
+                complaintB: {
+                  employeeName: complainantB?.name || 'Party B',
+                  text: complaintB?.cleanedText || complaintB?.originalText || '',
+                },
+                analysisResult: comparisonResult
+                  ? { contradictions: comparisonResult.contradictions, agreementPoints: comparisonResult.agreementPoints, neutralSummary: comparisonResult.neutralSummary }
+                  : undefined,
+                witnessStatements: witnessDocs.map(w => {
+                  const matchedEmp = witnessEmployees.find(e => e.id === w.employeeId);
+                  return { witnessName: matchedEmp?.name || 'Witness', text: w.cleanedText || w.originalText || '' };
+                }),
+                policySections: selectedSections,
+              });
+
+              // Map results: only keep matches for sections that were actually selected
+              const selectedIds = new Set(selectedSections.map(s => s.id));
+              const selectedNumbers = new Set(selectedSections.map(s => s.sectionNumber));
+              const aiMatches = (result.matches || [])
+                .filter(m => selectedIds.has(m.sectionId) || selectedNumbers.has(m.sectionNumber))
+                .map(m => ({
+                  ...m,
+                  // Use section content for display, not the type/category
+                  sectionTitle: sectionsArray.find(s => s.id === m.sectionId)?.content || m.sectionTitle,
+                }));
+
+              // For sections AI didn't return (below threshold), create low-confidence entries
+              const returnedIds = new Set(aiMatches.map(m => m.sectionId));
+              const returnedNumbers = new Set(aiMatches.map(m => m.sectionNumber));
+              selectedSections.forEach(s => {
+                if (!returnedIds.has(s.id) && !returnedNumbers.has(s.sectionNumber)) {
+                  aiMatches.push({
+                    sectionId: s.id,
+                    sectionNumber: s.sectionNumber,
+                    sectionTitle: s.content,
+                    relevanceExplanation: 'This section does not appear to be directly relevant to the behaviors described in the complaint statements or witness accounts for this case.',
+                    matchConfidence: 0.2,
+                    keyPhrases: [],
+                  });
+                }
+              });
+
+              setPrValidationResults(aiMatches);
+            } catch (err: any) {
+              // On error, create fallback entries so user can still decide
+              const fallbackMatches: PolicyMatch[] = selectedSections.map(s => ({
+                sectionId: s.id,
+                sectionNumber: s.sectionNumber,
+                sectionTitle: s.content,
+                relevanceExplanation: 'AI analysis could not be completed. You may still add this section based on your professional judgment.',
+                matchConfidence: 0.5,
+                keyPhrases: [],
+              }));
+              setPrValidationResults(fallbackMatches);
+            } finally {
+              // Finish animation steps
+              if (prValidationTimerRef.current) clearInterval(prValidationTimerRef.current);
+              let s = prValidationStepRef.current;
+              const fastForward = () => {
+                s++;
+                if (s < PR_VALIDATION_STEPS.length) {
+                  prValidationStepRef.current = s;
+                  setPrValidationStep(s);
+                  setTimeout(fastForward, 300);
+                } else {
+                  prValidationStepRef.current = PR_VALIDATION_STEPS.length - 1;
+                  setPrValidationStep(PR_VALIDATION_STEPS.length - 1);
+                  setTimeout(() => {
+                    setPrValidating(false);
+                    setPrShowResults(true);
+                  }, 500);
+                }
+              };
+              fastForward();
+            }
+          };
+
+          const handleAcceptValidatedSections = () => {
+            if (!policyResult || !prValidationResults) return;
+            const existingIds = new Set((policyResult.matches || []).map(m => m.sectionId));
+            const newMatches = prValidationResults.filter(m => !existingIds.has(m.sectionId));
+            if (newMatches.length > 0) {
+              const updatedResult = {
+                ...policyResult,
+                matches: [...(policyResult.matches || []), ...newMatches],
+              };
+              setPolicyResult(updatedResult);
+              // Persist to database
+              updateCase(caseData.id, { policyMatchesJson: updatedResult, policyMatchingResultJson: updatedResult, userId })
+                .then(() => onUpdate())
+                .catch(err => console.error('[AcceptValidatedSections] updateCase error:', err));
+            }
+            setPolicyReviewSelected(new Set());
+            setPrShowResults(false);
+            setPrValidationResults(null);
+            setShowPolicyReviewModal(false);
+          };
+
+          const handleDeclineValidatedSections = () => {
+            setPrShowResults(false);
+            setPrValidationResults(null);
+            // Keep modal open so user can adjust selection
+          };
+
+          const onPrDragStart = (e: React.MouseEvent) => {
+            e.preventDefault();
+            policyReviewDragRef.current = { startX: e.clientX, startY: e.clientY, origX: policyReviewPos.x, origY: policyReviewPos.y };
+            const onMove = (ev: MouseEvent) => {
+              if (!policyReviewDragRef.current) return;
+              const dx = ev.clientX - policyReviewDragRef.current.startX;
+              const dy = ev.clientY - policyReviewDragRef.current.startY;
+              setPolicyReviewPos({ x: policyReviewDragRef.current.origX + dx, y: policyReviewDragRef.current.origY + dy });
+            };
+            const onUp = () => { policyReviewDragRef.current = null; window.removeEventListener('mousemove', onMove); window.removeEventListener('mouseup', onUp); };
+            window.addEventListener('mousemove', onMove);
+            window.addEventListener('mouseup', onUp);
+          };
+
+          return (
+            <div className="fixed inset-0 z-[9998]" style={{ pointerEvents: 'none' }}>
+              <div
+                className="absolute bg-white dark:bg-gray-800 rounded-2xl shadow-2xl border border-gray-200 dark:border-gray-700 flex flex-col overflow-hidden"
+                style={{ left: policyReviewPos.x, top: policyReviewPos.y, width: policyReviewSize.w, height: policyReviewSize.h, pointerEvents: 'auto' }}
+              >
+                {/* Drag Header */}
+                <div
+                  className="flex items-center justify-between px-5 py-3 bg-gray-50 dark:bg-gray-900 border-b border-gray-200 dark:border-gray-700 cursor-move select-none"
+                  onMouseDown={onPrDragStart}
+                >
+                  <div className="flex items-center gap-2">
+                    <GripHorizontal className="w-4 h-4 text-gray-400" />
+                    <h3 className="text-sm font-bold text-gray-900 dark:text-white">{activePolicy.name}</h3>
+                    <span className="text-xs text-gray-500 dark:text-gray-400">v{activePolicy.version}</span>
+                  </div>
+                  <div className="flex items-center gap-2">
+                    {policyReviewSelected.size > 0 && !prValidating && !prShowResults && (
+                      <button
+                        onClick={handleAddSelectedViolations}
+                        className="flex items-center gap-1.5 px-3 py-1.5 text-xs font-bold text-white bg-green-600 hover:bg-green-700 rounded-lg transition-colors"
+                      >
+                        <Plus className="w-3.5 h-3.5" /> Add ({policyReviewSelected.size})
+                      </button>
+                    )}
+                    <button onClick={() => { if (!prValidating) { setShowPolicyReviewModal(false); setPrShowResults(false); setPrValidationResults(null); } }} className="p-1.5 rounded-lg hover:bg-gray-200 dark:hover:bg-gray-700 transition-colors">
+                      <X className="w-4 h-4 text-gray-500 dark:text-gray-400" />
+                    </button>
+                  </div>
+                </div>
+
+                {/* Search Bar */}
+                <div className="px-4 py-3 border-b border-gray-200 dark:border-gray-700">
+                  <div className="relative">
+                    <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-gray-400" />
+                    <input
+                      type="text"
+                      value={policyReviewSearch}
+                      onChange={e => setPolicyReviewSearch(e.target.value)}
+                      placeholder="Search sections, content, violations..."
+                      className="w-full pl-9 pr-3 py-2 text-sm bg-gray-100 dark:bg-gray-900 border border-gray-200 dark:border-gray-700 rounded-lg text-gray-900 dark:text-white placeholder-gray-400 focus:outline-none focus:ring-2 focus:ring-purple-500 focus:border-transparent"
+                    />
+                  </div>
+                </div>
+
+                {/* Table */}
+                <div className="flex-1 overflow-auto">
+                  <table className="w-full text-sm">
+                    <thead className="sticky top-0 bg-gray-100 dark:bg-gray-900 z-10">
+                      <tr>
+                        <th className="px-3 py-2.5 text-left text-[11px] font-semibold text-gray-500 dark:text-gray-400 uppercase tracking-wide w-10">
+                          <input
+                            type="checkbox"
+                            checked={filteredSections.filter(s => !matchedSectionIds.has(s.id) && !matchedSectionNumbers.has(s.sectionNumber)).length > 0 && filteredSections.filter(s => !matchedSectionIds.has(s.id) && !matchedSectionNumbers.has(s.sectionNumber)).every(s => policyReviewSelected.has(s.id))}
+                            onChange={e => {
+                              if (e.target.checked) {
+                                setPolicyReviewSelected(new Set(filteredSections.filter(s => !matchedSectionIds.has(s.id) && !matchedSectionNumbers.has(s.sectionNumber)).map(s => s.id)));
+                              } else {
+                                setPolicyReviewSelected(new Set());
+                              }
+                            }}
+                            className="w-4 h-4 rounded border-gray-300 text-purple-600 focus:ring-purple-500"
+                          />
+                        </th>
+                        <th className="px-3 py-2.5 text-left text-[11px] font-semibold text-gray-500 dark:text-gray-400 uppercase tracking-wide w-20">Section No</th>
+                        <th className="px-3 py-2.5 text-left text-[11px] font-semibold text-gray-500 dark:text-gray-400 uppercase tracking-wide w-44">Policy Type</th>
+                        <th className="px-3 py-2.5 text-left text-[11px] font-semibold text-gray-500 dark:text-gray-400 uppercase tracking-wide">Policy</th>
+                        <th className="px-3 py-2.5 text-left text-[11px] font-semibold text-gray-500 dark:text-gray-400 uppercase tracking-wide w-36">1st Violation</th>
+                        <th className="px-3 py-2.5 text-left text-[11px] font-semibold text-gray-500 dark:text-gray-400 uppercase tracking-wide w-36">2nd Violation</th>
+                        <th className="px-3 py-2.5 text-left text-[11px] font-semibold text-gray-500 dark:text-gray-400 uppercase tracking-wide w-36">3rd Violation</th>
+                        <th className="px-3 py-2.5 text-left text-[11px] font-semibold text-gray-500 dark:text-gray-400 uppercase tracking-wide w-36">4th Violation</th>
+                      </tr>
+                    </thead>
+                    <tbody className="divide-y divide-gray-100 dark:divide-gray-700">
+                      {filteredSections.map(section => {
+                        const matchLevel = getMatchLevel(section.id, section.sectionNumber);
+                        const isAlreadyMatched = matchedSectionIds.has(section.id) || matchedSectionNumbers.has(section.sectionNumber);
+                        const isSelected = policyReviewSelected.has(section.id);
+                        // Compact violations left — no empty columns before filled ones
+                        const rawViolations = [section.firstProgression, section.secondProgression, section.thirdProgression, section.fourthProgression];
+                        const filled = rawViolations.filter(v => v && v.trim());
+                        const v1 = filled[0] || '—';
+                        const v2 = filled[1] || '—';
+                        const v3 = filled[2] || '—';
+                        const v4 = filled[3] || '—';
+                        // Row colors: already matched rows colored by relevance level, otherwise purple if selected
+                        const rowClass = isAlreadyMatched
+                          ? matchLevel === 'high'
+                            ? 'bg-green-50 dark:bg-green-900/15'
+                            : matchLevel === 'moderate'
+                            ? 'bg-orange-50 dark:bg-orange-900/10'
+                            : 'bg-gray-100 dark:bg-gray-800/60 opacity-60'
+                          : isSelected
+                          ? 'bg-blue-50 dark:bg-blue-900/10 hover:bg-blue-100 dark:hover:bg-blue-900/20'
+                          : 'hover:bg-gray-50 dark:hover:bg-gray-800/50';
+                        return (
+                          <tr
+                            key={section.id}
+                            onClick={() => { if (!isAlreadyMatched) toggleSection(section.id); }}
+                            className={`transition-colors ${isAlreadyMatched ? '' : 'cursor-pointer'} ${rowClass}`}
+                          >
+                            <td className="px-3 py-3">
+                              {isAlreadyMatched ? (
+                                <div className="w-4 h-4" />
+                              ) : (
+                                <input
+                                  type="checkbox"
+                                  checked={isSelected}
+                                  onChange={() => toggleSection(section.id)}
+                                  onClick={e => e.stopPropagation()}
+                                  className="w-4 h-4 rounded border-gray-300 text-purple-600 focus:ring-purple-500"
+                                />
+                              )}
+                            </td>
+                            <td className="px-3 py-3">
+                              <div className="flex items-center gap-1.5">
+                                <span className={`text-xs font-semibold ${isAlreadyMatched && matchLevel === 'low' ? 'text-gray-400 dark:text-gray-500' : 'text-gray-700 dark:text-gray-300'}`}>{section.sectionNumber}</span>
+                                {isAlreadyMatched && matchLevel === 'high' && (
+                                  <span className="px-1.5 py-0.5 rounded text-[9px] font-bold bg-green-200 text-green-800 dark:bg-green-800/40 dark:text-green-300">HIGH</span>
+                                )}
+                                {isAlreadyMatched && matchLevel === 'moderate' && (
+                                  <span className="px-1.5 py-0.5 rounded text-[9px] font-bold bg-orange-200 text-orange-800 dark:bg-orange-800/40 dark:text-orange-300">MOD</span>
+                                )}
+                                {isAlreadyMatched && matchLevel === 'low' && (
+                                  <span className="px-1.5 py-0.5 rounded text-[9px] font-bold bg-gray-200 text-gray-600 dark:bg-gray-700 dark:text-gray-400">LOW</span>
+                                )}
+                              </div>
+                            </td>
+                            <td className="px-3 py-3">
+                              <p className="text-xs font-semibold text-gray-900 dark:text-white">{section.title}</p>
+                            </td>
+                            <td className="px-3 py-3">
+                              <p className="text-[11px] text-gray-700 dark:text-gray-300 line-clamp-3">{section.content}</p>
+                            </td>
+                            <td className="px-3 py-3 text-[11px] text-gray-600 dark:text-gray-400">{v1}</td>
+                            <td className="px-3 py-3 text-[11px] text-gray-600 dark:text-gray-400">{v2}</td>
+                            <td className="px-3 py-3 text-[11px] text-gray-600 dark:text-gray-400">{v3}</td>
+                            <td className="px-3 py-3 text-[11px] text-gray-600 dark:text-gray-400">{v4}</td>
+                          </tr>
+                        );
+                      })}
+                      {filteredSections.length === 0 && (
+                        <tr>
+                          <td colSpan={8} className="px-4 py-8 text-center text-sm text-gray-500 dark:text-gray-400">
+                            No sections match your search.
+                          </td>
+                        </tr>
+                      )}
+                    </tbody>
+                  </table>
+                </div>
+
+                {/* Footer */}
+                <div className="px-4 py-3 border-t border-gray-200 dark:border-gray-700 flex items-center justify-between bg-gray-50 dark:bg-gray-900">
+                  <p className="text-xs text-gray-500 dark:text-gray-400">
+                    {filteredSections.length} section{filteredSections.length !== 1 ? 's' : ''} • {policyReviewSelected.size} selected
+                  </p>
+                  {policyReviewSelected.size > 0 && !prValidating && !prShowResults && (
+                    <button
+                      onClick={handleAddSelectedViolations}
+                      className="flex items-center gap-1.5 px-4 py-2 text-xs font-bold text-white bg-green-600 hover:bg-green-700 rounded-lg transition-colors"
+                    >
+                      <Plus className="w-3.5 h-3.5" /> Add Selected to Policy Alignment
+                    </button>
+                  )}
+                </div>
+
+                {/* ─── AI Validation Progress Overlay ─── */}
+                {prValidating && (
+                  <div className="absolute inset-0 z-30 flex items-center justify-center animate-processing-overlay-in">
+                    <div className="absolute inset-0 bg-white/95 dark:bg-gray-900/95 backdrop-blur-2xl rounded-2xl" />
+                    <div className="absolute inset-0 overflow-hidden rounded-2xl">
+                      <div className="absolute -top-20 -left-20 w-64 h-64 bg-purple-400/20 dark:bg-purple-500/15 rounded-full blur-3xl animate-blob" />
+                      <div className="absolute -bottom-20 -right-20 w-64 h-64 bg-pink-400/20 dark:bg-pink-500/15 rounded-full blur-3xl animate-blob" style={{ animationDelay: '2s' }} />
+                    </div>
+                    <div className="relative z-10 flex flex-col items-center gap-6 animate-processing-bounce-in">
+                      {/* Progress Ring */}
+                      <div className="relative w-28 h-28">
+                        <div className="absolute inset-0 rounded-full animate-processing-glow" />
+                        <svg className="w-28 h-28 -rotate-90" viewBox="0 0 120 120">
+                          <circle cx="60" cy="60" r="52" fill="none" stroke="currentColor" strokeWidth="6" className="text-gray-200/60 dark:text-gray-700/60" />
+                          <circle cx="60" cy="60" r="52" fill="none" strokeWidth="6" strokeLinecap="round"
+                            className="text-purple-500 dark:text-purple-400"
+                            style={{
+                              strokeDasharray: `${2 * Math.PI * 52}`,
+                              strokeDashoffset: `${2 * Math.PI * 52 * (1 - ((prValidationStep + 1) / PR_VALIDATION_STEPS.length))}`,
+                              transition: 'stroke-dashoffset 1.2s cubic-bezier(0.4, 0, 0.2, 1)',
+                            }}
+                          />
+                        </svg>
+                        <div className="absolute inset-0 flex items-center justify-center">
+                          <BookOpen className="w-7 h-7 text-purple-500 dark:text-purple-400" />
+                        </div>
+                      </div>
+                      <div className="text-center">
+                        <h4 className="text-lg font-bold text-gray-900 dark:text-white mb-1">Analyzing Relevance</h4>
+                        <p className="text-sm text-gray-500 dark:text-gray-400">Checking {policyReviewSelected.size} section{policyReviewSelected.size !== 1 ? 's' : ''} against case evidence</p>
+                      </div>
+                      {/* Step Checklist */}
+                      <div className="space-y-2.5 w-72">
+                        {PR_VALIDATION_STEPS.map((s, i) => (
+                          <div key={i} className="flex items-center gap-3">
+                            {i < prValidationStep ? (
+                              <CheckCircle2 className="w-5 h-5 text-green-500 flex-shrink-0" />
+                            ) : i === prValidationStep ? (
+                              <Loader2 className="w-5 h-5 text-purple-500 animate-spin flex-shrink-0" />
+                            ) : (
+                              <div className="w-5 h-5 rounded-full border-2 border-gray-300 dark:border-gray-600 flex-shrink-0" />
+                            )}
+                            <span className={`text-sm ${i <= prValidationStep ? 'text-gray-900 dark:text-white font-medium' : 'text-gray-400 dark:text-gray-500'}`}>
+                              {s.icon} {s.label}
+                            </span>
+                          </div>
+                        ))}
+                      </div>
+                    </div>
+                  </div>
+                )}
+
+                {/* ─── AI Validation Results Overlay ─── */}
+                {prShowResults && prValidationResults && (
+                  <div className="absolute inset-0 z-30 flex flex-col bg-white dark:bg-gray-800 rounded-2xl overflow-hidden">
+                    {/* Results Header */}
+                    <div className="px-5 py-4 border-b border-gray-200 dark:border-gray-700 bg-gray-50 dark:bg-gray-900">
+                      <div className="flex items-center gap-3">
+                        <div className="w-10 h-10 rounded-full bg-purple-100 dark:bg-purple-900/30 flex items-center justify-center">
+                          <ShieldCheck className="w-5 h-5 text-purple-600 dark:text-purple-400" />
+                        </div>
+                        <div>
+                          <h4 className="text-sm font-bold text-gray-900 dark:text-white">Relevance Analysis Complete</h4>
+                          <p className="text-xs text-gray-500 dark:text-gray-400">
+                            {prValidationResults.filter(m => m.matchConfidence >= 0.5).length} of {prValidationResults.length} section{prValidationResults.length !== 1 ? 's' : ''} found relevant
+                          </p>
+                        </div>
+                      </div>
+                    </div>
+
+                    {/* Results List */}
+                    <div className="flex-1 overflow-y-auto p-4 space-y-3">
+                      {prValidationResults.map((m, i) => {
+                        const conf = m.matchConfidence;
+                        const confPercent = Math.round(conf * 100);
+                        const isRelevant = conf >= 0.5;
+                        const level = conf >= 0.8 ? 'high' : conf >= 0.65 ? 'moderate' : conf >= 0.5 ? 'low' : 'not_relevant';
+                        const levelLabel = level === 'high' ? 'High Relevance' : level === 'moderate' ? 'Moderate Relevance' : level === 'low' ? 'Low Relevance' : 'Not Relevant';
+                        const badgeColor = level === 'high'
+                          ? 'bg-green-100 text-green-700 dark:bg-green-900/30 dark:text-green-400'
+                          : level === 'moderate'
+                          ? 'bg-orange-100 text-orange-700 dark:bg-orange-900/30 dark:text-orange-400'
+                          : level === 'low'
+                          ? 'bg-yellow-100 text-yellow-700 dark:bg-yellow-900/30 dark:text-yellow-400'
+                          : 'bg-red-100 text-red-700 dark:bg-red-900/30 dark:text-red-400';
+                        const confColor = isRelevant ? 'text-green-600 dark:text-green-400' : 'text-red-500 dark:text-red-400';
+                        const borderColor = !isRelevant ? 'border-red-200 dark:border-red-800/50' : 'border-gray-200 dark:border-gray-700';
+
+                        return (
+                          <div key={i} className={`rounded-xl border ${borderColor} bg-gray-50 dark:bg-gray-800/50 p-4 space-y-2`}>
+                            <div className="flex items-center justify-between">
+                              <div className="flex items-center gap-2">
+                                {!isRelevant && <AlertTriangle className="w-4 h-4 text-red-500 flex-shrink-0" />}
+                                <span className="text-xs font-semibold text-gray-500 dark:text-gray-400">Section {m.sectionNumber}</span>
+                              </div>
+                              <div className="flex items-center gap-2">
+                                <span className={`px-2.5 py-0.5 rounded-full text-[11px] font-semibold ${badgeColor}`}>{levelLabel}</span>
+                                <span className={`text-xs font-bold ${confColor}`}>{confPercent}%</span>
+                              </div>
+                            </div>
+                            <p className="text-sm font-medium text-gray-900 dark:text-white line-clamp-2">{m.sectionTitle}</p>
+                            <p className="text-xs text-gray-600 dark:text-gray-400 leading-relaxed">{m.relevanceExplanation}</p>
+                            {(m.keyPhrases || []).length > 0 && (
+                              <div className="flex flex-wrap gap-1.5 pt-1">
+                                {m.keyPhrases.map((kp, j) => (
+                                  <span key={j} className="px-2 py-0.5 rounded-lg text-[10px] font-medium bg-purple-100 text-purple-700 dark:bg-purple-900/20 dark:text-purple-400">{kp}</span>
+                                ))}
+                              </div>
+                            )}
+                            {!isRelevant && (
+                              <div className="mt-1 p-2 rounded-lg bg-red-50 dark:bg-red-900/10 border border-red-100 dark:border-red-800/30">
+                                <div className="flex items-center gap-1.5">
+                                  <AlertCircle className="w-3.5 h-3.5 text-red-500 flex-shrink-0" />
+                                  <span className="text-[11px] font-semibold text-red-600 dark:text-red-400">This section may not be relevant to this case</span>
+                                </div>
+                              </div>
+                            )}
+                          </div>
+                        );
+                      })}
+                    </div>
+
+                    {/* Results Footer */}
+                    <div className="px-4 py-3 border-t border-gray-200 dark:border-gray-700 flex items-center justify-between bg-gray-50 dark:bg-gray-900">
+                      <div className="flex items-center gap-2">
+                        {prValidationResults.some(m => m.matchConfidence < 0.5) && (
+                          <div className="flex items-center gap-1.5">
+                            <AlertTriangle className="w-3.5 h-3.5 text-orange-500" />
+                            <span className="text-[11px] text-orange-600 dark:text-orange-400 font-medium">Some sections have low relevance</span>
+                          </div>
+                        )}
+                      </div>
+                      <div className="flex items-center gap-2">
+                        <button
+                          onClick={handleDeclineValidatedSections}
+                          className="px-4 py-2 text-xs font-semibold text-gray-600 dark:text-gray-400 bg-gray-200 dark:bg-gray-700 hover:bg-gray-300 dark:hover:bg-gray-600 rounded-lg transition-colors"
+                        >
+                          Decline
+                        </button>
+                        <button
+                          onClick={handleAcceptValidatedSections}
+                          className="flex items-center gap-1.5 px-4 py-2 text-xs font-bold text-white bg-green-600 hover:bg-green-700 rounded-lg transition-colors"
+                        >
+                          <CheckCircle2 className="w-3.5 h-3.5" /> Accept &amp; Add All
+                        </button>
+                      </div>
+                    </div>
+                  </div>
+                )}
+              </div>
+            </div>
+          );
+        })(),
+        document.body
+      )}
     </div>
   );
 }
@@ -6298,7 +6930,7 @@ function CaseDetailContent() {
   const [caseData, setCaseData] = useState<ConflictCase | null>(null);
   const [loading, setLoading] = useState(true);
   const [docsLoaded, setDocsLoaded] = useState(false);
-  const [activeTab, setActiveTab] = useState<'overview' | 'documents' | 'analysis' | 'actions' | 'comments' | 'review' | 'history'>('overview');
+  const [activeTab, setActiveTab] = useState<'overview' | 'documents' | 'analysis' | 'timeline'>('overview');
   const [deleting, setDeleting] = useState(false);
 
   const loadCase = useCallback(async () => {
@@ -6372,16 +7004,13 @@ function CaseDetailContent() {
     { id: 'overview' as const, label: 'Overview', icon: Eye },
     { id: 'documents' as const, label: 'Documents', icon: FileText, count: (caseData.documents || []).length },
     { id: 'analysis' as const, label: 'Analysis', icon: Brain },
-    { id: 'actions' as const, label: 'Actions', icon: Gavel },
-    { id: 'comments' as const, label: 'Comments', icon: MessageSquare },
-    { id: 'review' as const, label: 'Review', icon: ClipboardCheck },
-    { id: 'history' as const, label: 'History', icon: Clock },
+    { id: 'timeline' as const, label: 'Timeline', icon: Clock },
   ];
 
   const userName = user ? `${user.firstName || ''} ${user.lastName || ''}`.trim() : '';
 
   return (
-    <div className="h-full flex flex-col bg-gray-50 dark:bg-gray-900">
+    <div className="min-h-full flex flex-col bg-gray-50 dark:bg-gray-900">
       {/* Header */}
       <div className="sticky top-0 z-20 bg-white dark:bg-gray-800 border-b border-gray-200 dark:border-gray-700 shadow-sm flex-shrink-0">
         <div className="w-full px-6 lg:px-8 py-5">
@@ -6431,60 +7060,6 @@ function CaseDetailContent() {
             </div>
           )}
 
-          {/* Status Progress Stepper */}
-          {(() => {
-            const statusSteps = [
-              { key: 'DRAFT', label: 'Draft', icon: Edit3 },
-              { key: 'IN_PROGRESS', label: 'In Progress', icon: Clock },
-              { key: 'PENDING_REVIEW', label: 'Review', icon: Eye },
-              { key: 'AWAITING_ACTION', label: 'Action', icon: Gavel },
-              { key: 'CLOSED', label: 'Closed', icon: Lock },
-            ];
-            const statusOrder = statusSteps.map(s => s.key);
-            const currentIdx = statusOrder.indexOf(caseData.status);
-            const isEscalated = caseData.status === 'ESCALATED';
-            return (
-              <div className="mt-4 flex items-center gap-1">
-                {statusSteps.map((step, i) => {
-                  const isCurrent = step.key === caseData.status;
-                  const isPast = !isEscalated && currentIdx >= 0 && i < currentIdx;
-                  const StepIcon = step.icon;
-                  return (
-                    <div key={step.key} className="flex items-center gap-1 flex-1">
-                      <div className={`flex items-center gap-2 flex-1 px-3 py-2 rounded-lg transition-all ${
-                        isCurrent
-                          ? 'bg-blue-100 dark:bg-blue-900/20 border border-blue-300 dark:border-blue-700'
-                          : isPast
-                          ? 'bg-green-50 dark:bg-green-900/10 border border-green-200 dark:border-green-800'
-                          : 'bg-gray-50 dark:bg-gray-700/20 border border-gray-200 dark:border-gray-700'
-                      }`}>
-                        <div className={`p-1 rounded-md ${
-                          isCurrent ? 'bg-blue-200 dark:bg-blue-800/50' :
-                          isPast ? 'bg-green-200 dark:bg-green-800/50' :
-                          'bg-gray-200 dark:bg-gray-600'
-                        }`}>
-                          {isPast ? (
-                            <CheckCircle2 className="w-3 h-3 text-green-600 dark:text-green-400" />
-                          ) : (
-                            <StepIcon className={`w-3 h-3 ${isCurrent ? 'text-blue-600 dark:text-blue-400' : 'text-gray-400 dark:text-gray-500'}`} />
-                          )}
-                        </div>
-                        <span className={`text-xs font-medium truncate ${
-                          isCurrent ? 'text-blue-700 dark:text-blue-400' :
-                          isPast ? 'text-green-700 dark:text-green-400' :
-                          'text-gray-400 dark:text-gray-500'
-                        }`}>{step.label}</span>
-                      </div>
-                      {i < statusSteps.length - 1 && (
-                        <ChevronRight className={`w-3 h-3 flex-shrink-0 ${isPast ? 'text-green-400' : 'text-gray-300 dark:text-gray-600'}`} />
-                      )}
-                    </div>
-                  );
-                })}
-              </div>
-            );
-          })()}
-
           {/* Tabs */}
           <div className="flex items-center gap-1 mt-5 -mb-px overflow-x-auto">
             {tabs.map(tab => (
@@ -6514,11 +7089,8 @@ function CaseDetailContent() {
       <div className={`w-full px-6 lg:px-8 ${activeTab === 'documents' ? 'flex-1 min-h-0 flex flex-col py-4' : 'py-8'}`}>
         {activeTab === 'overview' && <OverviewTab caseData={caseData} onUpdate={loadCase} userId={user?.id || ''} />}
         {activeTab === 'documents' && <DocumentsTab caseData={caseData} onUpdate={loadCase} userId={user?.id || ''} userName={userName} />}
-        {activeTab === 'analysis' && <AnalysisTab caseData={caseData} onUpdate={loadCase} userId={user?.id || ''} onSwitchTab={(tab) => setActiveTab(tab as any)} />}
-        {activeTab === 'actions' && <ActionsTab caseData={caseData} onUpdate={loadCase} userId={user?.id || ''} onSwitchTab={(tab) => setActiveTab(tab as any)} />}
-        {activeTab === 'comments' && <CommentsTab caseData={caseData} userId={user?.id || ''} userName={userName} />}
-        {activeTab === 'review' && <ReviewTab caseData={caseData} onUpdate={loadCase} userId={user?.id || ''} userName={userName} />}
-        {activeTab === 'history' && <HistoryTab caseData={caseData} />}
+        {activeTab === 'analysis' && <AnalysisTab caseData={caseData} onUpdate={loadCase} userId={user?.id || ''} />}
+        {activeTab === 'timeline' && <HistoryTab caseData={caseData} />}
       </div>
     </div>
   );

@@ -978,7 +978,7 @@ function PoliciesTab({ policies, loading, onRefresh, onCreatePolicy, onDeletePol
   // Center modal on open
   useEffect(() => {
     if (selectedPolicy) {
-      const pos = { x: Math.max(0, (window.innerWidth - 720) / 2), y: Math.max(20, (window.innerHeight - window.innerHeight * 0.85) / 2) };
+      const pos = { x: Math.max(0, (window.innerWidth - 1024) / 2), y: Math.max(20, (window.innerHeight - window.innerHeight * 0.85) / 2) };
       setPdPos(pos);
       pdPosRef.current = pos;
       setPdCentered(false);
@@ -1136,7 +1136,7 @@ function PoliciesTab({ policies, loading, onRefresh, onCreatePolicy, onDeletePol
         <div className="fixed inset-0 z-50 pointer-events-none">
           <div
             ref={pdDragRef}
-            className={`absolute bg-white dark:bg-gray-800 rounded-2xl shadow-2xl border border-gray-200 dark:border-gray-700 w-full max-w-3xl max-h-[85vh] flex flex-col overflow-hidden pointer-events-auto ${pdCentered ? 'animate-[bounceIn_0.35s_cubic-bezier(0.34,1.56,0.64,1)_forwards]' : 'opacity-0 scale-95'}`}
+            className={`absolute bg-white dark:bg-gray-800 rounded-2xl shadow-2xl border border-gray-200 dark:border-gray-700 w-full max-w-5xl max-h-[85vh] flex flex-col overflow-hidden pointer-events-auto ${pdCentered ? 'animate-[bounceIn_0.35s_cubic-bezier(0.34,1.56,0.64,1)_forwards]' : 'opacity-0 scale-95'}`}
             style={{ left: pdPos.x, top: pdPos.y }}
           >
             {/* Drag Handle */}
@@ -1253,64 +1253,55 @@ function PoliciesTab({ policies, loading, onRefresh, onCreatePolicy, onDeletePol
                     ))}
                   </div>
 
-                  {/* Sections List */}
-                  <div className="space-y-2">
-                    {filteredSections.map(s => {
-                      const isExpanded = expandedSection === s.id;
-                      const TypeIcon = sectionTypeIcons[s.type || 'OTHER'] || FileText;
-                      const hasProgression = s.firstProgression || s.secondProgression || s.thirdProgression || s.fourthProgression;
-                      const progressions = [s.firstProgression, s.secondProgression, s.thirdProgression, s.fourthProgression];
-
-                      return (
-                        <div key={s.id} className="rounded-xl border border-gray-200 dark:border-gray-700 overflow-hidden transition-colors">
-                          {/* Section Header */}
-                          <button
-                            onClick={() => setExpandedSection(isExpanded ? null : s.id)}
-                            className="w-full flex items-center gap-3 px-4 py-3 text-left hover:bg-gray-50 dark:hover:bg-gray-700/30 transition-colors"
-                          >
-                            <TypeIcon className="w-4 h-4 text-purple-500 flex-shrink-0" />
-                            <div className="flex-1 min-w-0">
-                              <div className="flex items-center gap-2">
-                                <span className="text-[11px] font-semibold text-gray-400 dark:text-gray-500">
-                                  {s.sectionNumber ? `Section ${s.sectionNumber}` : ''}
-                                </span>
-                              </div>
-                              <p className="text-sm font-semibold text-gray-900 dark:text-white truncate">{s.title}</p>
-                            </div>
-                            {isExpanded ? <ChevronUp className="w-4 h-4 text-gray-400 flex-shrink-0" /> : <ChevronDown className="w-4 h-4 text-gray-400 flex-shrink-0" />}
-                          </button>
-
-                          {/* Expanded Content */}
-                          {isExpanded && (
-                            <div className="px-4 pb-4 space-y-3 border-t border-gray-100 dark:border-gray-700/50 pt-3">
-                              <p className="text-sm text-gray-700 dark:text-gray-300 leading-relaxed whitespace-pre-wrap">{s.content}</p>
-
-                              {/* Progressive Discipline */}
-                              {hasProgression && (
-                                <div className="mt-3">
-                                  <p className="text-xs font-semibold text-gray-500 dark:text-gray-400 uppercase tracking-wide mb-2">Progressive Discipline</p>
-                                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
-                                    {progressions.map((prog, idx) => prog ? (
-                                      <div key={idx} className={`p-3 rounded-xl border text-sm ${progressionColors[idx]}`}>
-                                        <p className="text-[11px] font-bold uppercase tracking-wide mb-1 opacity-80">{progressionLabels[idx]}</p>
-                                        <p className="leading-relaxed">{prog}</p>
-                                      </div>
-                                    ) : null)}
-                                  </div>
-                                </div>
-                              )}
-                            </div>
-                          )}
-                        </div>
-                      );
-                    })}
-
-                    {filteredSections.length === 0 && sectionSearch.trim() && (
-                      <div className="text-center py-8">
-                        <Search className="w-8 h-8 text-gray-300 dark:text-gray-600 mx-auto mb-2" />
-                        <p className="text-sm text-gray-500 dark:text-gray-400">No sections match &ldquo;{sectionSearch}&rdquo;</p>
-                      </div>
-                    )}
+                  {/* Sections Table */}
+                  <div className="overflow-x-auto rounded-xl border border-gray-200 dark:border-gray-700">
+                    <table className="w-full text-sm">
+                      <thead className="sticky top-0 bg-gray-100 dark:bg-gray-900 z-10">
+                        <tr>
+                          <th className="px-3 py-2.5 text-left text-[11px] font-semibold text-gray-500 dark:text-gray-400 uppercase tracking-wide w-20">Section No</th>
+                          <th className="px-3 py-2.5 text-left text-[11px] font-semibold text-gray-500 dark:text-gray-400 uppercase tracking-wide w-44">Policy Type</th>
+                          <th className="px-3 py-2.5 text-left text-[11px] font-semibold text-gray-500 dark:text-gray-400 uppercase tracking-wide">Policy</th>
+                          <th className="px-3 py-2.5 text-left text-[11px] font-semibold text-gray-500 dark:text-gray-400 uppercase tracking-wide w-36">1st Violation</th>
+                          <th className="px-3 py-2.5 text-left text-[11px] font-semibold text-gray-500 dark:text-gray-400 uppercase tracking-wide w-36">2nd Violation</th>
+                          <th className="px-3 py-2.5 text-left text-[11px] font-semibold text-gray-500 dark:text-gray-400 uppercase tracking-wide w-36">3rd Violation</th>
+                          <th className="px-3 py-2.5 text-left text-[11px] font-semibold text-gray-500 dark:text-gray-400 uppercase tracking-wide w-36">4th Violation</th>
+                        </tr>
+                      </thead>
+                      <tbody className="divide-y divide-gray-100 dark:divide-gray-700">
+                        {filteredSections.map(s => {
+                          const rawViolations = [s.firstProgression, s.secondProgression, s.thirdProgression, s.fourthProgression];
+                          const filled = rawViolations.filter(v => v && v.trim());
+                          const v1 = filled[0] || '—';
+                          const v2 = filled[1] || '—';
+                          const v3 = filled[2] || '—';
+                          const v4 = filled[3] || '—';
+                          return (
+                            <tr key={s.id} className="hover:bg-gray-50 dark:hover:bg-gray-800/50 transition-colors">
+                              <td className="px-3 py-3">
+                                <span className="text-xs font-semibold text-gray-700 dark:text-gray-300">{s.sectionNumber}</span>
+                              </td>
+                              <td className="px-3 py-3">
+                                <p className="text-xs font-semibold text-gray-900 dark:text-white">{s.title}</p>
+                              </td>
+                              <td className="px-3 py-3">
+                                <p className="text-[11px] text-gray-700 dark:text-gray-300 line-clamp-3">{s.content}</p>
+                              </td>
+                              <td className="px-3 py-3 text-[11px] text-gray-600 dark:text-gray-400">{v1}</td>
+                              <td className="px-3 py-3 text-[11px] text-gray-600 dark:text-gray-400">{v2}</td>
+                              <td className="px-3 py-3 text-[11px] text-gray-600 dark:text-gray-400">{v3}</td>
+                              <td className="px-3 py-3 text-[11px] text-gray-600 dark:text-gray-400">{v4}</td>
+                            </tr>
+                          );
+                        })}
+                        {filteredSections.length === 0 && sectionSearch.trim() && (
+                          <tr>
+                            <td colSpan={7} className="px-4 py-8 text-center text-sm text-gray-500 dark:text-gray-400">
+                              No sections match &ldquo;{sectionSearch}&rdquo;
+                            </td>
+                          </tr>
+                        )}
+                      </tbody>
+                    </table>
                   </div>
                 </div>
               ) : selectedPolicy.originalText ? (

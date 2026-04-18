@@ -599,8 +599,13 @@ router.patch('/:id', async (req: Request, res: Response, next) => {
       changes.type = { from: existingCase.type, to: caseType };
     }
     if (status !== undefined) {
-      updateData.status = status;
-      changes.status = { from: existingCase.status, to: status };
+      // Map lowercase frontend values to Prisma enum (e.g. 'awaiting_action' -> 'AWAITING_ACTION')
+      const statusMap: Record<string, string> = {
+        draft: 'DRAFT', in_progress: 'IN_PROGRESS', pending_review: 'PENDING_REVIEW',
+        awaiting_action: 'AWAITING_ACTION', closed: 'CLOSED', escalated: 'ESCALATED',
+      };
+      updateData.status = statusMap[status.toLowerCase()] || status;
+      changes.status = { from: existingCase.status, to: updateData.status };
     }
     if (description !== undefined) {
       updateData.description = description ? encrypt(description) : null;
@@ -659,15 +664,22 @@ router.patch('/:id', async (req: Request, res: Response, next) => {
       changes.recommendationResult = 'updated';
     }
     if (selectedActionType !== undefined) {
-      updateData.selectedAction = selectedActionType;
-      changes.selectedAction = { from: existingCase.selectedAction, to: selectedActionType };
+      // Map lowercase frontend values to Prisma enum (e.g. 'counseling' -> 'COUNSELING')
+      const actionTypeMap: Record<string, string> = {
+        coaching: 'COACHING', counseling: 'COUNSELING',
+        warning: 'WRITTEN_WARNING', written_warning: 'WRITTEN_WARNING',
+        escalate: 'ESCALATE_TO_HR', escalate_to_hr: 'ESCALATE_TO_HR',
+      };
+      const mappedAction = selectedActionType ? (actionTypeMap[selectedActionType.toLowerCase()] || selectedActionType) : null;
+      updateData.selectedAction = mappedAction;
+      changes.selectedAction = { from: existingCase.selectedAction, to: mappedAction };
     }
     if (generatedActionDocJson !== undefined) {
-      updateData.generatedDocument = encrypt(JSON.stringify(generatedActionDocJson));
+      updateData.generatedDocument = generatedActionDocJson ? encrypt(JSON.stringify(generatedActionDocJson)) : null;
       changes.generatedDocument = 'updated';
     }
     if (fullGeneratedDocumentResultJson !== undefined) {
-      updateData.fullGeneratedDocumentResult = encrypt(JSON.stringify(fullGeneratedDocumentResultJson));
+      updateData.fullGeneratedDocumentResult = fullGeneratedDocumentResultJson ? encrypt(JSON.stringify(fullGeneratedDocumentResultJson)) : null;
       changes.fullGeneratedDocumentResult = 'updated';
     }
     if (selectedTargetEmployeeIdsJson !== undefined) {
@@ -1599,10 +1611,19 @@ router.get('/:id/audit', async (req: Request, res: Response) => {
 // Helper to decrypt policy data
 function decryptPolicyData(policy: any): any {
   if (!policy) return policy;
+  const decryptedSections = policy.sections ? decrypt(policy.sections) : null;
+  let parsedSections = null;
+  if (decryptedSections) {
+    try {
+      parsedSections = JSON.parse(decryptedSections);
+    } catch {
+      parsedSections = decryptedSections;
+    }
+  }
   return {
     ...policy,
     originalText: policy.originalText ? decrypt(policy.originalText) : null,
-    sections: policy.sections ? decrypt(policy.sections) : null,
+    sections: parsedSections,
   };
 }
 
