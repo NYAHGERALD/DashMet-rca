@@ -2194,6 +2194,29 @@ function DocumentsTab({ caseData, onUpdate, userId, userName }: {
           </button>
         )}
       </SectionCard>
+
+      {/* ─── Image Lightbox Modal ─── */}
+      {lightboxSrc && typeof document !== 'undefined' && createPortal(
+        <div
+          className="fixed inset-0 z-[9999] flex items-center justify-center bg-black/80 backdrop-blur-sm"
+          onClick={() => setLightboxSrc(null)}
+        >
+          <button
+            onClick={() => setLightboxSrc(null)}
+            className="absolute top-4 right-4 z-10 w-10 h-10 rounded-full bg-white/20 hover:bg-white/40 flex items-center justify-center transition-colors"
+            title="Close"
+          >
+            <X className="w-6 h-6 text-white" />
+          </button>
+          <img
+            src={lightboxSrc}
+            alt="Full size preview"
+            className="max-w-[90vw] max-h-[90vh] object-contain rounded-lg shadow-2xl"
+            onClick={e => e.stopPropagation()}
+          />
+        </div>,
+        document.body
+      )}
     </div>
   );
 }
@@ -6300,28 +6323,6 @@ function AnalysisTab({ caseData, onUpdate, userId }: {
         document.body
       )}
 
-      {/* ─── Image Lightbox Modal ─── */}
-      {lightboxSrc && typeof document !== 'undefined' && createPortal(
-        <div
-          className="fixed inset-0 z-[9999] flex items-center justify-center bg-black/80 backdrop-blur-sm"
-          onClick={() => setLightboxSrc(null)}
-        >
-          <button
-            onClick={() => setLightboxSrc(null)}
-            className="absolute top-4 right-4 z-10 w-10 h-10 rounded-full bg-white/20 hover:bg-white/40 flex items-center justify-center transition-colors"
-            title="Close"
-          >
-            <X className="w-6 h-6 text-white" />
-          </button>
-          <img
-            src={lightboxSrc}
-            alt="Full size preview"
-            className="max-w-[90vw] max-h-[90vh] object-contain rounded-lg shadow-2xl"
-            onClick={e => e.stopPropagation()}
-          />
-        </div>,
-        document.body
-      )}
     </div>
   );
 }
