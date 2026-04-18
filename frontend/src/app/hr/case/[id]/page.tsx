@@ -3485,9 +3485,12 @@ function AnalysisTab({ caseData, onUpdate, userId }: {
         </div>
       )}
 
-      {/* ─── Complaint Comparison (compact summary + View Full Analysis button) ─── */}
+      {/* ─── Analysis Results Container ─── */}
       {comparisonResult && !comparisonAnalyzing && !policyAnalyzing && (
-        <div className="rounded-2xl bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-700 p-6">
+        <div className="rounded-2xl bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-700 overflow-hidden">
+
+      {/* ─── Complaint Comparison ─── */}
+        <div className="p-6">
           <div className="flex items-center justify-between mb-4">
             <h3 className="text-base font-semibold text-gray-900 dark:text-white flex items-center gap-2">
               <Brain className="w-5 h-5 text-blue-600 dark:text-blue-400" /> Complaint Comparison
@@ -3527,11 +3530,10 @@ function AnalysisTab({ caseData, onUpdate, userId }: {
             )}
           </div>
         </div>
-      )}
 
-      {/* ─── Evidence Expansion (matching iOS) ─── */}
-      {comparisonResult && !comparisonAnalyzing && !policyAnalyzing && !recommendationAnalyzing && (
-        <div className="rounded-2xl bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-700 p-6">
+      {/* ─── Evidence Expansion ─── */}
+        <hr className="border-black dark:border-gray-500" />
+        <div className="p-6">
           {/* Header */}
           <div className="flex items-center gap-3 mb-1">
             <div className="w-10 h-10 rounded-full bg-gradient-to-br from-blue-500 to-indigo-600 flex items-center justify-center flex-shrink-0">
@@ -3746,6 +3748,7 @@ function AnalysisTab({ caseData, onUpdate, userId }: {
             </button>
           )}
         </div>
+        </div>
       )}
 
       {/* ─── Add Person Modal ─── */}
@@ -3953,9 +3956,12 @@ function AnalysisTab({ caseData, onUpdate, userId }: {
         </div>
       )}
 
-      {/* ─── Policy Alignment (matching iOS) ─── */}
+      {/* ─── Policy & Decision Support Container ─── */}
       {policyResult && !policyAnalyzing && !recommendationAnalyzing && (
-        <div className="rounded-2xl bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-700 p-6">
+        <div className="rounded-2xl bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-700 overflow-hidden">
+
+      {/* ─── Policy Alignment ─── */}
+        <div className="p-6">
           {/* Header */}
           <div className="flex items-center gap-3 mb-5">
             <div className="w-12 h-12 rounded-full bg-purple-100 dark:bg-purple-900/30 flex items-center justify-center flex-shrink-0">
@@ -4092,7 +4098,6 @@ function AnalysisTab({ caseData, onUpdate, userId }: {
             </button>
           )}
         </div>
-      )}
 
       {/* ─── Policy Section Delete Confirmation Modal ─── */}
       {policyDeleteTarget && typeof document !== 'undefined' && createPortal(
@@ -4201,6 +4206,8 @@ function AnalysisTab({ caseData, onUpdate, userId }: {
         document.body
       )}
 
+      <hr className="border-black dark:border-gray-500 mx-0" />
+
       {/* ─── Decision Support (Recommendations) ─── */}
       {recommendationResult && !comparisonAnalyzing && !policyAnalyzing && !recommendationAnalyzing && (() => {
         // Build per-employee groups (backward compat: fallback to flat list grouped by target)
@@ -4243,7 +4250,7 @@ function AnalysisTab({ caseData, onUpdate, userId }: {
         let globalRecIdx = 0;
 
         return (
-          <div className="rounded-2xl bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-700 p-6">
+          <div className="p-6">
             {/* Header */}
             <div className="flex items-center gap-3 mb-5">
               <div className="w-11 h-11 rounded-full bg-indigo-100 dark:bg-indigo-900/30 flex items-center justify-center">
@@ -4470,6 +4477,9 @@ function AnalysisTab({ caseData, onUpdate, userId }: {
           </div>
         );
       })()}
+
+      </div>
+      )}
 
       {/* ─── Run Recommendations Button (when policy done but no recommendations yet) ─── */}
       {policyResult && !recommendationResult && !recommendationAnalyzing && !policyAnalyzing && (
@@ -4811,8 +4821,9 @@ function AnalysisTab({ caseData, onUpdate, userId }: {
             {/* ── Scrollable Content ── */}
               <div className="space-y-4">
 
-                {/* 1. Review Status Card */}
-                <div className="rounded-2xl bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-700 p-4">
+                {/* Combined Status + Document Info + Quick Actions Card */}
+                <div className="rounded-2xl bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-700 p-4 space-y-4">
+                  {/* Status Row */}
                   <div className="flex items-center gap-3">
                     <div className="w-11 h-11 rounded-full bg-blue-100 dark:bg-blue-900/30 flex items-center justify-center flex-shrink-0">
                       <Eye className="w-5 h-5 text-blue-600 dark:text-blue-400" />
@@ -4827,28 +4838,32 @@ function AnalysisTab({ caseData, onUpdate, userId }: {
                       <span className="px-2 py-0.5 rounded-full text-[10px] font-bold bg-orange-100 dark:bg-orange-900/30 text-orange-600 dark:text-orange-400">{docEdits.length} edit{docEdits.length !== 1 ? 's' : ''}</span>
                     )}
                   </div>
-                </div>
 
-                {/* 2. Document Info Card */}
-                <div className="rounded-2xl bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-700 p-4">
-                  <div className="flex items-center gap-3 mb-2">
-                    <div className={`w-10 h-10 rounded-lg ${tc.bg} flex items-center justify-center flex-shrink-0`}>
-                      <AlertTriangle className={`w-5 h-5 ${tc.text}`} />
-                    </div>
-                    <div className="flex-1 min-w-0">
-                      <h3 className="text-sm font-bold text-gray-900 dark:text-white truncate">{getDocTitle(generatedDoc) || actionTypeLabels[generatedDoc.actionType]}</h3>
-                      <p className="text-xs text-gray-500 dark:text-gray-400">Generated {formatDateTime(getDocDate(generatedDoc))}</p>
-                    </div>
-                    <span className={`px-2.5 py-1 rounded-lg text-[10px] font-bold ${tc.bg} ${tc.text}`}>{actionTypeLabels[generatedDoc.actionType]}</span>
-                  </div>
-                  <div className="flex items-center gap-4 text-xs text-gray-500 dark:text-gray-400">
-                    <span className="flex items-center gap-1"><FileText className="w-3.5 h-3.5" /> {caseData.caseNumber}</span>
-                    <span className="flex items-center gap-1"><BarChart3 className="w-3.5 h-3.5" /> {sections.length} sections</span>
-                  </div>
-                </div>
+                  {/* Divider */}
+                  <div className="border-t border-gray-100 dark:border-gray-700" />
 
-                {/* 3. Quick Actions Bar */}
-                <div className="rounded-2xl bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-700 p-3">
+                  {/* Document Info Row */}
+                  <div>
+                    <div className="flex items-center gap-3 mb-2">
+                      <div className={`w-10 h-10 rounded-lg ${tc.bg} flex items-center justify-center flex-shrink-0`}>
+                        <AlertTriangle className={`w-5 h-5 ${tc.text}`} />
+                      </div>
+                      <div className="flex-1 min-w-0">
+                        <h3 className="text-sm font-bold text-gray-900 dark:text-white truncate">{getDocTitle(generatedDoc) || actionTypeLabels[generatedDoc.actionType]}</h3>
+                        <p className="text-xs text-gray-500 dark:text-gray-400">Generated {formatDateTime(getDocDate(generatedDoc))}</p>
+                      </div>
+                      <span className={`px-2.5 py-1 rounded-lg text-[10px] font-bold ${tc.bg} ${tc.text}`}>{actionTypeLabels[generatedDoc.actionType]}</span>
+                    </div>
+                    <div className="flex items-center gap-4 text-xs text-gray-500 dark:text-gray-400">
+                      <span className="flex items-center gap-1"><FileText className="w-3.5 h-3.5" /> {caseData.caseNumber}</span>
+                      <span className="flex items-center gap-1"><BarChart3 className="w-3.5 h-3.5" /> {sections.length} sections</span>
+                    </div>
+                  </div>
+
+                  {/* Divider */}
+                  <div className="border-t border-gray-100 dark:border-gray-700" />
+
+                  {/* Quick Actions Row */}
                   <div className="flex items-center justify-around">
                     <button
                       onClick={() => {
