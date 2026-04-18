@@ -518,8 +518,22 @@ function DocumentsTab({ caseData, onUpdate, userId, userName }: {
   const [selectedDoc, setSelectedDoc] = useState<CaseDocument | null>(null);
   const [previewTab, setPreviewTab] = useState<'original' | 'translated' | 'cleaned' | 'images'>('cleaned');
 
-  // Image lightbox state (replaces target="_blank" which Chrome blocks for data: URLs)
-  const [lightboxSrc, setLightboxSrc] = useState<string | null>(null);
+  // Open image in new tab via Blob URL (Chrome blocks data: URLs in new tabs)
+  const openImageInNewTab = (src: string) => {
+    if (src.startsWith('http')) {
+      window.open(src, '_blank');
+      return;
+    }
+    // Convert data URL to blob URL
+    const byteString = atob(src.replace(/^data:image\/\w+;base64,/, ''));
+    const mimeMatch = src.match(/^data:(image\/\w+);base64,/);
+    const mime = mimeMatch ? mimeMatch[1] : 'image/jpeg';
+    const ab = new ArrayBuffer(byteString.length);
+    const ia = new Uint8Array(ab);
+    for (let i = 0; i < byteString.length; i++) ia[i] = byteString.charCodeAt(i);
+    const blob = new Blob([ab], { type: mime });
+    window.open(URL.createObjectURL(blob), '_blank');
+  };
 
   // Document Acceptance workflow state (3-step)
   const [showAcceptance, setShowAcceptance] = useState(false);
@@ -1105,7 +1119,7 @@ function DocumentsTab({ caseData, onUpdate, userId, userName }: {
                               <button
                                 onClick={() => {
                                   const src = urls[0].startsWith('data:') || urls[0].startsWith('http') ? urls[0] : `data:image/jpeg;base64,${urls[0]}`;
-                                  setLightboxSrc(src);
+                                  openImageInNewTab(src);
                                 }}
                                 className="sticky top-0 z-10 ml-auto flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-medium text-blue-600 dark:text-blue-400 bg-blue-50 dark:bg-blue-900/30 hover:bg-blue-100 dark:hover:bg-blue-900/50 border border-blue-200 dark:border-blue-800 transition-colors shadow-sm"
                                 title="Open image in full view"
@@ -1124,7 +1138,7 @@ function DocumentsTab({ caseData, onUpdate, userId, userName }: {
                               const imgSrc = url.startsWith('data:') || url.startsWith('http') ? url : `data:image/jpeg;base64,${url}`;
                               return (
                                 <div key={idx} className="rounded-lg border border-gray-200 dark:border-gray-700 overflow-hidden bg-white dark:bg-gray-800">
-                                  <button onClick={() => setLightboxSrc(imgSrc)} className="w-full" title="Click to view full size">
+                                  <button onClick={() => openImageInNewTab(imgSrc)} className="w-full" title="Click to view full size">
                                     <img src={imgSrc} alt={`Page ${idx + 1}`} className="w-full h-auto cursor-pointer hover:opacity-90 transition-opacity" />
                                   </button>
                                   <p className="text-[10px] text-gray-400 text-center py-1">Page {idx + 1}</p>
@@ -1420,7 +1434,7 @@ function DocumentsTab({ caseData, onUpdate, userId, userName }: {
                       <div className="grid grid-cols-4 sm:grid-cols-6 gap-2">
                         {uploadedImages.map((img, idx) => (
                           <div key={idx} className="relative group">
-                            <button onClick={() => setLightboxSrc(`data:image/jpeg;base64,${img}`)} className="w-full" title="Click to view full size">
+                            <button onClick={() => openImageInNewTab(`data:image/jpeg;base64,${img}`)} className="w-full" title="Click to view full size">
                               <img
                                 src={`data:image/jpeg;base64,${img}`}
                                 alt={imageNames[idx]}
@@ -1552,7 +1566,7 @@ function DocumentsTab({ caseData, onUpdate, userId, userName }: {
                         {uploadedImages.map((img, idx) => (
                           <div key={idx}>
                             <button
-                              onClick={() => setLightboxSrc(`data:image/jpeg;base64,${img}`)}
+                              onClick={() => openImageInNewTab(`data:image/jpeg;base64,${img}`)}
                               className="w-full"
                             >
                               <img
@@ -2195,28 +2209,6 @@ function DocumentsTab({ caseData, onUpdate, userId, userName }: {
         )}
       </SectionCard>
 
-      {/* ─── Image Lightbox Modal ─── */}
-      {lightboxSrc && typeof document !== 'undefined' && createPortal(
-        <div
-          className="fixed inset-0 z-[9999] flex items-center justify-center bg-black/80 backdrop-blur-sm"
-          onClick={() => setLightboxSrc(null)}
-        >
-          <button
-            onClick={() => setLightboxSrc(null)}
-            className="absolute top-4 right-4 z-10 w-10 h-10 rounded-full bg-white/20 hover:bg-white/40 flex items-center justify-center transition-colors"
-            title="Close"
-          >
-            <X className="w-6 h-6 text-white" />
-          </button>
-          <img
-            src={lightboxSrc}
-            alt="Full size preview"
-            className="max-w-[90vw] max-h-[90vh] object-contain rounded-lg shadow-2xl"
-            onClick={e => e.stopPropagation()}
-          />
-        </div>,
-        document.body
-      )}
     </div>
   );
 }
