@@ -1590,9 +1590,16 @@ router.get('/:id/audit', async (req: Request, res: Response) => {
       orderBy: { timestamp: 'desc' },
     });
 
+    // Decrypt encrypted fields
+    const decryptedAudit = auditTrail.map((entry: any) => ({
+      ...entry,
+      details: entry.details ? decrypt(entry.details) : entry.details,
+      userName: entry.userName ? decrypt(entry.userName) : entry.userName,
+    }));
+
     res.json({
       success: true,
-      data: auditTrail,
+      data: decryptedAudit,
     });
   } catch (error: any) {
     console.error('Error fetching audit trail:', error);
