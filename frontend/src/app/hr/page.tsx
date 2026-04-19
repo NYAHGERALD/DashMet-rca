@@ -44,6 +44,9 @@ import {
   HelpCircle,
   GripHorizontal,
   Sparkles,
+  Lock,
+  FileBarChart,
+  XCircle,
 } from 'lucide-react';
 import {
   ConflictCase,
@@ -750,6 +753,26 @@ function CasesTab({ cases, loading, onRefresh, onCreateCase, onDeleteCase, organ
   const [search, setSearch] = useState('');
   const [statusFilter, setStatusFilter] = useState<string>('');
   const [typeFilter, setTypeFilter] = useState<string>('');
+  const [contextMenu, setContextMenu] = useState<{ x: number; y: number; caseItem: ConflictCase } | null>(null);
+  const contextMenuRef = useRef<HTMLDivElement>(null);
+
+  // Close context menu on click outside or scroll
+  useEffect(() => {
+    if (!contextMenu) return;
+    const handleClose = () => setContextMenu(null);
+    window.addEventListener('click', handleClose);
+    window.addEventListener('scroll', handleClose, true);
+    return () => {
+      window.removeEventListener('click', handleClose);
+      window.removeEventListener('scroll', handleClose, true);
+    };
+  }, [contextMenu]);
+
+  const handleContextMenu = (e: React.MouseEvent, c: ConflictCase) => {
+    e.preventDefault();
+    e.stopPropagation();
+    setContextMenu({ x: e.clientX, y: e.clientY, caseItem: c });
+  };
 
   const filtered = useMemo(() => {
     return cases.filter(c => {
@@ -858,67 +881,93 @@ function CasesTab({ cases, loading, onRefresh, onCreateCase, onDeleteCase, organ
           )}
         </div>
       ) : (
-        <div className="space-y-3">
-          {filtered.map(c => (
-            <button
-              key={c.id}
-              onClick={() => router.push(`/hr/case/${c.id}`)}
-              className="w-full text-left rounded-2xl bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-700 p-5 hover:shadow-lg hover:border-blue-300 dark:hover:border-blue-700 transition-all group"
-            >
-              <div className="flex items-start justify-between gap-4">
-                <div className="flex-1 min-w-0">
-                  <div className="flex items-center gap-3 flex-wrap">
-                    <span className="text-base font-bold text-gray-900 dark:text-white">{c.caseNumber}</span>
-                    <span className={`px-2.5 py-0.5 rounded-full text-xs font-semibold ${getStatusColor(c.status)}`}>
+        <div>
+          <div className="rounded-2xl border border-gray-200 dark:border-gray-700 overflow-hidden bg-white dark:bg-gray-800">
+            {/* Table header */}
+            <div className="grid grid-cols-[1fr_120px_140px_1fr_150px_140px_44px] gap-0 px-5 py-3 bg-gray-50 dark:bg-gray-700/50 border-b border-gray-200 dark:border-gray-700 text-xs font-semibold text-gray-500 dark:text-gray-400 uppercase tracking-wider">
+              <span>Case Number</span>
+              <span>Date</span>
+              <span>Department</span>
+              <span>Location</span>
+              <span>Status</span>
+              <span>Type</span>
+              <span></span>
+            </div>
+            {/* Scrollable body */}
+            <div className="h-[calc(100vh-515px)] overflow-y-auto">
+              {filtered.map((c, idx) => (
+                <button
+                  key={c.id}
+                  onClick={() => router.push(`/hr/case/${c.id}`)}
+                  onContextMenu={(e) => handleContextMenu(e, c)}
+                  className={`w-full text-left grid grid-cols-[1fr_120px_140px_1fr_150px_140px_44px] gap-0 items-center px-5 py-3.5 hover:bg-blue-50/50 dark:hover:bg-blue-900/10 transition-colors group border-b border-gray-200 dark:border-gray-600`}
+                >
+                  <div className="flex items-center gap-2 min-w-0">
+                    <span className="text-sm font-bold text-gray-900 dark:text-white truncate">{c.caseNumber}</span>
+                    {c.isLocked && <Lock className="w-3 h-3 text-gray-400 flex-shrink-0" />}
+                  </div>
+                  <span className="text-sm text-gray-500 dark:text-gray-400 truncate">
+                    {c.incidentDate ? formatDate(c.incidentDate) : '—'}
+                  </span>
+                  <span className="text-sm text-gray-600 dark:text-gray-400 truncate">
+                    {c.department || '—'}
+                  </span>
+                  <span className="text-sm text-gray-500 dark:text-gray-400 truncate">
+                    {c.location || '—'}
+                  </span>
+                  <span>
+                    <span className={`px-2 py-0.5 rounded-full text-[11px] font-semibold ${getStatusColor(c.status)}`}>
                       {getStatusLabel(c.status)}
                     </span>
-                    <span className={`px-2.5 py-0.5 rounded-full text-xs font-semibold ${getCaseTypeColor(c.type)}`}>
+                  </span>
+                  <span>
+                    <span className={`px-2 py-0.5 rounded-full text-[11px] font-semibold ${getCaseTypeColor(c.type)}`}>
                       {getCaseTypeLabel(c.type)}
                     </span>
-                    {c.isLocked && (
-                      <span className="px-2 py-0.5 rounded-full text-xs font-semibold bg-gray-200 text-gray-600 dark:bg-gray-600 dark:text-gray-300">
-                        Locked
-                      </span>
-                    )}
+                  </span>
+                  <div className="flex justify-end">
+                    <ChevronRight className="w-4 h-4 text-gray-300 group-hover:text-blue-500 transition-colors" />
                   </div>
-                  <div className="flex items-center gap-4 mt-2 text-sm text-gray-500 dark:text-gray-400">
-                    {c.incidentDate && (
-                      <span className="flex items-center gap-1.5">
-                        <Calendar className="w-3.5 h-3.5" /> {formatDate(c.incidentDate)}
-                      </span>
-                    )}
-                    {c.department && (
-                      <span className="flex items-center gap-1.5">
-                        <Building2 className="w-3.5 h-3.5" /> {c.department}
-                      </span>
-                    )}
-                    {c.location && (
-                      <span className="flex items-center gap-1.5">
-                        <MapPin className="w-3.5 h-3.5" /> {c.location}
-                      </span>
-                    )}
-                    {c.involvedEmployees && c.involvedEmployees.length > 0 && (
-                      <span className="flex items-center gap-1.5">
-                        <Users className="w-3.5 h-3.5" /> {c.involvedEmployees.length} {c.involvedEmployees.length === 1 ? 'party' : 'parties'}
-                      </span>
-                    )}
-                  </div>
-                </div>
-                <div className="flex items-center gap-1 flex-shrink-0 mt-1">
-                  {!c.isLocked && (
-                    <button
-                      onClick={(e) => { e.stopPropagation(); onDeleteCase(c.id, c.caseNumber); }}
-                      className="p-1.5 rounded-lg hover:bg-red-100 dark:hover:bg-red-900/20 transition-colors opacity-0 group-hover:opacity-100"
-                      title="Delete case"
-                    >
-                      <Trash2 className="w-3.5 h-3.5 text-red-400" />
-                    </button>
-                  )}
-                  <ChevronRight className="w-5 h-5 text-gray-400 group-hover:text-blue-500 transition-colors" />
-                </div>
-              </div>
-            </button>
-          ))}
+                </button>
+              ))}
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Right-click context menu */}
+      {contextMenu && (
+        <div
+          ref={contextMenuRef}
+          className="fixed z-50 min-w-[180px] rounded-xl border border-gray-200 dark:border-gray-600 bg-white dark:bg-gray-800 shadow-xl py-1.5"
+          style={{ top: contextMenu.y, left: contextMenu.x }}
+          onClick={(e) => e.stopPropagation()}
+        >
+          <button
+            className="w-full flex items-center gap-2.5 px-4 py-2 text-sm text-gray-700 dark:text-gray-300 hover:bg-blue-50 dark:hover:bg-blue-900/20 transition-colors"
+            onClick={() => { router.push(`/hr/case/${contextMenu.caseItem.id}`); setContextMenu(null); }}
+          >
+            <Eye className="w-4 h-4 text-blue-500" /> View Case
+          </button>
+          <button
+            className="w-full flex items-center gap-2.5 px-4 py-2 text-sm text-gray-700 dark:text-gray-300 hover:bg-purple-50 dark:hover:bg-purple-900/20 transition-colors"
+            onClick={() => { router.push(`/hr/case/${contextMenu.caseItem.id}?action=report`); setContextMenu(null); }}
+          >
+            <FileBarChart className="w-4 h-4 text-purple-500" /> Generate Report
+          </button>
+          <div className="my-1.5 border-t border-gray-100 dark:border-gray-700" />
+          <button
+            className={`w-full flex items-center gap-2.5 px-4 py-2 text-sm transition-colors ${contextMenu.caseItem.status === 'CLOSED' ? 'text-gray-300 dark:text-gray-600 cursor-not-allowed' : 'text-gray-700 dark:text-gray-300 hover:bg-orange-50 dark:hover:bg-orange-900/20'}`}
+            onClick={() => { if (contextMenu.caseItem.status !== 'CLOSED') { router.push(`/hr/case/${contextMenu.caseItem.id}?action=close`); setContextMenu(null); } }}
+          >
+            <XCircle className={`w-4 h-4 ${contextMenu.caseItem.status === 'CLOSED' ? 'text-gray-300 dark:text-gray-600' : 'text-orange-500'}`} /> Close Case
+          </button>
+          <button
+            className="w-full flex items-center gap-2.5 px-4 py-2 text-sm text-red-600 dark:text-red-400 hover:bg-red-50 dark:hover:bg-red-900/20 transition-colors"
+            onClick={() => { onDeleteCase(contextMenu.caseItem.id, contextMenu.caseItem.caseNumber); setContextMenu(null); }}
+          >
+            <Trash2 className="w-4 h-4" /> Delete Case
+          </button>
         </div>
       )}
     </div>
@@ -1600,12 +1649,12 @@ function HRPageContent() {
 
   useEffect(() => {
     loadCases();
-  }, [loadCases]);
+    loadPolicies();
+  }, [loadCases, loadPolicies]);
 
   useEffect(() => {
-    if (activeTab === 'policies' && policies.length === 0 && !policiesLoading) loadPolicies();
     if (activeTab === 'analytics' && !analytics && !analyticsLoading) loadAnalytics();
-  }, [activeTab, policies.length, policiesLoading, analytics, analyticsLoading, loadPolicies, loadAnalytics]);
+  }, [activeTab, analytics, analyticsLoading, loadAnalytics]);
 
   const tabs = [
     { id: 'cases' as const, label: 'Cases', icon: FolderOpen, count: cases.length },
@@ -1614,7 +1663,7 @@ function HRPageContent() {
   ];
 
   return (
-    <div className="min-h-screen bg-gray-50 dark:bg-gray-900">
+    <div className="h-full bg-gray-50 dark:bg-gray-900">
       {/* Header */}
       <div className="bg-white dark:bg-gray-800 border-b border-gray-200 dark:border-gray-700">
         <div className="w-full px-6 lg:px-8 py-6">
@@ -1626,7 +1675,7 @@ function HRPageContent() {
                     <Scale className="w-6 h-6 text-white" />
                   </div>
                   <div>
-                    <h1 className="text-2xl font-bold text-gray-900 dark:text-white">HR Conflict Resolution</h1>
+                    <h1 className="text-2xl font-bold text-gray-900 dark:text-white">Conflict Resolution</h1>
                     <p className="text-sm text-gray-500 dark:text-gray-400">Manage workplace cases, policies, and AI-powered analysis</p>
                   </div>
                 </div>
@@ -1664,7 +1713,7 @@ function HRPageContent() {
       </div>
 
       {/* Content */}
-      <div className="w-full px-6 lg:px-8 py-8">
+      <div className="w-full px-6 lg:px-8 py-6">
         {activeTab === 'cases' && (
           <CasesTab
             cases={cases}

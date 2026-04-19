@@ -358,6 +358,28 @@ export async function closeCase(id: string, payload: {
   return data.data;
 }
 
+export async function reopenCase(id: string, payload: {
+  reopenedBy: string;
+  reason?: string;
+}): Promise<ConflictCase> {
+  const { data } = await api.post(`/conflict-cases/${id}/reopen`, payload);
+  return data.data;
+}
+
+export async function sendReopenCode(id: string, userId: string): Promise<{ maskedEmail: string }> {
+  const { data } = await api.post(`/conflict-cases/${id}/reopen-send-code`, { userId });
+  return { maskedEmail: data.maskedEmail };
+}
+
+export async function verifyReopenCode(id: string, payload: {
+  userId: string;
+  code: string;
+  reason?: string;
+}): Promise<ConflictCase> {
+  const { data } = await api.post(`/conflict-cases/${id}/reopen-verify`, payload);
+  return data.data;
+}
+
 // --- Involved Employees ---
 
 export async function addEmployee(caseId: string, payload: {

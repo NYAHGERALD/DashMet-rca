@@ -2,7 +2,7 @@
 
 import { useState, useEffect, useCallback, useMemo, useRef } from 'react';
 import { createPortal } from 'react-dom';
-import { useRouter, useParams } from 'next/navigation';
+import { useRouter, useParams, useSearchParams } from 'next/navigation';
 import { useAuth } from '@/components/providers/AuthProvider';
 import ProtectedRoute from '@/components/auth/ProtectedRoute';
 import {
@@ -64,6 +64,10 @@ import {
   Lightbulb,
   Download,
   ArrowRight,
+  FileDown,
+  Unlock,
+  ClipboardList,
+  FileCheck,
 } from 'lucide-react';
 import {
   ConflictCase,
@@ -89,6 +93,9 @@ import {
   updateCase,
   deleteCase,
   closeCase,
+  reopenCase,
+  sendReopenCode,
+  verifyReopenCode,
   addEmployee,
   updateEmployee,
   removeEmployee,
@@ -121,6 +128,8 @@ import {
   formatDateTime,
 } from '@/lib/hrApi';
 import { downloadDocx } from '@/lib/generateDocx';
+import { downloadCaseReport, generateCaseReport, getDefaultConfig, type ReportConfig, type ReportTemplate, type ConfidentialityLevel, type ReportGenerationInput } from '@/lib/generateCaseReport';
+import { saveAs } from 'file-saver';
 
 // ─── HELPERS ──────────────────────────────────────────────────────────────────
 
@@ -3486,7 +3495,7 @@ function AnalysisTab({ caseData, onUpdate, userId }: {
       )}
 
       {/* ─── Analysis Results Container ─── */}
-      {comparisonResult && !comparisonAnalyzing && !policyAnalyzing && (
+      {comparisonResult && !comparisonAnalyzing && (
         <div className="rounded-2xl bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-700 overflow-hidden">
 
       {/* ─── Complaint Comparison ─── */}
@@ -3532,7 +3541,7 @@ function AnalysisTab({ caseData, onUpdate, userId }: {
         </div>
 
       {/* ─── Evidence Expansion ─── */}
-        <hr className="border-black dark:border-gray-500" />
+        <hr className="border-black dark:border-gray-500 border-t-2" />
         <div className="p-6">
           {/* Header */}
           <div className="flex items-center gap-3 mb-1">
@@ -3748,8 +3757,6 @@ function AnalysisTab({ caseData, onUpdate, userId }: {
             </button>
           )}
         </div>
-        </div>
-      )}
 
       {/* ─── Add Person Modal ─── */}
       {showAddPersonModal && (
@@ -3956,11 +3963,9 @@ function AnalysisTab({ caseData, onUpdate, userId }: {
         </div>
       )}
 
-      {/* ─── Policy & Decision Support Container ─── */}
-      {policyResult && !policyAnalyzing && !recommendationAnalyzing && (
-        <div className="rounded-2xl bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-700 overflow-hidden">
-
       {/* ─── Policy Alignment ─── */}
+      {policyResult && !policyAnalyzing && !recommendationAnalyzing && (<>
+        <hr className="border-black dark:border-gray-500 border-t-2" />
         <div className="p-6">
           {/* Header */}
           <div className="flex items-center gap-3 mb-5">
@@ -4206,7 +4211,7 @@ function AnalysisTab({ caseData, onUpdate, userId }: {
         document.body
       )}
 
-      <hr className="border-black dark:border-gray-500 mx-0" />
+      <hr className="border-black dark:border-gray-500 border-t-2" />
 
       {/* ─── Decision Support (Recommendations) ─── */}
       {recommendationResult && !comparisonAnalyzing && !policyAnalyzing && !recommendationAnalyzing && (() => {
@@ -4478,8 +4483,7 @@ function AnalysisTab({ caseData, onUpdate, userId }: {
         );
       })()}
 
-      </div>
-      )}
+      </>)}
 
       {/* ─── Run Recommendations Button (when policy done but no recommendations yet) ─── */}
       {policyResult && !recommendationResult && !recommendationAnalyzing && !policyAnalyzing && (
@@ -4653,7 +4657,9 @@ function AnalysisTab({ caseData, onUpdate, userId }: {
         const sections = getDocSections(generatedDoc);
 
         return (
-          <div className="rounded-2xl bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-700 p-5">
+          <>
+          <hr className="border-black dark:border-gray-500 border-t-2" />
+          <div className="p-6">
             {/* Title Row */}
             <div className="flex items-center gap-3 mb-4">
               <div className={`w-10 h-10 rounded-lg ${tc.bg} flex items-center justify-center flex-shrink-0`}>
@@ -4705,8 +4711,11 @@ function AnalysisTab({ caseData, onUpdate, userId }: {
               </button>
             </div>
           </div>
+          </>
         );
       })()}
+      </div>
+      )}
       </>)}
 
       {/* ─── Document Generation Modal (iOS-style full-screen, portalled to body) ─── */}
@@ -5060,7 +5069,7 @@ function AnalysisTab({ caseData, onUpdate, userId }: {
         const docTitle = getDocTitle(generatedDoc);
         const docDate = getDocDate(generatedDoc);
         const sections = getDocSections(generatedDoc);
-        const targetEmployee = employees.find(e => e.name && d.employeeNames?.some((n: string) => n.toLowerCase().includes(e.name.toLowerCase()))) || employees[0];
+        const targetEmployee = employees.find(e => e.name && d.employeeNames?.some((n: string) => n.toLowerCase().includes(e.name.toLowerCase()))) || (d.employeeNames?.length ? null : employees[0]);
         const incidentDate = caseData.incidentDate ? new Date(caseData.incidentDate) : new Date();
         const todayDate = new Date(docDate);
         const dayOfWeek = (dt: Date) => ['Sunday','Monday','Tuesday','Wednesday','Thursday','Friday','Saturday'][dt.getDay()];
@@ -6706,12 +6715,12 @@ function CloseCaseModal({ caseData, userId, onClose, onClosed }: {
   const [closing, setClosing] = useState(false);
 
   const reasons = [
-    { value: 'RESOLVED', label: 'Resolved' },
-    { value: 'INSUFFICIENT_EVIDENCE', label: 'Insufficient Evidence' },
-    { value: 'WITHDRAWN', label: 'Withdrawn' },
-    { value: 'ESCALATED', label: 'Escalated' },
-    { value: 'MEDIATED', label: 'Mediated' },
-    { value: 'OTHER', label: 'Other' },
+    { value: 'RESOLVED', label: 'Issue Resolved', description: 'The matter has been addressed and resolved', icon: '✅' },
+    { value: 'NO_FURTHER_ACTION', label: 'No Further Action Required', description: 'Investigation complete, no disciplinary action warranted', icon: '📋' },
+    { value: 'EMPLOYEE_SEPARATION', label: 'Employee Separation', description: 'Employee has left the organization', icon: '👋' },
+    { value: 'WITHDRAWN', label: 'Complaint Withdrawn', description: 'Complainant has withdrawn the complaint', icon: '↩️' },
+    { value: 'INSUFFICIENT_EVIDENCE', label: 'Insufficient Evidence', description: 'Unable to substantiate claims with available evidence', icon: '🔍' },
+    { value: 'OTHER', label: 'Other', description: 'Other reason (specify in summary)', icon: '📝' },
   ];
 
   const handleClose = async () => {
@@ -6729,32 +6738,689 @@ function CloseCaseModal({ caseData, userId, onClose, onClosed }: {
     <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
       <div className="absolute inset-0 bg-black/60 backdrop-blur-sm" onClick={onClose} />
       <div className="relative w-full max-w-lg rounded-2xl bg-white dark:bg-gray-800 shadow-2xl border border-gray-200 dark:border-gray-700">
-        <div className="flex items-center justify-between px-6 py-5 border-b border-gray-200 dark:border-gray-700">
-          <h2 className="text-lg font-bold text-gray-900 dark:text-white flex items-center gap-2"><Lock className="w-5 h-5 text-red-500" /> Close & Lock Case</h2>
-          <button onClick={onClose} title="Close" className="p-2 rounded-lg hover:bg-gray-100 dark:hover:bg-gray-700 transition-colors"><X className="w-5 h-5 text-gray-500" /></button>
-        </div>
-        <div className="px-6 py-5 space-y-4">
-          <div className="p-3 rounded-lg bg-yellow-50 dark:bg-yellow-900/10 border border-yellow-200 dark:border-yellow-800">
-            <p className="text-sm text-yellow-700 dark:text-yellow-400 flex items-center gap-2"><AlertTriangle className="w-4 h-4" /> This action is permanent. The case will be locked and cannot be edited.</p>
+        {/* Header */}
+        <div className="flex items-center justify-between px-5 py-3.5 border-b border-gray-200 dark:border-gray-700">
+          <div className="flex items-center gap-3">
+            <div className="p-1.5 rounded-lg bg-red-50 dark:bg-red-900/20">
+              <Lock className="w-4 h-4 text-red-500" />
+            </div>
+            <div>
+              <h2 className="text-base font-bold text-gray-900 dark:text-white">Close & Lock Case</h2>
+              <p className="text-xs text-gray-500 dark:text-gray-400">{caseData.caseNumber}</p>
+            </div>
           </div>
+          <button onClick={onClose} title="Close" className="p-1.5 rounded-lg hover:bg-gray-100 dark:hover:bg-gray-700 transition-colors"><X className="w-4 h-4 text-gray-500" /></button>
+        </div>
+
+        <div className="px-5 py-4 space-y-3.5">
+          {/* Warning */}
+          <div className="px-3 py-2.5 rounded-lg bg-red-50 dark:bg-red-900/10 border border-red-200 dark:border-red-800 flex items-center gap-2.5">
+            <AlertTriangle className="w-4 h-4 text-red-500 flex-shrink-0" />
+            <p className="text-xs text-red-600 dark:text-red-400"><span className="font-semibold">Permanent —</span> The case will be locked. Documents and audit trail are preserved but uneditable.</p>
+          </div>
+
+          {/* Closure Reason */}
           <div>
             <label className="block text-sm font-semibold text-gray-700 dark:text-gray-300 mb-2">Closure Reason <span className="text-red-500">*</span></label>
-            <select value={reason} onChange={e => setReason(e.target.value)} title="Closure reason" className="w-full px-4 py-3 rounded-xl border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-700 text-gray-900 dark:text-white focus:ring-2 focus:ring-blue-500 transition-colors">
-              <option value="">Select reason...</option>
-              {reasons.map(r => <option key={r.value} value={r.value}>{r.label}</option>)}
-            </select>
+            <div className="space-y-1.5">
+              {reasons.map(r => (
+                <button
+                  key={r.value}
+                  onClick={() => setReason(r.value)}
+                  className={`w-full text-left px-3 py-2 rounded-lg border transition-all ${
+                    reason === r.value
+                      ? 'border-blue-500 bg-blue-50 dark:bg-blue-900/20 dark:border-blue-400'
+                      : 'border-gray-200 dark:border-gray-700 hover:border-gray-300 dark:hover:border-gray-600'
+                  }`}
+                >
+                  <div className="flex items-center gap-2.5">
+                    <span className="text-sm">{r.icon}</span>
+                    <div className="flex-1 min-w-0">
+                      <p className={`text-sm font-medium leading-tight ${reason === r.value ? 'text-blue-700 dark:text-blue-300' : 'text-gray-900 dark:text-white'}`}>{r.label}</p>
+                      <p className="text-[11px] text-gray-500 dark:text-gray-400 leading-tight">{r.description}</p>
+                    </div>
+                    <div className={`w-4 h-4 rounded-full border-2 flex-shrink-0 ${
+                      reason === r.value ? 'border-blue-500 bg-blue-500' : 'border-gray-300 dark:border-gray-600'
+                    }`}>
+                      {reason === r.value && <CheckCircle2 className="w-3 h-3 text-white -mt-[1px] -ml-[1px]" />}
+                    </div>
+                  </div>
+                </button>
+              ))}
+            </div>
           </div>
+
+          {/* Closure Summary */}
           <div>
-            <label className="block text-sm font-semibold text-gray-700 dark:text-gray-300 mb-2">Closure Summary</label>
-            <textarea value={summary} onChange={e => setSummary(e.target.value)} rows={3} placeholder="Summary of resolution..." className="w-full px-4 py-3 rounded-xl border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-700 text-gray-900 dark:text-white placeholder-gray-400 focus:ring-2 focus:ring-blue-500 transition-colors resize-none" />
+            <label className="block text-sm font-semibold text-gray-700 dark:text-gray-300 mb-1.5">Closure Summary</label>
+            <textarea value={summary} onChange={e => setSummary(e.target.value)} rows={2} placeholder="Summarize the resolution and any follow-up actions taken..." className="w-full px-3 py-2 rounded-lg border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-700 text-gray-900 dark:text-white placeholder-gray-400 focus:ring-2 focus:ring-blue-500 transition-colors resize-none text-sm" />
           </div>
         </div>
-        <div className="flex items-center justify-end gap-3 px-6 py-4 bg-gray-50 dark:bg-gray-800/80 border-t border-gray-200 dark:border-gray-700 rounded-b-2xl">
+
+        {/* Footer */}
+        <div className="flex items-center justify-end gap-3 px-5 py-3 border-t border-gray-200 dark:border-gray-700 rounded-b-2xl">
           <button onClick={onClose} className="px-4 py-2 rounded-lg text-sm font-medium text-gray-600 dark:text-gray-400 hover:bg-gray-100 dark:hover:bg-gray-700 transition-colors">Cancel</button>
-          <button onClick={handleClose} disabled={!reason || closing} className="px-5 py-2 rounded-lg text-sm font-semibold text-white bg-red-600 hover:bg-red-700 disabled:opacity-50 transition-colors flex items-center gap-2">
-            {closing ? <Loader2 className="w-4 h-4 animate-spin" /> : <Lock className="w-4 h-4" />} Close Case
+          <button onClick={handleClose} disabled={!reason || closing} className="px-5 py-2 rounded-lg text-sm font-semibold text-white bg-red-600 hover:bg-red-700 disabled:opacity-50 transition-colors flex items-center gap-2 shadow-lg shadow-red-600/25">
+            {closing ? <Loader2 className="w-4 h-4 animate-spin" /> : <Lock className="w-4 h-4" />} Close & Lock Case
           </button>
         </div>
+      </div>
+    </div>
+  );
+}
+
+// ─── GENERATE REPORT MODAL ───────────────────────────────────────────────────
+
+function GenerateReportModal({ caseData, onClose }: {
+  caseData: ConflictCase; onClose: () => void;
+}) {
+  const deduplicateEmployees = (employees: any[]) => {
+    const seen = new Set<string>();
+    return employees.filter(e => {
+      const key = e.employeeFileNo || `${e.name}-${e.role}-${e.department}`;
+      if (seen.has(key)) return false;
+      seen.add(key);
+      return true;
+    });
+  };
+
+  const [config, setConfig] = useState<ReportConfig>(getDefaultConfig('comprehensive'));
+  const [selectedTemplate, setSelectedTemplate] = useState<ReportTemplate>('comprehensive');
+  const [generating, setGenerating] = useState(false);
+  const [error, setError] = useState('');
+  // Progress tracking
+  const [progress, setProgress] = useState(0);
+  const [currentStep, setCurrentStep] = useState(-1);
+  const [completedSteps, setCompletedSteps] = useState<boolean[]>([]);
+  // Phase: 'config' | 'generating' | 'success'
+  const [phase, setPhase] = useState<'config' | 'generating' | 'success'>('config');
+  // Store generated report for deferred download
+  const reportBlobRef = useRef<{ blob: Blob; filename: string; sectionCount: number } | null>(null);
+  const [downloading, setDownloading] = useState(false);
+  // Dragging
+  const [modalPos, setModalPos] = useState<{ x: number; y: number } | null>(null);
+  const isDragging = useRef(false);
+  const dragStart = useRef({ x: 0, y: 0 });
+  const modalRef = useRef<HTMLDivElement>(null);
+
+  const allGenerationSteps: { label: string; icon: typeof Zap; duration: number; configKey?: keyof ReportConfig }[] = [
+    { label: 'Initializing report engine', icon: Zap, duration: 1500 },
+    { label: 'Loading case data & documents', icon: FileText, duration: 2200 },
+    { label: 'Building executive summary', icon: Award, duration: 2000, configKey: 'includeExecutiveSummary' },
+    { label: 'Compiling case details', icon: ClipboardList, duration: 1800, configKey: 'includeCaseDetails' },
+    { label: 'Processing involved parties', icon: Users, duration: 1600, configKey: 'includeInvolvedParties' },
+    { label: 'Processing document images', icon: Image, duration: 3500, configKey: 'includeDocumentSummary' },
+    { label: 'Embedding scanned documents', icon: Upload, duration: 4000, configKey: 'includeDocumentSummary' },
+    { label: 'Running AI analysis', icon: Brain, duration: 3000, configKey: 'includeAIAnalysis' },
+    { label: 'Matching policy sections', icon: BookOpen, duration: 2200, configKey: 'includePolicyMatches' },
+    { label: 'Generating recommendations', icon: Lightbulb, duration: 2000, configKey: 'includeRecommendations' },
+    { label: 'Processing selected action', icon: Target, duration: 1500, configKey: 'includeSelectedAction' },
+    { label: 'Compiling audit trail', icon: Clock, duration: 1800, configKey: 'includeAuditTrail' },
+    { label: 'Rendering signatures', icon: PenTool, duration: 2800, configKey: 'includeSignatureBlocks' },
+    { label: 'Applying branding & formatting', icon: Sparkles, duration: 2200 },
+    { label: 'Generating DOCX file', icon: FileDown, duration: 1800 },
+    { label: 'Finalizing report', icon: CheckCircle2, duration: 1200 },
+  ];
+
+  // Active steps are computed at generation time and stored in state
+  const [activeSteps, setActiveSteps] = useState<typeof allGenerationSteps>([]);
+
+  const templates: { id: ReportTemplate; label: string; description: string; icon: string; color: string }[] = [
+    { id: 'comprehensive', label: 'Comprehensive', description: 'Full detailed report', icon: '📋', color: 'blue' },
+    { id: 'executive', label: 'Executive', description: 'High-level overview', icon: '👔', color: 'purple' },
+    { id: 'summary', label: 'Summary', description: 'Condensed key points', icon: '📝', color: 'green' },
+    { id: 'hrReview', label: 'HR Review', description: 'HR-focused review', icon: '👥', color: 'orange' },
+    { id: 'legal', label: 'Legal', description: 'Legal documentation', icon: '⚖️', color: 'red' },
+  ];
+
+  const confidentialityLevels: { value: ConfidentialityLevel; label: string; color: string }[] = [
+    { value: 'CONFIDENTIAL', label: 'Confidential', color: 'text-red-600' },
+    { value: 'RESTRICTED', label: 'Restricted', color: 'text-orange-600' },
+    { value: 'INTERNAL_ONLY', label: 'Internal Only', color: 'text-yellow-600' },
+    { value: 'HR_ONLY', label: 'HR Only', color: 'text-purple-600' },
+  ];
+
+  const reportSections = [
+    { key: 'includeExecutiveSummary' as const, label: 'Executive Summary', description: 'High-level case overview and key findings', icon: FileText },
+    { key: 'includeCaseDetails' as const, label: 'Case Details', description: 'Full case information, dates, and location', icon: ClipboardList },
+    { key: 'includeInvolvedParties' as const, label: 'Involved Parties', description: 'All employees involved in the case', icon: Users },
+    { key: 'includeDocumentSummary' as const, label: 'Document Summary', description: 'List of all uploaded documents', icon: FileText },
+    { key: 'includeAIAnalysis' as const, label: 'AI Analysis', description: 'AI-generated comparison and insights', icon: Brain, disabled: !caseData.comparisonResult },
+    { key: 'includePolicyMatches' as const, label: 'Policy Matches', description: 'Relevant policy sections identified', icon: BookOpen, disabled: !caseData.policyMatches },
+    { key: 'includeRecommendations' as const, label: 'Recommendations', description: 'AI-generated action recommendations', icon: Lightbulb, disabled: !caseData.recommendations },
+    { key: 'includeSelectedAction' as const, label: 'Selected Action', description: 'Final action and resolution details', icon: CheckCircle2, disabled: !caseData.selectedAction },
+    { key: 'includeAuditTrail' as const, label: 'Audit Trail', description: 'Complete history of case actions', icon: Clock, disabled: !(caseData.auditLog || []).length },
+    { key: 'includeSignatureBlocks' as const, label: 'Signature Blocks', description: 'Sign-off sections for approvals', icon: PenTool },
+  ];
+
+  const applyTemplate = (template: ReportTemplate) => {
+    setSelectedTemplate(template);
+    const newConfig = getDefaultConfig(template);
+    newConfig.preparedBy = config.preparedBy;
+    newConfig.preparedFor = config.preparedFor;
+    setConfig(newConfig);
+  };
+
+  const selectAll = () => {
+    setConfig(prev => ({
+      ...prev,
+      includeExecutiveSummary: true,
+      includeCaseDetails: true,
+      includeInvolvedParties: true,
+      includeDocumentSummary: true,
+      includeAIAnalysis: !!caseData.comparisonResult,
+      includePolicyMatches: !!caseData.policyMatches,
+      includeRecommendations: !!caseData.recommendations,
+      includeSelectedAction: !!caseData.selectedAction,
+      includeAuditTrail: !!(caseData.auditLog || []).length,
+      includeSignatureBlocks: true,
+    }));
+  };
+
+  const deselectAll = () => {
+    setConfig(prev => ({
+      ...prev,
+      includeExecutiveSummary: false,
+      includeCaseDetails: false,
+      includeInvolvedParties: false,
+      includeDocumentSummary: false,
+      includeAIAnalysis: false,
+      includePolicyMatches: false,
+      includeRecommendations: false,
+      includeSelectedAction: false,
+      includeAuditTrail: false,
+      includeSignatureBlocks: false,
+    }));
+  };
+
+  const selectedCount = reportSections.filter(s => !s.disabled && config[s.key]).length;
+  const availableCount = reportSections.filter(s => !s.disabled).length;
+
+  const toggleSection = (key: keyof ReportConfig) => {
+    setConfig(prev => ({ ...prev, [key]: !prev[key] }));
+  };
+
+  // Simulate progress steps during actual generation
+  const simulateProgress = useCallback((steps: typeof allGenerationSteps) => {
+    const count = steps.length;
+    const completed: boolean[] = new Array(count).fill(false);
+    setCompletedSteps(completed);
+    setCurrentStep(0);
+    setProgress(0);
+
+    const durations = steps.map(s => s.duration);
+    const totalTime = durations.reduce((a, b) => a + b, 0);
+    let totalDuration = 0;
+
+    durations.forEach((dur, i) => {
+      const startDelay = totalDuration;
+      const endDelay = totalDuration + dur;
+
+      setTimeout(() => {
+        setCurrentStep(i);
+        setProgress(Math.round((startDelay / totalTime) * 100));
+      }, startDelay);
+
+      // Incremental progress within each step
+      const ticks = 4;
+      for (let t = 1; t <= ticks; t++) {
+        setTimeout(() => {
+          setProgress(Math.round(((startDelay + (dur * t / ticks)) / totalTime) * 100));
+        }, startDelay + (dur * t / ticks));
+      }
+
+      setTimeout(() => {
+        setCompletedSteps(prev => { const n = [...prev]; n[i] = true; return n; });
+      }, endDelay - 100);
+
+      totalDuration += dur;
+    });
+
+    // Final 100%
+    setTimeout(() => {
+      setProgress(100);
+      setCurrentStep(count);
+    }, totalDuration);
+
+    return totalTime;
+  }, []);
+
+  const handleGenerate = async () => {
+    setGenerating(true);
+    setPhase('generating');
+    setError('');
+
+    // Filter steps based on selected config sections
+    const steps = allGenerationSteps.filter(s => !s.configKey || config[s.configKey]);
+    setActiveSteps(steps);
+
+    const genStart = Date.now();
+    const animationTotal = simulateProgress(steps);
+
+    try {
+      let comparison: ComparisonResult | null = null;
+      let policyResult: PolicyMatchResult | null = null;
+      let recommendationResult: RecommendationResult | null = null;
+
+      if (caseData.comparisonResult) {
+        try { comparison = typeof caseData.comparisonResult === 'string' ? JSON.parse(caseData.comparisonResult) : caseData.comparisonResult; } catch {}
+      }
+      if (caseData.policyMatches) {
+        try { policyResult = typeof caseData.policyMatches === 'string' ? JSON.parse(caseData.policyMatches) : caseData.policyMatches; } catch {}
+      }
+      if (caseData.recommendations || caseData.recommendationResult) {
+        try {
+          const raw = caseData.recommendationResult || caseData.recommendations;
+          recommendationResult = typeof raw === 'string' ? JSON.parse(raw) : raw;
+        } catch {}
+      }
+
+      const input: ReportGenerationInput = {
+        caseData,
+        config,
+        comparison,
+        policyResult,
+        recommendationResult,
+        auditLog: caseData.auditLog || [],
+      };
+
+      // Generate but DON'T download yet — store the blob
+      const result = await generateCaseReport(input);
+      reportBlobRef.current = result;
+
+      // Wait for the full animation to complete before showing success
+      const elapsed = Date.now() - genStart;
+      const remaining = Math.max(animationTotal - elapsed + 800, 0);
+      setTimeout(() => {
+        setProgress(100);
+        setCurrentStep(steps.length);
+        setCompletedSteps(new Array(steps.length).fill(true));
+        setGenerating(false);
+        setPhase('success');
+      }, remaining);
+    } catch (err: any) {
+      console.error('Report generation failed:', err);
+      setError(err.message || 'Failed to generate report');
+      setGenerating(false);
+      setPhase('config');
+      setCurrentStep(-1);
+      setProgress(0);
+    }
+  };
+
+  const handleDownload = () => {
+    if (!reportBlobRef.current) return;
+    setDownloading(true);
+    const { blob, filename } = reportBlobRef.current;
+    saveAs(blob, filename);
+    setTimeout(() => setDownloading(false), 1000);
+  };
+
+  // Drag handlers
+  const handleDragStart = useCallback((e: React.MouseEvent) => {
+    if (!modalRef.current) return;
+    isDragging.current = true;
+    const rect = modalRef.current.getBoundingClientRect();
+    dragStart.current = { x: e.clientX - rect.left, y: e.clientY - rect.top };
+    document.body.style.userSelect = 'none';
+  }, []);
+
+  useEffect(() => {
+    const handleMouseMove = (e: MouseEvent) => {
+      if (!isDragging.current) return;
+      setModalPos({
+        x: e.clientX - dragStart.current.x,
+        y: e.clientY - dragStart.current.y,
+      });
+    };
+    const handleMouseUp = () => {
+      isDragging.current = false;
+      document.body.style.userSelect = '';
+    };
+    window.addEventListener('mousemove', handleMouseMove);
+    window.addEventListener('mouseup', handleMouseUp);
+    return () => {
+      window.removeEventListener('mousemove', handleMouseMove);
+      window.removeEventListener('mouseup', handleMouseUp);
+    };
+  }, []);
+
+  const templateColorMap: Record<string, string> = {
+    blue: 'border-blue-500 bg-blue-50 dark:bg-blue-900/20 ring-blue-500',
+    purple: 'border-purple-500 bg-purple-50 dark:bg-purple-900/20 ring-purple-500',
+    green: 'border-green-500 bg-green-50 dark:bg-green-900/20 ring-green-500',
+    orange: 'border-orange-500 bg-orange-50 dark:bg-orange-900/20 ring-orange-500',
+    red: 'border-red-500 bg-red-50 dark:bg-red-900/20 ring-red-500',
+  };
+
+  const modalStyle: React.CSSProperties = modalPos ? {
+    position: 'fixed',
+    left: modalPos.x,
+    top: modalPos.y,
+    transform: 'none',
+    margin: 0,
+  } : {};
+
+  // ── Success Modal (bouncing, separate from main modal) ──
+  if (phase === 'success') {
+    return (
+      <div className="fixed inset-0 z-50 flex items-center justify-center p-4 pointer-events-none">
+        <div className="pointer-events-auto w-full max-w-md rounded-2xl bg-white dark:bg-gray-800 shadow-2xl border border-gray-200 dark:border-gray-700 overflow-hidden animate-modal-bounce">
+          {/* Success Header */}
+          <div className="relative px-6 pt-8 pb-6 text-center overflow-hidden">
+            {/* Decorative background circles */}
+            <div className="absolute top-0 left-0 w-32 h-32 bg-green-400/10 rounded-full -translate-x-1/2 -translate-y-1/2" />
+            <div className="absolute bottom-0 right-0 w-24 h-24 bg-emerald-400/10 rounded-full translate-x-1/2 translate-y-1/2" />
+            
+            {/* Animated checkmark */}
+            <div className="relative mx-auto w-20 h-20 mb-5">
+              <div className="absolute inset-0 rounded-full bg-green-500/20 animate-ping" />
+              <div className="relative w-20 h-20 rounded-full bg-gradient-to-br from-green-500 to-emerald-600 flex items-center justify-center shadow-lg shadow-green-500/30">
+                <CheckCircle2 className="w-10 h-10 text-white" />
+              </div>
+            </div>
+
+            <h2 className="text-xl font-bold text-gray-900 dark:text-white mb-1.5">Report Ready!</h2>
+            <p className="text-sm text-gray-500 dark:text-gray-400">
+              Your case investigation report has been generated successfully.
+            </p>
+          </div>
+
+          {/* Report Info */}
+          <div className="mx-6 mb-5 p-4 rounded-xl bg-gray-50 dark:bg-gray-700/50 border border-gray-200 dark:border-gray-700">
+            <div className="flex items-center justify-between mb-2">
+              <span className="text-xs text-gray-500 dark:text-gray-400">Case</span>
+              <span className="text-xs font-bold text-gray-900 dark:text-white">{caseData.caseNumber}</span>
+            </div>
+            <div className="flex items-center justify-between mb-2">
+              <span className="text-xs text-gray-500 dark:text-gray-400">Sections</span>
+              <span className="text-xs font-semibold text-green-600 dark:text-green-400">{reportBlobRef.current?.sectionCount ?? 0} included</span>
+            </div>
+            <div className="flex items-center justify-between">
+              <span className="text-xs text-gray-500 dark:text-gray-400">Format</span>
+              <span className="text-xs font-medium text-blue-600 dark:text-blue-400 flex items-center gap-1"><FileText className="w-3 h-3" /> Word Document (.docx)</span>
+            </div>
+          </div>
+
+          {/* Actions */}
+          <div className="px-6 pb-6 space-y-3">
+            <button
+              onClick={handleDownload}
+              disabled={downloading}
+              className="w-full py-3 rounded-xl text-sm font-semibold text-white bg-gradient-to-r from-green-600 to-emerald-600 hover:from-green-700 hover:to-emerald-700 disabled:opacity-60 transition-all flex items-center justify-center gap-2.5 shadow-lg shadow-green-600/25 active:scale-[0.98]"
+            >
+              {downloading ? (
+                <><Loader2 className="w-4 h-4 animate-spin" /> Downloading...</>
+              ) : (
+                <><Download className="w-5 h-5" /> Download Report</>
+              )}
+            </button>
+            <button
+              onClick={onClose}
+              className="w-full py-2.5 rounded-xl text-sm font-medium text-gray-500 dark:text-gray-400 hover:bg-gray-100 dark:hover:bg-gray-700 transition-colors"
+            >
+              Close
+            </button>
+          </div>
+        </div>
+      </div>
+    );
+  }
+
+  // ── Main (Config + Generating) Modal ──
+  return (
+    <div className="fixed inset-0 z-50 flex items-center justify-center p-4 pointer-events-none">
+      <div
+        ref={modalRef}
+        style={modalStyle}
+        className="pointer-events-auto w-full max-w-3xl rounded-2xl bg-white dark:bg-gray-800 shadow-2xl border border-gray-200 dark:border-gray-700 max-h-[90vh] overflow-y-auto"
+      >
+        {/* Drag handle + Header */}
+        <div
+          className="flex items-center justify-between px-6 py-5 border-b border-gray-200 dark:border-gray-700 sticky top-0 bg-white dark:bg-gray-800 z-10 rounded-t-2xl cursor-grab active:cursor-grabbing select-none"
+          onMouseDown={handleDragStart}
+        >
+          <div className="flex items-center gap-3">
+            <GripHorizontal className="w-4 h-4 text-gray-300 dark:text-gray-600 mr-1" />
+            <div className="p-2 rounded-xl bg-blue-50 dark:bg-blue-900/20">
+              <FileText className="w-5 h-5 text-blue-600 dark:text-blue-400" />
+            </div>
+            <div>
+              <h2 className="text-lg font-bold text-gray-900 dark:text-white">Generate Report</h2>
+              <p className="text-xs text-gray-500 dark:text-gray-400">Case Investigation Report</p>
+            </div>
+          </div>
+          {!generating && (
+            <button onClick={onClose} title="Close" className="p-2 rounded-lg hover:bg-gray-100 dark:hover:bg-gray-700 transition-colors"><X className="w-5 h-5 text-gray-500" /></button>
+          )}
+        </div>
+
+        {/* Generation Progress View */}
+        {generating && (
+          <div className="px-6 py-6 space-y-5">
+            {/* Progress header */}
+            <div className="text-center">
+              <div className="inline-flex items-center gap-2 px-4 py-2 rounded-full bg-blue-50 dark:bg-blue-900/20 mb-3">
+                <Loader2 className="w-4 h-4 text-blue-600 animate-spin" />
+                <span className="text-sm font-semibold text-blue-700 dark:text-blue-300">Generating Report...</span>
+              </div>
+              <p className="text-xs text-gray-500 dark:text-gray-400">Processing case #{caseData.caseNumber}</p>
+            </div>
+
+            {/* Progress bar */}
+            <div>
+              <div className="flex items-center justify-between mb-2">
+                <span className="text-xs font-medium text-gray-600 dark:text-gray-400">Progress</span>
+                <span className="text-xs font-bold text-blue-600 dark:text-blue-400">{progress}%</span>
+              </div>
+              <div className="w-full h-3 rounded-full bg-gray-100 dark:bg-gray-700 overflow-hidden">
+                <div
+                  className="h-full rounded-full bg-gradient-to-r from-blue-500 via-indigo-500 to-blue-600 transition-all duration-500 ease-out relative"
+                  style={{ width: `${progress}%` }}
+                >
+                  <div className="absolute inset-0 bg-white/20 animate-pulse rounded-full" />
+                </div>
+              </div>
+            </div>
+
+            {/* Step checklist */}
+            <div className="space-y-1.5 max-h-[320px] overflow-y-auto">
+              {activeSteps.map((step, idx) => {
+                const StepIcon = step.icon;
+                const isCompleted = completedSteps[idx];
+                const isActive = currentStep === idx;
+
+                return (
+                  <div
+                    key={idx}
+                    className={`flex items-center gap-3 px-3 py-2.5 rounded-xl transition-all duration-300 ${
+                      isActive ? 'bg-blue-50 dark:bg-blue-900/20 border border-blue-200 dark:border-blue-800' :
+                      isCompleted ? 'bg-green-50/50 dark:bg-green-900/10' :
+                      'opacity-40'
+                    }`}
+                  >
+                    {/* Status icon */}
+                    <div className={`flex-shrink-0 w-7 h-7 rounded-full flex items-center justify-center transition-all duration-300 ${
+                      isCompleted ? 'bg-green-500 text-white' :
+                      isActive ? 'bg-blue-500 text-white' :
+                      'bg-gray-200 dark:bg-gray-700 text-gray-400'
+                    }`}>
+                      {isCompleted ? (
+                        <CheckCircle2 className="w-4 h-4" />
+                      ) : isActive ? (
+                        <Loader2 className="w-4 h-4 animate-spin" />
+                      ) : (
+                        <span className="text-[10px] font-bold">{idx + 1}</span>
+                      )}
+                    </div>
+                    {/* Step info */}
+                    <div className="flex-1 min-w-0">
+                      <p className={`text-sm font-medium transition-colors ${
+                        isCompleted ? 'text-green-700 dark:text-green-400' :
+                        isActive ? 'text-blue-700 dark:text-blue-300' :
+                        'text-gray-400 dark:text-gray-500'
+                      }`}>{step.label}</p>
+                    </div>
+                    {/* Step type icon */}
+                    <StepIcon className={`w-4 h-4 flex-shrink-0 ${
+                      isCompleted ? 'text-green-500' :
+                      isActive ? 'text-blue-500' :
+                      'text-gray-300 dark:text-gray-600'
+                    }`} />
+                  </div>
+                );
+              })}
+            </div>
+          </div>
+        )}
+
+        {/* Configuration View (hidden during generation) */}
+        {!generating && phase === 'config' && (
+          <div className="px-6 py-5 space-y-6">
+            {/* Case Info Card */}
+            <div className="p-4 rounded-xl bg-gray-50 dark:bg-gray-700/50 border border-gray-200 dark:border-gray-700">
+              <div className="flex items-center justify-between mb-3">
+                <div>
+                  <p className="text-xs text-gray-500 dark:text-gray-400">Case Number</p>
+                  <p className="text-base font-bold text-gray-900 dark:text-white">{caseData.caseNumber}</p>
+                </div>
+                <Badge className={getStatusColor(caseData.status)}>{getStatusLabel(caseData.status)}</Badge>
+              </div>
+              <div className="flex items-center gap-4 text-xs text-gray-500 dark:text-gray-400">
+                <span className="flex items-center gap-1"><Building2 className="w-3 h-3" /> {caseData.department || '—'}</span>
+                <span className="flex items-center gap-1"><Calendar className="w-3 h-3" /> {formatDate(caseData.incidentDate)}</span>
+                <span className="flex items-center gap-1"><Users className="w-3 h-3" /> {deduplicateEmployees(caseData.involvedEmployees || []).length} parties</span>
+              </div>
+            </div>
+
+            {/* Report Template */}
+            <div>
+              <h3 className="text-sm font-semibold text-gray-700 dark:text-gray-300 mb-3 flex items-center gap-2"><FileCheck className="w-4 h-4 text-blue-500" /> Report Template</h3>
+              <div className="flex gap-2 overflow-x-auto pb-1">
+                {templates.map(t => (
+                  <button
+                    key={t.id}
+                    onClick={() => applyTemplate(t.id)}
+                    className={`flex-shrink-0 flex flex-col items-center gap-1.5 px-4 py-3 rounded-xl border-2 transition-all min-w-[100px] ${
+                      selectedTemplate === t.id ? templateColorMap[t.color] : 'border-gray-200 dark:border-gray-700 hover:border-gray-300 dark:hover:border-gray-600'
+                    }`}
+                  >
+                    <span className="text-xl">{t.icon}</span>
+                    <span className="text-xs font-semibold text-gray-900 dark:text-white">{t.label}</span>
+                    <span className="text-[10px] text-gray-500 dark:text-gray-400 leading-tight text-center">{t.description}</span>
+                  </button>
+                ))}
+              </div>
+            </div>
+
+            {/* Include in Report */}
+            <div>
+              <div className="flex items-center justify-between mb-3">
+                <h3 className="text-sm font-semibold text-gray-700 dark:text-gray-300 flex items-center gap-2">
+                  <ClipboardCheck className="w-4 h-4 text-green-500" /> Include in Report
+                  <span className="text-xs font-normal text-gray-400 dark:text-gray-500 ml-1">({selectedCount}/{availableCount})</span>
+                </h3>
+                <div className="flex items-center gap-3">
+                  <button onClick={deselectAll} className="text-xs font-medium text-gray-500 dark:text-gray-400 hover:text-red-500 hover:underline transition-colors">Deselect All</button>
+                  <button onClick={selectAll} className="text-xs font-medium text-blue-600 dark:text-blue-400 hover:underline">Select All</button>
+                </div>
+              </div>
+              <div className="space-y-1.5">
+                {reportSections.map(section => (
+                  <div
+                    key={section.key}
+                    onClick={() => { if (!section.disabled) toggleSection(section.key); }}
+                    className={`flex items-center gap-3 p-3 rounded-xl transition-colors ${
+                      section.disabled ? 'opacity-50 cursor-not-allowed' : 'cursor-pointer hover:bg-gray-50 dark:hover:bg-gray-700/50'
+                    } ${config[section.key] ? 'bg-blue-50/50 dark:bg-blue-900/10' : ''}`}
+                  >
+                    <div className={`p-1.5 rounded-lg ${config[section.key] ? 'bg-blue-100 dark:bg-blue-900/30' : 'bg-gray-100 dark:bg-gray-700'}`}>
+                      <section.icon className={`w-3.5 h-3.5 ${config[section.key] ? 'text-blue-600 dark:text-blue-400' : 'text-gray-400'}`} />
+                    </div>
+                    <div className="flex-1 min-w-0">
+                      <p className="text-sm font-medium text-gray-900 dark:text-white">{section.label}</p>
+                      <p className="text-xs text-gray-500 dark:text-gray-400">{section.description}</p>
+                    </div>
+                    {section.disabled ? (
+                      <span className="text-[10px] text-gray-400 bg-gray-100 dark:bg-gray-700 px-2 py-0.5 rounded-full">N/A</span>
+                    ) : (
+                      <div
+                        onClick={e => { e.stopPropagation(); toggleSection(section.key); }}
+                        className={`w-10 h-[22px] rounded-full flex items-center transition-colors duration-200 cursor-pointer flex-shrink-0 ${
+                          config[section.key] ? 'bg-blue-600 justify-end' : 'bg-gray-300 dark:bg-gray-600 justify-start'
+                        }`}
+                      >
+                        <div className={`w-[18px] h-[18px] rounded-full bg-white shadow-sm mx-0.5 transition-transform duration-200`} />
+                      </div>
+                    )}
+                  </div>
+                ))}
+              </div>
+            </div>
+
+            {/* Report Metadata */}
+            <div>
+              <h3 className="text-sm font-semibold text-gray-700 dark:text-gray-300 mb-3 flex items-center gap-2"><Shield className="w-4 h-4 text-orange-500" /> Report Metadata</h3>
+              <div className="space-y-3">
+                <div>
+                  <label className="block text-xs font-medium text-gray-500 dark:text-gray-400 mb-1">Confidentiality Level</label>
+                  <select
+                    value={config.confidentialityLevel}
+                    onChange={e => setConfig(prev => ({ ...prev, confidentialityLevel: e.target.value as ConfidentialityLevel }))}
+                    title="Confidentiality level"
+                    className="w-full px-3 py-2 rounded-xl border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-700 text-sm text-gray-900 dark:text-white focus:ring-2 focus:ring-blue-500"
+                  >
+                    {confidentialityLevels.map(l => (
+                      <option key={l.value} value={l.value}>{l.label}</option>
+                    ))}
+                  </select>
+                </div>
+                <div>
+                  <label className="block text-xs font-medium text-gray-500 dark:text-gray-400 mb-1">Prepared By</label>
+                  <input
+                    type="text"
+                    value={config.preparedBy}
+                    onChange={e => setConfig(prev => ({ ...prev, preparedBy: e.target.value }))}
+                    placeholder="Your name or title"
+                    className="w-full px-3 py-2 rounded-xl border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-700 text-sm text-gray-900 dark:text-white placeholder-gray-400 focus:ring-2 focus:ring-blue-500"
+                  />
+                </div>
+                <div>
+                  <label className="block text-xs font-medium text-gray-500 dark:text-gray-400 mb-1">Prepared For</label>
+                  <input
+                    type="text"
+                    value={config.preparedFor}
+                    onChange={e => setConfig(prev => ({ ...prev, preparedFor: e.target.value }))}
+                    placeholder="Recipient name or department"
+                    className="w-full px-3 py-2 rounded-xl border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-700 text-sm text-gray-900 dark:text-white placeholder-gray-400 focus:ring-2 focus:ring-blue-500"
+                  />
+                </div>
+              </div>
+            </div>
+
+            {/* Error */}
+            {error && (
+              <div className="p-3 rounded-xl bg-red-50 dark:bg-red-900/10 border border-red-200 dark:border-red-800">
+                <p className="text-sm text-red-600 dark:text-red-400 flex items-center gap-2"><AlertCircle className="w-4 h-4" /> {error}</p>
+              </div>
+            )}
+          </div>
+        )}
+
+        {/* Footer (config phase only) */}
+        {!generating && phase === 'config' && (
+          <div className="flex items-center justify-between px-6 py-4 bg-gray-50 dark:bg-gray-800/80 border-t border-gray-200 dark:border-gray-700 rounded-b-2xl sticky bottom-0">
+            <button onClick={onClose} className="px-5 py-2.5 rounded-xl text-sm font-medium text-gray-600 dark:text-gray-400 hover:bg-gray-100 dark:hover:bg-gray-700 transition-colors">
+              Cancel
+            </button>
+            <button
+              onClick={handleGenerate}
+              className="px-6 py-2.5 rounded-xl text-sm font-semibold text-white bg-gradient-to-r from-blue-600 to-indigo-600 hover:from-blue-700 hover:to-indigo-700 transition-all flex items-center gap-2 shadow-lg shadow-blue-600/25"
+            >
+              <FileDown className="w-4 h-4" /> Generate Report
+            </button>
+          </div>
+        )}
       </div>
     </div>
   );
@@ -6910,7 +7576,7 @@ function HistoryTab({ caseData }: { caseData: ConflictCase }) {
       try {
         const data = await fetchAudit(caseData.id);
         setAudit(data || []);
-      } catch {} finally { setLoading(false); }
+      } catch (err) { console.error('Failed to fetch audit trail:', err); } finally { setLoading(false); }
     })();
   }, [caseData.id]);
 
@@ -6931,7 +7597,24 @@ function HistoryTab({ caseData }: { caseData: ConflictCase }) {
                   <div className="flex items-start justify-between gap-3">
                     <div>
                       <p className="text-sm font-semibold text-gray-900 dark:text-white capitalize">{entry.action.replace(/_/g, ' ')}</p>
-                      {entry.details && <p className="text-sm text-gray-600 dark:text-gray-400 mt-0.5">{entry.details}</p>}
+                      {entry.details && (() => {
+                        try {
+                          const parsed = JSON.parse(entry.details);
+                          const parts: string[] = [];
+                          if (parsed.reason) parts.push(parsed.reason);
+                          if (parsed.closureReason) parts.push(`Reason: ${parsed.closureReason.replace(/_/g, ' ').toLowerCase()}`);
+                          if (parsed.closureSummary) parts.push(parsed.closureSummary);
+                          if (parsed.previousStatus) parts.push(`Previous status: ${parsed.previousStatus.replace(/_/g, ' ').toLowerCase()}`);
+                          if (parsed.verifiedViaEmail) parts.push('Verified via email');
+                          if (parsed.documentCount !== undefined) parts.push(`${parsed.documentCount} document(s)`);
+                          if (parsed.involvedEmployeesCount !== undefined) parts.push(`${parsed.involvedEmployeesCount} involved employee(s)`);
+                          return parts.length > 0
+                            ? <p className="text-sm text-gray-600 dark:text-gray-400 mt-0.5">{parts.join(' · ')}</p>
+                            : null;
+                        } catch {
+                          return <p className="text-sm text-gray-600 dark:text-gray-400 mt-0.5">{entry.details}</p>;
+                        }
+                      })()}
                     </div>
                     <span className="text-xs text-gray-400 dark:text-gray-500 whitespace-nowrap">{formatDateTime(entry.timestamp)}</span>
                   </div>
@@ -6955,6 +7638,7 @@ function HistoryTab({ caseData }: { caseData: ConflictCase }) {
 function CaseDetailContent() {
   const router = useRouter();
   const params = useParams();
+  const searchParams = useSearchParams();
   const { user } = useAuth();
   const caseId = params?.id as string;
 
@@ -6963,6 +7647,16 @@ function CaseDetailContent() {
   const [docsLoaded, setDocsLoaded] = useState(false);
   const [activeTab, setActiveTab] = useState<'overview' | 'documents' | 'analysis' | 'timeline'>('overview');
   const [deleting, setDeleting] = useState(false);
+  const [showReportModal, setShowReportModal] = useState(false);
+  const [showCloseCaseModal, setShowCloseCaseModal] = useState(false);
+  const [reopening, setReopening] = useState(false);
+  const [showVerifyModal, setShowVerifyModal] = useState(false);
+  const [verifyCode, setVerifyCode] = useState(['', '', '', '', '', '']);
+  const [verifyError, setVerifyError] = useState('');
+  const [verifyLoading, setVerifyLoading] = useState(false);
+  const [sendingCode, setSendingCode] = useState(false);
+  const [maskedEmail, setMaskedEmail] = useState('');
+  const [codeSentAt, setCodeSentAt] = useState<number | null>(null);
 
   const loadCase = useCallback(async () => {
     if (!caseId) return;
@@ -6988,6 +7682,22 @@ function CaseDetailContent() {
 
   useEffect(() => { loadCase(); }, [loadCase]);
 
+  // Auto-open modal from query param (e.g. ?action=report or ?action=close)
+  // Runs once when case data loads, then clears the param to prevent re-triggering
+  useEffect(() => {
+    if (!caseData || loading) return;
+    const action = searchParams.get('action');
+    if (!action) return;
+    if (action === 'report') {
+      setShowReportModal(true);
+      setActiveTab('analysis');
+    } else if (action === 'close') {
+      setShowCloseCaseModal(true);
+    }
+    // Clear the query param so it doesn't re-trigger on re-renders
+    router.replace(`/hr/case/${caseId}`, { scroll: false });
+  }, [caseData, loading, searchParams, router, caseId]);
+
   // Load documents when Documents tab is selected
   useEffect(() => {
     if (activeTab === 'documents') {
@@ -7006,6 +7716,60 @@ function CaseDetailContent() {
       console.error('Failed to delete case:', err);
       alert('Failed to delete case. It may contain locked data.');
     } finally { setDeleting(false); }
+  };
+
+  const handleReopenCase = async () => {
+    if (!caseData || !user) return;
+    setSendingCode(true);
+    setVerifyError('');
+    try {
+      const { maskedEmail: email } = await sendReopenCode(caseData.id, user.id || user.uid);
+      setMaskedEmail(email);
+      setCodeSentAt(Date.now());
+      setVerifyCode(['', '', '', '', '', '']);
+      setShowVerifyModal(true);
+    } catch (err: any) {
+      const msg = err?.response?.data?.error || 'Failed to send verification code.';
+      alert(msg);
+    } finally { setSendingCode(false); }
+  };
+
+  const handleVerifyAndReopen = async () => {
+    if (!caseData || !user) return;
+    const code = verifyCode.join('');
+    if (code.length !== 6) {
+      setVerifyError('Please enter the full 6-digit code.');
+      return;
+    }
+    setVerifyLoading(true);
+    setVerifyError('');
+    try {
+      await verifyReopenCode(caseData.id, {
+        userId: user.id || user.uid,
+        code,
+        reason: 'Case re-opened via email verification',
+      });
+      setShowVerifyModal(false);
+      loadCase();
+    } catch (err: any) {
+      const msg = err?.response?.data?.error || 'Verification failed.';
+      setVerifyError(msg);
+    } finally { setVerifyLoading(false); }
+  };
+
+  const handleResendCode = async () => {
+    if (!caseData || !user) return;
+    setSendingCode(true);
+    setVerifyError('');
+    try {
+      const { maskedEmail: email } = await sendReopenCode(caseData.id, user.id || user.uid);
+      setMaskedEmail(email);
+      setCodeSentAt(Date.now());
+      setVerifyCode(['', '', '', '', '', '']);
+    } catch (err: any) {
+      const msg = err?.response?.data?.error || 'Failed to resend code.';
+      setVerifyError(msg);
+    } finally { setSendingCode(false); }
   };
 
   if (loading) {
@@ -7042,6 +7806,172 @@ function CaseDetailContent() {
 
   return (
     <div className="min-h-full flex flex-col bg-gray-50 dark:bg-gray-900">
+
+      {/* Case Closed — full page overlay */}
+      {caseData.isLocked && caseData.status === 'CLOSED' ? (
+        <div className="flex-1 flex items-center justify-center px-6 lg:px-8 py-4 relative">
+          {/* Floating back button */}
+          <button
+            onClick={() => router.push('/hr')}
+            className="absolute top-6 left-6 lg:left-8 p-2.5 rounded-xl border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-800 hover:bg-gray-100 dark:hover:bg-gray-700 transition-colors shadow-sm z-10"
+            title="Back to cases"
+          >
+            <ChevronLeft className="w-5 h-5 text-gray-600 dark:text-gray-400" />
+          </button>
+          <div className="rounded-2xl bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-700 shadow-sm overflow-hidden w-full max-w-lg">
+            <div className="flex flex-col items-center text-center py-8 px-6">
+              <div className="w-16 h-16 rounded-full bg-red-50 dark:bg-red-900/20 flex items-center justify-center mb-4">
+                <Lock className="w-8 h-8 text-red-500" />
+              </div>
+              <h2 className="text-xl font-bold text-gray-900 dark:text-white mb-2">Case Closed</h2>
+              <p className="text-sm text-gray-500 dark:text-gray-400 mb-6 max-w-md">
+                This case has been closed and locked. All documents, analysis results, and audit trail are preserved but cannot be modified.
+              </p>
+              <div className="w-full max-w-sm space-y-2 mb-6">
+                <div className="flex justify-between py-2 border-b border-gray-100 dark:border-gray-700">
+                  <span className="text-sm text-gray-500 dark:text-gray-400">Case Number</span>
+                  <span className="text-sm font-semibold text-gray-900 dark:text-white">{caseData.caseNumber}</span>
+                </div>
+                <div className="flex justify-between py-2 border-b border-gray-100 dark:border-gray-700">
+                  <span className="text-sm text-gray-500 dark:text-gray-400">Type</span>
+                  <span className="text-sm font-semibold text-gray-900 dark:text-white">{getCaseTypeLabel(caseData.type)}</span>
+                </div>
+                <div className="flex justify-between py-2 border-b border-gray-100 dark:border-gray-700">
+                  <span className="text-sm text-gray-500 dark:text-gray-400">Status</span>
+                  <span className="text-sm font-semibold text-red-600 dark:text-red-400 flex items-center gap-1"><Lock className="w-3 h-3" /> Closed & Locked</span>
+                </div>
+                {caseData.closureReason && (
+                  <div className="flex justify-between py-2 border-b border-gray-100 dark:border-gray-700">
+                    <span className="text-sm text-gray-500 dark:text-gray-400">Closure Reason</span>
+                    <span className="text-sm font-semibold text-gray-900 dark:text-white">{caseData.closureReason.replace(/_/g, ' ').replace(/\b\w/g, c => c.toUpperCase())}</span>
+                  </div>
+                )}
+                {caseData.closedAt && (
+                  <div className="flex justify-between py-2">
+                    <span className="text-sm text-gray-500 dark:text-gray-400">Closed On</span>
+                    <span className="text-sm font-semibold text-gray-900 dark:text-white">{formatDate(caseData.closedAt)}</span>
+                  </div>
+                )}
+              </div>
+              <div className="flex flex-col items-center gap-3 w-full max-w-sm">
+                <button
+                  onClick={handleReopenCase}
+                  disabled={sendingCode}
+                  className="w-full px-6 py-3 rounded-xl text-sm font-semibold text-white bg-orange-500 hover:bg-orange-600 disabled:opacity-50 transition-colors flex items-center justify-center gap-2 shadow-lg shadow-orange-500/25"
+                >
+                  {sendingCode ? <Loader2 className="w-4 h-4 animate-spin" /> : <Unlock className="w-4 h-4" />} Re-Open Case
+                </button>
+                <button
+                  onClick={() => router.push('/hr')}
+                  className="text-sm text-gray-500 dark:text-gray-400 hover:text-gray-700 dark:hover:text-gray-300"
+                >
+                  Go Back to Cases
+                </button>
+              </div>
+            </div>
+          </div>
+
+          {/* Email Verification Modal */}
+          {showVerifyModal && (
+            <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 backdrop-blur-sm">
+              <div className="bg-white dark:bg-gray-800 rounded-2xl shadow-2xl w-full max-w-md mx-4 p-6">
+                <div className="flex flex-col items-center text-center">
+                  <div className="w-14 h-14 rounded-full bg-orange-50 dark:bg-orange-900/20 flex items-center justify-center mb-4">
+                    <Shield className="w-7 h-7 text-orange-500" />
+                  </div>
+                  <h3 className="text-lg font-bold text-gray-900 dark:text-white mb-1">Verify Your Identity</h3>
+                  <p className="text-sm text-gray-500 dark:text-gray-400 mb-6">
+                    We sent a 6-digit code to <span className="font-semibold text-gray-700 dark:text-gray-300">{maskedEmail}</span>
+                  </p>
+
+                  {/* 6 digit input boxes */}
+                  <div className="flex gap-2 mb-4">
+                    {verifyCode.map((digit, i) => (
+                      <input
+                        key={i}
+                        id={`reopen-code-${i}`}
+                        type="text"
+                        inputMode="numeric"
+                        maxLength={1}
+                        value={digit}
+                        autoFocus={i === 0}
+                        className="w-11 h-13 text-center text-xl font-bold rounded-lg border-2 border-gray-200 dark:border-gray-600 bg-gray-50 dark:bg-gray-700 text-gray-900 dark:text-white focus:border-orange-500 focus:ring-2 focus:ring-orange-500/20 outline-none transition-all"
+                        onChange={(e) => {
+                          const val = e.target.value.replace(/\D/g, '');
+                          if (!val && !digit) return;
+                          const newCode = [...verifyCode];
+                          newCode[i] = val;
+                          setVerifyCode(newCode);
+                          setVerifyError('');
+                          if (val && i < 5) {
+                            document.getElementById(`reopen-code-${i + 1}`)?.focus();
+                          }
+                        }}
+                        onKeyDown={(e) => {
+                          if (e.key === 'Backspace' && !digit && i > 0) {
+                            const newCode = [...verifyCode];
+                            newCode[i - 1] = '';
+                            setVerifyCode(newCode);
+                            document.getElementById(`reopen-code-${i - 1}`)?.focus();
+                          }
+                          if (e.key === 'Enter' && verifyCode.join('').length === 6) {
+                            handleVerifyAndReopen();
+                          }
+                        }}
+                        onPaste={(e) => {
+                          e.preventDefault();
+                          const pasted = e.clipboardData.getData('text').replace(/\D/g, '').slice(0, 6);
+                          if (!pasted) return;
+                          const newCode = [...verifyCode];
+                          for (let j = 0; j < 6; j++) {
+                            newCode[j] = pasted[j] || '';
+                          }
+                          setVerifyCode(newCode);
+                          const focusIdx = Math.min(pasted.length, 5);
+                          document.getElementById(`reopen-code-${focusIdx}`)?.focus();
+                        }}
+                      />
+                    ))}
+                  </div>
+
+                  {verifyError && (
+                    <p className="text-sm text-red-500 mb-3">{verifyError}</p>
+                  )}
+
+                  <button
+                    onClick={handleVerifyAndReopen}
+                    disabled={verifyLoading || verifyCode.join('').length !== 6}
+                    className="w-full px-4 py-3 rounded-xl text-sm font-semibold text-white bg-orange-500 hover:bg-orange-600 disabled:opacity-50 transition-colors flex items-center justify-center gap-2 mb-3"
+                  >
+                    {verifyLoading ? <Loader2 className="w-4 h-4 animate-spin" /> : <Unlock className="w-4 h-4" />}
+                    Verify & Re-Open Case
+                  </button>
+
+                  <div className="flex items-center gap-2 text-sm">
+                    <span className="text-gray-400">Didn&apos;t receive the code?</span>
+                    <button
+                      onClick={handleResendCode}
+                      disabled={sendingCode}
+                      className="text-orange-500 hover:text-orange-600 font-semibold disabled:opacity-50"
+                    >
+                      {sendingCode ? 'Sending...' : 'Resend'}
+                    </button>
+                  </div>
+
+                  <button
+                    onClick={() => { setShowVerifyModal(false); setVerifyError(''); }}
+                    className="mt-4 text-sm text-gray-400 hover:text-gray-600 dark:hover:text-gray-300"
+                  >
+                    Cancel
+                  </button>
+                </div>
+              </div>
+            </div>
+          )}
+
+        </div>
+      ) : (
+      <>
       {/* Header */}
       <div className="sticky top-0 z-20 bg-white dark:bg-gray-800 border-b border-gray-200 dark:border-gray-700 shadow-sm flex-shrink-0">
         <div className="w-full px-6 lg:px-8 py-5">
@@ -7067,14 +7997,37 @@ function CaseDetailContent() {
               </p>
             </div>
             {!caseData.isLocked && (
-              <button
-                onClick={handleDeleteCase}
-                disabled={deleting}
-                className="p-2.5 rounded-xl border border-red-200 dark:border-red-800 hover:bg-red-50 dark:hover:bg-red-900/20 transition-colors flex-shrink-0"
-                title="Delete case"
-              >
-                {deleting ? <Loader2 className="w-4 h-4 text-red-500 animate-spin" /> : <Trash2 className="w-4 h-4 text-red-500" />}
-              </button>
+              <div className="flex items-center gap-2 flex-shrink-0">
+                {activeTab === 'analysis' && (
+                  <>
+                    <button
+                      onClick={() => setShowReportModal(true)}
+                      className="px-3.5 py-2 rounded-xl border border-blue-200 dark:border-blue-800 bg-blue-50 dark:bg-blue-900/20 hover:bg-blue-100 dark:hover:bg-blue-900/30 transition-colors flex items-center gap-2 text-sm font-medium text-blue-700 dark:text-blue-400"
+                      title="Generate Report"
+                    >
+                      <FileDown className="w-4 h-4" /> Generate Report
+                    </button>
+                    <button
+                      onClick={() => setShowCloseCaseModal(true)}
+                      className="px-3.5 py-2 rounded-xl border border-green-200 dark:border-green-800 bg-green-50 dark:bg-green-900/20 hover:bg-green-100 dark:hover:bg-green-900/30 transition-colors flex items-center gap-2 text-sm font-medium text-green-700 dark:text-green-400"
+                      title="Close Case"
+                    >
+                      <Lock className="w-4 h-4" /> Close Case
+                    </button>
+                  </>
+                )}
+              </div>
+            )}
+            {caseData.isLocked && activeTab === 'analysis' && (
+              <div className="flex items-center gap-2 flex-shrink-0">
+                <button
+                  onClick={() => setShowReportModal(true)}
+                  className="px-3.5 py-2 rounded-xl border border-blue-200 dark:border-blue-800 bg-blue-50 dark:bg-blue-900/20 hover:bg-blue-100 dark:hover:bg-blue-900/30 transition-colors flex items-center gap-2 text-sm font-medium text-blue-700 dark:text-blue-400"
+                  title="Generate Report"
+                >
+                  <FileDown className="w-4 h-4" /> Generate Report
+                </button>
+              </div>
             )}
           </div>
 
@@ -7123,6 +8076,12 @@ function CaseDetailContent() {
         {activeTab === 'analysis' && <AnalysisTab caseData={caseData} onUpdate={loadCase} userId={user?.id || ''} />}
         {activeTab === 'timeline' && <HistoryTab caseData={caseData} />}
       </div>
+
+      {/* Modals */}
+      {showCloseCaseModal && <CloseCaseModal caseData={caseData} userId={user?.id || ''} onClose={() => setShowCloseCaseModal(false)} onClosed={loadCase} />}
+      {showReportModal && <GenerateReportModal caseData={caseData} onClose={() => setShowReportModal(false)} />}
+      </>
+      )}
     </div>
   );
 }

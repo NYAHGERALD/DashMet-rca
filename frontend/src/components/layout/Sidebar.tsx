@@ -70,7 +70,7 @@ export default function Sidebar() {
     { name: t('nav.investigationReport'), href: '/investigation-report', icon: FileSearch, roles: ['*'] },
     { name: t('nav.fmir') || 'Foreign Material', href: '/fmir', icon: ShieldAlert, roles: ['*'] },
     { name: 'Safety Assessment', href: '/workplace-safety', icon: ShieldCheck, roles: ['SUPERVISOR', 'QA_FOOD_SAFETY', 'MAINTENANCE_ENGINEERING', 'SAFETY_SECURITY_MANAGER', 'CI_MANAGER', 'ADMIN', 'SYSTEM_ADMIN'] },
-    { name: 'HR Resolution', href: '/hr', icon: Gavel, roles: ['SUPERVISOR', 'QA_FOOD_SAFETY', 'MAINTENANCE_ENGINEERING', 'CI_MANAGER', 'ADMIN', 'SYSTEM_ADMIN'] },
+    { name: 'Conflict Resolution', href: '/hr', icon: Gavel, roles: ['SUPERVISOR', 'QA_FOOD_SAFETY', 'MAINTENANCE_ENGINEERING', 'CI_MANAGER', 'ADMIN', 'SYSTEM_ADMIN'] },
     { name: 'Bakery Metrics', href: '/bakery-metrics', icon: PieChart, roles: ['*'] },
   ];
 

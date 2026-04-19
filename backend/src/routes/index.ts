@@ -241,7 +241,7 @@ router.use('/privileges', privilegeRoutes);
 router.use('/video-call', videoCallRoutes);
 
 // Meeting Transcript routes (AI transcription & smart summaries)
-router.use('/transcripts', transcriptRoutes);
+router.use('/transcripts', aiRateLimiter, promptInjectionDetector, transcriptRoutes);
 
 // Evidence Spotlight routes (present evidence during video calls with annotations)
 router.use('/evidence', spotlightRoutes);

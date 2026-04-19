@@ -24,9 +24,12 @@
 
 import { Router, Request, Response } from 'express';
 import { Prisma } from '@prisma/client';
+import crypto from 'crypto';
+import { v4 as uuidv4 } from 'uuid';
 import { prisma } from '../utils/prisma';
 import { authenticateFirebaseOnly } from '../middleware/auth';
 import { encrypt, decrypt } from '../utils/encryption';
+import { sendCaseReopenEmail } from '../services/emailService';
 
 const router = Router();
 
@@ -941,6 +944,311 @@ router.post('/:id/close', async (req: Request, res: Response, next) => {
 });
 
 // ============================================================================
+// POST /api/conflict-cases/:id/reopen-send-code
+// Send a 6-digit verification code to the user's email before allowing reopen
+// Body: { userId }
+// Security: cryptographically random OTP, SHA-256 hashed in DB,
+//   10-min TTL, max 5 attempts, rate-limited (3 per email/hour)
+// ============================================================================
+router.post('/:id/reopen-send-code', async (req: Request, res: Response, next) => {
+  if (!isValidUUID(req.params.id)) {
+    return next();
+  }
+
+  try {
+    const { id } = req.params;
+    const { userId } = req.body;
+
+    if (!userId) {
+      return res.status(400).json({
+        success: false,
+        error: 'userId is required',
+      });
+    }
+
+    // Check case exists and is actually closed
+    const existingCase = await prisma.conflictCase.findUnique({
+      where: { id },
+    });
+
+    if (!existingCase) {
+      return res.status(404).json({ success: false, error: 'Case not found' });
+    }
+
+    if (existingCase.status !== 'CLOSED' && !existingCase.isLocked) {
+      return res.status(400).json({
+        success: false,
+        error: 'Case is not closed — no verification needed',
+      });
+    }
+
+    // Find user (try DB id, then Firebase UID)
+    let user = await prisma.user.findUnique({
+      where: { id: userId },
+      select: { id: true, email: true, firstName: true },
+    });
+
+    if (!user) {
+      user = await prisma.user.findUnique({
+        where: { firebaseUid: userId },
+        select: { id: true, email: true, firstName: true },
+      });
+    }
+
+    if (!user) {
+      await new Promise(r => setTimeout(r, 200 + Math.random() * 300));
+      return res.status(400).json({ success: false, error: 'Invalid request' });
+    }
+
+    const normalizedEmail = user.email.toLowerCase().trim();
+
+    // Rate limit: max 3 OTPs per email per hour
+    const oneHourAgo = new Date(Date.now() - 60 * 60 * 1000);
+    const recentCount = await prisma.mobileVerification.count({
+      where: {
+        email: normalizedEmail,
+        createdAt: { gte: oneHourAgo },
+      },
+    });
+
+    if (recentCount >= 3) {
+      return res.status(429).json({
+        success: false,
+        error: 'Too many verification requests. Please try again later.',
+      });
+    }
+
+    // Invalidate all previous unused OTPs for this user
+    await prisma.mobileVerification.updateMany({
+      where: { userId: user.id, used: false },
+      data: { used: true },
+    });
+
+    // Generate cryptographically random 6-digit OTP
+    const code = crypto.randomInt(100000, 999999).toString();
+    const codeHash = crypto.createHash('sha256').update(code).digest('hex');
+
+    // Store hashed OTP with 10-minute expiry
+    await prisma.mobileVerification.create({
+      data: {
+        id: uuidv4(),
+        userId: user.id,
+        email: normalizedEmail,
+        codeHash,
+        expiresAt: new Date(Date.now() + 10 * 60 * 1000),
+      },
+    });
+
+    // Send email via Resend
+    const sent = await sendCaseReopenEmail(normalizedEmail, code, user.firstName, existingCase.caseNumber);
+
+    if (!sent) {
+      return res.status(500).json({
+        success: false,
+        error: 'Failed to send verification email. Please try again.',
+      });
+    }
+
+    // Mask email for display: g***@gmail.com
+    const [local, domain] = normalizedEmail.split('@');
+    const maskedEmail = local[0] + '***@' + domain;
+
+    return res.json({
+      success: true,
+      message: 'Verification code sent',
+      maskedEmail,
+    });
+  } catch (error: any) {
+    console.error('Error sending reopen verification code:', error);
+    res.status(500).json({
+      success: false,
+      error: 'Failed to send verification code',
+    });
+  }
+});
+
+// ============================================================================
+// POST /api/conflict-cases/:id/reopen-verify
+// Verify the 6-digit code and reopen the case if valid
+// Body: { userId, code, reason? }
+// ============================================================================
+router.post('/:id/reopen-verify', async (req: Request, res: Response, next) => {
+  if (!isValidUUID(req.params.id)) {
+    return next();
+  }
+
+  try {
+    const { id } = req.params;
+    const { userId, code, reason } = req.body;
+
+    if (!userId || !code) {
+      return res.status(400).json({
+        success: false,
+        error: 'userId and code are required',
+      });
+    }
+
+    // Find user (try DB id, then Firebase UID)
+    let verifyingUser = await prisma.user.findUnique({
+      where: { id: userId },
+      select: { id: true, firstName: true, lastName: true, email: true },
+    });
+
+    if (!verifyingUser) {
+      verifyingUser = await prisma.user.findUnique({
+        where: { firebaseUid: userId },
+        select: { id: true, firstName: true, lastName: true, email: true },
+      });
+    }
+
+    if (!verifyingUser) {
+      return res.status(404).json({ success: false, error: 'User not found' });
+    }
+
+    const actualUserId = verifyingUser.id;
+    const codeHash = crypto.createHash('sha256').update(code.trim()).digest('hex');
+
+    // Find the most recent unused, non-expired verification for this user
+    const verification = await prisma.mobileVerification.findFirst({
+      where: {
+        userId: actualUserId,
+        used: false,
+        expiresAt: { gte: new Date() },
+      },
+      orderBy: { createdAt: 'desc' },
+    });
+
+    if (!verification) {
+      return res.status(400).json({
+        success: false,
+        error: 'No active verification code. Please request a new one.',
+      });
+    }
+
+    // Brute-force protection: max 5 attempts per code
+    if (verification.attempts >= 5) {
+      await prisma.mobileVerification.update({
+        where: { id: verification.id },
+        data: { used: true },
+      });
+      return res.status(429).json({
+        success: false,
+        error: 'Too many attempts. Please request a new verification code.',
+      });
+    }
+
+    // Increment attempt count
+    await prisma.mobileVerification.update({
+      where: { id: verification.id },
+      data: { attempts: { increment: 1 } },
+    });
+
+    // Constant-time comparison to prevent timing attacks
+    const isValid = crypto.timingSafeEqual(
+      Buffer.from(codeHash, 'hex'),
+      Buffer.from(verification.codeHash, 'hex')
+    );
+
+    if (!isValid) {
+      const remaining = 5 - (verification.attempts + 1);
+      return res.status(400).json({
+        success: false,
+        error: remaining > 0
+          ? `Invalid code. ${remaining} attempt(s) remaining.`
+          : 'Invalid code. Please request a new verification code.',
+      });
+    }
+
+    // Mark OTP as used
+    await prisma.mobileVerification.update({
+      where: { id: verification.id },
+      data: { used: true },
+    });
+
+    // Verify case exists and is closed
+    const existingCase = await prisma.conflictCase.findUnique({
+      where: { id },
+    });
+
+    if (!existingCase) {
+      return res.status(404).json({ success: false, error: 'Case not found' });
+    }
+
+    if (existingCase.status !== 'CLOSED' && !existingCase.isLocked) {
+      return res.status(400).json({
+        success: false,
+        error: 'Case is not closed — cannot reopen',
+      });
+    }
+
+    // Re-open: set status back to AWAITING_ACTION, unlock, clear closure fields
+    const reopenedCase = await prisma.conflictCase.update({
+      where: { id },
+      data: {
+        status: 'AWAITING_ACTION',
+        isLocked: false,
+        closedAt: null,
+        closedBy: null,
+        closureReason: null,
+        closureSummary: null,
+      },
+      include: {
+        createdByUser: {
+          select: { id: true, firstName: true, lastName: true, email: true },
+        },
+        closedByUser: {
+          select: { id: true, firstName: true, lastName: true, email: true },
+        },
+        organization: {
+          select: { id: true, name: true },
+        },
+        facility: {
+          select: { id: true, name: true },
+        },
+        involvedEmployees: true,
+        documents: {
+          orderBy: { createdAt: 'desc' },
+        },
+        auditLog: {
+          orderBy: { timestamp: 'desc' },
+        },
+      },
+    });
+
+    // Create audit trail entry
+    const userName = `${verifyingUser.firstName || ''} ${verifyingUser.lastName || ''}`.trim() || 'Unknown User';
+    await prisma.conflictCaseAuditEntry.create({
+      data: {
+        caseId: id,
+        action: 'CASE_REOPENED',
+        details: encrypt(JSON.stringify({
+          reason: reason || 'Case re-opened via email verification',
+          previousStatus: existingCase.status,
+          verifiedViaEmail: true,
+        })),
+        userId: actualUserId,
+        userName: encrypt(userName),
+      },
+    });
+
+    const decryptedCase = decryptCaseData(reopenedCase);
+
+    res.json({
+      success: true,
+      message: 'Case re-opened successfully',
+      data: decryptedCase,
+    });
+  } catch (error: any) {
+    console.error('Error verifying reopen code:', error);
+    res.status(500).json({
+      success: false,
+      error: 'Failed to verify code and reopen case',
+      details: error.message,
+    });
+  }
+});
+
+// ============================================================================
 // POST /api/conflict-cases/:id/reopen
 // Re-open a closed/locked case — allows editing again
 // ============================================================================
@@ -1582,11 +1890,6 @@ router.get('/:id/audit', async (req: Request, res: Response) => {
 
     const auditTrail = await prisma.conflictCaseAuditEntry.findMany({
       where: { caseId: id },
-      include: {
-        user: {
-          select: { id: true, firstName: true, lastName: true, email: true },
-        },
-      },
       orderBy: { timestamp: 'desc' },
     });
 
