@@ -4,6 +4,13 @@ import bakeryMetricsService from '../services/bakeryMetricsService';
 import bakeryAdminService from '../services/bakeryAdminService';
 import { generateAiInsights, getCachedInsight, saveInsight, logInsightAction, getInsightLogs } from '../services/bakeryAiInsightsService';
 import { generateOperationalDailyReport, getSavedDailyReport, saveDailyReport } from '../services/operationalDailyReportService';
+import {
+  computeTargetDay,
+  generateStandupReport,
+  getSavedStandupReport,
+  saveStandupReport,
+  updateStandupComments,
+} from '../services/standupMeetingReportService';
 import { buildBakeryReportData, generateBakeryReportPdf, sendBakeryReportEmail, sendBakeryReportToUsers, getOrgUsersForBakeryReport } from '../services/bakeryReportEmailService';
 import { notifyBakeryMetricsSubmitted } from '../services/smsService';
 import { authenticate, AuthRequest } from '../middleware/auth';
@@ -91,6 +98,45 @@ router.get('/both-shifts-records/:id', async (req: Request, res: Response) => {
     res.json({ success: true, record });
   } catch (error: any) {
     console.error('Error fetching record:', error);
+    res.status(500).json({ success: false, error: error.message });
+  }
+});
+
+// ─────────────────────────────────────────────────────────────────────────────
+// PATCH /api/bakery-metrics/both-shifts-records/:id/resolve-missing-kpis
+// Resolves partial missing KPI values for one shift/line and returns updated row
+// ─────────────────────────────────────────────────────────────────────────────
+router.patch('/both-shifts-records/:id/resolve-missing-kpis', async (req: Request, res: Response) => {
+  try {
+    const { shift, line, values, updatedBy } = req.body;
+
+    if (!shift || !line || !values || !updatedBy) {
+      return res.status(400).json({
+        success: false,
+        error: 'shift, line, values, and updatedBy are required',
+      });
+    }
+
+    if (shift !== 'first' && shift !== 'second') {
+      return res.status(400).json({ success: false, error: 'shift must be first or second' });
+    }
+
+    if (line !== 'die_cut_1' && line !== 'die_cut_2') {
+      return res.status(400).json({ success: false, error: 'line must be die_cut_1 or die_cut_2' });
+    }
+
+    await bakeryMetricsService.resolveMissingKpis({
+      submissionId: req.params.id,
+      shift,
+      line,
+      values,
+      updatedBy,
+    });
+
+    const record = await bakeryMetricsService.getRecordById(req.params.id);
+    res.json({ success: true, record });
+  } catch (error: any) {
+    console.error('Error resolving missing KPI fields:', error);
     res.status(500).json({ success: false, error: error.message });
   }
 });
@@ -1072,6 +1118,144 @@ router.post('/operational-daily-report', authenticate, async (req: AuthRequest, 
   } catch (error: any) {
     console.error('[OpsDailyReport] Unhandled error:', error);
     res.status(500).json({ success: false, error: 'Internal error generating report.' });
+  }
+});
+
+// ─────────────────────────────────────────────────────────────────────────────
+// STANDUP MEETING REPORT — conversational supervisor briefing
+// ─────────────────────────────────────────────────────────────────────────────
+
+// GET /api/bakery-metrics/standup-report/target-day
+// Returns { weekName, dayOfWeek, targetDate, weekExists } for "previous production day"
+router.get('/standup-report/target-day', authenticate, async (_req: AuthRequest, res: Response) => {
+  try {
+    const target = computeTargetDay(new Date());
+    const weekSheet = await prisma.bakeryWeeklySheet.findFirst({
+      where: { sheetName: target.weekName },
+      select: { sheetName: true, isActive: true },
+    });
+    res.json({
+      success: true,
+      weekName: target.weekName,
+      dayOfWeek: target.dayOfWeek,
+      targetDate: target.targetDate.toISOString(),
+      weekStart: target.weekStart.toISOString(),
+      weekEnd: target.weekEnd.toISOString(),
+      weekExists: !!weekSheet,
+    });
+  } catch (error: any) {
+    console.error('[StandupReport] target-day error:', error);
+    res.status(500).json({ success: false, error: 'Failed to compute target day.' });
+  }
+});
+
+// GET /api/bakery-metrics/standup-report?weekName=&dayOfWeek=
+router.get('/standup-report', authenticate, async (req: AuthRequest, res: Response) => {
+  try {
+    const weekName = req.query.weekName as string;
+    const dayOfWeek = req.query.dayOfWeek as string;
+    if (!weekName || !WEEK_NAME_ROUTE_PATTERN.test(weekName)) {
+      return res.status(400).json({ success: false, error: 'Valid weekName is required.' });
+    }
+    if (!dayOfWeek || !VALID_DAYS_ROUTE.includes(dayOfWeek)) {
+      return res.status(400).json({ success: false, error: 'Valid dayOfWeek is required.' });
+    }
+    const saved = await getSavedStandupReport(weekName, dayOfWeek);
+    if (!saved) return res.json({ success: true, exists: false });
+    res.json({ success: true, exists: true, ...saved });
+  } catch (error: any) {
+    console.error('[StandupReport] GET error:', error);
+    res.status(500).json({ success: false, error: 'Failed to fetch standup report.' });
+  }
+});
+
+// POST /api/bakery-metrics/standup-report
+// Body: { weekName, dayOfWeek, regenerate?: boolean, reportDate?: string }
+router.post('/standup-report', authenticate, async (req: AuthRequest, res: Response) => {
+  try {
+    const user = req.user;
+    if (!user) return res.status(401).json({ success: false, error: 'Authentication required.' });
+
+    const { weekName, dayOfWeek, regenerate, reportDate } = req.body || {};
+    if (!weekName || !WEEK_NAME_ROUTE_PATTERN.test(weekName)) {
+      return res.status(400).json({ success: false, error: 'Invalid week name.' });
+    }
+    if (!dayOfWeek || !VALID_DAYS_ROUTE.includes(dayOfWeek)) {
+      return res.status(400).json({ success: false, error: 'Invalid day of week.' });
+    }
+
+    const organizationId = user.organizationId;
+    if (!organizationId) {
+      return res.status(400).json({ success: false, error: 'User organization not found.' });
+    }
+
+    const userName = `${user.firstName} ${user.lastName}`;
+
+    if (!regenerate) {
+      const saved = await getSavedStandupReport(weekName, dayOfWeek);
+      if (saved) {
+        return res.json({ ...saved, source: 'database' });
+      }
+    }
+
+    const result = await generateStandupReport(weekName, dayOfWeek, organizationId);
+    if (!result.success) return res.status(422).json(result);
+
+    const resolvedDate = reportDate ? new Date(reportDate) : computeTargetDay(new Date()).targetDate;
+
+    try {
+      const saved = await saveStandupReport(
+        weekName,
+        dayOfWeek,
+        resolvedDate,
+        result.data as Record<string, unknown>,
+        user.id,
+        userName,
+        result.tokenUsage,
+        result.durationMs,
+      );
+      return res.json({
+        ...result,
+        source: 'generated',
+        reportId: saved.id,
+        supervisorComments: saved.supervisorComments ?? '',
+        savedAt: saved.updatedAt.toISOString(),
+      });
+    } catch (saveErr: any) {
+      console.error('[StandupReport] save error:', saveErr.message);
+      return res.json({ ...result, source: 'generated', saveError: true });
+    }
+  } catch (error: any) {
+    console.error('[StandupReport] POST error:', error);
+    res.status(500).json({ success: false, error: 'Internal error generating standup report.' });
+  }
+});
+
+// PATCH /api/bakery-metrics/standup-report/comments
+// Body: { weekName, dayOfWeek, comments }
+router.patch('/standup-report/comments', authenticate, async (req: AuthRequest, res: Response) => {
+  try {
+    const user = req.user;
+    if (!user) return res.status(401).json({ success: false, error: 'Authentication required.' });
+
+    const { weekName, dayOfWeek, comments } = req.body || {};
+    if (!weekName || !WEEK_NAME_ROUTE_PATTERN.test(weekName)) {
+      return res.status(400).json({ success: false, error: 'Invalid week name.' });
+    }
+    if (!dayOfWeek || !VALID_DAYS_ROUTE.includes(dayOfWeek)) {
+      return res.status(400).json({ success: false, error: 'Invalid day of week.' });
+    }
+    if (typeof comments !== 'string') {
+      return res.status(400).json({ success: false, error: 'comments must be a string.' });
+    }
+
+    const userName = `${user.firstName} ${user.lastName}`;
+    const result = await updateStandupComments(weekName, dayOfWeek, comments, userName);
+    if (!result.success) return res.status(404).json(result);
+    res.json({ success: true, ...result });
+  } catch (error: any) {
+    console.error('[StandupReport] PATCH comments error:', error);
+    res.status(500).json({ success: false, error: 'Failed to save comments.' });
   }
 });
 

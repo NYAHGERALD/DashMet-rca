@@ -147,19 +147,72 @@ function formatVal(value: number | undefined | null, suffix: string, isInteger =
 }
 
 // ─── Metric Value Cell ──────────────────────────────────────────────────────────
-function MetricCell({ value, suffix, target, isReverse = false, isInteger = false }: {
+function MetricCell({ value, suffix, target, isReverse = false, isInteger = false, missing = false, onResolve, didNotRun = false, lineName }: {
   value: number | undefined | null;
   suffix: string;
   target: number;
   isReverse?: boolean;
   isInteger?: boolean;
+  missing?: boolean;
+  onResolve?: () => void;
+  didNotRun?: boolean;
+  lineName?: string;
 }) {
   const display = formatVal(value, suffix, isInteger);
   const color = getValueColor(value, target, isReverse);
+  const [showHint, setShowHint] = useState(false);
   return (
-    <span className={`inline-flex items-center px-2.5 py-1.5 rounded-full text-xs font-bold ${color}`}>
-      {display}
-    </span>
+    <div className="relative min-h-[38px] flex items-center">
+      <span className={`inline-flex items-center px-2.5 py-1.5 rounded-full text-xs font-bold ${color}`}>
+        {display}
+      </span>
+      {didNotRun && (
+        <div className="absolute inset-0 flex items-center justify-between gap-1.5 px-2 bg-slate-100/95 dark:bg-slate-800/90 border border-slate-300 dark:border-slate-600 rounded-lg shadow-sm">
+          <div className="flex items-center gap-1.5 min-w-0">
+            <span className="text-[10px] font-bold text-slate-700 dark:text-slate-200 truncate">
+              No Production Run{lineName ? ` on ${lineName}` : ''}
+            </span>
+            <button
+              type="button"
+              aria-label="Why is this shown?"
+              title="All KPI data is missing for this line, indicating that no production occurred on this day."
+              onMouseEnter={() => setShowHint(true)}
+              onMouseLeave={() => setShowHint(false)}
+              onClick={(e) => { e.stopPropagation(); setShowHint((s) => !s); }}
+              className="flex-shrink-0 text-slate-500 hover:text-slate-700 dark:text-slate-400 dark:hover:text-slate-200"
+            >
+              <Info className="w-3 h-3" />
+            </button>
+            {showHint && (
+              <div className="absolute left-2 top-full mt-1 z-20 w-56 p-2 text-[10px] font-medium text-white bg-slate-900 dark:bg-slate-700 rounded-md shadow-lg pointer-events-none">
+                All KPI data is missing for this line, indicating that no production occurred on this day.
+              </div>
+            )}
+          </div>
+          {onResolve && (
+            <button
+              type="button"
+              onClick={onResolve}
+              className="flex-shrink-0 px-2 py-1 text-[10px] font-bold text-white bg-slate-600 hover:bg-slate-700 rounded-md transition-colors"
+            >
+              Resolve
+            </button>
+          )}
+        </div>
+      )}
+      {!didNotRun && missing && (
+        <div className="absolute inset-0 flex items-center justify-between gap-2 px-2 bg-amber-100/90 dark:bg-amber-900/50 border border-amber-300 dark:border-amber-700 rounded-lg">
+          <span className="text-[10px] font-bold text-amber-700 dark:text-amber-300">Missing Data?</span>
+          <button
+            type="button"
+            onClick={onResolve}
+            className="px-2 py-1 text-[10px] font-bold text-white bg-amber-600 hover:bg-amber-700 rounded-md transition-colors"
+          >
+            Resolve
+          </button>
+        </div>
+      )}
+    </div>
   );
 }
 
@@ -281,6 +334,22 @@ export default function BakeryMetricsReport({ onFilterInfo, triggerAction, onCon
   const [resolveModal, setResolveModal] = useState<{ shift: 'first' | 'second' } | null>(null);
   const [resolveReason, setResolveReason] = useState('');
   const [savingResolve, setSavingResolve] = useState(false);
+
+  const [missingKpiModal, setMissingKpiModal] = useState<{
+    shift: 'first' | 'second';
+    line: 1 | 2;
+    missingFields: Array<'oee' | 'pounds' | 'waste'>;
+  } | null>(null);
+  const [missingKpiForm, setMissingKpiForm] = useState({ oee: '', pounds: '', waste: '' });
+  const [savingMissingKpi, setSavingMissingKpi] = useState(false);
+  const [missingModalPos, setMissingModalPos] = useState<{ x: number; y: number } | null>(null);
+  const missingDragRef = useRef<{ active: boolean; offsetX: number; offsetY: number }>({ active: false, offsetX: 0, offsetY: 0 });
+
+  // ─── Week Summary confirmation state ──────────────────────────────────
+  const [weekSummaryConfirm, setWeekSummaryConfirm] = useState<null | {
+    missing: Array<{ day: string; shift: string; line: string; kpi: string }>;
+  }>(null);
+  const [checkingWeekSummary, setCheckingWeekSummary] = useState(false);
 
   // ─── Email Report state ───────────────────────────────────────────────
   const [showEmailModal, setShowEmailModal] = useState(false);
@@ -492,6 +561,73 @@ export default function BakeryMetricsReport({ onFilterInfo, triggerAction, onCon
     }
   };
 
+  const openMissingKpiModal = (shift: 'first' | 'second', line: 1 | 2, missingFields: Array<'oee' | 'pounds' | 'waste'>) => {
+    setMissingKpiModal({ shift, line, missingFields });
+    setMissingKpiForm({ oee: '', pounds: '', waste: '' });
+    const width = 520;
+    const startX = Math.max(20, Math.floor((window.innerWidth - width) / 2));
+    setMissingModalPos({ x: startX, y: 120 });
+  };
+
+  const saveMissingKpi = async () => {
+    if (!missingKpiModal || !metricsData.id) return;
+
+    const values: { oee?: number; pounds?: number; waste_lbs?: number } = {};
+    if (missingKpiModal.missingFields.includes('oee')) values.oee = Number(missingKpiForm.oee);
+    if (missingKpiModal.missingFields.includes('pounds')) values.pounds = Number(missingKpiForm.pounds);
+    if (missingKpiModal.missingFields.includes('waste')) values.waste_lbs = Number(missingKpiForm.waste);
+
+    const invalid = Object.values(values).some(v => v === undefined || Number.isNaN(v));
+    if (invalid) {
+      showNotification('Please enter all required missing KPI values', 'warning');
+      return;
+    }
+
+    setSavingMissingKpi(true);
+    try {
+      const res = await api.patch(`/bakery-metrics/both-shifts-records/${metricsData.id}/resolve-missing-kpis`, {
+        shift: missingKpiModal.shift,
+        line: missingKpiModal.line === 1 ? 'die_cut_1' : 'die_cut_2',
+        values,
+        updatedBy: currentUserName,
+      });
+
+      if (res.data?.success && res.data?.record) {
+        setMetricsData(res.data.record);
+      } else {
+        await loadMetricsData(weekFilter, dayFilter);
+      }
+
+      setMissingKpiModal(null);
+      showNotification('Missing KPI values updated', 'success');
+    } catch (err: any) {
+      showNotification(err?.response?.data?.error || 'Failed to update missing KPI values', 'error');
+    } finally {
+      setSavingMissingKpi(false);
+    }
+  };
+
+  useEffect(() => {
+    const onMouseMove = (e: MouseEvent) => {
+      if (!missingDragRef.current.active) return;
+      setMissingModalPos({
+        x: Math.max(8, e.clientX - missingDragRef.current.offsetX),
+        y: Math.max(8, e.clientY - missingDragRef.current.offsetY),
+      });
+    };
+
+    const onMouseUp = () => {
+      missingDragRef.current.active = false;
+    };
+
+    window.addEventListener('mousemove', onMouseMove);
+    window.addEventListener('mouseup', onMouseUp);
+    return () => {
+      window.removeEventListener('mousemove', onMouseMove);
+      window.removeEventListener('mouseup', onMouseUp);
+    };
+  }, []);
+
   // ─── Close dropdowns on outside click ────────────────────────────────────
   useEffect(() => {
     const handleClickOutside = (e: MouseEvent) => {
@@ -666,6 +802,62 @@ export default function BakeryMetricsReport({ onFilterInfo, triggerAction, onCon
     }
   };
 
+  // ─── Week Summary pre-check (scan missing data across the week) ──────────
+  const requestWeekSummary = async () => {
+    if (!weekFilter || weekFilter === 'latest') {
+      showNotification('Select a specific week to calculate averages', 'warning');
+      return;
+    }
+    setCheckingWeekSummary(true);
+    try {
+      const res = await api.get(`/bakery-metrics/both-shifts-records?week=${encodeURIComponent(weekFilter)}`);
+      const records = res.data?.records || res.data || [];
+      const missing: Array<{ day: string; shift: string; line: string; kpi: string }> = [];
+      const shiftLabel = (s: 'first' | 'second') => (s === 'first' ? 'First Shift' : 'Second Shift');
+      const kpiLabel: Record<'oee' | 'pounds' | 'waste', string> = {
+        oee: 'OEE',
+        pounds: 'Volume (lbs)',
+        waste: 'Waste %',
+      };
+      const isMiss = (v: any) => v === undefined || v === null || Number(v) === 0;
+
+      (Array.isArray(records) ? records : []).forEach((rec: any) => {
+        const day = rec.day_of_week || rec.dayOfWeek || rec.day || 'Unknown Day';
+        (['first', 'second'] as const).forEach((s) => {
+          ([1, 2] as const).forEach((line) => {
+            const keyBase = `${s}_shift_die_cut${line}`;
+            const values = {
+              oee: rec[`${keyBase}_oee`],
+              pounds: rec[`${keyBase}_lbs`],
+              waste: rec[`${keyBase}_waste_pct`],
+            };
+            const didNotRun = isMiss(values.oee) && isMiss(values.pounds) && isMiss(values.waste);
+            const lineName = `Die Cut ${line}`;
+            if (didNotRun) {
+              missing.push({ day, shift: shiftLabel(s), line: lineName, kpi: 'All KPIs (no production run)' });
+            } else {
+              (['oee', 'pounds', 'waste'] as Array<'oee' | 'pounds' | 'waste'>).forEach((k) => {
+                if (isMiss(values[k])) {
+                  missing.push({ day, shift: shiftLabel(s), line: lineName, kpi: kpiLabel[k] });
+                }
+              });
+            }
+          });
+        });
+      });
+
+      if (missing.length > 0) {
+        setWeekSummaryConfirm({ missing });
+      } else {
+        await loadWeekSummary();
+      }
+    } catch {
+      showNotification('Failed to check week data', 'error');
+    } finally {
+      setCheckingWeekSummary(false);
+    }
+  };
+
   // ─── Refresh all ─────────────────────────────────────────────────────────
   const refreshAll = async () => {
     showNotification('Refreshing all data...', 'info');
@@ -731,6 +923,113 @@ export default function BakeryMetricsReport({ onFilterInfo, triggerAction, onCon
 
   const d = metricsData;
   const t = kpiTargets;
+
+  type KpiKey = 'oee' | 'pounds' | 'waste';
+  type ShiftKey = 'first' | 'second';
+
+  const isMissingValue = (v: number | undefined | null) => v === undefined || v === null || Number(v) === 0;
+
+  const getLineValues = (shift: ShiftKey, line: 1 | 2) => {
+    const keyBase = `${shift}_shift_die_cut${line}`;
+    return {
+      oee: d[`${keyBase}_oee`] as number | undefined,
+      pounds: d[`${keyBase}_lbs`] as number | undefined,
+      waste: d[`${keyBase}_waste_pct`] as number | undefined,
+    };
+  };
+
+  const getLineState = (shift: ShiftKey, line: 1 | 2) => {
+    const values = getLineValues(shift, line);
+    const didNotRun = isMissingValue(values.oee) && isMissingValue(values.pounds) && isMissingValue(values.waste);
+    const missing = {
+      oee: !didNotRun && isMissingValue(values.oee),
+      pounds: !didNotRun && isMissingValue(values.pounds),
+      waste: !didNotRun && isMissingValue(values.waste),
+    };
+    return { values, didNotRun, partialMissing: missing.oee || missing.pounds || missing.waste, missing };
+  };
+
+  type LineState = {
+    values: { oee: number | undefined | null; pounds: number | undefined | null; waste: number | undefined | null };
+    didNotRun: boolean;
+    missing: { oee: boolean; pounds: boolean; waste: boolean };
+  };
+
+  const combineTwoLines = (
+    kpi: KpiKey,
+    line1: LineState,
+    line2: LineState,
+    mode: 'avg' | 'sum'
+  ): number | null => {
+    const v1 = line1.values[kpi];
+    const v2 = line2.values[kpi];
+    const m1 = line1.missing[kpi];
+    const m2 = line2.missing[kpi];
+
+    if (line1.didNotRun && line2.didNotRun) return null;
+    if (line1.didNotRun && !line2.didNotRun) return m2 ? null : (v2 ?? null);
+    if (line2.didNotRun && !line1.didNotRun) return m1 ? null : (v1 ?? null);
+    if (m1 || m2 || v1 === undefined || v2 === undefined || v1 === null || v2 === null) return null;
+
+    return mode === 'sum' ? Number(v1) + Number(v2) : (Number(v1) + Number(v2)) / 2;
+  };
+
+  const combineTwoShiftsByLine = (line: 1 | 2, kpi: KpiKey): number | null => {
+    const first = getLineState('first', line);
+    const second = getLineState('second', line);
+    const v1 = first.values[kpi];
+    const v2 = second.values[kpi];
+    const m1 = first.missing[kpi];
+    const m2 = second.missing[kpi];
+
+    if (first.didNotRun && second.didNotRun) return null;
+    if (first.didNotRun && !second.didNotRun) return m2 ? null : (v2 ?? null);
+    if (second.didNotRun && !first.didNotRun) return m1 ? null : (v1 ?? null);
+    if (m1 || m2 || v1 === undefined || v2 === undefined || v1 === null || v2 === null) return null;
+
+    if (kpi === 'pounds') return Number(v1) + Number(v2);
+    return (Number(v1) + Number(v2)) / 2;
+  };
+
+  const fsLine1 = getLineState('first', 1);
+  const fsLine2 = getLineState('first', 2);
+  const ssLine1 = getLineState('second', 1);
+  const ssLine2 = getLineState('second', 2);
+
+  const firstShiftTotalOee = combineTwoLines('oee', fsLine1, fsLine2, 'avg');
+  const firstShiftTotalPounds = combineTwoLines('pounds', fsLine1, fsLine2, 'sum');
+  const firstShiftTotalWaste = combineTwoLines('waste', fsLine1, fsLine2, 'avg');
+  const secondShiftTotalOee = combineTwoLines('oee', ssLine1, ssLine2, 'avg');
+  const secondShiftTotalPounds = combineTwoLines('pounds', ssLine1, ssLine2, 'sum');
+  const secondShiftTotalWaste = combineTwoLines('waste', ssLine1, ssLine2, 'avg');
+
+  const bothShiftLine1 = {
+    oee: combineTwoShiftsByLine(1, 'oee'),
+    pounds: combineTwoShiftsByLine(1, 'pounds'),
+    waste: combineTwoShiftsByLine(1, 'waste'),
+  };
+  const bothShiftLine2 = {
+    oee: combineTwoShiftsByLine(2, 'oee'),
+    pounds: combineTwoShiftsByLine(2, 'pounds'),
+    waste: combineTwoShiftsByLine(2, 'waste'),
+  };
+
+  const bothLineState = (line: { oee: number | null; pounds: number | null; waste: number | null }) => {
+    const didNotRun = isMissingValue(line.oee) && isMissingValue(line.pounds) && isMissingValue(line.waste);
+    const missing = {
+      oee: !didNotRun && isMissingValue(line.oee),
+      pounds: !didNotRun && isMissingValue(line.pounds),
+      waste: !didNotRun && isMissingValue(line.waste),
+    };
+    return { didNotRun, missing, values: line };
+  };
+
+  const bsLine1 = bothLineState(bothShiftLine1);
+  const bsLine2 = bothLineState(bothShiftLine2);
+
+  const bothShiftTotalOee = combineTwoLines('oee', bsLine1, bsLine2, 'avg');
+  const bothShiftTotalPounds = combineTwoLines('pounds', bsLine1, bsLine2, 'sum');
+  const bothShiftTotalWaste = combineTwoLines('waste', bsLine1, bsLine2, 'avg');
 
   // ─── Days ─────────────────────────────────────────────────────────────────
   const days = ['Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday'];
@@ -907,10 +1206,15 @@ export default function BakeryMetricsReport({ onFilterInfo, triggerAction, onCon
 
               {/* Week Summary toggle */}
               <button
-                onClick={() => { isWeekSummary ? (() => { setIsWeekSummary(false); loadMetricsData(weekFilter, dayFilter); })() : loadWeekSummary(); }}
-                className="px-3 py-2 text-xs bg-emerald-500/80 border border-emerald-400/50 rounded-lg text-white hover:bg-emerald-600/80 transition-colors font-semibold whitespace-nowrap active:scale-95"
+                onClick={() => { isWeekSummary ? (() => { setIsWeekSummary(false); loadMetricsData(weekFilter, dayFilter); })() : requestWeekSummary(); }}
+                disabled={checkingWeekSummary}
+                className="px-3 py-2 text-xs bg-emerald-500/80 border border-emerald-400/50 rounded-lg text-white hover:bg-emerald-600/80 transition-colors font-semibold whitespace-nowrap active:scale-95 disabled:opacity-70 disabled:cursor-wait"
               >
-                {isWeekSummary ? <><Calendar className="w-3.5 h-3.5 inline mr-1" />Daily</> : <><CalendarCheck className="w-3.5 h-3.5 inline mr-1" />Week Summary</>}
+                {checkingWeekSummary
+                  ? <><Loader2 className="w-3.5 h-3.5 inline mr-1 animate-spin" />Checking...</>
+                  : isWeekSummary
+                    ? <><Calendar className="w-3.5 h-3.5 inline mr-1" />Daily</>
+                    : <><CalendarCheck className="w-3.5 h-3.5 inline mr-1" />Week Summary</>}
               </button>
 
               {/* Compact toggle */}
@@ -973,24 +1277,64 @@ export default function BakeryMetricsReport({ onFilterInfo, triggerAction, onCon
                   </div>
                 </td>
                 <td className="px-4 py-2"><div className="text-xs font-semibold text-gray-900 dark:text-gray-100">Die Cut 1</div><div className="text-[10px] text-gray-500">≥ {t.oee.die_cut_1}%</div></td>
-                <td className="px-4 py-2 bg-blue-50/30 dark:bg-blue-900/10"><MetricCell value={d.first_shift_die_cut1_oee} suffix="%" target={t.oee.die_cut_1} /></td>
-                <td className="px-4 py-2 bg-indigo-50/30 dark:bg-indigo-900/10"><MetricCell value={d.second_shift_die_cut1_oee} suffix="%" target={t.oee.die_cut_1} /></td>
-                <td className="px-4 py-2 bg-purple-50/30 dark:bg-purple-900/10"><MetricCell value={d.both_shift_die_cut1_oee} suffix="%" target={t.oee.die_cut_1} /></td>
-                <td className="px-4 py-2"><StatusBadge value={d.both_shift_die_cut1_oee} target={t.oee.die_cut_1} type="oee" /></td>
+                <td className="px-4 py-2 bg-blue-50/30 dark:bg-blue-900/10">
+                  <MetricCell
+                    value={fsLine1.values.oee}
+                    suffix="%"
+                    target={t.oee.die_cut_1}
+                    missing={fsLine1.missing.oee}
+                    didNotRun={fsLine1.didNotRun}
+                    lineName="Die Cut 1"
+                    onResolve={() => openMissingKpiModal('first', 1, fsLine1.didNotRun ? ['oee', 'pounds', 'waste'] : (['oee', 'pounds', 'waste'].filter((k) => fsLine1.missing[k as KpiKey]) as Array<'oee' | 'pounds' | 'waste'>))}
+                  />
+                </td>
+                <td className="px-4 py-2 bg-indigo-50/30 dark:bg-indigo-900/10">
+                  <MetricCell
+                    value={ssLine1.values.oee}
+                    suffix="%"
+                    target={t.oee.die_cut_1}
+                    missing={ssLine1.missing.oee}
+                    didNotRun={ssLine1.didNotRun}
+                    lineName="Die Cut 1"
+                    onResolve={() => openMissingKpiModal('second', 1, ssLine1.didNotRun ? ['oee', 'pounds', 'waste'] : (['oee', 'pounds', 'waste'].filter((k) => ssLine1.missing[k as KpiKey]) as Array<'oee' | 'pounds' | 'waste'>))}
+                  />
+                </td>
+                <td className="px-4 py-2 bg-purple-50/30 dark:bg-purple-900/10"><MetricCell value={bothShiftLine1.oee} suffix="%" target={t.oee.die_cut_1} didNotRun={bsLine1.didNotRun} lineName="Die Cut 1" /></td>
+                <td className="px-4 py-2"><StatusBadge value={bothShiftLine1.oee} target={t.oee.die_cut_1} type="oee" /></td>
               </tr>
               <tr className="hover:bg-blue-50/50 dark:hover:bg-blue-900/10">
                 <td className="px-4 py-2"><div className="text-xs font-semibold text-gray-900 dark:text-gray-100">Die Cut 2</div><div className="text-[10px] text-gray-500">≥ {t.oee.die_cut_2}%</div></td>
-                <td className="px-4 py-2 bg-blue-50/30 dark:bg-blue-900/10"><MetricCell value={d.first_shift_die_cut2_oee} suffix="%" target={t.oee.die_cut_2} /></td>
-                <td className="px-4 py-2 bg-indigo-50/30 dark:bg-indigo-900/10"><MetricCell value={d.second_shift_die_cut2_oee} suffix="%" target={t.oee.die_cut_2} /></td>
-                <td className="px-4 py-2 bg-purple-50/30 dark:bg-purple-900/10"><MetricCell value={d.both_shift_die_cut2_oee} suffix="%" target={t.oee.die_cut_2} /></td>
-                <td className="px-4 py-2"><StatusBadge value={d.both_shift_die_cut2_oee} target={t.oee.die_cut_2} type="oee" /></td>
+                <td className="px-4 py-2 bg-blue-50/30 dark:bg-blue-900/10">
+                  <MetricCell
+                    value={fsLine2.values.oee}
+                    suffix="%"
+                    target={t.oee.die_cut_2}
+                    missing={fsLine2.missing.oee}
+                    didNotRun={fsLine2.didNotRun}
+                    lineName="Die Cut 2"
+                    onResolve={() => openMissingKpiModal('first', 2, fsLine2.didNotRun ? ['oee', 'pounds', 'waste'] : (['oee', 'pounds', 'waste'].filter((k) => fsLine2.missing[k as KpiKey]) as Array<'oee' | 'pounds' | 'waste'>))}
+                  />
+                </td>
+                <td className="px-4 py-2 bg-indigo-50/30 dark:bg-indigo-900/10">
+                  <MetricCell
+                    value={ssLine2.values.oee}
+                    suffix="%"
+                    target={t.oee.die_cut_2}
+                    missing={ssLine2.missing.oee}
+                    didNotRun={ssLine2.didNotRun}
+                    lineName="Die Cut 2"
+                    onResolve={() => openMissingKpiModal('second', 2, ssLine2.didNotRun ? ['oee', 'pounds', 'waste'] : (['oee', 'pounds', 'waste'].filter((k) => ssLine2.missing[k as KpiKey]) as Array<'oee' | 'pounds' | 'waste'>))}
+                  />
+                </td>
+                <td className="px-4 py-2 bg-purple-50/30 dark:bg-purple-900/10"><MetricCell value={bothShiftLine2.oee} suffix="%" target={t.oee.die_cut_2} didNotRun={bsLine2.didNotRun} lineName="Die Cut 2" /></td>
+                <td className="px-4 py-2"><StatusBadge value={bothShiftLine2.oee} target={t.oee.die_cut_2} type="oee" /></td>
               </tr>
               <tr className="hover:bg-blue-50/50 dark:hover:bg-blue-900/10 border-b-4 border-gray-200 dark:border-gray-600">
                 <td className="px-4 py-2"><div className="text-xs font-black text-gray-900 dark:text-gray-100">Total</div><div className="text-[10px] text-gray-500">≥ {t.oee.total}%</div></td>
-                <td className="px-4 py-2 bg-blue-50/30 dark:bg-blue-900/10"><MetricCell value={d.first_shift_oee} suffix="%" target={t.oee.total} /></td>
-                <td className="px-4 py-2 bg-indigo-50/30 dark:bg-indigo-900/10"><MetricCell value={d.second_shift_oee} suffix="%" target={t.oee.total} /></td>
-                <td className="px-4 py-2 bg-purple-50/30 dark:bg-purple-900/10"><MetricCell value={d.total_oee} suffix="%" target={t.oee.total} /></td>
-                <td className="px-4 py-2"><StatusBadge value={d.total_oee} target={t.oee.total} type="oee" /></td>
+                <td className="px-4 py-2 bg-blue-50/30 dark:bg-blue-900/10"><MetricCell value={firstShiftTotalOee} suffix="%" target={t.oee.total} /></td>
+                <td className="px-4 py-2 bg-indigo-50/30 dark:bg-indigo-900/10"><MetricCell value={secondShiftTotalOee} suffix="%" target={t.oee.total} /></td>
+                <td className="px-4 py-2 bg-purple-50/30 dark:bg-purple-900/10"><MetricCell value={bothShiftTotalOee} suffix="%" target={t.oee.total} /></td>
+                <td className="px-4 py-2"><StatusBadge value={bothShiftTotalOee} target={t.oee.total} type="oee" /></td>
               </tr>
 
               {/* ── VOLUME Section ── */}
@@ -1007,24 +1351,68 @@ export default function BakeryMetricsReport({ onFilterInfo, triggerAction, onCon
                   </div>
                 </td>
                 <td className="px-4 py-2"><div className="text-xs font-semibold text-gray-900 dark:text-gray-100">Die Cut 1</div><div className="text-[10px] text-gray-500">≥ {t.volume.die_cut_1.toLocaleString()} lbs</div></td>
-                <td className="px-4 py-2 bg-blue-50/30 dark:bg-blue-900/10"><MetricCell value={d.first_shift_die_cut1_lbs} suffix=" lbs" target={t.volume.die_cut_1 / 2} isInteger /></td>
-                <td className="px-4 py-2 bg-indigo-50/30 dark:bg-indigo-900/10"><MetricCell value={d.second_shift_die_cut1_lbs} suffix=" lbs" target={t.volume.die_cut_1 / 2} isInteger /></td>
-                <td className="px-4 py-2 bg-purple-50/30 dark:bg-purple-900/10"><MetricCell value={d.both_shift_die_cut1_lbs} suffix=" lbs" target={t.volume.die_cut_1} isInteger /></td>
-                <td className="px-4 py-2"><StatusBadge value={d.both_shift_die_cut1_lbs} target={t.volume.die_cut_1} type="volume" /></td>
+                <td className="px-4 py-2 bg-blue-50/30 dark:bg-blue-900/10">
+                  <MetricCell
+                    value={fsLine1.values.pounds}
+                    suffix=" lbs"
+                    target={t.volume.die_cut_1 / 2}
+                    isInteger
+                    missing={fsLine1.missing.pounds}
+                    didNotRun={fsLine1.didNotRun}
+                    lineName="Die Cut 1"
+                    onResolve={() => openMissingKpiModal('first', 1, fsLine1.didNotRun ? ['oee', 'pounds', 'waste'] : (['oee', 'pounds', 'waste'].filter((k) => fsLine1.missing[k as KpiKey]) as Array<'oee' | 'pounds' | 'waste'>))}
+                  />
+                </td>
+                <td className="px-4 py-2 bg-indigo-50/30 dark:bg-indigo-900/10">
+                  <MetricCell
+                    value={ssLine1.values.pounds}
+                    suffix=" lbs"
+                    target={t.volume.die_cut_1 / 2}
+                    isInteger
+                    missing={ssLine1.missing.pounds}
+                    didNotRun={ssLine1.didNotRun}
+                    lineName="Die Cut 1"
+                    onResolve={() => openMissingKpiModal('second', 1, ssLine1.didNotRun ? ['oee', 'pounds', 'waste'] : (['oee', 'pounds', 'waste'].filter((k) => ssLine1.missing[k as KpiKey]) as Array<'oee' | 'pounds' | 'waste'>))}
+                  />
+                </td>
+                <td className="px-4 py-2 bg-purple-50/30 dark:bg-purple-900/10"><MetricCell value={bothShiftLine1.pounds} suffix=" lbs" target={t.volume.die_cut_1} isInteger didNotRun={bsLine1.didNotRun} lineName="Die Cut 1" /></td>
+                <td className="px-4 py-2"><StatusBadge value={bothShiftLine1.pounds} target={t.volume.die_cut_1} type="volume" /></td>
               </tr>
               <tr className="hover:bg-emerald-50/50 dark:hover:bg-emerald-900/10">
                 <td className="px-4 py-2"><div className="text-xs font-semibold text-gray-900 dark:text-gray-100">Die Cut 2</div><div className="text-[10px] text-gray-500">≥ {t.volume.die_cut_2.toLocaleString()} lbs</div></td>
-                <td className="px-4 py-2 bg-blue-50/30 dark:bg-blue-900/10"><MetricCell value={d.first_shift_die_cut2_lbs} suffix=" lbs" target={t.volume.die_cut_2 / 2} isInteger /></td>
-                <td className="px-4 py-2 bg-indigo-50/30 dark:bg-indigo-900/10"><MetricCell value={d.second_shift_die_cut2_lbs} suffix=" lbs" target={t.volume.die_cut_2 / 2} isInteger /></td>
-                <td className="px-4 py-2 bg-purple-50/30 dark:bg-purple-900/10"><MetricCell value={d.both_shift_die_cut2_lbs} suffix=" lbs" target={t.volume.die_cut_2} isInteger /></td>
-                <td className="px-4 py-2"><StatusBadge value={d.both_shift_die_cut2_lbs} target={t.volume.die_cut_2} type="volume" /></td>
+                <td className="px-4 py-2 bg-blue-50/30 dark:bg-blue-900/10">
+                  <MetricCell
+                    value={fsLine2.values.pounds}
+                    suffix=" lbs"
+                    target={t.volume.die_cut_2 / 2}
+                    isInteger
+                    missing={fsLine2.missing.pounds}
+                    didNotRun={fsLine2.didNotRun}
+                    lineName="Die Cut 2"
+                    onResolve={() => openMissingKpiModal('first', 2, fsLine2.didNotRun ? ['oee', 'pounds', 'waste'] : (['oee', 'pounds', 'waste'].filter((k) => fsLine2.missing[k as KpiKey]) as Array<'oee' | 'pounds' | 'waste'>))}
+                  />
+                </td>
+                <td className="px-4 py-2 bg-indigo-50/30 dark:bg-indigo-900/10">
+                  <MetricCell
+                    value={ssLine2.values.pounds}
+                    suffix=" lbs"
+                    target={t.volume.die_cut_2 / 2}
+                    isInteger
+                    missing={ssLine2.missing.pounds}
+                    didNotRun={ssLine2.didNotRun}
+                    lineName="Die Cut 2"
+                    onResolve={() => openMissingKpiModal('second', 2, ssLine2.didNotRun ? ['oee', 'pounds', 'waste'] : (['oee', 'pounds', 'waste'].filter((k) => ssLine2.missing[k as KpiKey]) as Array<'oee' | 'pounds' | 'waste'>))}
+                  />
+                </td>
+                <td className="px-4 py-2 bg-purple-50/30 dark:bg-purple-900/10"><MetricCell value={bothShiftLine2.pounds} suffix=" lbs" target={t.volume.die_cut_2} isInteger didNotRun={bsLine2.didNotRun} lineName="Die Cut 2" /></td>
+                <td className="px-4 py-2"><StatusBadge value={bothShiftLine2.pounds} target={t.volume.die_cut_2} type="volume" /></td>
               </tr>
               <tr className="hover:bg-emerald-50/50 dark:hover:bg-emerald-900/10 border-b-4 border-gray-200 dark:border-gray-600">
                 <td className="px-4 py-2"><div className="text-xs font-black text-gray-900 dark:text-gray-100">Total</div><div className="text-[10px] text-gray-500">≥ {t.volume.total.toLocaleString()} lbs</div></td>
-                <td className="px-4 py-2 bg-blue-50/30 dark:bg-blue-900/10"><MetricCell value={d.first_shift_production} suffix=" lbs" target={t.volume.total / 2} isInteger /></td>
-                <td className="px-4 py-2 bg-indigo-50/30 dark:bg-indigo-900/10"><MetricCell value={d.second_shift_production} suffix=" lbs" target={t.volume.total / 2} isInteger /></td>
-                <td className="px-4 py-2 bg-purple-50/30 dark:bg-purple-900/10"><MetricCell value={d.total_production} suffix=" lbs" target={t.volume.total} isInteger /></td>
-                <td className="px-4 py-2"><StatusBadge value={d.total_production} target={t.volume.total} type="volume" /></td>
+                <td className="px-4 py-2 bg-blue-50/30 dark:bg-blue-900/10"><MetricCell value={firstShiftTotalPounds} suffix=" lbs" target={t.volume.total / 2} isInteger /></td>
+                <td className="px-4 py-2 bg-indigo-50/30 dark:bg-indigo-900/10"><MetricCell value={secondShiftTotalPounds} suffix=" lbs" target={t.volume.total / 2} isInteger /></td>
+                <td className="px-4 py-2 bg-purple-50/30 dark:bg-purple-900/10"><MetricCell value={bothShiftTotalPounds} suffix=" lbs" target={t.volume.total} isInteger /></td>
+                <td className="px-4 py-2"><StatusBadge value={bothShiftTotalPounds} target={t.volume.total} type="volume" /></td>
               </tr>
 
               {/* ── WASTE Section ── */}
@@ -1041,24 +1429,68 @@ export default function BakeryMetricsReport({ onFilterInfo, triggerAction, onCon
                   </div>
                 </td>
                 <td className="px-4 py-2"><div className="text-xs font-semibold text-gray-900 dark:text-gray-100">Die Cut 1</div><div className="text-[10px] text-gray-500">≤ {t.waste.die_cut_1}%</div></td>
-                <td className="px-4 py-2 bg-blue-50/30 dark:bg-blue-900/10"><MetricCell value={d.first_shift_die_cut1_waste_pct} suffix="%" target={t.waste.die_cut_1} isReverse /></td>
-                <td className="px-4 py-2 bg-indigo-50/30 dark:bg-indigo-900/10"><MetricCell value={d.second_shift_die_cut1_waste_pct} suffix="%" target={t.waste.die_cut_1} isReverse /></td>
-                <td className="px-4 py-2 bg-purple-50/30 dark:bg-purple-900/10"><MetricCell value={d.both_shift_die_cut1_waste_pct} suffix="%" target={t.waste.die_cut_1} isReverse /></td>
-                <td className="px-4 py-2"><StatusBadge value={d.both_shift_die_cut1_waste_pct} target={t.waste.die_cut_1} type="waste" /></td>
+                <td className="px-4 py-2 bg-blue-50/30 dark:bg-blue-900/10">
+                  <MetricCell
+                    value={fsLine1.values.waste}
+                    suffix="%"
+                    target={t.waste.die_cut_1}
+                    isReverse
+                    missing={fsLine1.missing.waste}
+                    didNotRun={fsLine1.didNotRun}
+                    lineName="Die Cut 1"
+                    onResolve={() => openMissingKpiModal('first', 1, fsLine1.didNotRun ? ['oee', 'pounds', 'waste'] : (['oee', 'pounds', 'waste'].filter((k) => fsLine1.missing[k as KpiKey]) as Array<'oee' | 'pounds' | 'waste'>))}
+                  />
+                </td>
+                <td className="px-4 py-2 bg-indigo-50/30 dark:bg-indigo-900/10">
+                  <MetricCell
+                    value={ssLine1.values.waste}
+                    suffix="%"
+                    target={t.waste.die_cut_1}
+                    isReverse
+                    missing={ssLine1.missing.waste}
+                    didNotRun={ssLine1.didNotRun}
+                    lineName="Die Cut 1"
+                    onResolve={() => openMissingKpiModal('second', 1, ssLine1.didNotRun ? ['oee', 'pounds', 'waste'] : (['oee', 'pounds', 'waste'].filter((k) => ssLine1.missing[k as KpiKey]) as Array<'oee' | 'pounds' | 'waste'>))}
+                  />
+                </td>
+                <td className="px-4 py-2 bg-purple-50/30 dark:bg-purple-900/10"><MetricCell value={bothShiftLine1.waste} suffix="%" target={t.waste.die_cut_1} isReverse didNotRun={bsLine1.didNotRun} lineName="Die Cut 1" /></td>
+                <td className="px-4 py-2"><StatusBadge value={bothShiftLine1.waste} target={t.waste.die_cut_1} type="waste" /></td>
               </tr>
               <tr className="hover:bg-red-50/50 dark:hover:bg-red-900/10">
                 <td className="px-4 py-2"><div className="text-xs font-semibold text-gray-900 dark:text-gray-100">Die Cut 2</div><div className="text-[10px] text-gray-500">≤ {t.waste.die_cut_2}%</div></td>
-                <td className="px-4 py-2 bg-blue-50/30 dark:bg-blue-900/10"><MetricCell value={d.first_shift_die_cut2_waste_pct} suffix="%" target={t.waste.die_cut_2} isReverse /></td>
-                <td className="px-4 py-2 bg-indigo-50/30 dark:bg-indigo-900/10"><MetricCell value={d.second_shift_die_cut2_waste_pct} suffix="%" target={t.waste.die_cut_2} isReverse /></td>
-                <td className="px-4 py-2 bg-purple-50/30 dark:bg-purple-900/10"><MetricCell value={d.both_shift_die_cut2_waste_pct} suffix="%" target={t.waste.die_cut_2} isReverse /></td>
-                <td className="px-4 py-2"><StatusBadge value={d.both_shift_die_cut2_waste_pct} target={t.waste.die_cut_2} type="waste" /></td>
+                <td className="px-4 py-2 bg-blue-50/30 dark:bg-blue-900/10">
+                  <MetricCell
+                    value={fsLine2.values.waste}
+                    suffix="%"
+                    target={t.waste.die_cut_2}
+                    isReverse
+                    missing={fsLine2.missing.waste}
+                    didNotRun={fsLine2.didNotRun}
+                    lineName="Die Cut 2"
+                    onResolve={() => openMissingKpiModal('first', 2, fsLine2.didNotRun ? ['oee', 'pounds', 'waste'] : (['oee', 'pounds', 'waste'].filter((k) => fsLine2.missing[k as KpiKey]) as Array<'oee' | 'pounds' | 'waste'>))}
+                  />
+                </td>
+                <td className="px-4 py-2 bg-indigo-50/30 dark:bg-indigo-900/10">
+                  <MetricCell
+                    value={ssLine2.values.waste}
+                    suffix="%"
+                    target={t.waste.die_cut_2}
+                    isReverse
+                    missing={ssLine2.missing.waste}
+                    didNotRun={ssLine2.didNotRun}
+                    lineName="Die Cut 2"
+                    onResolve={() => openMissingKpiModal('second', 2, ssLine2.didNotRun ? ['oee', 'pounds', 'waste'] : (['oee', 'pounds', 'waste'].filter((k) => ssLine2.missing[k as KpiKey]) as Array<'oee' | 'pounds' | 'waste'>))}
+                  />
+                </td>
+                <td className="px-4 py-2 bg-purple-50/30 dark:bg-purple-900/10"><MetricCell value={bothShiftLine2.waste} suffix="%" target={t.waste.die_cut_2} isReverse didNotRun={bsLine2.didNotRun} lineName="Die Cut 2" /></td>
+                <td className="px-4 py-2"><StatusBadge value={bothShiftLine2.waste} target={t.waste.die_cut_2} type="waste" /></td>
               </tr>
               <tr className="hover:bg-red-50/50 dark:hover:bg-red-900/10">
                 <td className="px-4 py-2"><div className="text-xs font-black text-gray-900 dark:text-gray-100">Total</div><div className="text-[10px] text-gray-500">≤ {t.waste.total}%</div></td>
-                <td className="px-4 py-2 bg-blue-50/30 dark:bg-blue-900/10"><MetricCell value={d.first_shift_waste_percent} suffix="%" target={t.waste.total} isReverse /></td>
-                <td className="px-4 py-2 bg-indigo-50/30 dark:bg-indigo-900/10"><MetricCell value={d.second_shift_waste_percent} suffix="%" target={t.waste.total} isReverse /></td>
-                <td className="px-4 py-2 bg-purple-50/30 dark:bg-purple-900/10"><MetricCell value={d.total_waste_percent} suffix="%" target={t.waste.total} isReverse /></td>
-                <td className="px-4 py-2"><StatusBadge value={d.total_waste_percent} target={t.waste.total} type="waste" /></td>
+                <td className="px-4 py-2 bg-blue-50/30 dark:bg-blue-900/10"><MetricCell value={firstShiftTotalWaste} suffix="%" target={t.waste.total} isReverse /></td>
+                <td className="px-4 py-2 bg-indigo-50/30 dark:bg-indigo-900/10"><MetricCell value={secondShiftTotalWaste} suffix="%" target={t.waste.total} isReverse /></td>
+                <td className="px-4 py-2 bg-purple-50/30 dark:bg-purple-900/10"><MetricCell value={bothShiftTotalWaste} suffix="%" target={t.waste.total} isReverse /></td>
+                <td className="px-4 py-2"><StatusBadge value={bothShiftTotalWaste} target={t.waste.total} type="waste" /></td>
               </tr>
             </tbody>
           </table>
@@ -1300,6 +1732,114 @@ export default function BakeryMetricsReport({ onFilterInfo, triggerAction, onCon
         />
       </div>
 
+      {/* ═══ MISSING KPI RESOLVE MODAL (DRAGGABLE, NO BLUR) ═══ */}
+      {missingKpiModal && (
+        <div className="fixed inset-0 z-50 bg-black/20" onClick={() => setMissingKpiModal(null)}>
+          <div
+            className="fixed w-full max-w-[520px] bg-white dark:bg-gray-800 rounded-2xl shadow-2xl border border-gray-200 dark:border-gray-700"
+            style={{ left: missingModalPos?.x ?? 80, top: missingModalPos?.y ?? 120 }}
+            onClick={(e) => e.stopPropagation()}
+          >
+            <div
+              className="px-5 py-4 border-b border-gray-200 dark:border-gray-700 cursor-move select-none bg-gradient-to-r from-amber-500 to-orange-500 rounded-t-2xl"
+              onMouseDown={(e) => {
+                missingDragRef.current.active = true;
+                const rect = (e.currentTarget.parentElement as HTMLDivElement).getBoundingClientRect();
+                missingDragRef.current.offsetX = e.clientX - rect.left;
+                missingDragRef.current.offsetY = e.clientY - rect.top;
+              }}
+            >
+              <div className="flex items-center justify-between gap-3">
+                <div>
+                  <h3 className="text-sm font-bold text-white">Resolve Missing KPI Data</h3>
+                  <p className="text-xs text-amber-100 mt-0.5">
+                    {missingKpiModal.shift === 'first' ? 'First Shift' : 'Second Shift'} · Die Cut {missingKpiModal.line}
+                  </p>
+                </div>
+                <button
+                  type="button"
+                  onClick={() => setMissingKpiModal(null)}
+                  title="Close missing KPI modal"
+                  className="p-1.5 rounded-lg hover:bg-white/20 text-white"
+                >
+                  <X className="w-4 h-4" />
+                </button>
+              </div>
+            </div>
+
+            <div className="p-5 space-y-4">
+              {missingKpiModal.missingFields.includes('oee') && (
+                <div>
+                  <label className="block text-xs font-semibold text-gray-700 dark:text-gray-300 mb-1.5">OEE (%)</label>
+                  <input
+                    type="number"
+                    min={0}
+                    max={100}
+                    step={0.1}
+                    title="OEE percent"
+                    placeholder="Enter OEE %"
+                    value={missingKpiForm.oee}
+                    onChange={(e) => setMissingKpiForm((prev) => ({ ...prev, oee: e.target.value }))}
+                    className="w-full px-3 py-2 rounded-lg border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-700 text-sm text-gray-900 dark:text-white focus:ring-2 focus:ring-amber-500"
+                  />
+                </div>
+              )}
+
+              {missingKpiModal.missingFields.includes('pounds') && (
+                <div>
+                  <label className="block text-xs font-semibold text-gray-700 dark:text-gray-300 mb-1.5">Pounds (lbs)</label>
+                  <input
+                    type="number"
+                    min={0}
+                    step={0.1}
+                    title="Pounds in lbs"
+                    placeholder="Enter pounds"
+                    value={missingKpiForm.pounds}
+                    onChange={(e) => setMissingKpiForm((prev) => ({ ...prev, pounds: e.target.value }))}
+                    className="w-full px-3 py-2 rounded-lg border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-700 text-sm text-gray-900 dark:text-white focus:ring-2 focus:ring-amber-500"
+                  />
+                </div>
+              )}
+
+              {missingKpiModal.missingFields.includes('waste') && (
+                <div>
+                  <label className="block text-xs font-semibold text-gray-700 dark:text-gray-300 mb-1.5">Waste (lbs)</label>
+                  <input
+                    type="number"
+                    min={0}
+                    step={0.1}
+                    title="Waste in lbs"
+                    placeholder="Enter waste lbs"
+                    value={missingKpiForm.waste}
+                    onChange={(e) => setMissingKpiForm((prev) => ({ ...prev, waste: e.target.value }))}
+                    className="w-full px-3 py-2 rounded-lg border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-700 text-sm text-gray-900 dark:text-white focus:ring-2 focus:ring-amber-500"
+                  />
+                </div>
+              )}
+
+              <div className="flex items-center justify-end gap-2 pt-2">
+                <button
+                  type="button"
+                  onClick={() => setMissingKpiModal(null)}
+                  className="px-4 py-2 text-xs font-semibold text-gray-700 dark:text-gray-300 bg-gray-100 dark:bg-gray-700 rounded-lg hover:bg-gray-200 dark:hover:bg-gray-600"
+                >
+                  Cancel
+                </button>
+                <button
+                  type="button"
+                  onClick={saveMissingKpi}
+                  disabled={savingMissingKpi}
+                  className="px-4 py-2 text-xs font-bold text-white bg-amber-600 hover:bg-amber-700 rounded-lg disabled:opacity-50 flex items-center gap-1.5"
+                >
+                  {savingMissingKpi ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Send className="w-3.5 h-3.5" />}
+                  {savingMissingKpi ? 'Updating...' : 'Save/Update'}
+                </button>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
+
       {/* ═══ RESOLVE MODAL ═══ */}
       {resolveModal && (
         <div className="fixed inset-0 bg-black/50 backdrop-blur-sm z-50 flex items-center justify-center p-4" onClick={() => { setResolveModal(null); setResolveReason(''); }}>
@@ -1391,7 +1931,7 @@ export default function BakeryMetricsReport({ onFilterInfo, triggerAction, onCon
                 </h3>
                 <p className="text-xs text-blue-200 mt-0.5">Send bakery production report to selected users</p>
               </div>
-              <button onClick={() => setShowEmailModal(false)} className="text-white/70 hover:text-white transition-colors">
+              <button onClick={() => setShowEmailModal(false)} title="Close email modal" className="text-white/70 hover:text-white transition-colors">
                 <X className="w-5 h-5" />
               </button>
             </div>
@@ -1404,6 +1944,7 @@ export default function BakeryMetricsReport({ onFilterInfo, triggerAction, onCon
                   <select
                     value={emailWeek}
                     onChange={e => setEmailWeek(e.target.value)}
+                    title="Select week"
                     className="w-full rounded-lg border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-700 text-sm px-3 py-2 text-gray-900 dark:text-white focus:ring-2 focus:ring-blue-500"
                   >
                     <option value="">Select week</option>
@@ -1415,6 +1956,7 @@ export default function BakeryMetricsReport({ onFilterInfo, triggerAction, onCon
                   <select
                     value={emailDay}
                     onChange={e => setEmailDay(e.target.value)}
+                    title="Select day"
                     className="w-full rounded-lg border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-700 text-sm px-3 py-2 text-gray-900 dark:text-white focus:ring-2 focus:ring-blue-500"
                   >
                     {['Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday'].map(d => (
@@ -1513,6 +2055,84 @@ export default function BakeryMetricsReport({ onFilterInfo, triggerAction, onCon
         </div>
       )}
 
+      {/* Week Summary — Missing Data Confirmation Modal */}
+      {weekSummaryConfirm && (
+        <div className="fixed inset-0 z-[90] flex items-center justify-center bg-black/60 backdrop-blur-sm p-4 animate-overlay-fade-in">
+          <div className="relative w-full max-w-xl bg-white dark:bg-gray-900 rounded-2xl shadow-2xl border border-gray-200 dark:border-gray-700 overflow-hidden animate-bounce-in">
+            {/* Header */}
+            <div className="px-6 py-4 bg-gradient-to-r from-amber-500 to-orange-500 text-white">
+              <div className="flex items-start gap-3">
+                <div className="flex-shrink-0 w-10 h-10 rounded-full bg-white/20 backdrop-blur-sm flex items-center justify-center animate-gentle-float">
+                  <AlertTriangle className="w-5 h-5" />
+                </div>
+                <div className="flex-1 min-w-0">
+                  <h3 className="text-base font-bold leading-tight">Heads up — some data is missing</h3>
+                  <p className="text-xs text-white/90 mt-0.5">Please review before viewing the week summary.</p>
+                </div>
+                <button
+                  onClick={() => setWeekSummaryConfirm(null)}
+                  className="ml-2 text-white/80 hover:text-white hover:bg-white/20 rounded-md p-1 transition-colors"
+                  title="Close"
+                  aria-label="Close"
+                >
+                  <X className="w-4 h-4" />
+                </button>
+              </div>
+            </div>
+
+            {/* Body */}
+            <div className="px-6 py-5 text-sm text-gray-700 dark:text-gray-200 space-y-3">
+              <p className="leading-relaxed">
+                The <span className="font-semibold">Week Summary</span> for{' '}
+                <span className="font-semibold text-emerald-700 dark:text-emerald-400">{weekFilter}</span>{' '}
+                will be computed using only the data currently available. A few entries are missing and will not be included in the KPI averages.
+              </p>
+              <p className="text-xs text-gray-500 dark:text-gray-400 leading-relaxed">
+                For the most accurate picture of both Die Cut lines, we recommend resolving the items below first. You can still proceed if you&apos;d like a quick look at the week so far.
+              </p>
+
+              <div className="rounded-lg border border-amber-200 dark:border-amber-800/60 bg-amber-50 dark:bg-amber-900/20 overflow-hidden">
+                <div className="px-3 py-2 bg-amber-100/70 dark:bg-amber-900/40 text-[11px] font-semibold uppercase tracking-wide text-amber-800 dark:text-amber-200 flex items-center justify-between">
+                  <span>Missing entries ({weekSummaryConfirm.missing.length})</span>
+                  <span className="text-amber-700 dark:text-amber-300 normal-case font-medium">Day · Shift · Line · KPI</span>
+                </div>
+                <div className="max-h-60 overflow-y-auto divide-y divide-amber-100 dark:divide-amber-900/40">
+                  {weekSummaryConfirm.missing.map((m, i) => (
+                    <div key={i} className="px-3 py-2 text-xs flex items-center gap-2">
+                      <ClipboardX className="w-3.5 h-3.5 text-amber-600 dark:text-amber-400 flex-shrink-0" />
+                      <span className="font-semibold text-gray-800 dark:text-gray-100 w-20 flex-shrink-0 truncate">{m.day}</span>
+                      <span className="text-gray-600 dark:text-gray-300 w-24 flex-shrink-0 truncate">{m.shift}</span>
+                      <span className="text-gray-600 dark:text-gray-300 w-20 flex-shrink-0 truncate">{m.line}</span>
+                      <span className="text-amber-700 dark:text-amber-300 font-medium truncate">{m.kpi}</span>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            </div>
+
+            {/* Footer */}
+            <div className="px-6 py-4 bg-gray-50 dark:bg-gray-800/60 border-t border-gray-200 dark:border-gray-700 flex items-center justify-end gap-2">
+              <button
+                onClick={() => setWeekSummaryConfirm(null)}
+                className="px-4 py-2 text-sm font-medium text-gray-700 dark:text-gray-200 border border-gray-300 dark:border-gray-600 rounded-lg hover:bg-gray-100 dark:hover:bg-gray-700 transition-colors"
+              >
+                Go Back
+              </button>
+              <button
+                onClick={async () => {
+                  setWeekSummaryConfirm(null);
+                  await loadWeekSummary();
+                }}
+                className="px-5 py-2 text-sm font-bold text-white bg-gradient-to-r from-emerald-500 to-emerald-600 rounded-lg hover:from-emerald-600 hover:to-emerald-700 transition-all flex items-center gap-2 shadow-md active:scale-95"
+              >
+                <CalendarCheck className="w-4 h-4" />
+                Proceed
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
       <style jsx>{`
         @keyframes fadeSlideIn {
           from { opacity: 0; transform: translateY(8px); }
@@ -1557,6 +2177,15 @@ export default function BakeryMetricsReport({ onFilterInfo, triggerAction, onCon
           100% { box-shadow: 0 0 0 0 rgba(34, 197, 94, 0); }
         }
         .animate-ripple-glow { animation: rippleGlow 2s ease-in-out infinite; }
+
+        @keyframes bounceIn {
+          0%   { opacity: 0; transform: scale(0.3) translateY(-40px); }
+          50%  { opacity: 1; transform: scale(1.05) translateY(6px); }
+          70%  { transform: scale(0.97) translateY(-3px); }
+          85%  { transform: scale(1.01) translateY(1px); }
+          100% { transform: scale(1) translateY(0); }
+        }
+        .animate-bounce-in { animation: bounceIn 0.6s cubic-bezier(0.22, 1.2, 0.36, 1) both; }
       `}</style>
     </div>
   );

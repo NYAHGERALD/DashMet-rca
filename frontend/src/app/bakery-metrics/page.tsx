@@ -4,14 +4,15 @@ import { useState, useCallback, useEffect, useRef } from 'react';
 import { useRouter } from 'next/navigation';
 import { useAuth } from '@/components/providers/AuthProvider';
 import ProtectedRoute from '@/components/auth/ProtectedRoute';
-import { Wheat, FileBarChart, LayoutDashboard, FileText, BarChart3, Calendar, Clock, RefreshCw, FileSpreadsheet, Sparkles, History, ClipboardList, X, Plus, Lightbulb, Check, AlertTriangle, Info, Target, Trophy } from 'lucide-react';
+import { Wheat, FileBarChart, LayoutDashboard, FileText, BarChart3, Calendar, Clock, RefreshCw, FileSpreadsheet, Sparkles, History, ClipboardList, X, Plus, Lightbulb, Check, AlertTriangle, Info, Target, Trophy, Users } from 'lucide-react';
 import BakeryMetricsForm from '@/components/bakery-metrics/BakeryMetricsForm';
 import BakeryMetricsReport from '@/components/bakery-metrics/BakeryMetricsReport';
 import BakeryMetricsInsights from '@/components/bakery-metrics/BakeryMetricsInsightsV2';
 import BakeryDashboardOverview from '@/components/bakery-metrics/BakeryDashboardOverview';
 import BakeryOperationalDailyReport from '@/components/bakery-metrics/BakeryOperationalDailyReport';
+import BakeryStandupMeetingReport from '@/components/bakery-metrics/BakeryStandupMeetingReport';
 
-type Tab = 'dashboard' | 'report' | 'insights' | 'daily-report';
+type Tab = 'dashboard' | 'report' | 'insights' | 'daily-report' | 'standup';
 
 export default function BakeryMetricsPage() {
   const router = useRouter();
@@ -131,6 +132,7 @@ export default function BakeryMetricsPage() {
     { id: 'report', label: 'View Reports', icon: FileBarChart },
     { id: 'insights', label: 'AI Insights', icon: Sparkles },
     { id: 'daily-report', label: 'Operational Daily Reports', icon: ClipboardList },
+    { id: 'standup', label: 'Standup Meeting Report', icon: Users },
   ];
 
   return (
@@ -339,6 +341,10 @@ export default function BakeryMetricsPage() {
 
           {activeTab === 'daily-report' && (
             <BakeryOperationalDailyReport />
+          )}
+
+          {activeTab === 'standup' && (
+            <BakeryStandupMeetingReport />
           )}
         </div>
 

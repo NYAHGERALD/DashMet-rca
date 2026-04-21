@@ -3941,6 +3941,37 @@ model BakeryDailyReport {
 }
 
 // ═══════════════════════════════════════════════════════════════════════════════
+// BAKERY STANDUP MEETING REPORTS (AI-generated supervisor briefings)
+// ═══════════════════════════════════════════════════════════════════════════════
+
+model BakeryStandupReport {
+  id                 String   @id @default(uuid())
+  weekName           String   @db.VarChar(100)
+  dayOfWeek          String   @db.VarChar(20)
+  reportDate         DateTime @db.Date
+  reportData         Json     // Full AI-generated conversational report payload
+  rawMetrics         Json?    // Snapshot of metrics at generation time
+  metaData           Json?    // Meta info (model, generatedAt, etc.)
+  supervisorComments String?  @db.Text
+  commentsUpdatedBy  String?  @db.VarChar(255)
+  commentsUpdatedAt  DateTime?
+  aiModel            String?  @db.VarChar(50)
+  tokenUsage         Int?
+  durationMs         Int?
+  generatedBy        String   @db.VarChar(255)
+  generatedByUserId  String?  @db.VarChar(255)
+  createdAt          DateTime @default(now())
+  updatedAt          DateTime @updatedAt
+
+  @@unique([weekName, dayOfWeek])
+  @@index([reportDate])
+  @@index([weekName])
+  @@index([generatedByUserId])
+  @@index([createdAt])
+  @@map("bakery_standup_reports")
+}
+
+// ═══════════════════════════════════════════════════════════════════════════════
 // BAKERY AI INSIGHTS CACHE & LOGS
 // ═══════════════════════════════════════════════════════════════════════════════
 

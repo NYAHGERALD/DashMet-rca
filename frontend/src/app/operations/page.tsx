@@ -7,9 +7,14 @@ import ProtectedRoute from '@/components/auth/ProtectedRoute';
 import api from '@/lib/api';
 import ImageCropModal from '@/components/ui/ImageCropModal';
 import PhotoLightbox from '@/components/ui/PhotoLightbox';
+import ReportIssueFromDocumentModal, { type ExtractionResult } from '@/components/operations/ReportIssueFromDocumentModal';
+import ReviewExtractedIssuesModal from '@/components/operations/ReviewExtractedIssuesModal';
 import {
   Wrench,
   Plus,
+  FileText,
+  Edit3,
+  Sparkles,
   Search,
   Filter,
   RefreshCw,
@@ -41,6 +46,10 @@ import {
   GripHorizontal,
   Calendar,
   Hourglass,
+  CheckSquare,
+  Square,
+  ShieldAlert,
+  History,
 } from 'lucide-react';
 import { format } from 'date-fns';
 
@@ -188,11 +197,121 @@ export default function OperationsPage() {
   const [sortDirection, setSortDirection] = useState<'asc' | 'desc'>('asc');
   const contextMenuRef = useRef<HTMLDivElement>(null);
 
+  // ─── Multi-select + Delete confirm ────────────────────────────────────────
+  const [selectionMode, setSelectionMode] = useState(false);
+  const [selectedRowIds, setSelectedRowIds] = useState<Set<string>>(new Set());
+  const [deleteModal, setDeleteModal] = useState<{
+    issues: MachineIssue[];
+    strict: boolean;
+    challenge: string; // issue number the user must type (strict mode)
+    typed: string;
+    deleting: boolean;
+  } | null>(null);
+
+  // ─── Activity log modal ──────────────────────────────────────────────────
+  interface ActivityLogEntry {
+    id: string;
+    action: 'CREATE' | 'UPDATE' | 'DELETE' | 'LOGIN' | 'LOGOUT' | 'EXPORT' | 'VIEW';
+    entityId: string;
+    createdAt: string;
+    changes: any;
+    ipAddress?: string | null;
+    user: { id: string; name: string; email: string } | null;
+  }
+  const [showLogModal, setShowLogModal] = useState(false);
+  const [activityLogs, setActivityLogs] = useState<ActivityLogEntry[]>([]);
+  const [loadingLogs, setLoadingLogs] = useState(false);
+  const [logFilter, setLogFilter] = useState<'ALL' | 'CREATE' | 'UPDATE' | 'DELETE'>('ALL');
+  const [logSearch, setLogSearch] = useState('');
+
+  // Draggable + independently resizable (H/V) activity-log window.
+  // Default = minimum; cannot be made smaller than this.
+  const LOG_MIN_W = 880;
+  const LOG_MIN_H = 560;
+  const [logPos, setLogPos] = useState<{ x: number; y: number }>({ x: 0, y: 0 });
+  const [logSize, setLogSize] = useState<{ w: number; h: number }>({ w: LOG_MIN_W, h: LOG_MIN_H });
+  const logDragRef = useRef<{ startX: number; startY: number; origX: number; origY: number } | null>(null);
+  const logResizeRef = useRef<{ startX: number; startY: number; origW: number; origH: number; axis: 'x' | 'y' | 'xy' } | null>(null);
+
+  const centerLogWindow = useCallback(() => {
+    if (typeof window === 'undefined') return;
+    setLogPos({
+      x: Math.max(16, Math.round((window.innerWidth - LOG_MIN_W) / 2)),
+      y: Math.max(16, Math.round((window.innerHeight - LOG_MIN_H) / 2)),
+    });
+  }, []);
+
+  const onLogDragStart = useCallback((e: React.MouseEvent) => {
+    e.preventDefault();
+    logDragRef.current = { startX: e.clientX, startY: e.clientY, origX: logPos.x, origY: logPos.y };
+    const onMove = (ev: MouseEvent) => {
+      if (!logDragRef.current) return;
+      const dx = ev.clientX - logDragRef.current.startX;
+      const dy = ev.clientY - logDragRef.current.startY;
+      setLogPos({ x: logDragRef.current.origX + dx, y: logDragRef.current.origY + dy });
+    };
+    const onUp = () => {
+      logDragRef.current = null;
+      window.removeEventListener('mousemove', onMove);
+      window.removeEventListener('mouseup', onUp);
+    };
+    window.addEventListener('mousemove', onMove);
+    window.addEventListener('mouseup', onUp);
+  }, [logPos.x, logPos.y]);
+
+  const onLogResizeStart = useCallback((axis: 'x' | 'y' | 'xy') => (e: React.MouseEvent) => {
+    e.preventDefault();
+    e.stopPropagation();
+    logResizeRef.current = { startX: e.clientX, startY: e.clientY, origW: logSize.w, origH: logSize.h, axis };
+    const onMove = (ev: MouseEvent) => {
+      if (!logResizeRef.current) return;
+      const { startX, startY, origW, origH, axis: ax } = logResizeRef.current;
+      const dx = ev.clientX - startX;
+      const dy = ev.clientY - startY;
+      setLogSize({
+        w: ax === 'y' ? origW : Math.max(LOG_MIN_W, origW + dx),
+        h: ax === 'x' ? origH : Math.max(LOG_MIN_H, origH + dy),
+      });
+    };
+    const onUp = () => {
+      logResizeRef.current = null;
+      window.removeEventListener('mousemove', onMove);
+      window.removeEventListener('mouseup', onUp);
+    };
+    window.addEventListener('mousemove', onMove);
+    window.addEventListener('mouseup', onUp);
+  }, [logSize.w, logSize.h]);
+
+  const openActivityLog = async () => {
+    setShowLogModal(true);
+    centerLogWindow();
+    setLoadingLogs(true);
+    try {
+      const res = await api.get('/operations/issues/audit-logs');
+      setActivityLogs(res.data?.data || []);
+    } catch (err: any) {
+      setError(err?.response?.data?.error || 'Failed to load activity log');
+    } finally {
+      setLoadingLogs(false);
+    }
+  };
+
   // ─── Modals ─────────────────────────────────────────────────────────────────
   const [showReportModal, setShowReportModal] = useState(false);
   const [showDetailModal, setShowDetailModal] = useState(false);
   const [selectedIssue, setSelectedIssue] = useState<MachineIssue | null>(null);
   const [submitting, setSubmitting] = useState(false);
+
+  // ─── Submit dropdown + Document-import modal ────────────────────────────────
+  const [submitMenuOpen, setSubmitMenuOpen] = useState(false);
+  const [showDocumentModal, setShowDocumentModal] = useState(false);
+  const [documentSourceFile, setDocumentSourceFile] = useState<File | null>(null);
+  const [aiNotes, setAiNotes] = useState<string | null>(null);
+  const [aiConfidence, setAiConfidence] = useState<number | null>(null);
+  // Multi-issue review modal (AI From-Document flow)
+  const [showReviewModal, setShowReviewModal] = useState(false);
+  const [reviewExtraction, setReviewExtraction] = useState<ExtractionResult | null>(null);
+  const submitMenuRef = useRef<HTMLDivElement>(null);
 
   // ─── Report Form ────────────────────────────────────────────────────────────
   const [formType, setFormType] = useState<IssueType>('MACHINE');
@@ -221,6 +340,17 @@ export default function OperationsPage() {
     };
     document.addEventListener('mousedown', handleClickOutside);
     return () => document.removeEventListener('mousedown', handleClickOutside);
+  }, []);
+
+  // Close Submit dropdown on click outside
+  useEffect(() => {
+    const onClick = (e: MouseEvent) => {
+      if (submitMenuRef.current && !submitMenuRef.current.contains(e.target as Node)) {
+        setSubmitMenuOpen(false);
+      }
+    };
+    document.addEventListener('mousedown', onClick);
+    return () => document.removeEventListener('mousedown', onClick);
   }, []);
 
   // ─── Quality Issue checkboxes ───────────────────────────────────────────────
@@ -420,7 +550,7 @@ export default function OperationsPage() {
   const reportModalRef = useRef<HTMLDivElement>(null);
   const detailModalRef = useRef<HTMLDivElement>(null);
 
-  const resetReportModal = useCallback(() => { setReportModalPos({ x: 0, y: 0 }); setReportModalSize({ w: 672, h: 0 }); setReportMaximized(false); }, []);
+  const resetReportModal = useCallback(() => { setReportModalPos({ x: 0, y: 0 }); setReportModalSize({ w: 672, h: 0 }); setReportMaximized(false); setDocumentSourceFile(null); setAiNotes(null); setAiConfidence(null); }, []);
   const resetDetailModal = useCallback(() => { setDetailModalPos({ x: 0, y: 0 }); setDetailModalSize({ w: 768, h: 0 }); setDetailMaximized(false); setPhotoSelectMode(false); setSelectedPhotoUrls(new Set()); }, []);
 
   // ─── Filtered dropdown data (cascade) ─────────────────────────────────────
@@ -706,6 +836,15 @@ export default function OperationsPage() {
     }
     setPendingPhotos([]);
     setShowReportModal(true);
+  };
+
+  // NOTE: AI From-Document extractions now open the dedicated
+  // `ReviewExtractedIssuesModal` (multi-issue Save All) instead of reusing
+  // the manual Report Issue modal.
+  const handleReanalyzeDocument = async () => {
+    if (!documentSourceFile) return;
+    setShowReportModal(false);
+    setShowDocumentModal(true);
   };
 
   const handleSubmitIssue = async () => {
@@ -1011,17 +1150,44 @@ export default function OperationsPage() {
     }
   };
 
-  // ─── Delete issue ─────────────────────────────────────────────────────────
-  const deleteIssue = async (issueId: string) => {
-    if (!confirm('Are you sure you want to delete this issue? This action cannot be undone.')) return;
+  // ─── Delete issue(s) ──────────────────────────────────────────────────────
+  // Opens the custom confirm modal. `strict` forces the user to type an
+  // issue number. We auto-enable strict when the selection is large (>5) or
+  // equals every visible row, matching the user-defined safety rules.
+  const openDeleteModal = (targets: MachineIssue[], forceStrict = false) => {
+    if (targets.length === 0) return;
+    const totalVisible = sortedIssues.length;
+    const isAllSelected = totalVisible > 0 && targets.length >= totalVisible;
+    const strict = forceStrict || isAllSelected || targets.length > 5;
+    // Pick a random issue from the batch for the challenge. This forces the
+    // user to actually look at the list, not just type a fixed phrase.
+    const challenge = strict ? targets[Math.floor(Math.random() * targets.length)].issueNumber : '';
+    setDeleteModal({ issues: targets, strict, challenge, typed: '', deleting: false });
+  };
+
+  const deleteIssue = (issueId: string) => {
+    const found = issues.find((i) => i.id === issueId);
+    if (!found) return;
+    openDeleteModal([found]);
+  };
+
+  const performDelete = async () => {
+    if (!deleteModal) return;
+    const { issues: targets, strict, challenge, typed } = deleteModal;
+    if (strict && typed.trim() !== challenge) return;
+    setDeleteModal({ ...deleteModal, deleting: true });
     try {
-      await api.delete(`/operations/issues/${issueId}`);
-      setSuccess('Issue deleted');
+      await Promise.all(targets.map((it) => api.delete(`/operations/issues/${it.id}`)));
+      setSuccess(targets.length === 1 ? 'Issue deleted' : `${targets.length} issues deleted`);
       setShowDetailModal(false);
       setSelectedIssue(null);
+      setSelectedRowIds(new Set());
+      setSelectionMode(false);
+      setDeleteModal(null);
       loadIssues();
     } catch (err: any) {
       setError(err?.response?.data?.error || 'Failed to delete issue');
+      setDeleteModal((prev) => (prev ? { ...prev, deleting: false } : prev));
     }
   };
 
@@ -1072,19 +1238,57 @@ export default function OperationsPage() {
               </div>
               <div className="flex items-center gap-2">
                 <button
+                  onClick={openActivityLog}
+                  className="p-2 rounded-lg bg-gray-200 hover:bg-gray-300 dark:bg-gray-700 dark:hover:bg-gray-600 text-gray-600 dark:text-gray-300 transition-colors"
+                  title="Activity log"
+                >
+                  <History className="w-4 h-4" />
+                </button>
+                <button
                   onClick={() => loadIssues()}
                   className="p-2 rounded-lg bg-gray-200 hover:bg-gray-300 dark:bg-gray-700 dark:hover:bg-gray-600 text-gray-600 dark:text-gray-300 transition-colors"
                   title="Refresh"
                 >
                   <RefreshCw className={`w-4 h-4 ${loading ? 'animate-spin' : ''}`} />
                 </button>
-                <button
-                  onClick={() => openReportModal()}
-                  className="flex items-center gap-1.5 px-3 py-2 bg-[#3aa8e8] hover:bg-[#2d8abf] text-white rounded-lg text-sm font-medium transition-colors"
-                >
-                  <Plus className="w-4 h-4" />
-                  Report Issue
-                </button>
+                <div ref={submitMenuRef} className="relative">
+                  <button
+                    onClick={() => setSubmitMenuOpen((v) => !v)}
+                    className="flex items-center gap-1.5 px-3 py-2 bg-[#3aa8e8] hover:bg-[#2d8abf] text-white rounded-lg text-sm font-medium transition-colors"
+                  >
+                    <Plus className="w-4 h-4" />
+                    Report Issue
+                    <ChevronDown className={`w-3.5 h-3.5 transition-transform ${submitMenuOpen ? 'rotate-180' : ''}`} />
+                  </button>
+                  {submitMenuOpen && (
+                    <div className="absolute right-0 mt-2 w-60 rounded-xl bg-white dark:bg-gray-800 shadow-2xl ring-1 ring-black/5 dark:ring-white/10 overflow-hidden z-40 animate-in fade-in slide-in-from-top-2">
+                      <button
+                        onClick={() => { setSubmitMenuOpen(false); openReportModal(); }}
+                        className="w-full flex items-start gap-3 px-4 py-3 text-left hover:bg-gray-50 dark:hover:bg-gray-700/50 transition-colors"
+                      >
+                        <Edit3 className="w-4 h-4 mt-0.5 text-[#3aa8e8] flex-shrink-0" />
+                        <div>
+                          <div className="text-sm font-semibold text-gray-800 dark:text-gray-100">Submit Report</div>
+                          <div className="text-[11px] text-gray-500 dark:text-gray-400">Fill the form manually</div>
+                        </div>
+                      </button>
+                      <div className="h-px bg-gray-200 dark:bg-gray-700" />
+                      <button
+                        onClick={() => { setSubmitMenuOpen(false); setShowDocumentModal(true); }}
+                        className="w-full flex items-start gap-3 px-4 py-3 text-left hover:bg-gray-50 dark:hover:bg-gray-700/50 transition-colors"
+                      >
+                        <Sparkles className="w-4 h-4 mt-0.5 text-amber-500 flex-shrink-0" />
+                        <div>
+                          <div className="text-sm font-semibold text-gray-800 dark:text-gray-100 flex items-center gap-1.5">
+                            From Document
+                            <span className="text-[9px] font-bold uppercase tracking-wider px-1.5 py-0.5 rounded bg-gradient-to-r from-amber-400 to-orange-500 text-white">AI</span>
+                          </div>
+                          <div className="text-[11px] text-gray-500 dark:text-gray-400">Upload an image, PDF, DOCX or XLSX</div>
+                        </div>
+                      </button>
+                    </div>
+                  )}
+                </div>
               </div>
             </div>
           </div>
@@ -1373,6 +1577,33 @@ export default function OperationsPage() {
                       </span>
                     )}
                   </button>
+                  {(user?.role === 'ADMIN' || user?.role === 'SYSTEM_ADMIN') && (
+                    <>
+                      {selectionMode && selectedRowIds.size > 0 && (
+                        <button
+                          onClick={() => {
+                            const targets = sortedIssues.filter((i) => selectedRowIds.has(i.id));
+                            openDeleteModal(targets);
+                          }}
+                          className="flex items-center gap-1.5 px-2.5 py-1 text-[11px] font-semibold bg-white text-red-600 hover:bg-red-50 rounded-md shadow-sm transition-colors"
+                          title={`Delete ${selectedRowIds.size} selected`}
+                        >
+                          <Trash2 className="w-3.5 h-3.5" />
+                          Delete ({selectedRowIds.size})
+                        </button>
+                      )}
+                      <button
+                        onClick={() => {
+                          setSelectionMode((v) => !v);
+                          setSelectedRowIds(new Set());
+                        }}
+                        className={`p-1.5 rounded-lg transition-colors ${selectionMode ? 'bg-white/25 text-white' : 'text-white/70 hover:text-white hover:bg-white/15'}`}
+                        title={selectionMode ? 'Exit delete mode' : 'Delete issues'}
+                      >
+                        {selectionMode ? <X className="w-4 h-4" /> : <Trash2 className="w-4 h-4" />}
+                      </button>
+                    </>
+                  )}
                 </div>
               </div>
 
@@ -1411,6 +1642,25 @@ export default function OperationsPage() {
                   <table className={`w-full text-sm text-left ${showFilters ? 'min-w-[1400px]' : ''}`}>
                     <thead className="bg-gray-50 dark:bg-gray-700/50 border-b border-gray-900 dark:border-gray-300 sticky top-0 z-10">
                       <tr className="divide-x divide-gray-200 dark:divide-gray-600">
+                        {selectionMode && (
+                          <th className="w-10 px-3 py-3 text-center">
+                            <button
+                              onClick={() => {
+                                if (selectedRowIds.size === sortedIssues.length) {
+                                  setSelectedRowIds(new Set());
+                                } else {
+                                  setSelectedRowIds(new Set(sortedIssues.map((i) => i.id)));
+                                }
+                              }}
+                              className="inline-flex items-center justify-center text-gray-600 dark:text-gray-300 hover:text-[#3aa8e8]"
+                              title={selectedRowIds.size === sortedIssues.length ? 'Deselect all' : 'Select all'}
+                            >
+                              {selectedRowIds.size === sortedIssues.length && sortedIssues.length > 0
+                                ? <CheckSquare className="w-4 h-4 text-[#3aa8e8]" />
+                                : <Square className="w-4 h-4" />}
+                            </button>
+                          </th>
+                        )}
                         {['Issue #', 'Title', 'Type', 'Status', 'Priority', 'Department', 'Area', 'Line', 'Shift', 'Equipment', 'Component', 'Reported By', 'Date', 'Photos'].map(col => (
                           <th
                             key={col}
@@ -1439,10 +1689,42 @@ export default function OperationsPage() {
                         return (
                           <tr
                             key={issue.id}
-                            onClick={() => { if (!editingCell) openIssueDetail(issue); }}
+                            onClick={() => {
+                              if (editingCell) return;
+                              if (selectionMode) {
+                                setSelectedRowIds((prev) => {
+                                  const next = new Set(prev);
+                                  if (next.has(issue.id)) next.delete(issue.id);
+                                  else next.add(issue.id);
+                                  return next;
+                                });
+                                return;
+                              }
+                              openIssueDetail(issue);
+                            }}
                             onContextMenu={(e) => handleRowContextMenu(e, issue)}
-                            className="hover:bg-blue-50/50 dark:hover:bg-blue-900/10 cursor-pointer transition-colors divide-x divide-gray-200 dark:divide-gray-600"
+                            className={`hover:bg-blue-50/50 dark:hover:bg-blue-900/10 cursor-pointer transition-colors divide-x divide-gray-200 dark:divide-gray-600 ${selectionMode && selectedRowIds.has(issue.id) ? 'bg-blue-50 dark:bg-blue-900/20' : ''}`}
                           >
+                            {selectionMode && (
+                              <td className="w-10 px-3 py-3 text-center" onClick={(e) => e.stopPropagation()}>
+                                <button
+                                  onClick={() => {
+                                    setSelectedRowIds((prev) => {
+                                      const next = new Set(prev);
+                                      if (next.has(issue.id)) next.delete(issue.id);
+                                      else next.add(issue.id);
+                                      return next;
+                                    });
+                                  }}
+                                  className="inline-flex items-center justify-center"
+                                  title={selectedRowIds.has(issue.id) ? 'Deselect' : 'Select'}
+                                >
+                                  {selectedRowIds.has(issue.id)
+                                    ? <CheckSquare className="w-4 h-4 text-[#3aa8e8]" />
+                                    : <Square className="w-4 h-4 text-gray-400" />}
+                                </button>
+                              </td>
+                            )}
                             {/* Issue # — not editable */}
                             <td className="px-4 py-3 text-xs font-mono text-gray-500 dark:text-gray-400 whitespace-nowrap">{issue.issueNumber}</td>
 
@@ -1727,6 +2009,279 @@ export default function OperationsPage() {
         )}
 
         {/* ═══════════════════════════════════════════════════════════════════════
+            ACTIVITY LOG MODAL
+            ═══════════════════════════════════════════════════════════════════════ */}
+        {showLogModal && (
+          <div className="fixed inset-0 z-[115] pointer-events-none">
+            <div
+              className="absolute bg-white dark:bg-gray-800 rounded-2xl shadow-2xl ring-1 ring-black/10 overflow-hidden flex flex-col pointer-events-auto"
+              style={{ top: logPos.y, left: logPos.x, width: logSize.w, height: logSize.h, minWidth: LOG_MIN_W, minHeight: LOG_MIN_H }}
+            >
+              {/* Header — drag handle */}
+              <div
+                onMouseDown={onLogDragStart}
+                className="px-5 py-3 bg-gradient-to-r from-[#3aa8e8] to-[#2d8abf] text-white flex items-center gap-2 flex-shrink-0 cursor-move select-none"
+              >
+                <GripHorizontal className="w-4 h-4 opacity-70" />
+                <History className="w-5 h-5" />
+                <div className="flex-1">
+                  <h3 className="text-sm font-bold uppercase tracking-wider">Activity Log</h3>
+                  <p className="text-[11px] opacity-90">Every action performed on operations issues</p>
+                </div>
+                <button
+                  onClick={openActivityLog}
+                  onMouseDown={(e) => e.stopPropagation()}
+                  className="p-1 rounded hover:bg-white/20"
+                  title="Refresh"
+                >
+                  <RefreshCw className={`w-4 h-4 ${loadingLogs ? 'animate-spin' : ''}`} />
+                </button>
+                <button
+                  onClick={() => setShowLogModal(false)}
+                  onMouseDown={(e) => e.stopPropagation()}
+                  className="p-1 rounded hover:bg-white/20"
+                  aria-label="Close"
+                >
+                  <X className="w-4 h-4" />
+                </button>
+              </div>
+
+              {/* Filters */}
+              <div className="flex items-center gap-2 px-5 py-2 border-b border-gray-200 dark:border-gray-700 bg-gray-50 dark:bg-gray-900/40 flex-shrink-0">
+                <div className="flex items-center gap-1">
+                  {(['ALL', 'CREATE', 'UPDATE', 'DELETE'] as const).map((a) => (
+                    <button
+                      key={a}
+                      onClick={() => setLogFilter(a)}
+                      className={`px-2.5 py-1 text-[11px] font-semibold rounded-md transition-colors ${
+                        logFilter === a
+                          ? 'bg-[#3aa8e8] text-white'
+                          : 'bg-white dark:bg-gray-700 text-gray-600 dark:text-gray-300 border border-gray-300 dark:border-gray-600 hover:bg-gray-100 dark:hover:bg-gray-600'
+                      }`}
+                    >
+                      {a}
+                    </button>
+                  ))}
+                </div>
+                <input
+                  type="text"
+                  value={logSearch}
+                  onChange={(e) => setLogSearch(e.target.value)}
+                  placeholder="Search by issue #, user, or field…"
+                  className="flex-1 px-2.5 py-1 text-[12px] rounded-md border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-700 text-gray-900 dark:text-gray-100 outline-none focus:border-[#3aa8e8]"
+                />
+                <span className="text-[11px] text-gray-500 dark:text-gray-400 whitespace-nowrap">
+                  {activityLogs.length} entries
+                </span>
+              </div>
+
+              {/* Body */}
+              <div className="flex-1 overflow-y-auto">
+                {loadingLogs ? (
+                  <div className="flex items-center justify-center py-12">
+                    <Loader2 className="w-6 h-6 text-[#3aa8e8] animate-spin" />
+                  </div>
+                ) : (() => {
+                  const filtered = activityLogs.filter((l) => {
+                    if (logFilter !== 'ALL' && l.action !== logFilter) return false;
+                    if (logSearch) {
+                      const q = logSearch.toLowerCase();
+                      const userStr = l.user?.name?.toLowerCase() || '';
+                      const changesStr = JSON.stringify(l.changes || {}).toLowerCase();
+                      if (!userStr.includes(q) && !changesStr.includes(q) && !l.entityId.toLowerCase().includes(q)) return false;
+                    }
+                    return true;
+                  });
+                  if (filtered.length === 0) {
+                    return (
+                      <div className="text-center py-12 text-gray-500 dark:text-gray-400 text-sm">
+                        No activity found for this filter.
+                      </div>
+                    );
+                  }
+                  return (
+                    <ul className="divide-y divide-gray-100 dark:divide-gray-700">
+                      {filtered.map((log) => {
+                        const actionColor = log.action === 'CREATE'
+                          ? 'bg-emerald-100 text-emerald-700 dark:bg-emerald-900/40 dark:text-emerald-300'
+                          : log.action === 'DELETE'
+                          ? 'bg-rose-100 text-rose-700 dark:bg-rose-900/40 dark:text-rose-300'
+                          : log.action === 'UPDATE'
+                          ? 'bg-amber-100 text-amber-700 dark:bg-amber-900/40 dark:text-amber-300'
+                          : 'bg-gray-100 text-gray-700 dark:bg-gray-700 dark:text-gray-300';
+                        const issueNumber = (log.changes && log.changes.issueNumber) || log.entityId.slice(0, 8);
+                        return (
+                          <li key={log.id} className="px-5 py-3 hover:bg-gray-50 dark:hover:bg-gray-700/30">
+                            <div className="flex items-start gap-3">
+                              <span className={`px-2 py-0.5 rounded text-[10px] font-bold uppercase tracking-wider flex-shrink-0 ${actionColor}`}>
+                                {log.action}
+                              </span>
+                              <div className="flex-1 min-w-0">
+                                <div className="flex items-center gap-2 flex-wrap">
+                                  <span className="text-[12px] font-mono text-gray-700 dark:text-gray-200">{issueNumber}</span>
+                                  <span className="text-[11px] text-gray-500 dark:text-gray-400">by</span>
+                                  <span className="text-[12px] font-medium text-gray-900 dark:text-gray-100">
+                                    {log.user?.name || 'System'}
+                                  </span>
+                                  {log.user?.email && (
+                                    <span className="text-[10px] text-gray-500 dark:text-gray-400">({log.user.email})</span>
+                                  )}
+                                </div>
+                                <ActivityLogDetails log={log} />
+                                <div className="mt-1 flex items-center gap-2 text-[10px] text-gray-500 dark:text-gray-400">
+                                  <Clock className="w-3 h-3" />
+                                  <span>{new Date(log.createdAt).toLocaleString()}</span>
+                                  {log.ipAddress && <span>· IP {log.ipAddress}</span>}
+                                </div>
+                              </div>
+                            </div>
+                          </li>
+                        );
+                      })}
+                    </ul>
+                  );
+                })()}
+              </div>
+
+              {/* Footer */}
+              <div className="flex items-center justify-end gap-2 px-5 py-2 bg-gray-50 dark:bg-gray-900/40 border-t border-gray-200 dark:border-gray-700 flex-shrink-0">
+                <button
+                  onClick={() => setShowLogModal(false)}
+                  className="px-3 py-1.5 text-[12px] font-medium text-gray-700 dark:text-gray-200 bg-white dark:bg-gray-700 border border-gray-300 dark:border-gray-600 rounded-md hover:bg-gray-100 dark:hover:bg-gray-600"
+                >
+                  Close
+                </button>
+              </div>
+
+              {/* Resize handles — horizontal (right edge), vertical (bottom edge), corner */}
+              <div
+                onMouseDown={onLogResizeStart('x')}
+                className="absolute top-0 right-0 h-full w-1.5 cursor-ew-resize hover:bg-[#3aa8e8]/40"
+                title="Resize width"
+              />
+              <div
+                onMouseDown={onLogResizeStart('y')}
+                className="absolute bottom-0 left-0 w-full h-1.5 cursor-ns-resize hover:bg-[#3aa8e8]/40"
+                title="Resize height"
+              />
+              <div
+                onMouseDown={onLogResizeStart('xy')}
+                className="absolute bottom-0 right-0 w-4 h-4 cursor-nwse-resize bg-gradient-to-br from-transparent via-transparent to-[#3aa8e8]/60 hover:to-[#3aa8e8]"
+                title="Resize"
+              />
+            </div>
+          </div>
+        )}
+
+        {/* ═══════════════════════════════════════════════════════════════════════
+            CUSTOM DELETE CONFIRM MODAL
+            ═══════════════════════════════════════════════════════════════════════ */}
+        {deleteModal && (
+          <div className="fixed inset-0 z-[120] flex items-center justify-center bg-black/60 backdrop-blur-sm p-4">
+            <div className="w-full max-w-lg bg-white dark:bg-gray-800 rounded-2xl shadow-2xl ring-1 ring-black/10 overflow-hidden">
+              {/* Header */}
+              <div className="px-5 py-3 bg-gradient-to-r from-rose-600 to-red-600 text-white flex items-center gap-2">
+                <ShieldAlert className="w-5 h-5" />
+                <div className="flex-1">
+                  <h3 className="text-sm font-bold uppercase tracking-wider">
+                    {deleteModal.strict ? 'High-Impact Delete' : 'Confirm Delete'}
+                  </h3>
+                  <p className="text-[11px] opacity-90">
+                    {deleteModal.issues.length === 1
+                      ? 'This action cannot be undone.'
+                      : `You are about to delete ${deleteModal.issues.length} issues. This cannot be undone.`}
+                  </p>
+                </div>
+                <button
+                  onClick={() => { if (!deleteModal.deleting) setDeleteModal(null); }}
+                  className="p-1 rounded hover:bg-white/20"
+                  aria-label="Close"
+                >
+                  <X className="w-4 h-4" />
+                </button>
+              </div>
+
+              {/* Body */}
+              <div className="px-5 py-4 space-y-3">
+                {deleteModal.strict && (
+                  <div className="flex items-start gap-2 p-2.5 rounded-md bg-amber-50 dark:bg-amber-900/30 border border-amber-200 dark:border-amber-700 text-amber-800 dark:text-amber-200 text-[12px] leading-snug">
+                    <AlertTriangle className="w-4 h-4 mt-0.5 flex-shrink-0" />
+                    <div>
+                      You&apos;re removing a large batch or every issue in the list. Related photos, resolutions, and history will be lost permanently.
+                    </div>
+                  </div>
+                )}
+
+                <div>
+                  <div className="text-[11px] font-semibold text-gray-500 dark:text-gray-400 uppercase tracking-wider mb-1">
+                    Issues to delete ({deleteModal.issues.length})
+                  </div>
+                  <div className="max-h-40 overflow-y-auto rounded-md border border-gray-200 dark:border-gray-700 divide-y divide-gray-100 dark:divide-gray-700">
+                    {deleteModal.issues.map((it) => (
+                      <div key={it.id} className="flex items-center gap-2 px-2.5 py-1.5 text-[12px]">
+                        <span className="font-mono text-gray-500 dark:text-gray-400 whitespace-nowrap">{it.issueNumber}</span>
+                        <span className="text-gray-800 dark:text-gray-100 truncate">{it.title}</span>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+
+                {deleteModal.strict && (
+                  <div>
+                    <label className="block text-[12px] font-medium text-gray-700 dark:text-gray-200 mb-1">
+                      Type <span className="font-mono font-bold text-rose-600 dark:text-rose-400">{deleteModal.challenge}</span> to confirm
+                    </label>
+                    <input
+                      autoFocus
+                      type="text"
+                      value={deleteModal.typed}
+                      onChange={(e) => setDeleteModal((prev) => (prev ? { ...prev, typed: e.target.value } : prev))}
+                      placeholder="Enter the issue number exactly"
+                      className="w-full px-3 py-2 text-[13px] font-mono rounded-md border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-700 text-gray-900 dark:text-gray-100 focus:border-rose-500 focus:ring-1 focus:ring-rose-500 outline-none"
+                      disabled={deleteModal.deleting}
+                    />
+                    <p className="mt-1 text-[10px] text-gray-500 dark:text-gray-400">
+                      Pick this exact issue number from the list above and type it to prove you reviewed the batch.
+                    </p>
+                  </div>
+                )}
+              </div>
+
+              {/* Footer */}
+              <div className="flex items-center justify-end gap-2 px-5 py-3 bg-gray-50 dark:bg-gray-900/40 border-t border-gray-200 dark:border-gray-700">
+                <button
+                  onClick={() => setDeleteModal(null)}
+                  disabled={deleteModal.deleting}
+                  className="px-3 py-1.5 text-[12px] font-medium text-gray-700 dark:text-gray-200 bg-white dark:bg-gray-700 border border-gray-300 dark:border-gray-600 rounded-md hover:bg-gray-100 dark:hover:bg-gray-600 disabled:opacity-50"
+                >
+                  Cancel
+                </button>
+                <button
+                  onClick={performDelete}
+                  disabled={
+                    deleteModal.deleting ||
+                    (deleteModal.strict && deleteModal.typed.trim() !== deleteModal.challenge)
+                  }
+                  className="inline-flex items-center gap-1.5 px-4 py-1.5 text-[12px] font-semibold text-white bg-gradient-to-r from-rose-600 to-red-600 rounded-md hover:opacity-95 disabled:opacity-50 shadow"
+                >
+                  {deleteModal.deleting ? (
+                    <>
+                      <Loader2 className="w-3.5 h-3.5 animate-spin" />
+                      Deleting…
+                    </>
+                  ) : (
+                    <>
+                      <Trash2 className="w-3.5 h-3.5" />
+                      {deleteModal.issues.length === 1 ? 'Delete Issue' : `Delete ${deleteModal.issues.length} Issues`}
+                    </>
+                  )}
+                </button>
+              </div>
+            </div>
+          </div>
+        )}
+
+        {/* ═══════════════════════════════════════════════════════════════════════
             REPORT ISSUE MODAL
             ═══════════════════════════════════════════════════════════════════════ */}
         {showReportModal && (
@@ -1765,6 +2320,28 @@ export default function OperationsPage() {
                   </button>
                 </div>
               </div>
+
+              {/* AI-extracted banner + Reanalyze */}
+              {documentSourceFile && !editingIssue && (
+                <div className="flex items-center gap-2 px-5 py-2.5 bg-gradient-to-r from-amber-50 to-orange-50 dark:from-amber-900/20 dark:to-orange-900/20 border-b border-amber-200/60 dark:border-amber-800/40">
+                  <Sparkles className="w-4 h-4 text-amber-500 flex-shrink-0" />
+                  <div className="flex-1 min-w-0 text-xs text-amber-800 dark:text-amber-200">
+                    <span className="font-semibold">AI-extracted</span> from <span className="font-mono truncate">{documentSourceFile.name}</span>
+                    {aiConfidence != null && (
+                      <span className="ml-1.5 text-amber-700 dark:text-amber-300">· {Math.round(aiConfidence * 100)}% confidence</span>
+                    )}
+                    {aiNotes && <div className="text-[11px] text-amber-700/80 dark:text-amber-300/80 mt-0.5 truncate">{aiNotes}</div>}
+                  </div>
+                  <button
+                    onClick={handleReanalyzeDocument}
+                    className="inline-flex items-center gap-1 px-2.5 py-1 text-[11px] font-semibold text-amber-800 dark:text-amber-200 bg-white dark:bg-gray-800 border border-amber-300 dark:border-amber-700 rounded-md hover:bg-amber-50 dark:hover:bg-amber-900/30 transition-colors"
+                    title="Re-run AI extraction on the same document"
+                  >
+                    <RefreshCw className="w-3 h-3" />
+                    Reanalyze
+                  </button>
+                </div>
+              )}
 
               {/* Body */}
               <div className="overflow-y-auto flex-1 p-5 space-y-4">
@@ -2820,7 +3397,103 @@ export default function OperationsPage() {
             </div>
           </div>
         )}
+
+        {/* ═══════════════════════════════════════════════════════════════════════
+            REPORT ISSUE FROM DOCUMENT (AI)
+            ═══════════════════════════════════════════════════════════════════════ */}
+        <ReportIssueFromDocumentModal
+          open={showDocumentModal}
+          initialFile={documentSourceFile}
+          onClose={() => setShowDocumentModal(false)}
+          onExtracted={(result, sourceFile) => {
+            setShowDocumentModal(false);
+            setDocumentSourceFile(sourceFile);
+            setReviewExtraction(result);
+            setShowReviewModal(true);
+          }}
+        />
+
+        {/* ═══════════════════════════════════════════════════════════════════════
+            REVIEW AI-EXTRACTED ISSUES (multi-issue Save All)
+            ═══════════════════════════════════════════════════════════════════════ */}
+        <ReviewExtractedIssuesModal
+          open={showReviewModal}
+          extraction={reviewExtraction}
+          sourceFile={documentSourceFile}
+          departments={departments}
+          areas={areas as any}
+          lines={lines as any}
+          shifts={shifts}
+          equipment={equipment as any}
+          components={components as any}
+          daysOfWeek={daysOfWeek}
+          weeks={availableWeeks}
+          currentWeek={currentWeek}
+          onClose={() => { setShowReviewModal(false); setReviewExtraction(null); setDocumentSourceFile(null); }}
+          onReanalyze={() => {
+            if (!documentSourceFile) return;
+            setShowReviewModal(false);
+            setShowDocumentModal(true);
+          }}
+          onSaved={(created) => {
+            setShowReviewModal(false);
+            setReviewExtraction(null);
+            setDocumentSourceFile(null);
+            setSuccess(`${created} issue${created === 1 ? '' : 's'} reported successfully`);
+            loadIssues();
+          }}
+        />
       </div>
     </ProtectedRoute>
   );
+}
+
+// ─── Activity-log detail renderer ─────────────────────────────────────────
+function ActivityLogDetails({ log }: { log: any }) {
+  const c = log.changes || {};
+  if (log.action === 'CREATE') {
+    const parts: string[] = [];
+    if (c.title) parts.push(`"${c.title}"`);
+    if (c.type) parts.push(c.type.toLowerCase());
+    if (c.priority) parts.push(`${c.priority} priority`);
+    if (c.departmentName) parts.push(`in ${c.departmentName}`);
+    if (c.lineName) parts.push(`on ${c.lineName}`);
+    return (
+      <div className="mt-0.5 text-[12px] text-gray-700 dark:text-gray-200 leading-snug">
+        Created {parts.join(' · ')}
+      </div>
+    );
+  }
+  if (log.action === 'DELETE') {
+    return (
+      <div className="mt-0.5 text-[12px] text-gray-700 dark:text-gray-200 leading-snug">
+        Deleted {c.title ? `"${c.title}"` : 'issue'}
+        {c.status ? ` (was ${String(c.status).toLowerCase()})` : ''}
+      </div>
+    );
+  }
+  if (log.action === 'UPDATE' && c.diff) {
+    const entries = Object.entries(c.diff as Record<string, { before: any; after: any }>);
+    if (entries.length === 0) return null;
+    return (
+      <div className="mt-0.5 space-y-0.5">
+        {entries.map(([field, v]) => (
+          <div key={field} className="text-[12px] text-gray-700 dark:text-gray-200 leading-snug">
+            <span className="font-semibold">{field}</span>
+            : <span className="line-through text-gray-400">{formatAuditValue(v.before)}</span>
+            {' → '}
+            <span className="text-[#2d8abf] dark:text-[#7ec8ec] font-medium">{formatAuditValue(v.after)}</span>
+          </div>
+        ))}
+      </div>
+    );
+  }
+  return null;
+}
+
+function formatAuditValue(v: any): string {
+  if (v == null || v === '') return '—';
+  if (typeof v === 'string' && v.length > 60) return v.slice(0, 60) + '…';
+  if (typeof v === 'object') return JSON.stringify(v).slice(0, 60);
+  return String(v);
 }

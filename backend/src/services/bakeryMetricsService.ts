@@ -602,6 +602,153 @@ const bakeryMetricsService = {
   },
 
   // ═══════════════════════════════════════════════════════════════════════════
+  // RESOLVE MISSING KPIS — update only missing KPI fields for a shift line
+  // ═══════════════════════════════════════════════════════════════════════════
+  async resolveMissingKpis(data: {
+    submissionId: string;
+    shift: 'first' | 'second';
+    line: 'die_cut_1' | 'die_cut_2';
+    values: { oee?: number; pounds?: number; waste_lbs?: number };
+    updatedBy: string;
+  }) {
+    return prisma.$transaction(async (tx) => {
+      const submission = await tx.bakeryWeekSubmission.findUnique({
+        where: { id: data.submissionId },
+        include: {
+          firstShiftMetrics: true,
+          secondShiftMetrics: true,
+        },
+      });
+
+      if (!submission) {
+        throw new Error('Submission not found');
+      }
+
+      const currentShift = data.shift === 'first' ? submission.firstShiftMetrics : submission.secondShiftMetrics;
+      if (!currentShift) {
+        throw new Error(`${data.shift} shift metrics not found`);
+      }
+
+      const toNum = (v: any): number => Number(v || 0);
+      const isEmpty = (v: number): boolean => v === 0;
+
+      const line1 = {
+        oee: toNum(currentShift.dieCut1OeePct),
+        lbs: toNum(currentShift.dieCut1Lbs),
+        wasteLb: toNum(currentShift.dieCut1WasteLb),
+      };
+      const line2 = {
+        oee: toNum(currentShift.dieCut2OeePct),
+        lbs: toNum(currentShift.dieCut2Lbs),
+        wasteLb: toNum(currentShift.dieCut2WasteLb),
+      };
+
+      const lineState = (line: { oee: number; lbs: number; wasteLb: number }) => {
+        const wastePct = line.lbs > 0 ? (line.wasteLb / line.lbs) * 100 : 0;
+        const didNotRun = isEmpty(line.oee) && isEmpty(line.lbs) && isEmpty(line.wasteLb);
+        const missing = {
+          oee: !didNotRun && isEmpty(line.oee),
+          pounds: !didNotRun && isEmpty(line.lbs),
+          waste: !didNotRun && isEmpty(line.wasteLb),
+        };
+        return { didNotRun, missing, wastePct };
+      };
+
+      const targetLine = data.line === 'die_cut_1' ? line1 : line2;
+      const targetState = lineState(targetLine);
+      const missingKeys = Object.entries(targetState.missing)
+        .filter(([, missing]) => missing)
+        .map(([k]) => k);
+
+      if (missingKeys.length === 0) {
+        throw new Error('No missing KPI fields found for this line');
+      }
+
+      if (targetState.missing.oee && (data.values.oee === undefined || Number.isNaN(Number(data.values.oee)))) {
+        throw new Error('Missing field required: oee');
+      }
+      if (targetState.missing.pounds && (data.values.pounds === undefined || Number.isNaN(Number(data.values.pounds)))) {
+        throw new Error('Missing field required: pounds');
+      }
+      if (targetState.missing.waste && (data.values.waste_lbs === undefined || Number.isNaN(Number(data.values.waste_lbs)))) {
+        throw new Error('Missing field required: waste_lbs');
+      }
+
+      const nextLine1 = { ...line1 };
+      const nextLine2 = { ...line2 };
+      const mutableLine = data.line === 'die_cut_1' ? nextLine1 : nextLine2;
+
+      if (targetState.missing.oee && data.values.oee !== undefined) {
+        mutableLine.oee = Number(data.values.oee);
+      }
+      if (targetState.missing.pounds && data.values.pounds !== undefined) {
+        mutableLine.lbs = Number(data.values.pounds);
+      }
+      if (targetState.missing.waste && data.values.waste_lbs !== undefined) {
+        mutableLine.wasteLb = Number(data.values.waste_lbs);
+      }
+
+      const nextState1 = lineState(nextLine1);
+      const nextState2 = lineState(nextLine2);
+
+      const computeAvgByLineRule = (v1: number, v2: number, m1: boolean, m2: boolean, d1: boolean, d2: boolean): number | null => {
+        if (d1 && d2) return null;
+        if (d1 && !d2) return m2 ? null : v2;
+        if (d2 && !d1) return m1 ? null : v1;
+        if (m1 || m2) return null;
+        return (v1 + v2) / 2;
+      };
+
+      const nextOeeAvg = computeAvgByLineRule(
+        nextLine1.oee,
+        nextLine2.oee,
+        nextState1.missing.oee,
+        nextState2.missing.oee,
+        nextState1.didNotRun,
+        nextState2.didNotRun
+      );
+
+      const nextWasteAvg = computeAvgByLineRule(
+        nextState1.wastePct,
+        nextState2.wastePct,
+        nextState1.missing.waste,
+        nextState2.missing.waste,
+        nextState1.didNotRun,
+        nextState2.didNotRun
+      );
+
+      const updateData = {
+        dieCut1OeePct: nextLine1.oee,
+        dieCut2OeePct: nextLine2.oee,
+        oeeAvgPct: nextOeeAvg,
+        dieCut1Lbs: nextLine1.lbs,
+        dieCut2Lbs: nextLine2.lbs,
+        poundsTotal: nextLine1.lbs + nextLine2.lbs,
+        dieCut1WasteLb: nextLine1.wasteLb,
+        dieCut2WasteLb: nextLine2.wasteLb,
+        dieCut1WastePct: nextState1.wastePct,
+        dieCut2WastePct: nextState2.wastePct,
+        wasteAvgPct: nextWasteAvg,
+        submittedBy: data.updatedBy,
+      };
+
+      if (data.shift === 'first') {
+        await tx.bakeryFirstShiftMetrics.update({
+          where: { weekSubmissionId: data.submissionId },
+          data: updateData,
+        });
+      } else {
+        await tx.bakerySecondShiftMetrics.update({
+          where: { weekSubmissionId: data.submissionId },
+          data: updateData,
+        });
+      }
+
+      return { success: true };
+    });
+  },
+
+  // ═══════════════════════════════════════════════════════════════════════════
   // MISSING DATA ANALYSIS — scan all weeks for missing days/shifts/metrics
   // ═══════════════════════════════════════════════════════════════════════════
   async getMissingDataAnalysis() {

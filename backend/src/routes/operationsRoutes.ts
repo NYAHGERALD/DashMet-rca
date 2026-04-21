@@ -6,6 +6,7 @@ import { prisma } from '../utils/prisma';
 import { v4 as uuidv4 } from 'uuid';
 import { upload, handleMulterError } from '../middleware/upload';
 import { adminStorage } from '../config/firebase-admin';
+import { logAuditEvent } from '../services/auditService';
 import path from 'path';
 
 const router = Router();
@@ -69,6 +70,43 @@ router.get('/issues', async (req: any, res: Response, next: NextFunction) => {
     });
 
     res.json({ success: true, data: issues });
+  } catch (err) {
+    next(err);
+  }
+});
+
+// ─── GET /operations/issues/audit-logs — Activity log for issues section ────────
+// NOTE: Must be declared BEFORE `/issues/:id` so the literal path wins.
+
+router.get('/issues/audit-logs', async (req: any, res: Response, next: NextFunction) => {
+  try {
+    const limit = Math.min(parseInt((req.query.limit as string) || '200', 10) || 200, 500);
+    const where: any = { entity: 'MachineIssue' };
+    if (req.user.role !== 'SYSTEM_ADMIN') where.organizationId = req.user.organizationId;
+
+    const logs = await prisma.auditLog.findMany({
+      where,
+      orderBy: { createdAt: 'desc' },
+      take: limit,
+      include: {
+        User: { select: { id: true, firstName: true, lastName: true, email: true } },
+      },
+    });
+
+    res.json({
+      success: true,
+      data: logs.map((l) => ({
+        id: l.id,
+        action: l.action,
+        entityId: l.entityId,
+        createdAt: l.createdAt,
+        changes: l.changes,
+        ipAddress: l.ipAddress,
+        user: l.User
+          ? { id: l.User.id, name: `${l.User.firstName ?? ''} ${l.User.lastName ?? ''}`.trim() || l.User.email, email: l.User.email }
+          : null,
+      })),
+    });
   } catch (err) {
     next(err);
   }
@@ -144,6 +182,25 @@ router.post('/issues', async (req: any, res: Response, next: NextFunction) => {
     });
 
     res.status(201).json({ success: true, data: issue, message: 'Issue reported successfully' });
+
+    // Fire-and-forget audit trail
+    logAuditEvent({
+      action: 'CREATE',
+      entity: 'MachineIssue',
+      entityId: issue.id,
+      userId: req.user.id,
+      organizationId: req.user.organizationId,
+      changes: {
+        issueNumber: issue.issueNumber,
+        title: issue.title,
+        type: issue.type,
+        priority: issue.priority,
+        departmentName: issue.Department?.name || null,
+        lineName: issue.Line?.name || null,
+      },
+      ipAddress: (req.ip || req.headers['x-forwarded-for']) as string | undefined,
+      userAgent: req.headers['user-agent'] as string | undefined,
+    }).catch(() => {});
   } catch (err) {
     next(err);
   }
@@ -200,6 +257,28 @@ router.patch('/issues/:id', async (req: any, res: Response, next: NextFunction) 
     });
 
     res.json({ success: true, data: updated, message: 'Issue updated successfully' });
+
+    // Diff only changed fields for audit trail
+    const diff: Record<string, { before: any; after: any }> = {};
+    for (const key of Object.keys(data)) {
+      const before = (existing as any)[key];
+      const after = (data as any)[key];
+      const bNorm = before instanceof Date ? before.toISOString() : before;
+      const aNorm = after instanceof Date ? after.toISOString() : after;
+      if (bNorm !== aNorm) diff[key] = { before: bNorm ?? null, after: aNorm ?? null };
+    }
+    if (Object.keys(diff).length > 0) {
+      logAuditEvent({
+        action: 'UPDATE',
+        entity: 'MachineIssue',
+        entityId: updated.id,
+        userId: req.user.id,
+        organizationId: req.user.organizationId,
+        changes: { issueNumber: updated.issueNumber, diff },
+        ipAddress: (req.ip || req.headers['x-forwarded-for']) as string | undefined,
+        userAgent: req.headers['user-agent'] as string | undefined,
+      }).catch(() => {});
+    }
   } catch (err) {
     next(err);
   }
@@ -226,6 +305,23 @@ router.delete('/issues/:id', requireMinimumRole(UserRole.ADMIN), async (req: any
 
     await prisma.machineIssue.delete({ where: { id: req.params.id } });
     res.json({ success: true, message: 'Issue deleted' });
+
+    logAuditEvent({
+      action: 'DELETE',
+      entity: 'MachineIssue',
+      entityId: existing.id,
+      userId: req.user.id,
+      organizationId: req.user.organizationId,
+      changes: {
+        issueNumber: existing.issueNumber,
+        title: existing.title,
+        type: existing.type,
+        priority: existing.priority,
+        status: existing.status,
+      },
+      ipAddress: (req.ip || req.headers['x-forwarded-for']) as string | undefined,
+      userAgent: req.headers['user-agent'] as string | undefined,
+    }).catch(() => {});
   } catch (err) {
     next(err);
   }
@@ -437,5 +533,35 @@ router.get('/weeks', async (req: any, res: Response, next: NextFunction) => {
     next(err);
   }
 });
+
+// ─── POST /operations/issues/extract-from-document ──────────────────────────────
+// Accepts a single file (image/pdf/docx/xlsx) and returns an AI-extracted
+// issue payload ready to be reviewed/edited by the user before submission.
+
+router.post(
+  '/issues/extract-from-document',
+  upload.single('file'),
+  handleMulterError,
+  async (req: any, res: Response, next: NextFunction) => {
+    try {
+      if (!req.file) {
+        return res.status(400).json({ success: false, error: 'No file uploaded.' });
+      }
+      const { extractIssuesFromDocument } = await import('../services/issueDocumentIngestionService');
+      const result = await extractIssuesFromDocument({
+        buffer: req.file.buffer,
+        mimetype: req.file.mimetype,
+        originalName: req.file.originalname,
+        organizationId: req.user?.organizationId || null,
+      });
+      if (!result.success) {
+        return res.status(400).json({ success: false, error: result.error });
+      }
+      res.json({ success: true, data: result.data, rawTextPreview: result.rawText });
+    } catch (err) {
+      next(err);
+    }
+  }
+);
 
 export default router;
