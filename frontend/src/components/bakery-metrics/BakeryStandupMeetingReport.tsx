@@ -21,6 +21,7 @@ import {
   TrendingDown,
   Minus,
   Clock,
+  X,
 } from 'lucide-react';
 
 // ─── Types ──────────────────────────────────────────────────────────────────
@@ -179,10 +180,50 @@ export default function BakeryStandupMeetingReport() {
   }, [loadExisting]);
 
   // ─── Generate / Regenerate ────────────────────────────────────────────
+  const [progressMode, setProgressMode] = useState<null | 'generate' | 'regenerate'>(null);
+  const [progressPct, setProgressPct] = useState(0);
+  const progressRafRef = useRef<number | null>(null);
+  const progressTargetRef = useRef(0);
+
+  const animateProgressTo = useCallback((target: number) => {
+    progressTargetRef.current = target;
+    if (progressRafRef.current) return;
+    const tick = () => {
+      setProgressPct((cur) => {
+        const tgt = progressTargetRef.current;
+        if (cur >= tgt) {
+          progressRafRef.current = null;
+          return cur;
+        }
+        const step = Math.max(0.4, (tgt - cur) * 0.06);
+        const next = Math.min(tgt, cur + step);
+        progressRafRef.current = requestAnimationFrame(tick);
+        return next;
+      });
+    };
+    progressRafRef.current = requestAnimationFrame(tick);
+  }, []);
+
+  useEffect(() => {
+    return () => {
+      if (progressRafRef.current) cancelAnimationFrame(progressRafRef.current);
+    };
+  }, []);
+
   const handleGenerate = async (regenerate = false) => {
     if (!target) return;
     setGenerating(true);
     setErrorMsg(null);
+    setProgressMode(regenerate ? 'regenerate' : 'generate');
+    setProgressPct(0);
+    progressTargetRef.current = 0;
+    animateProgressTo(20);
+    // Creep toward 85% while waiting for the AI response
+    const creep = setInterval(() => {
+      if (progressTargetRef.current < 85) {
+        animateProgressTo(Math.min(85, progressTargetRef.current + 10));
+      }
+    }, 900);
     try {
       const data: any = await apiWithExtendedTimeout({
         method: 'POST',
@@ -194,6 +235,8 @@ export default function BakeryStandupMeetingReport() {
           regenerate,
         },
       });
+      clearInterval(creep);
+      animateProgressTo(100);
       if (data?.success && data?.data) {
         setReport(data.data);
         setSource(data.source || 'generated');
@@ -208,9 +251,17 @@ export default function BakeryStandupMeetingReport() {
         setErrorMsg(data?.error || 'Failed to generate the standup report.');
       }
     } catch (err: any) {
+      clearInterval(creep);
+      animateProgressTo(100);
       setErrorMsg(err?.response?.data?.error || 'Something went wrong while generating the report.');
     } finally {
       setGenerating(false);
+      // Hold briefly at 100% so the user sees completion, then close
+      setTimeout(() => {
+        setProgressMode(null);
+        setProgressPct(0);
+        progressTargetRef.current = 0;
+      }, 600);
     }
   };
 
@@ -238,6 +289,49 @@ export default function BakeryStandupMeetingReport() {
 
   const commentsDirty = comments !== initialComments;
 
+  // ─── Delete saved report ─────────────────────────────────────────────
+  const [showDeleteConfirm, setShowDeleteConfirm] = useState(false);
+  const [deleting, setDeleting] = useState(false);
+
+  const handleDelete = async () => {
+    if (!target) {
+      setErrorMsg('No target day resolved — cannot delete.');
+      return;
+    }
+    console.log('[StandupReport] Delete clicked', { weekName: target.weekName, dayOfWeek: target.dayOfWeek });
+    setDeleting(true);
+    setErrorMsg(null);
+    try {
+      const resp = await api.post(
+        '/bakery-metrics/standup-report/delete',
+        { weekName: target.weekName, dayOfWeek: target.dayOfWeek },
+        { timeout: 15000 },
+      );
+      console.log('[StandupReport] Delete response', resp?.data);
+      // Reset local state so the user lands back on the Generate screen
+      setReport(null);
+      setComments('');
+      setInitialComments('');
+      setCommentsUpdatedBy(null);
+      setCommentsUpdatedAt(null);
+      setSavedAt(null);
+      setGeneratedBy(null);
+      setSource(null);
+      setShowDeleteConfirm(false);
+    } catch (err: any) {
+      console.error('[StandupReport] Delete failed', err, err?.response?.data);
+      const serverMsg = err?.response?.data?.error;
+      const status = err?.response?.status;
+      setErrorMsg(
+        serverMsg
+          ? `Delete failed (${status}): ${serverMsg}`
+          : err?.message || 'Failed to delete the standup report.'
+      );
+    } finally {
+      setDeleting(false);
+    }
+  };
+
   // ─── Pre-generation landing view ──────────────────────────────────────
   if (loadingTarget) {
     return (
@@ -257,10 +351,10 @@ export default function BakeryStandupMeetingReport() {
     : '';
 
   return (
-    <div className="w-full px-2 sm:px-4 pb-12">
+    <div className={`w-full px-2 sm:px-4 ${!report ? 'h-[calc(100vh-260px)] overflow-hidden flex flex-col items-center justify-center' : 'pb-12'}`}>
       {/* Top description — only when no report has been generated yet */}
       {!report && (
-        <div className="text-center px-4 pt-2 pb-8">
+        <div className="text-center px-4 pb-6 w-full">
           <div className="inline-flex items-center gap-2 px-3 py-1 rounded-full bg-gradient-to-r from-amber-50 to-orange-50 dark:from-amber-900/30 dark:to-orange-900/30 border border-amber-200/60 dark:border-amber-800/60 text-[11px] font-semibold text-amber-700 dark:text-amber-300 mb-3 animate-fade-in">
             <Sparkles className="w-3.5 h-3.5" />
             AI-Generated · Supervisor Briefing
@@ -297,7 +391,7 @@ export default function BakeryStandupMeetingReport() {
 
       {/* Generate button (centered) */}
       {!report && (
-        <div className="flex flex-col items-center justify-center py-10 animate-pop-in">
+        <div className="flex flex-col items-center justify-center py-4 animate-pop-in">
           <div className="relative group">
             <div className="absolute -inset-1 bg-gradient-to-r from-amber-400 via-orange-500 to-rose-500 rounded-2xl blur-lg opacity-60 group-hover:opacity-90 transition-opacity animate-gradient-pulse" />
             <button
@@ -345,12 +439,13 @@ export default function BakeryStandupMeetingReport() {
               )}
             </div>
             <button
-              onClick={() => handleGenerate(true)}
-              disabled={generating}
-              className="inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-semibold text-slate-700 dark:text-slate-200 bg-white/70 dark:bg-gray-800/70 ring-1 ring-slate-200 dark:ring-slate-700 rounded-lg hover:bg-white dark:hover:bg-gray-800 shadow-sm transition-colors active:scale-95 disabled:opacity-60"
+              onClick={() => setShowDeleteConfirm(true)}
+              disabled={generating || deleting}
+              className="inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-semibold text-rose-700 dark:text-rose-300 bg-white/70 dark:bg-gray-800/70 ring-1 ring-rose-200 dark:ring-rose-800 rounded-lg hover:bg-rose-50 dark:hover:bg-rose-900/30 shadow-sm transition-colors active:scale-95 disabled:opacity-60"
+              title="Delete this saved report"
             >
-              {generating ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <RefreshCw className="w-3.5 h-3.5" />}
-              Regenerate
+              {deleting ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Trash2 className="w-3.5 h-3.5" />}
+              Delete Report
             </button>
           </div>
 
@@ -567,6 +662,148 @@ export default function BakeryStandupMeetingReport() {
               {errorMsg}
             </div>
           )}
+        </div>
+      )}
+
+      {/* ── Generation / Regeneration Progress Modal (Animated Checklist) */}
+      {progressMode && (() => {
+        const steps: Array<{ key: string; label: string; threshold: number; icon: any }> = [
+          { key: 'pull',     label: 'Pulling latest Both Shifts metrics',     threshold: 20, icon: Gauge },
+          { key: 'analyze',  label: 'Analyzing performance and issues',       threshold: 55, icon: TrendingUp },
+          { key: 'draft',    label: 'Drafting your supervisor briefing',      threshold: 85, icon: Wand2 },
+          { key: 'finalize', label: 'Finalizing and saving the report',       threshold: 100, icon: Save },
+        ];
+        return (
+          <div className="fixed inset-0 z-[80] flex items-center justify-center p-4 pointer-events-none">
+            <div className="pointer-events-auto w-full max-w-md rounded-2xl bg-white dark:bg-gray-800 shadow-2xl ring-1 ring-black/10 overflow-hidden animate-pop-in">
+              <div className="px-5 py-3 bg-gradient-to-r from-amber-500 via-orange-500 to-rose-500 text-white flex items-center gap-2">
+                <Sparkles className="w-5 h-5 animate-icon-twinkle" />
+                <h3 className="text-sm font-bold">
+                  {progressMode === 'regenerate' ? 'Regenerating Standup Report' : 'Generating Standup Report'}
+                </h3>
+              </div>
+              <div className="p-5 space-y-4">
+                {/* Checklist */}
+                <ul className="space-y-2">
+                  {steps.map((s, idx) => {
+                    const prevThreshold = idx === 0 ? 0 : steps[idx - 1].threshold;
+                    const isCompleted = progressPct >= s.threshold;
+                    const isActive = !isCompleted && progressPct >= prevThreshold;
+                    const Icon = s.icon;
+                    return (
+                      <li
+                        key={s.key}
+                        className={`flex items-center gap-3 rounded-lg px-3 py-2 border transition-all ${
+                          isCompleted
+                            ? 'bg-emerald-50 dark:bg-emerald-900/20 border-emerald-200 dark:border-emerald-800'
+                            : isActive
+                              ? 'bg-amber-50 dark:bg-amber-900/20 border-amber-200 dark:border-amber-800'
+                              : 'bg-gray-50 dark:bg-gray-900/20 border-gray-200 dark:border-gray-700 opacity-60'
+                        }`}
+                      >
+                        <div className={`w-7 h-7 rounded-full flex items-center justify-center flex-shrink-0 ${
+                          isCompleted
+                            ? 'bg-emerald-500 text-white'
+                            : isActive
+                              ? 'bg-amber-500 text-white'
+                              : 'bg-gray-200 dark:bg-gray-700 text-gray-400'
+                        }`}>
+                          {isCompleted ? (
+                            <CheckCircle className="w-4 h-4" />
+                          ) : isActive ? (
+                            <Loader2 className="w-4 h-4 animate-spin" />
+                          ) : (
+                            <Icon className="w-4 h-4" />
+                          )}
+                        </div>
+                        <span className={`text-sm flex-1 ${
+                          isCompleted
+                            ? 'text-emerald-800 dark:text-emerald-200 font-medium'
+                            : isActive
+                              ? 'text-amber-800 dark:text-amber-200 font-semibold'
+                              : 'text-gray-500 dark:text-gray-400'
+                        }`}>
+                          {s.label}
+                        </span>
+                        {isActive && (
+                          <span className="text-[10px] font-bold uppercase tracking-wider text-amber-600 dark:text-amber-300 animate-pulse">
+                            Working…
+                          </span>
+                        )}
+                        {isCompleted && (
+                          <span className="text-[10px] font-bold uppercase tracking-wider text-emerald-600 dark:text-emerald-300">
+                            Done
+                          </span>
+                        )}
+                      </li>
+                    );
+                  })}
+                </ul>
+                {/* Progress bar */}
+                <div className="w-full h-2 rounded-full bg-gray-200 dark:bg-gray-700 overflow-hidden">
+                  <div
+                    className="h-full rounded-full bg-gradient-to-r from-amber-400 via-orange-500 to-rose-500 transition-[width] duration-200 ease-out"
+                    style={{ width: `${Math.max(4, Math.min(100, progressPct))}%` }}
+                  />
+                </div>
+                <div className="flex items-center justify-between text-[11px] text-gray-500 dark:text-gray-400">
+                  <span>{target?.dayOfWeek} · {target?.weekName}</span>
+                  <span className="tabular-nums font-semibold">{Math.round(progressPct)}%</span>
+                </div>
+              </div>
+            </div>
+          </div>
+        );
+      })()}
+
+      {/* ── Delete Confirmation Modal ────────────────────────────────── */}
+      {showDeleteConfirm && (
+        <div className="fixed inset-0 z-[80] flex items-center justify-center p-4 pointer-events-none">
+          <div className="pointer-events-auto w-full max-w-md rounded-2xl bg-white dark:bg-gray-800 shadow-2xl ring-1 ring-black/10 overflow-hidden animate-pop-in">
+            <div className="px-5 py-3 bg-gradient-to-r from-rose-500 to-red-600 text-white flex items-center justify-between">
+              <div className="flex items-center gap-2">
+                <AlertTriangle className="w-5 h-5" />
+                <h3 className="text-sm font-bold">Delete Standup Report?</h3>
+              </div>
+              <button
+                onClick={() => !deleting && setShowDeleteConfirm(false)}
+                disabled={deleting}
+                className="p-1 rounded-lg hover:bg-white/15 disabled:opacity-50"
+                title="Cancel"
+              >
+                <X className="w-4 h-4" />
+              </button>
+            </div>
+            <div className="p-5 space-y-4">
+              <p className="text-sm text-gray-700 dark:text-gray-200">
+                This will permanently remove the saved standup report for{' '}
+                <span className="font-semibold">{target?.dayOfWeek}</span>{' '}
+                <span className="text-gray-500">({target?.weekName})</span> from the database. This action cannot be undone.
+              </p>
+              {commentsDirty || initialComments ? (
+                <p className="text-[12px] text-amber-700 dark:text-amber-300 bg-amber-50 dark:bg-amber-900/30 border border-amber-200 dark:border-amber-800 rounded-lg px-3 py-2">
+                  Supervisor comments attached to this report will also be deleted.
+                </p>
+              ) : null}
+              <div className="flex items-center justify-end gap-2 pt-1">
+                <button
+                  onClick={() => setShowDeleteConfirm(false)}
+                  disabled={deleting}
+                  className="px-4 py-2 text-xs font-semibold text-gray-700 dark:text-gray-200 bg-gray-100 dark:bg-gray-700 rounded-lg hover:bg-gray-200 dark:hover:bg-gray-600 transition-colors disabled:opacity-50"
+                >
+                  Cancel
+                </button>
+                <button
+                  onClick={handleDelete}
+                  disabled={deleting}
+                  className="inline-flex items-center gap-1.5 px-4 py-2 text-xs font-bold text-white bg-gradient-to-r from-rose-500 to-red-600 rounded-lg shadow hover:from-rose-600 hover:to-red-700 active:scale-95 transition-all disabled:opacity-60"
+                >
+                  {deleting ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Trash2 className="w-3.5 h-3.5" />}
+                  {deleting ? 'Deleting…' : 'Delete Report'}
+                </button>
+              </div>
+            </div>
+          </div>
         </div>
       )}
 

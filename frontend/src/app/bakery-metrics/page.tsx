@@ -4,7 +4,7 @@ import { useState, useCallback, useEffect, useRef } from 'react';
 import { useRouter } from 'next/navigation';
 import { useAuth } from '@/components/providers/AuthProvider';
 import ProtectedRoute from '@/components/auth/ProtectedRoute';
-import { Wheat, FileBarChart, LayoutDashboard, FileText, BarChart3, Calendar, Clock, RefreshCw, FileSpreadsheet, Sparkles, History, ClipboardList, X, Plus, Lightbulb, Check, AlertTriangle, Info, Target, Trophy, Users } from 'lucide-react';
+import { Wheat, FileBarChart, LayoutDashboard, FileText, BarChart3, Calendar, Clock, RefreshCw, FileSpreadsheet, Sparkles, History, ClipboardList, X, Plus, Lightbulb, Check, AlertTriangle, Info, Target, Trophy, Users, MoreHorizontal } from 'lucide-react';
 import BakeryMetricsForm from '@/components/bakery-metrics/BakeryMetricsForm';
 import BakeryMetricsReport from '@/components/bakery-metrics/BakeryMetricsReport';
 import BakeryMetricsInsights from '@/components/bakery-metrics/BakeryMetricsInsightsV2';
@@ -34,6 +34,72 @@ export default function BakeryMetricsPage() {
   // Report action trigger (refresh / export)
   const [reportAction, setReportAction] = useState<{ type: 'refresh' | 'pdf' | 'excel'; ts: number } | undefined>();
 
+  // Floating Action Button (View Reports tab only)
+  const [fabOpen, setFabOpen] = useState(false);
+  const fabRef = useRef<HTMLDivElement | null>(null);
+
+  // Submit Metrics draggable modal — GPU-accelerated drag (no React re-renders during move)
+  const submitModalRef = useRef<HTMLDivElement | null>(null);
+  const [submitModalPos, setSubmitModalPos] = useState<{ x: number; y: number }>({ x: 0, y: 0 });
+  const submitDragRef = useRef<{
+    dragging: boolean;
+    startX: number; startY: number;
+    origX: number; origY: number;
+    curX: number; curY: number;
+    rafId: number | null;
+  }>({ dragging: false, startX: 0, startY: 0, origX: 0, origY: 0, curX: 0, curY: 0, rafId: null });
+  const handleSubmitModalDragStart = useCallback((e: React.MouseEvent) => {
+    const target = e.target as HTMLElement;
+    if (target.closest('button, input, select, textarea, a, [role="button"]')) return;
+    e.preventDefault();
+    const s = submitDragRef.current;
+    s.dragging = true;
+    s.startX = e.clientX; s.startY = e.clientY;
+    s.origX = submitModalPos.x; s.origY = submitModalPos.y;
+    s.curX = submitModalPos.x; s.curY = submitModalPos.y;
+    const card = submitModalRef.current;
+    if (card) { card.style.transition = 'none'; card.style.willChange = 'transform'; }
+    const flush = () => {
+      s.rafId = null;
+      if (!submitDragRef.current.dragging) return;
+      const c = submitModalRef.current;
+      if (c) c.style.transform = `translate3d(${s.curX}px, ${s.curY}px, 0)`;
+    };
+    const handleMove = (ev: MouseEvent) => {
+      if (!submitDragRef.current.dragging) return;
+      s.curX = s.origX + (ev.clientX - s.startX);
+      s.curY = s.origY + (ev.clientY - s.startY);
+      if (s.rafId == null) s.rafId = requestAnimationFrame(flush);
+    };
+    const handleUp = () => {
+      submitDragRef.current.dragging = false;
+      if (s.rafId != null) { cancelAnimationFrame(s.rafId); s.rafId = null; }
+      document.removeEventListener('mousemove', handleMove);
+      document.removeEventListener('mouseup', handleUp);
+      document.body.style.userSelect = '';
+      if (submitModalRef.current) submitModalRef.current.style.willChange = '';
+      setSubmitModalPos({ x: s.curX, y: s.curY });
+    };
+    document.body.style.userSelect = 'none';
+    document.addEventListener('mousemove', handleMove);
+    document.addEventListener('mouseup', handleUp);
+  }, [submitModalPos]);
+  useEffect(() => {
+    if (!fabOpen) return;
+    const handleClickOutside = (e: MouseEvent) => {
+      if (fabRef.current && !fabRef.current.contains(e.target as Node)) setFabOpen(false);
+    };
+    const handleEsc = (e: KeyboardEvent) => { if (e.key === 'Escape') setFabOpen(false); };
+    document.addEventListener('mousedown', handleClickOutside);
+    document.addEventListener('keydown', handleEsc);
+    return () => {
+      document.removeEventListener('mousedown', handleClickOutside);
+      document.removeEventListener('keydown', handleEsc);
+    };
+  }, [fabOpen]);
+  // Close FAB when leaving the report tab
+  useEffect(() => { if (activeTab !== 'report') setFabOpen(false); }, [activeTab]);
+
   // Recent Submissions modal trigger
   const [recentSubsTrigger, setRecentSubsTrigger] = useState(0);
 
@@ -43,6 +109,7 @@ export default function BakeryMetricsPage() {
   // Submit Metrics modal (centered)
   const [showFormModal, setShowFormModal] = useState(false);
   const [prefillWeekDay, setPrefillWeekDay] = useState<{ weekName: string; dayOfWeek: string; ts: number } | null>(null);
+  useEffect(() => { if (showFormModal) setSubmitModalPos({ x: 0, y: 0 }); }, [showFormModal]);
 
   // Handle Fill Now from tracker — open form modal with prefilled week/day
   const handleFillNow = (weekName: string, dayOfWeek: string) => {
@@ -156,25 +223,7 @@ export default function BakeryMetricsPage() {
                 </div>
               </div>
 
-              {/* Center: Submit Metrics + Data Completeness buttons (only on report tab) */}
-              {activeTab === 'report' && <div className="hidden sm:flex items-center gap-2">
-                <button
-                  onClick={() => setShowFormModal(true)}
-                  className="inline-flex items-center gap-1.5 px-3 py-1.5 bg-gradient-to-r from-blue-500 to-indigo-600 text-white rounded-lg text-xs font-bold shadow-sm hover:from-blue-600 hover:to-indigo-700 transition-all active:scale-95"
-                  title="Submit Daily Metrics"
-                >
-                  <Plus className="w-3.5 h-3.5" />
-                  Submit Metrics
-                </button>
-                <button
-                  onClick={() => setTrackerModalTrigger(Date.now())}
-                  className="inline-flex items-center gap-1.5 px-3 py-1.5 bg-gradient-to-r from-amber-500 to-orange-500 text-white rounded-lg text-xs font-bold shadow-sm hover:from-amber-600 hover:to-orange-600 transition-all active:scale-95"
-                  title="Open Data Completeness Tracker"
-                >
-                  <ClipboardList className="w-3.5 h-3.5" />
-                  Data Completeness
-                </button>
-              </div>}
+              {/* Center buttons moved to Floating Action Button (bottom-right of content area) */}
 
               {/* Right: Dynamic tab context */}
               <div className="flex-shrink-0 hidden sm:block">
@@ -193,65 +242,20 @@ export default function BakeryMetricsPage() {
                       </span>
                       <span className="mx-0.5 w-px h-4 bg-gray-300 dark:bg-gray-600" />
                       <button
-                        onClick={() => setReportAction({ type: 'pdf', ts: Date.now() })}
-                        className="inline-flex items-center px-2 py-1 bg-white dark:bg-gray-700 border border-gray-300 dark:border-gray-600 rounded-md hover:bg-red-50 dark:hover:bg-red-900/20 hover:border-red-300 transition-all text-[10px] font-semibold text-gray-700 dark:text-gray-300 shadow-sm"
-                      >
-                        <FileText className="w-3 h-3 mr-1 text-red-600" /> PDF
-                      </button>
-                      <button
-                        onClick={() => setReportAction({ type: 'excel', ts: Date.now() })}
-                        className="inline-flex items-center px-2 py-1 bg-white dark:bg-gray-700 border border-gray-300 dark:border-gray-600 rounded-md hover:bg-green-50 dark:hover:bg-green-900/20 hover:border-green-300 transition-all text-[10px] font-semibold text-gray-700 dark:text-gray-300 shadow-sm"
-                      >
-                        <FileSpreadsheet className="w-3 h-3 mr-1 text-green-600" /> Excel
-                      </button>
-                      <button
                         onClick={() => setReportAction({ type: 'refresh', ts: Date.now() })}
                         className="inline-flex items-center px-2 py-1 bg-gradient-to-r from-blue-600 to-indigo-600 text-white rounded-md hover:from-blue-700 hover:to-indigo-700 transition-all text-[10px] font-semibold shadow-sm active:scale-95"
                       >
                         <RefreshCw className="w-3 h-3 mr-1" /> Refresh
                       </button>
-                      <span className="mx-0.5 w-px h-4 bg-gray-300 dark:bg-gray-600" />
-                      <button
-                        onClick={() => setShowTipsPanel(true)}
-                        className="inline-flex items-center gap-1 px-2 py-1 bg-gradient-to-r from-blue-500 to-blue-600 text-white rounded-md text-[10px] font-bold shadow-sm hover:from-blue-600 hover:to-blue-700 transition-all active:scale-95"
-                        title="Tips & Guidelines"
-                      >
-                        <Lightbulb className="w-3 h-3" /> Tips & Guidelines
-                      </button>
-                      <button
-                        onClick={() => setRecentSubsTrigger(Date.now())}
-                        className="inline-flex items-center gap-1 px-2 py-1 bg-gradient-to-r from-green-500 to-emerald-600 text-white rounded-md text-[10px] font-bold shadow-sm hover:from-green-600 hover:to-emerald-700 transition-all active:scale-95"
-                        title="View recent submissions"
-                      >
-                        <History className="w-3 h-3" /> Recent Submissions
-                      </button>
+                      {/* PDF, Excel, Tips & Guidelines, Recent Submissions moved to Floating Action Button */}
                     </div>
                   </div>
                 )}
               </div>
             </div>
 
-            {/* Mobile: Submit Metrics + Data Completeness buttons (only on report tab) */}
+            {/* Mobile: status badges + Refresh only (other actions moved to Floating Action Button) */}
             {activeTab === 'report' && <div className="sm:hidden mb-2">
-              <div className="flex items-center gap-1.5 mb-1.5">
-                <button
-                  onClick={() => setShowFormModal(true)}
-                  className="inline-flex items-center gap-1 px-2.5 py-1 bg-gradient-to-r from-blue-500 to-indigo-600 text-white rounded-md text-[9px] font-bold shadow-sm hover:from-blue-600 hover:to-indigo-700 transition-all active:scale-95"
-                  title="Submit Daily Metrics"
-                >
-                  <Plus className="w-3 h-3" />
-                  Submit Metrics
-                </button>
-                <button
-                  onClick={() => setTrackerModalTrigger(Date.now())}
-                  className="inline-flex items-center gap-1 px-2.5 py-1 bg-gradient-to-r from-amber-500 to-orange-500 text-white rounded-md text-[9px] font-bold shadow-sm hover:from-amber-600 hover:to-orange-600 transition-all active:scale-95"
-                  title="Open Data Completeness Tracker"
-                >
-                  <ClipboardList className="w-3 h-3" />
-                  Data Completeness
-                </button>
-              </div>
-
               {activeTab === 'report' && (
                 <div className="flex flex-col gap-1.5">
                   <div className="flex flex-wrap items-center gap-1">
@@ -261,41 +265,11 @@ export default function BakeryMetricsPage() {
                     <span className="flex items-center gap-1 px-1.5 py-0.5 bg-blue-50 dark:bg-blue-900/30 border border-blue-200 dark:border-blue-700 rounded text-[9px] font-semibold text-blue-700 dark:text-blue-300 truncate max-w-[140px]">
                       <Calendar className="w-2.5 h-2.5 flex-shrink-0" /> {reportFilter.week || 'Current Week'}
                     </span>
-                  </div>
-                  <div className="flex items-center gap-1">
-                    <button
-                      onClick={() => setReportAction({ type: 'pdf', ts: Date.now() })}
-                      className="inline-flex items-center px-1.5 py-0.5 bg-white dark:bg-gray-700 border border-gray-300 dark:border-gray-600 rounded text-[9px] font-semibold text-gray-700 dark:text-gray-300"
-                    >
-                      <FileText className="w-2.5 h-2.5 mr-0.5 text-red-600" /> PDF
-                    </button>
-                    <button
-                      onClick={() => setReportAction({ type: 'excel', ts: Date.now() })}
-                      className="inline-flex items-center px-1.5 py-0.5 bg-white dark:bg-gray-700 border border-gray-300 dark:border-gray-600 rounded text-[9px] font-semibold text-gray-700 dark:text-gray-300"
-                    >
-                      <FileSpreadsheet className="w-2.5 h-2.5 mr-0.5 text-green-600" /> Excel
-                    </button>
                     <button
                       onClick={() => setReportAction({ type: 'refresh', ts: Date.now() })}
                       className="inline-flex items-center px-1.5 py-0.5 bg-gradient-to-r from-blue-600 to-indigo-600 text-white rounded text-[9px] font-semibold active:scale-95"
                     >
                       <RefreshCw className="w-2.5 h-2.5 mr-0.5" /> Refresh
-                    </button>
-                  </div>
-                  <div className="flex items-center gap-1">
-                    <button
-                      onClick={() => setShowTipsPanel(true)}
-                      className="inline-flex items-center gap-0.5 px-1.5 py-0.5 bg-gradient-to-r from-blue-500 to-blue-600 text-white rounded text-[9px] font-bold shadow-sm active:scale-95"
-                      title="Tips & Guidelines"
-                    >
-                      <Lightbulb className="w-2.5 h-2.5" /> Tips & Guidelines
-                    </button>
-                    <button
-                      onClick={() => setRecentSubsTrigger(Date.now())}
-                      className="inline-flex items-center gap-0.5 px-1.5 py-0.5 bg-gradient-to-r from-green-500 to-emerald-600 text-white rounded text-[9px] font-bold shadow-sm active:scale-95"
-                      title="View recent submissions"
-                    >
-                      <History className="w-2.5 h-2.5" /> Recent Submissions
                     </button>
                   </div>
                 </div>
@@ -353,11 +327,118 @@ export default function BakeryMetricsPage() {
           <BakeryMetricsForm onStepChange={handleStepChange} openRecentSubmissions={recentSubsTrigger} openTrackerModal={trackerModalTrigger} onFillNow={handleFillNow} />
         </div>
 
-        {/* Submit Metrics Modal (centered) */}
+        {/* Floating Action Button — visible only on View Reports tab */}
+        {activeTab === 'report' && (
+          <div ref={fabRef} className="fixed bottom-24 right-6 z-50 flex flex-col items-end gap-3">
+            {/* Dropdown menu */}
+            {fabOpen && (
+              <div
+                className="w-64 bg-white dark:bg-gray-800 rounded-2xl shadow-2xl border border-gray-200 dark:border-gray-700 overflow-hidden animate-[fabMenuIn_0.2s_ease-out]"
+              >
+                <div className="px-4 py-3 bg-gradient-to-r from-amber-500 to-orange-500 text-white">
+                  <h4 className="text-sm font-bold flex items-center gap-2">
+                    <Sparkles className="w-4 h-4" /> Quick Actions
+                  </h4>
+                </div>
+
+                <div className="p-2 space-y-1" role="menu">
+                  {/* Group 1: Tips & Guidelines, Recent Submissions */}
+                  <button
+                    onClick={() => { setShowTipsPanel(true); setFabOpen(false); }}
+                    className="w-full flex items-center gap-3 px-3 py-2 rounded-lg text-left text-sm font-semibold text-gray-700 dark:text-gray-200 hover:bg-blue-50 dark:hover:bg-blue-900/30 transition-colors"
+                    role="menuitem"
+                  >
+                    <span className="flex items-center justify-center w-8 h-8 rounded-lg bg-gradient-to-br from-blue-500 to-blue-600 text-white shadow-sm">
+                      <Lightbulb className="w-4 h-4" />
+                    </span>
+                    Tips & Guidelines
+                  </button>
+                  <button
+                    onClick={() => { setRecentSubsTrigger(Date.now()); setFabOpen(false); }}
+                    className="w-full flex items-center gap-3 px-3 py-2 rounded-lg text-left text-sm font-semibold text-gray-700 dark:text-gray-200 hover:bg-green-50 dark:hover:bg-green-900/30 transition-colors"
+                    role="menuitem"
+                  >
+                    <span className="flex items-center justify-center w-8 h-8 rounded-lg bg-gradient-to-br from-green-500 to-emerald-600 text-white shadow-sm">
+                      <History className="w-4 h-4" />
+                    </span>
+                    Recent Submissions
+                  </button>
+
+                  <div className="my-1 border-t border-gray-200 dark:border-gray-700" />
+
+                  {/* Group 2: PDF, Excel */}
+                  <button
+                    onClick={() => { setReportAction({ type: 'pdf', ts: Date.now() }); setFabOpen(false); }}
+                    className="w-full flex items-center gap-3 px-3 py-2 rounded-lg text-left text-sm font-semibold text-gray-700 dark:text-gray-200 hover:bg-red-50 dark:hover:bg-red-900/30 transition-colors"
+                    role="menuitem"
+                  >
+                    <span className="flex items-center justify-center w-8 h-8 rounded-lg bg-white dark:bg-gray-700 border border-gray-300 dark:border-gray-600 shadow-sm">
+                      <FileText className="w-4 h-4 text-red-600" />
+                    </span>
+                    Export PDF
+                  </button>
+                  <button
+                    onClick={() => { setReportAction({ type: 'excel', ts: Date.now() }); setFabOpen(false); }}
+                    className="w-full flex items-center gap-3 px-3 py-2 rounded-lg text-left text-sm font-semibold text-gray-700 dark:text-gray-200 hover:bg-green-50 dark:hover:bg-green-900/30 transition-colors"
+                    role="menuitem"
+                  >
+                    <span className="flex items-center justify-center w-8 h-8 rounded-lg bg-white dark:bg-gray-700 border border-gray-300 dark:border-gray-600 shadow-sm">
+                      <FileSpreadsheet className="w-4 h-4 text-green-600" />
+                    </span>
+                    Export Excel
+                  </button>
+
+                  <div className="my-1 border-t border-gray-200 dark:border-gray-700" />
+
+                  {/* Group 3: Submit Metrics, Data Completeness */}
+                  <button
+                    onClick={() => { setShowFormModal(true); setFabOpen(false); }}
+                    className="w-full flex items-center gap-3 px-3 py-2 rounded-lg text-left text-sm font-semibold text-gray-700 dark:text-gray-200 hover:bg-indigo-50 dark:hover:bg-indigo-900/30 transition-colors"
+                    role="menuitem"
+                  >
+                    <span className="flex items-center justify-center w-8 h-8 rounded-lg bg-gradient-to-br from-blue-500 to-indigo-600 text-white shadow-sm">
+                      <Plus className="w-4 h-4" />
+                    </span>
+                    Submit Metrics
+                  </button>
+                  <button
+                    onClick={() => { setTrackerModalTrigger(Date.now()); setFabOpen(false); }}
+                    className="w-full flex items-center gap-3 px-3 py-2 rounded-lg text-left text-sm font-semibold text-gray-700 dark:text-gray-200 hover:bg-amber-50 dark:hover:bg-amber-900/30 transition-colors"
+                    role="menuitem"
+                  >
+                    <span className="flex items-center justify-center w-8 h-8 rounded-lg bg-gradient-to-br from-amber-500 to-orange-500 text-white shadow-sm">
+                      <ClipboardList className="w-4 h-4" />
+                    </span>
+                    Data Completeness
+                  </button>
+                </div>
+              </div>
+            )}
+
+            {/* FAB trigger */}
+            <button
+              onClick={() => setFabOpen(v => !v)}
+              aria-label="Report actions menu"
+              className={`group flex items-center justify-center w-14 h-14 rounded-full bg-gradient-to-br from-amber-500 to-orange-500 text-white shadow-xl hover:shadow-2xl hover:scale-110 transition-all active:scale-95 ${fabOpen ? 'rotate-45' : ''}`}
+            >
+              {fabOpen ? <X className="w-6 h-6" /> : <MoreHorizontal className="w-6 h-6" />}
+            </button>
+          </div>
+        )}
+
+        {/* Submit Metrics Modal (centered, draggable, clear background) */}
         {showFormModal && (
-          <div className="fixed inset-0 z-50 flex items-start justify-center overflow-y-auto bg-black/50 backdrop-blur-sm" onClick={() => setShowFormModal(false)}>
-            <div className="relative w-full max-w-5xl mx-4 my-6 bg-white dark:bg-gray-900 rounded-2xl shadow-2xl border border-gray-200 dark:border-gray-700 overflow-hidden" onClick={(e) => e.stopPropagation()}>
-              <div className="sticky top-0 z-10 flex items-center justify-between px-4 sm:px-6 py-4 bg-gradient-to-r from-blue-600 to-indigo-600 text-white shadow-lg">
+          <div className="fixed inset-0 z-50 flex items-start justify-center pointer-events-none">
+            <div
+              ref={submitModalRef}
+              className="relative w-full max-w-5xl mx-4 my-6 max-h-[80vh] bg-white dark:bg-gray-900 rounded-2xl shadow-2xl border border-gray-200 dark:border-gray-700 overflow-hidden flex flex-col pointer-events-auto"
+              style={{ transform: `translate3d(${submitModalPos.x}px, ${submitModalPos.y}px, 0)` }}
+              onClick={(e) => e.stopPropagation()}
+            >
+              <div
+                className="flex-shrink-0 flex items-center justify-between px-4 sm:px-6 py-4 bg-gradient-to-r from-blue-600 to-indigo-600 text-white shadow-lg select-none cursor-move"
+                onMouseDown={handleSubmitModalDragStart}
+              >
                 <div className="flex items-center gap-3">
                   <div className="p-1.5 bg-white/20 rounded-lg">
                     <Wheat className="w-5 h-5" />
@@ -371,7 +452,7 @@ export default function BakeryMetricsPage() {
                   <X className="w-5 h-5" />
                 </button>
               </div>
-              <div className="p-4 sm:p-6">
+              <div className="flex-1 overflow-y-auto p-2 sm:p-3">
                 <BakeryMetricsForm onStepChange={handleStepChange} openRecentSubmissions={recentSubsTrigger} prefillWeekDay={prefillWeekDay} onSuccessClose={() => { setShowFormModal(false); setActiveTab('report'); }} />
               </div>
             </div>
@@ -547,6 +628,10 @@ export default function BakeryMetricsPage() {
           @keyframes slideDown {
             from { opacity: 0; transform: translateY(-10px); }
             to { opacity: 1; transform: translateY(0); }
+          }
+          @keyframes fabMenuIn {
+            from { opacity: 0; transform: translateY(8px) scale(0.95); }
+            to { opacity: 1; transform: translateY(0) scale(1); }
           }
         `}</style>
       </div>

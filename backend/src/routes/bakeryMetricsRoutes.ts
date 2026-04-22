@@ -10,6 +10,7 @@ import {
   getSavedStandupReport,
   saveStandupReport,
   updateStandupComments,
+  deleteStandupReport,
 } from '../services/standupMeetingReportService';
 import { buildBakeryReportData, generateBakeryReportPdf, sendBakeryReportEmail, sendBakeryReportToUsers, getOrgUsersForBakeryReport } from '../services/bakeryReportEmailService';
 import { notifyBakeryMetricsSubmitted } from '../services/smsService';
@@ -1256,6 +1257,60 @@ router.patch('/standup-report/comments', authenticate, async (req: AuthRequest, 
   } catch (error: any) {
     console.error('[StandupReport] PATCH comments error:', error);
     res.status(500).json({ success: false, error: 'Failed to save comments.' });
+  }
+});
+
+// DELETE /api/bakery-metrics/standup-report
+// Body/Query: { weekName, dayOfWeek } — permanently removes the saved report
+router.delete('/standup-report', authenticate, async (req: AuthRequest, res: Response) => {
+  try {
+    const user = req.user;
+    if (!user) return res.status(401).json({ success: false, error: 'Authentication required.' });
+
+    const weekName = (req.body?.weekName ?? req.query.weekName) as string;
+    const dayOfWeek = (req.body?.dayOfWeek ?? req.query.dayOfWeek) as string;
+
+    if (!weekName || !WEEK_NAME_ROUTE_PATTERN.test(weekName)) {
+      return res.status(400).json({ success: false, error: 'Invalid week name.' });
+    }
+    if (!dayOfWeek || !VALID_DAYS_ROUTE.includes(dayOfWeek)) {
+      return res.status(400).json({ success: false, error: 'Invalid day of week.' });
+    }
+
+    const result = await deleteStandupReport(weekName, dayOfWeek);
+    if (!result.success) return res.status(404).json(result);
+    res.json(result);
+  } catch (error: any) {
+    console.error('[StandupReport] DELETE error:', error);
+    res.status(500).json({ success: false, error: 'Failed to delete standup report.' });
+  }
+});
+
+// POST /api/bakery-metrics/standup-report/delete
+// Alias for clients/proxies that don't handle DELETE well. Same behavior.
+router.post('/standup-report/delete', authenticate, async (req: AuthRequest, res: Response) => {
+  console.log('[StandupReport][DELETE via POST] hit', { body: req.body, user: req.user?.id });
+  try {
+    const user = req.user;
+    if (!user) return res.status(401).json({ success: false, error: 'Authentication required.' });
+
+    const { weekName, dayOfWeek } = req.body || {};
+    if (!weekName || !WEEK_NAME_ROUTE_PATTERN.test(weekName)) {
+      console.warn('[StandupReport][DELETE] invalid weekName:', weekName);
+      return res.status(400).json({ success: false, error: `Invalid week name: ${weekName}` });
+    }
+    if (!dayOfWeek || !VALID_DAYS_ROUTE.includes(dayOfWeek)) {
+      console.warn('[StandupReport][DELETE] invalid dayOfWeek:', dayOfWeek);
+      return res.status(400).json({ success: false, error: `Invalid day of week: ${dayOfWeek}` });
+    }
+
+    const result = await deleteStandupReport(weekName, dayOfWeek);
+    console.log('[StandupReport][DELETE] result:', result);
+    if (!result.success) return res.status(404).json(result);
+    res.json(result);
+  } catch (error: any) {
+    console.error('[StandupReport] POST delete error:', error);
+    res.status(500).json({ success: false, error: error?.message || 'Failed to delete standup report.' });
   }
 });
 

@@ -236,6 +236,80 @@ export default function BakeryMetricsForm({ onStepChange, openRecentSubmissions,
   const [showAllModal, setShowAllModal] = useState(false);
   const [allSubmissions, setAllSubmissions] = useState<Submission[]>([]);
   const [allSubsLoading, setAllSubsLoading] = useState(false);
+  // All Submissions draggable modal — GPU-accelerated drag
+  const [allModalPos, setAllModalPos] = useState<{ x: number; y: number }>({ x: 0, y: 0 });
+  const allModalCardRef = useRef<HTMLDivElement | null>(null);
+  const allModalDragRef = useRef<{
+    dragging: boolean;
+    startX: number; startY: number;
+    origX: number; origY: number;
+    curX: number; curY: number;
+    rafId: number | null;
+  }>({ dragging: false, startX: 0, startY: 0, origX: 0, origY: 0, curX: 0, curY: 0, rafId: null });
+  const handleAllModalDragStart = useCallback((e: React.MouseEvent) => {
+    const target = e.target as HTMLElement;
+    if (target.closest('button, input, select, textarea, a, [role="button"]')) return;
+    e.preventDefault();
+    const s = allModalDragRef.current;
+    s.dragging = true;
+    s.startX = e.clientX; s.startY = e.clientY;
+    s.origX = allModalPos.x; s.origY = allModalPos.y;
+    s.curX = allModalPos.x; s.curY = allModalPos.y;
+    const card = allModalCardRef.current;
+    if (card) { card.style.transition = 'none'; card.style.willChange = 'transform'; }
+    const flush = () => {
+      s.rafId = null;
+      if (!allModalDragRef.current.dragging) return;
+      const c = allModalCardRef.current;
+      if (c) c.style.transform = `translate3d(${s.curX}px, ${s.curY}px, 0)`;
+    };
+    const handleMove = (ev: MouseEvent) => {
+      if (!allModalDragRef.current.dragging) return;
+      s.curX = s.origX + (ev.clientX - s.startX);
+      s.curY = s.origY + (ev.clientY - s.startY);
+      if (s.rafId == null) s.rafId = requestAnimationFrame(flush);
+    };
+    const handleUp = () => {
+      allModalDragRef.current.dragging = false;
+      if (s.rafId != null) { cancelAnimationFrame(s.rafId); s.rafId = null; }
+      document.removeEventListener('mousemove', handleMove);
+      document.removeEventListener('mouseup', handleUp);
+      document.body.style.userSelect = '';
+      if (allModalCardRef.current) allModalCardRef.current.style.willChange = '';
+      setAllModalPos({ x: s.curX, y: s.curY });
+    };
+    document.body.style.userSelect = 'none';
+    document.addEventListener('mousemove', handleMove);
+    document.addEventListener('mouseup', handleUp);
+  }, [allModalPos]);
+  useEffect(() => { if (showAllModal) setAllModalPos({ x: 0, y: 0 }); }, [showAllModal]);
+  // All Submissions filters
+  const [showAllFilter, setShowAllFilter] = useState(false);
+  const [showWeekDropdown, setShowWeekDropdown] = useState(false);
+  const [allFilterWeek, setAllFilterWeek] = useState('');
+  const [allFilterDay, setAllFilterDay] = useState('');
+  const [allFilterUser, setAllFilterUser] = useState('');
+  const [allFilterStatus, setAllFilterStatus] = useState('');
+  const filteredAllSubmissions = useMemo(() => {
+    return allSubmissions.filter(s => {
+      if (allFilterWeek && !(s.week_name || '').toLowerCase().includes(allFilterWeek.toLowerCase())) return false;
+      if (allFilterDay && s.day_of_week !== allFilterDay) return false;
+      if (allFilterUser && !(s.submitted_by || '').toLowerCase().includes(allFilterUser.toLowerCase())) return false;
+      if (allFilterStatus && (s.status || 'Completed') !== allFilterStatus) return false;
+      return true;
+    });
+  }, [allSubmissions, allFilterWeek, allFilterDay, allFilterUser, allFilterStatus]);
+  const allFilterActiveCount = [allFilterWeek, allFilterDay, allFilterUser, allFilterStatus].filter(Boolean).length;
+  const clearAllFilters = () => { setAllFilterWeek(''); setAllFilterDay(''); setAllFilterUser(''); setAllFilterStatus(''); };
+  const uniqueAllUsers = useMemo(() => Array.from(new Set(allSubmissions.map(s => s.submitted_by).filter(Boolean))) as string[], [allSubmissions]);
+  const uniqueAllWeeks = useMemo(() => Array.from(new Set(allSubmissions.map(s => s.week_name).filter(Boolean))) as string[], [allSubmissions]);
+  // Safety fallback: when modal opens, ensure we fetch data (prevents stuck "Loading…" state)
+  useEffect(() => {
+    if (showAllModal && !allSubsLoading && allSubmissions.length === 0) {
+      loadAllSubmissions();
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [showAllModal]);
   const [shiftTab, setShiftTab] = useState<'first' | 'second'>('first');
   const [shiftSubmitReady, setShiftSubmitReady] = useState(() => {
     if (typeof window !== 'undefined') {
@@ -293,6 +367,63 @@ export default function BakeryMetricsForm({ onStepChange, openRecentSubmissions,
   const [logFilterStartDate, setLogFilterStartDate] = useState('');
   const [logFilterEndDate, setLogFilterEndDate] = useState('');
   const [showTrackerModal, setShowTrackerModal] = useState(false);
+  const [trackerPos, setTrackerPos] = useState<{ x: number; y: number }>({ x: 0, y: 0 });
+  const trackerCardRef = useRef<HTMLDivElement | null>(null);
+  const trackerDragRef = useRef<{
+    dragging: boolean;
+    startX: number; startY: number;
+    origX: number; origY: number;
+    curX: number; curY: number;
+    rafId: number | null;
+  }>({ dragging: false, startX: 0, startY: 0, origX: 0, origY: 0, curX: 0, curY: 0, rafId: null });
+  const handleTrackerDragStart = useCallback((e: React.MouseEvent) => {
+    // Do not start drag on interactive elements inside the header
+    const target = e.target as HTMLElement;
+    if (target.closest('button, input, select, textarea, a, [role="button"]')) return;
+    e.preventDefault();
+    const card = trackerCardRef.current;
+    const startState = trackerDragRef.current;
+    startState.dragging = true;
+    startState.startX = e.clientX;
+    startState.startY = e.clientY;
+    startState.origX = trackerPos.x;
+    startState.origY = trackerPos.y;
+    startState.curX = trackerPos.x;
+    startState.curY = trackerPos.y;
+    if (card) {
+      card.style.transition = 'none';
+      card.style.willChange = 'transform';
+    }
+    const flush = () => {
+      startState.rafId = null;
+      if (!trackerDragRef.current.dragging) return;
+      const c = trackerCardRef.current;
+      if (c) c.style.transform = `translate3d(${startState.curX}px, ${startState.curY}px, 0)`;
+    };
+    const handleMove = (ev: MouseEvent) => {
+      if (!trackerDragRef.current.dragging) return;
+      startState.curX = startState.origX + (ev.clientX - startState.startX);
+      startState.curY = startState.origY + (ev.clientY - startState.startY);
+      if (startState.rafId == null) {
+        startState.rafId = requestAnimationFrame(flush);
+      }
+    };
+    const handleUp = () => {
+      trackerDragRef.current.dragging = false;
+      if (startState.rafId != null) { cancelAnimationFrame(startState.rafId); startState.rafId = null; }
+      document.removeEventListener('mousemove', handleMove);
+      document.removeEventListener('mouseup', handleUp);
+      document.body.style.userSelect = '';
+      if (trackerCardRef.current) trackerCardRef.current.style.willChange = '';
+      // Sync final position to state so re-renders keep the position
+      setTrackerPos({ x: startState.curX, y: startState.curY });
+    };
+    document.body.style.userSelect = 'none';
+    document.addEventListener('mousemove', handleMove);
+    document.addEventListener('mouseup', handleUp);
+  }, [trackerPos]);
+  // Reset position each time modal opens
+  useEffect(() => { if (showTrackerModal) setTrackerPos({ x: 0, y: 0 }); }, [showTrackerModal]);
   const [showFilterPanel, setShowFilterPanel] = useState(false);
   const [filterPanelClosing, setFilterPanelClosing] = useState(false);
   const [activeFilters, setActiveFilters] = useState<string[]>([]);
@@ -974,7 +1105,8 @@ export default function BakeryMetricsForm({ onStepChange, openRecentSubmissions,
       if (res.data?.submissions) {
         setAllSubmissions(res.data.submissions);
       }
-    } catch {
+    } catch (err) {
+      console.error('[AllSubmissions] Failed to load:', err);
       showNotification('Failed to load submissions', 'error');
     } finally {
       setAllSubsLoading(false);
@@ -1049,7 +1181,10 @@ export default function BakeryMetricsForm({ onStepChange, openRecentSubmissions,
   const trackerContent = (
     <>
       {/* Header with Tabs */}
-      <div className="bg-gradient-to-r from-amber-500 to-orange-500 px-4 sm:px-5 py-3">
+      <div
+        className="bg-gradient-to-r from-amber-500 to-orange-500 px-4 sm:px-5 py-3 select-none cursor-move"
+        onMouseDown={handleTrackerDragStart}
+      >
         <div className="flex items-center justify-between">
           <div className="flex items-center space-x-2.5">
             <div className="p-1.5 bg-white/20 rounded-lg">
@@ -1628,6 +1763,10 @@ export default function BakeryMetricsForm({ onStepChange, openRecentSubmissions,
           0%, 100% { opacity: 1; }
           50% { opacity: 0.2; }
         }
+        @keyframes filterPanelIn {
+          from { opacity: 0; transform: scaleX(0.3) translateX(-24px); }
+          to { opacity: 1; transform: scaleX(1) translateX(0); }
+        }
       `}</style>
 
       {/* ─── Notifications ──────────────────────────────────────────────────── */}
@@ -1837,38 +1976,31 @@ export default function BakeryMetricsForm({ onStepChange, openRecentSubmissions,
 
         {/* ═══ STEP 2: Performance Metrics ═══ */}
         {currentStep === 2 && (
-          <div className="p-4 sm:p-5">
-            <div className="mb-3">
-              <div className="flex items-center space-x-2 mb-1">
-                <div className="p-1.5 bg-blue-100 dark:bg-blue-900/30 rounded-lg">
+          <div className="p-3">
+            <div className="mb-2">
+              <div className="flex items-center space-x-2">
+                <div className="p-1 bg-blue-100 dark:bg-blue-900/30 rounded-lg">
                   <BarChart3 className="w-4 h-4 text-blue-600 dark:text-blue-400" />
                 </div>
-                <h2 className="text-base sm:text-lg font-bold text-gray-800 dark:text-gray-100">Performance Metrics</h2>
+                <h2 className="text-sm sm:text-base font-bold text-gray-800 dark:text-gray-100">Performance Metrics</h2>
+                <span
+                  key={shiftTab}
+                  className={`ml-auto inline-flex items-center gap-1.5 text-xs sm:text-sm font-bold animate-bounce-in ${
+                    shiftTab === 'first' ? 'text-blue-600 dark:text-blue-400' : 'text-orange-600 dark:text-orange-400'
+                  }`}
+                >
+                  {shiftTab === 'first' ? <Sun className="w-3.5 h-3.5" /> : <Moon className="w-3.5 h-3.5" />}
+                  {shiftTab === 'first' ? 'First Shift Metrics' : 'Second Shift Metrics'}
+                </span>
               </div>
-              <p className="text-gray-500 dark:text-gray-400 text-xs">Enter daily metrics for each shift independently</p>
-            </div>
-
-            {/* Dynamic shift label - centered */}
-            <div className="flex justify-center mb-3">
-              <span
-                key={shiftTab}
-                className={`inline-flex items-center gap-2 text-sm sm:text-base font-bold animate-bounce-in ${
-                  shiftTab === 'first'
-                    ? 'text-blue-600 dark:text-blue-400'
-                    : 'text-orange-600 dark:text-orange-400'
-                }`}
-              >
-                {shiftTab === 'first' ? <Sun className="w-4 h-4" /> : <Moon className="w-4 h-4" />}
-                {shiftTab === 'first' ? 'Submit First Shift Metrics' : 'Submit Second Shift Metrics'}
-              </span>
             </div>
 
             {/* Shift Tabs */}
-            <div className="flex space-x-1 mb-4 bg-gray-100 dark:bg-gray-700/80 rounded-xl p-1 relative">
+            <div className="flex space-x-1 mb-2 bg-gray-100 dark:bg-gray-700/80 rounded-xl p-1 relative">
               <button
                 type="button"
                 onClick={() => setShiftTab('first')}
-                className={`flex-1 flex items-center justify-center gap-1.5 px-3 py-2.5 rounded-lg text-xs sm:text-sm font-bold transition-all duration-300 ease-in-out active:scale-[0.96] ${
+                className={`flex-1 flex items-center justify-center gap-1.5 px-3 py-1.5 rounded-lg text-xs sm:text-sm font-bold transition-all duration-300 ease-in-out active:scale-[0.96] ${
                   shiftTab === 'first'
                     ? 'bg-gradient-to-r from-blue-500 to-blue-600 text-white shadow-md shadow-blue-500/30 ring-1 ring-blue-400/50'
                     : 'text-gray-500 dark:text-gray-400 hover:text-gray-700 dark:hover:text-gray-200 hover:bg-gray-200/60 dark:hover:bg-gray-600/40'
@@ -1883,7 +2015,7 @@ export default function BakeryMetricsForm({ onStepChange, openRecentSubmissions,
               <button
                 type="button"
                 onClick={() => setShiftTab('second')}
-                className={`flex-1 flex items-center justify-center gap-1.5 px-3 py-2.5 rounded-lg text-xs sm:text-sm font-bold transition-all duration-300 ease-in-out active:scale-[0.96] ${
+                className={`flex-1 flex items-center justify-center gap-1.5 px-3 py-1.5 rounded-lg text-xs sm:text-sm font-bold transition-all duration-300 ease-in-out active:scale-[0.96] ${
                   shiftTab === 'second'
                     ? 'bg-gradient-to-r from-orange-500 to-orange-600 text-white shadow-md shadow-orange-500/30 ring-1 ring-orange-400/50'
                     : 'text-gray-500 dark:text-gray-400 hover:text-gray-700 dark:hover:text-gray-200 hover:bg-gray-200/60 dark:hover:bg-gray-600/40'
@@ -1899,7 +2031,7 @@ export default function BakeryMetricsForm({ onStepChange, openRecentSubmissions,
 
             {/* ─── First Shift Content ─────────────────────────────────────── */}
             {shiftTab === 'first' && (
-              <div className="space-y-3 animate-fade-slide-in">
+              <div className="space-y-2 animate-fade-slide-in">
                 <MetricSection
                   title="Overall Equipment Effectiveness (OEE)"
                   icon={<Gauge className="w-5 h-5 mr-3 text-indigo-600 dark:text-indigo-400" />}
@@ -1946,7 +2078,7 @@ export default function BakeryMetricsForm({ onStepChange, openRecentSubmissions,
 
             {/* ─── Second Shift Content ────────────────────────────────────── */}
             {shiftTab === 'second' && (
-              <div className="space-y-3 animate-fade-slide-in">
+              <div className="space-y-2 animate-fade-slide-in">
                 <MetricSection
                   title="Overall Equipment Effectiveness (OEE)"
                   icon={<Gauge className="w-5 h-5 mr-3 text-indigo-600 dark:text-indigo-400" />}
@@ -2008,7 +2140,7 @@ export default function BakeryMetricsForm({ onStepChange, openRecentSubmissions,
             )}
 
             {/* Shift Submit Checkbox */}
-            <div className="mt-4 bg-gradient-to-r from-gray-50 to-gray-100 dark:from-gray-700/40 dark:to-gray-700/60 rounded-lg px-4 py-3 border border-gray-200 dark:border-gray-600">
+            <div className="mt-2 bg-gradient-to-r from-gray-50 to-gray-100 dark:from-gray-700/40 dark:to-gray-700/60 rounded-lg px-3 py-2 border border-gray-200 dark:border-gray-600">
               <label className="flex items-center space-x-3 cursor-pointer select-none">
                 <input
                   type="checkbox"
@@ -2264,10 +2396,14 @@ export default function BakeryMetricsForm({ onStepChange, openRecentSubmissions,
 
       {/* ─── Data Completeness Tracker Modal ────────────────────────────────── */}
       {showTrackerModal && createPortal(
-        <div className="fixed inset-0 z-50" onClick={() => setShowTrackerModal(false)}>
-          <div className="absolute inset-0 backdrop-blur-sm bg-black/30" />
-          <div className="relative h-full flex items-center justify-center p-2 sm:p-4">
-            <div className="relative h-[90vh] sm:h-[85vh] w-full max-w-4xl rounded-xl" onClick={e => e.stopPropagation()}>
+        <div className="fixed inset-0 z-50 pointer-events-none">
+          <div className="relative h-full flex items-center justify-center p-2 sm:p-4 pointer-events-none">
+            <div
+              ref={trackerCardRef}
+              className="relative h-[75vh] sm:h-[72vh] w-full max-w-4xl rounded-xl pointer-events-auto"
+              style={{ transform: `translate3d(${trackerPos.x}px, ${trackerPos.y}px, 0)` }}
+              onClick={e => e.stopPropagation()}
+            >
               {/* ── Main Modal ── */}
               <div className="relative z-10 bg-white dark:bg-gray-800 shadow-2xl border border-gray-200 dark:border-gray-700 w-full h-full overflow-hidden flex flex-col rounded-xl">
                 {trackerContent}
@@ -2827,31 +2963,52 @@ export default function BakeryMetricsForm({ onStepChange, openRecentSubmissions,
 
       {/* ─── All Submissions Modal ──────────────────────────────────────────── */}
       {showAllModal && createPortal(
-        <div className="fixed inset-0 z-50" onClick={() => setShowAllModal(false)}>
-          <div className="absolute inset-0 backdrop-blur-sm bg-black/30" />
-          <div className="relative h-full flex items-center justify-center p-4">
+        <div className="fixed inset-0 z-50 pointer-events-none">
+          <div className="relative h-full flex items-center justify-center p-4 pointer-events-none">
+            {/* Drag-wrapper holds both modal card and filter panel so they translate together */}
             <div
-              className="bg-white dark:bg-gray-800 rounded-xl shadow-2xl border border-gray-200 dark:border-gray-700 w-full max-w-5xl max-h-[85vh] overflow-hidden"
+              ref={allModalCardRef}
+              className="relative flex items-start gap-0 pointer-events-auto"
+              style={{ transform: `translate3d(${allModalPos.x}px, ${allModalPos.y}px, 0)` }}
               onClick={e => e.stopPropagation()}
             >
-              {/* Modal Header */}
-              <div className="bg-gradient-to-r from-blue-500 to-blue-600 px-4 py-3 text-white border-b border-white/20">
-                <div className="flex items-center justify-between">
-                  <div className="flex items-center space-x-2">
-                    <div className="p-1.5 bg-white/20 rounded-lg"><Database className="w-4 h-4" /></div>
-                    <div>
-                      <h2 className="text-sm font-bold">All Submissions</h2>
-                      <p className="text-blue-100 text-[10px]">Complete history of bakery metrics</p>
+              {/* Main modal card — fixed height */}
+              <div className="bg-white dark:bg-gray-800 rounded-xl shadow-2xl border border-gray-200 dark:border-gray-700 w-[min(64rem,calc(100vw-2rem))] h-[72vh] overflow-hidden flex flex-col">
+                {/* Modal Header — drag handle */}
+                <div
+                  className="flex-shrink-0 bg-gradient-to-r from-blue-500 to-blue-600 px-4 py-3 text-white border-b border-white/20 select-none cursor-move"
+                  onMouseDown={handleAllModalDragStart}
+                >
+                  <div className="flex items-center justify-between">
+                    <div className="flex items-center space-x-2">
+                      <div className="p-1.5 bg-white/20 rounded-lg"><Database className="w-4 h-4" /></div>
+                      <div>
+                        <h2 className="text-sm font-bold">All Submissions</h2>
+                        <p className="text-blue-100 text-[10px]">Complete history of bakery metrics</p>
+                      </div>
+                    </div>
+                    <div className="flex items-center gap-1.5">
+                      <button
+                        onClick={() => setShowAllFilter(v => !v)}
+                        className={`relative p-1.5 rounded-lg transition-all active:scale-90 ${showAllFilter ? 'bg-white text-blue-600' : 'bg-white/20 hover:bg-white/30 text-white'}`}
+                        title="Filter submissions"
+                      >
+                        <Filter className="w-4 h-4" />
+                        {allFilterActiveCount > 0 && (
+                          <span className="absolute -top-1 -right-1 bg-red-500 text-white text-[9px] font-bold rounded-full w-4 h-4 flex items-center justify-center shadow">
+                            {allFilterActiveCount}
+                          </span>
+                        )}
+                      </button>
+                      <button onClick={() => setShowAllModal(false)} className="p-1.5 bg-white/20 rounded-lg hover:bg-white/30 transition-all active:scale-90" title="Close modal">
+                        <X className="w-4 h-4" />
+                      </button>
                     </div>
                   </div>
-                  <button onClick={() => setShowAllModal(false)} className="p-1.5 bg-white/20 rounded-lg hover:bg-white/30 transition-all active:scale-90" title="Close modal">
-                    <X className="w-4 h-4" />
-                  </button>
                 </div>
-              </div>
 
-              {/* Modal Content */}
-              <div className="overflow-y-auto max-h-[calc(85vh-60px)]">
+                {/* Modal Content */}
+                <div className="flex-1 overflow-y-auto">
                 {allSubsLoading ? (
                   <div className="flex flex-col items-center justify-center py-8">
                     <Loader2 className="w-6 h-6 text-blue-600 animate-spin mb-2" />
@@ -2864,7 +3021,13 @@ export default function BakeryMetricsForm({ onStepChange, openRecentSubmissions,
                       <Inbox className="w-5 h-5 text-gray-400 dark:text-gray-500" />
                     </div>
                     <h3 className="text-sm font-semibold text-gray-900 dark:text-gray-100">No Submissions Found</h3>
-                    <p className="text-xs text-gray-500 dark:text-gray-400">There are no submissions to display.</p>
+                    <p className="text-xs text-gray-500 dark:text-gray-400 mb-2">There are no submissions to display.</p>
+                    <button
+                      onClick={loadAllSubmissions}
+                      className="inline-flex items-center gap-1.5 px-3 py-1.5 bg-blue-600 hover:bg-blue-700 text-white rounded-md text-xs font-semibold transition-colors active:scale-95"
+                    >
+                      <RotateCcw className="w-3.5 h-3.5" /> Retry
+                    </button>
                   </div>
                 ) : (
                   <div className="overflow-x-auto">
@@ -2878,7 +3041,13 @@ export default function BakeryMetricsForm({ onStepChange, openRecentSubmissions,
                         </tr>
                       </thead>
                       <tbody className="divide-y divide-gray-100 dark:divide-gray-700">
-                        {allSubmissions.map((sub, i) => {
+                        {filteredAllSubmissions.length === 0 ? (
+                          <tr>
+                            <td colSpan={4} className="px-4 py-6 text-center text-xs text-gray-500 dark:text-gray-400">
+                              No submissions match the current filters.
+                            </td>
+                          </tr>
+                        ) : filteredAllSubmissions.map((sub, i) => {
                           const statusClass = sub.status === 'Completed'
                             ? 'bg-green-100 text-green-800 dark:bg-green-900/30 dark:text-green-300'
                             : 'bg-blue-100 text-blue-800 dark:bg-blue-900/30 dark:text-blue-300';
@@ -2898,6 +3067,82 @@ export default function BakeryMetricsForm({ onStepChange, openRecentSubmissions,
                   </div>
                 )}
               </div>
+              </div>
+              {/* Outward Filter Panel — sibling of the card, same fixed height */}
+              {showAllFilter && (
+                <div className="w-72 h-[72vh] bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-700 rounded-xl shadow-2xl origin-left flex flex-col overflow-hidden animate-[filterPanelIn_0.22s_cubic-bezier(0.34,1.56,0.64,1)]">
+                  <div className="flex-shrink-0 flex items-center justify-between px-3 py-2 bg-gradient-to-r from-blue-50 to-indigo-50 dark:from-blue-900/30 dark:to-indigo-900/30 border-b border-gray-200 dark:border-gray-700">
+                    <div className="flex items-center gap-1.5 text-xs font-bold text-blue-700 dark:text-blue-300">
+                      <Filter className="w-3.5 h-3.5" /> Filter
+                      {allFilterActiveCount > 0 && (
+                        <span className="bg-blue-600 text-white text-[9px] rounded-full px-1.5 py-0.5">{allFilterActiveCount}</span>
+                      )}
+                    </div>
+                    <button onClick={() => setShowAllFilter(false)} className="p-1 hover:bg-white/80 dark:hover:bg-gray-700 rounded transition" title="Close filter">
+                      <X className="w-3.5 h-3.5 text-gray-600 dark:text-gray-300" />
+                    </button>
+                  </div>
+                  <div className="flex-1 overflow-y-auto p-3 space-y-2.5">
+                    <div className="relative">
+                      <label className="block text-[10px] font-bold text-gray-600 dark:text-gray-400 uppercase tracking-wide mb-1">Week</label>
+                      <button
+                        type="button"
+                        onClick={() => setShowWeekDropdown(v => !v)}
+                        className="w-full text-xs px-2 py-1.5 border border-gray-300 dark:border-gray-600 rounded-md bg-white dark:bg-gray-700 text-gray-900 dark:text-gray-100 flex items-center justify-between gap-1 hover:border-blue-500 focus:ring-1 focus:ring-blue-500 focus:border-blue-500"
+                      >
+                        <span className="truncate">{allFilterWeek || 'All weeks'}</span>
+                        <svg className={`w-3 h-3 flex-shrink-0 transition-transform ${showWeekDropdown ? 'rotate-180' : ''}`} fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 9l-7 7-7-7" /></svg>
+                      </button>
+                      {showWeekDropdown && (
+                        <div className="absolute left-0 right-0 top-full mt-1 z-10 max-h-48 overflow-y-auto bg-white dark:bg-gray-700 border border-gray-300 dark:border-gray-600 rounded-md shadow-lg">
+                          <button type="button" onClick={() => { setAllFilterWeek(''); setShowWeekDropdown(false); }} className={`w-full text-left text-xs px-2 py-1.5 hover:bg-blue-50 dark:hover:bg-blue-900/30 ${!allFilterWeek ? 'bg-blue-100 dark:bg-blue-900/40 font-semibold' : ''}`}>All weeks</button>
+                          {uniqueAllWeeks.map(w => (
+                            <button key={w} type="button" onClick={() => { setAllFilterWeek(w); setShowWeekDropdown(false); }} className={`w-full text-left text-xs px-2 py-1.5 hover:bg-blue-50 dark:hover:bg-blue-900/30 ${allFilterWeek === w ? 'bg-blue-100 dark:bg-blue-900/40 font-semibold' : ''}`}>{w}</button>
+                          ))}
+                        </div>
+                      )}
+                    </div>
+                    <div>
+                      <label className="block text-[10px] font-bold text-gray-600 dark:text-gray-400 uppercase tracking-wide mb-1">Day</label>
+                      <select title="Filter by day" value={allFilterDay} onChange={e => setAllFilterDay(e.target.value)} className="w-full text-xs px-2 py-1.5 border border-gray-300 dark:border-gray-600 rounded-md bg-white dark:bg-gray-700 text-gray-900 dark:text-gray-100 focus:ring-1 focus:ring-blue-500 focus:border-blue-500">
+                        <option value="">All days</option>
+                        <option>Monday</option>
+                        <option>Tuesday</option>
+                        <option>Wednesday</option>
+                        <option>Thursday</option>
+                        <option>Friday</option>
+                      </select>
+                    </div>
+                    <div>
+                      <label className="block text-[10px] font-bold text-gray-600 dark:text-gray-400 uppercase tracking-wide mb-1">Submitted By</label>
+                      <select title="Filter by submitter" value={allFilterUser} onChange={e => setAllFilterUser(e.target.value)} className="w-full text-xs px-2 py-1.5 border border-gray-300 dark:border-gray-600 rounded-md bg-white dark:bg-gray-700 text-gray-900 dark:text-gray-100 focus:ring-1 focus:ring-blue-500 focus:border-blue-500">
+                        <option value="">Everyone</option>
+                        {uniqueAllUsers.map(u => <option key={u} value={u}>{u}</option>)}
+                      </select>
+                    </div>
+                    <div>
+                      <label className="block text-[10px] font-bold text-gray-600 dark:text-gray-400 uppercase tracking-wide mb-1">Status</label>
+                      <select title="Filter by status" value={allFilterStatus} onChange={e => setAllFilterStatus(e.target.value)} className="w-full text-xs px-2 py-1.5 border border-gray-300 dark:border-gray-600 rounded-md bg-white dark:bg-gray-700 text-gray-900 dark:text-gray-100 focus:ring-1 focus:ring-blue-500 focus:border-blue-500">
+                        <option value="">All statuses</option>
+                        <option value="Completed">Completed</option>
+                        <option value="Pending">Pending</option>
+                      </select>
+                    </div>
+                  </div>
+                  <div className="flex-shrink-0 flex items-center justify-between px-3 py-2 border-t border-gray-200 dark:border-gray-700 bg-gray-50 dark:bg-gray-800/80">
+                    <span className="text-[10px] font-semibold text-gray-500 dark:text-gray-400">
+                      {filteredAllSubmissions.length} of {allSubmissions.length}
+                    </span>
+                    <button
+                      onClick={clearAllFilters}
+                      disabled={allFilterActiveCount === 0}
+                      className="inline-flex items-center gap-1 px-2 py-1 text-[10px] font-bold rounded-md bg-gray-100 hover:bg-gray-200 dark:bg-gray-700 dark:hover:bg-gray-600 text-gray-700 dark:text-gray-200 disabled:opacity-50 disabled:cursor-not-allowed transition"
+                    >
+                      <RotateCcw className="w-3 h-3" /> Clear
+                    </button>
+                  </div>
+                </div>
+              )}
             </div>
           </div>
         </div>
@@ -3147,15 +3392,15 @@ function MetricSection({
   };
 
   return (
-    <div className={`bg-gradient-to-r ${bgMap[bgFrom] || bgMap.indigo} rounded-lg p-3`}>
-      <h4 className="text-xs sm:text-sm font-bold text-gray-700 dark:text-gray-200 mb-2.5 flex items-center">
+    <div className={`bg-gradient-to-r ${bgMap[bgFrom] || bgMap.indigo} rounded-lg px-3 py-2`}>
+      <h4 className="text-xs sm:text-sm font-bold text-gray-700 dark:text-gray-200 mb-1.5 flex items-center">
         {icon}
         {title}
       </h4>
-      <div className="grid grid-cols-1 md:grid-cols-2 gap-2.5">
+      <div className="grid grid-cols-1 md:grid-cols-2 gap-2">
         {fields.map(f => (
           <div key={f.field}>
-            <label className="block text-[11px] font-semibold text-gray-600 dark:text-gray-300 mb-1">
+            <label className="block text-[11px] font-semibold text-gray-600 dark:text-gray-300 mb-0.5">
               {f.label} <span className="text-red-500">*</span>
             </label>
             <div className="relative">

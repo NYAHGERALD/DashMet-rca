@@ -12,6 +12,7 @@
 
 import OpenAI from 'openai';
 import { PrismaClient } from '@prisma/client';
+import bakeryMetricsService from './bakeryMetricsService';
 
 const prisma = new PrismaClient();
 
@@ -103,19 +104,15 @@ export function computeTargetDay(today: Date = new Date()): {
 }
 
 // ─── Data Collection ────────────────────────────────────────────────────────
-function parseShift(raw: any) {
-  if (!raw) return null;
-  return {
-    dieCut1Oee: Number(raw.dieCut1OeePct ?? 0),
-    dieCut2Oee: Number(raw.dieCut2OeePct ?? 0),
-    oeeAvg: Number(raw.oeeAvgPct ?? 0),
-    dieCut1Lbs: Number(raw.dieCut1Lbs ?? 0),
-    dieCut2Lbs: Number(raw.dieCut2Lbs ?? 0),
-    lbsTotal: Number(raw.poundsTotal ?? 0),
-    dieCut1Waste: Number(raw.dieCut1WastePct ?? 0),
-    dieCut2Waste: Number(raw.dieCut2WastePct ?? 0),
-    wasteAvg: Number(raw.wasteAvgPct ?? 0),
-  };
+// NOTE: Numbers MUST come from the same source that the Bakery Metrics table
+// shows in its "Both Shifts" column — `bakeryMetricsService.getBothShiftsRecords`.
+// This already includes the single-shift fallback (when only 1st or 2nd shift
+// was submitted, its values flow into the Both-Shifts column). The AI must
+// NEVER recompute averages — it just speaks the numbers it is given.
+function numOrNull(n: any): number | null {
+  if (n === null || n === undefined) return null;
+  const v = Number(n);
+  return Number.isFinite(v) ? v : null;
 }
 
 function sanitizeText(text: string): string {
@@ -131,19 +128,86 @@ function sanitizeText(text: string): string {
 }
 
 async function collectStandupData(weekName: string, dayOfWeek: string, organizationId: string) {
-  // Metrics submission
-  const submission = await prisma.bakeryWeekSubmission.findFirst({
-    where: { weekName, dayOfWeek },
-    include: {
-      firstShiftMetrics: true,
-      secondShiftMetrics: true,
-      bothShiftsMetrics: true,
-    },
-  });
+  // Pull the exact flattened row the UI table renders
+  const flattenedRows = await bakeryMetricsService.getBothShiftsRecords({ week: weekName, day: dayOfWeek });
+  const row: any = flattenedRows?.[0] ?? null;
 
-  const firstShift = parseShift(submission?.firstShiftMetrics);
-  const secondShift = parseShift(submission?.secondShiftMetrics);
-  const bothShifts = parseShift(submission?.bothShiftsMetrics);
+  // ─── Compute Both-Shifts values the EXACT SAME WAY the UI table does ───
+  // The table's "Both Shifts" column does NOT read from the stored
+  // `bothShiftsMetrics` record. Instead, it combines 1st + 2nd shift values
+  // per-line with these rules:
+  //   - A value of 0 (or null/undefined) is treated as "did not run"
+  //   - If one shift did not run on a line, use the other shift's value alone
+  //   - Otherwise average (for %) or sum (for lbs)
+  // We replicate that rule here so the standup numbers ALWAYS match the table.
+  const isMissing = (v: any) => v === null || v === undefined || Number(v) === 0;
+
+  const combineByLine = (
+    fsVal: any,
+    ssVal: any,
+    fsDidNotRun: boolean,
+    ssDidNotRun: boolean,
+    mode: 'avg' | 'sum',
+  ): number | null => {
+    if (fsDidNotRun && ssDidNotRun) return null;
+    if (fsDidNotRun) return isMissing(ssVal) ? null : Number(ssVal);
+    if (ssDidNotRun) return isMissing(fsVal) ? null : Number(fsVal);
+    if (isMissing(fsVal) || isMissing(ssVal)) return null;
+    return mode === 'sum' ? Number(fsVal) + Number(ssVal) : (Number(fsVal) + Number(ssVal)) / 2;
+  };
+
+  const avg2 = (a: number | null, b: number | null): number | null => {
+    if (a === null && b === null) return null;
+    if (a === null) return b;
+    if (b === null) return a;
+    return (a + b) / 2;
+  };
+  const sum2 = (a: number | null, b: number | null): number | null => {
+    if (a === null && b === null) return null;
+    return (a ?? 0) + (b ?? 0);
+  };
+
+  let bothShifts: any = null;
+  if (row) {
+    // First-shift line states (0/null → missing; if all 3 KPIs missing → didNotRun)
+    const fsL1DidNotRun =
+      isMissing(row.first_shift_die_cut1_oee) &&
+      isMissing(row.first_shift_die_cut1_lbs) &&
+      isMissing(row.first_shift_die_cut1_waste_pct);
+    const fsL2DidNotRun =
+      isMissing(row.first_shift_die_cut2_oee) &&
+      isMissing(row.first_shift_die_cut2_lbs) &&
+      isMissing(row.first_shift_die_cut2_waste_pct);
+    const ssL1DidNotRun =
+      isMissing(row.second_shift_die_cut1_oee) &&
+      isMissing(row.second_shift_die_cut1_lbs) &&
+      isMissing(row.second_shift_die_cut1_waste_pct);
+    const ssL2DidNotRun =
+      isMissing(row.second_shift_die_cut2_oee) &&
+      isMissing(row.second_shift_die_cut2_lbs) &&
+      isMissing(row.second_shift_die_cut2_waste_pct);
+
+    const bsL1Oee   = combineByLine(row.first_shift_die_cut1_oee,         row.second_shift_die_cut1_oee,         fsL1DidNotRun, ssL1DidNotRun, 'avg');
+    const bsL2Oee   = combineByLine(row.first_shift_die_cut2_oee,         row.second_shift_die_cut2_oee,         fsL2DidNotRun, ssL2DidNotRun, 'avg');
+    const bsL1Lbs   = combineByLine(row.first_shift_die_cut1_lbs,         row.second_shift_die_cut1_lbs,         fsL1DidNotRun, ssL1DidNotRun, 'sum');
+    const bsL2Lbs   = combineByLine(row.first_shift_die_cut2_lbs,         row.second_shift_die_cut2_lbs,         fsL2DidNotRun, ssL2DidNotRun, 'sum');
+    const bsL1Waste = combineByLine(row.first_shift_die_cut1_waste_pct,   row.second_shift_die_cut1_waste_pct,   fsL1DidNotRun, ssL1DidNotRun, 'avg');
+    const bsL2Waste = combineByLine(row.first_shift_die_cut2_waste_pct,   row.second_shift_die_cut2_waste_pct,   fsL2DidNotRun, ssL2DidNotRun, 'avg');
+
+    bothShifts = {
+      dieCut1Oee: bsL1Oee,
+      dieCut2Oee: bsL2Oee,
+      oeeAvg: avg2(bsL1Oee, bsL2Oee),
+      dieCut1Lbs: bsL1Lbs,
+      dieCut2Lbs: bsL2Lbs,
+      lbsTotal: sum2(bsL1Lbs, bsL2Lbs),
+      dieCut1Waste: bsL1Waste,
+      dieCut2Waste: bsL2Waste,
+      wasteAvg: avg2(bsL1Waste, bsL2Waste),
+      hasFirstShift: !!row.has_first_shift,
+      hasSecondShift: !!row.has_second_shift,
+    };
+  }
 
   // Resolve dayOfWeek id & week number for issue lookup
   const dayMapping: Record<string, number> = { Monday: 1, Tuesday: 2, Wednesday: 3, Thursday: 4, Friday: 5, Saturday: 6, Sunday: 7 };
@@ -184,7 +248,7 @@ async function collectStandupData(weekName: string, dayOfWeek: string, organizat
     weekNumber = sheetsBeforeCount + 1;
   }
 
-  // Issues for the target day
+  // Issues for the target (production review) day
   const issues = weekNumber && dayOfWeekIds.length > 0
     ? await prisma.machineIssue.findMany({
         where: { organizationId, weekNumber, dayOfWeekId: { in: dayOfWeekIds } },
@@ -196,6 +260,61 @@ async function collectStandupData(weekName: string, dayOfWeek: string, organizat
         orderBy: { createdAt: 'desc' },
       })
     : [];
+
+  // ─── TODAY's startup issues (the day the standup is being held) ─────────
+  // The standup runs TODAY (e.g. Tuesday) and reviews YESTERDAY's production
+  // (e.g. Monday). "Today's Startup Indicators" MUST reflect issues filed for
+  // today — not the production-review day.
+  const today = new Date();
+  const todayDowIndex = today.getDay() === 0 ? 7 : today.getDay(); // Sun=7, Mon=1…
+  const todayDayName = VALID_DAYS[(todayDowIndex - 1) % 7];
+  let todayIssues: any[] = [];
+  if (todayDayName !== dayOfWeek) {
+    const todayDowRecords = await prisma.dayOfWeek.findMany({
+      where: { organizationId, dayOrder: todayDowIndex, isActive: true },
+      select: { id: true },
+    });
+    const todayDowIds = todayDowRecords.map((d) => d.id);
+
+    // Determine the week sheet that contains "today" (may differ from target week)
+    const todayMidnight = new Date(today);
+    todayMidnight.setHours(0, 0, 0, 0);
+    const todaySheet = await prisma.bakeryWeeklySheet.findFirst({
+      where: { weekStart: { lte: todayMidnight }, weekEnd: { gte: todayMidnight } },
+    });
+
+    let todayWeekNumber: number | null = null;
+    if (todaySheet) {
+      const org = await prisma.organization.findUnique({
+        where: { id: organizationId },
+        select: { calendarYearStartMonth: true, calendarYearStartDay: true },
+      });
+      const startMonth = org?.calendarYearStartMonth ?? 1;
+      const startDay = org?.calendarYearStartDay ?? 1;
+      const sheetStart = new Date(todaySheet.weekStart);
+      const currentYear = sheetStart.getFullYear();
+      let yearStart = new Date(currentYear, startMonth - 1, startDay);
+      if (yearStart > sheetStart) {
+        yearStart = new Date(currentYear - 1, startMonth - 1, startDay);
+      }
+      const sheetsBeforeCount = await prisma.bakeryWeeklySheet.count({
+        where: { isActive: true, weekStart: { gte: yearStart, lt: todaySheet.weekStart } },
+      });
+      todayWeekNumber = sheetsBeforeCount + 1;
+    }
+
+    if (todayWeekNumber && todayDowIds.length > 0) {
+      todayIssues = await prisma.machineIssue.findMany({
+        where: { organizationId, weekNumber: todayWeekNumber, dayOfWeekId: { in: todayDowIds } },
+        include: {
+          Equipment: { select: { name: true, assetTag: true } },
+          Line: { select: { name: true } },
+          Shift: { select: { name: true } },
+        },
+        orderBy: { createdAt: 'desc' },
+      });
+    }
+  }
 
   // KPI targets
   const targetRows = await prisma.bakeryKpiTarget.findMany();
@@ -212,9 +331,22 @@ async function collectStandupData(weekName: string, dayOfWeek: string, organizat
   return {
     weekName,
     dayOfWeek,
-    hasData: !!submission,
-    metrics: { firstShift, secondShift, bothShifts },
+    todayDayName,
+    hasData: !!row,
+    metrics: { bothShifts },
     issues: issues.map((i) => ({
+      issueNumber: i.issueNumber,
+      title: sanitizeText(i.title),
+      description: sanitizeText(i.description),
+      priority: i.priority,
+      status: i.status,
+      type: i.type,
+      equipment: i.Equipment?.name || null,
+      line: i.Line?.name || null,
+      shift: i.Shift?.name || null,
+      minutesLost: i.totalMinutesLost ?? null,
+    })),
+    todayIssues: todayIssues.map((i) => ({
       issueNumber: i.issueNumber,
       title: sanitizeText(i.title),
       description: sanitizeText(i.description),
@@ -232,17 +364,24 @@ async function collectStandupData(weekName: string, dayOfWeek: string, organizat
 
 // ─── Prompt Builder ─────────────────────────────────────────────────────────
 function buildStandupPrompt(data: Awaited<ReturnType<typeof collectStandupData>>): string {
-  const { metrics, issues, targets, dayOfWeek, weekName } = data;
+  const { metrics, issues, todayIssues, todayDayName, targets, dayOfWeek, weekName } = data;
   const bs = metrics.bothShifts;
-  const fs = metrics.firstShift;
-  const ss = metrics.secondShift;
+
+  // Which shifts contributed to the Both-Shifts column (for the AI's context)
+  let shiftNote = '';
+  if (bs) {
+    if (bs.hasFirstShift && bs.hasSecondShift) shiftNote = 'Both 1st and 2nd shift were submitted.';
+    else if (bs.hasFirstShift) shiftNote = 'Only 1st shift was submitted — the numbers below reflect 1st shift only.';
+    else if (bs.hasSecondShift) shiftNote = 'Only 2nd shift was submitted — the numbers below reflect 2nd shift only.';
+    else shiftNote = 'No shift submissions yet.';
+  }
 
   let prompt = `You are a bakery production supervisor delivering the morning standup meeting briefing to your team and management. Your tone is warm but professional — like a seasoned supervisor who knows the floor. Speak naturally, as if addressing the team in person. Be confident, conversational, and specific with the numbers.
 
 ═══ PRODUCTION DAY BRIEFING ═══
 Day: ${dayOfWeek}
 Week: ${weekName}
-
+${shiftNote ? `Context: ${shiftNote}\n` : ''}
 KPI TARGETS (fiscal year):
   OEE ≥ ${targets.oee}%
   Waste ≤ ${targets.waste}%
@@ -251,34 +390,28 @@ KPI TARGETS (fiscal year):
 `;
 
   if (bs) {
-    prompt += `═══ OEE (Both Shifts Combined) ═══
-  Die Cut 1: ${bs.dieCut1Oee}%
-  Die Cut 2: ${bs.dieCut2Oee}%
-  Average:   ${bs.oeeAvg}%
+    prompt += `═══ BOTH SHIFTS (AUTHORITATIVE — use these exact numbers) ═══
+  OEE
+    Die Cut 1: ${bs.dieCut1Oee ?? 'N/A'}%
+    Die Cut 2: ${bs.dieCut2Oee ?? 'N/A'}%
+    Average:   ${bs.oeeAvg ?? 'N/A'}%
 
-═══ VOLUME / PRODUCTION (lbs) ═══
-  Die Cut 1: ${bs.dieCut1Lbs.toLocaleString()} lbs
-  Die Cut 2: ${bs.dieCut2Lbs.toLocaleString()} lbs
-  Total:     ${bs.lbsTotal.toLocaleString()} lbs
+  VOLUME (lbs)
+    Die Cut 1: ${bs.dieCut1Lbs != null ? bs.dieCut1Lbs.toLocaleString() : 'N/A'} lbs
+    Die Cut 2: ${bs.dieCut2Lbs != null ? bs.dieCut2Lbs.toLocaleString() : 'N/A'} lbs
+    Total:     ${bs.lbsTotal != null ? bs.lbsTotal.toLocaleString() : 'N/A'} lbs
 
-═══ WASTE ═══
-  Die Cut 1: ${bs.dieCut1Waste}%
-  Die Cut 2: ${bs.dieCut2Waste}%
-  Average:   ${bs.wasteAvg}%
+  WASTE
+    Die Cut 1: ${bs.dieCut1Waste ?? 'N/A'}%
+    Die Cut 2: ${bs.dieCut2Waste ?? 'N/A'}%
+    Average:   ${bs.wasteAvg ?? 'N/A'}%
 `;
   } else {
     prompt += `═══ COMBINED METRICS: No submitted data for ${dayOfWeek} ═══\n`;
   }
 
-  if (fs) {
-    prompt += `\n1st Shift: OEE ${fs.oeeAvg}% | ${fs.lbsTotal.toLocaleString()} lbs | Waste ${fs.wasteAvg}%\n`;
-  }
-  if (ss) {
-    prompt += `2nd Shift: OEE ${ss.oeeAvg}% | ${ss.lbsTotal.toLocaleString()} lbs | Waste ${ss.wasteAvg}%\n`;
-  }
-
   if (issues.length > 0) {
-    prompt += `\n═══ ISSUES REPORTED (${issues.length}) ═══\n`;
+    prompt += `\n═══ ISSUES REPORTED FOR ${dayOfWeek.toUpperCase()} (PRODUCTION DAY REVIEW) — ${issues.length} ═══\n`;
     issues.forEach((i, idx) => {
       prompt += `${idx + 1}. [${i.issueNumber}] ${i.title}
    Priority: ${i.priority} | Status: ${i.status} | Type: ${i.type}
@@ -288,7 +421,25 @@ KPI TARGETS (fiscal year):
 `;
     });
   } else {
-    prompt += `\n═══ ISSUES REPORTED: None ═══\n`;
+    prompt += `\n═══ ISSUES REPORTED FOR ${dayOfWeek.toUpperCase()}: None ═══\n`;
+  }
+
+  // Today's startup issues — distinct from production-day issues above.
+  if (todayDayName && todayDayName !== dayOfWeek) {
+    if (todayIssues.length > 0) {
+      prompt += `\n═══ TODAY'S STARTUP ISSUES (${todayDayName.toUpperCase()} — ${todayIssues.length}) ═══\n`;
+      prompt += `These were reported for TODAY (${todayDayName}) — use them for the "startupSection". They are NOT part of yesterday's production review.\n`;
+      todayIssues.forEach((i, idx) => {
+        prompt += `${idx + 1}. [${i.issueNumber}] ${i.title}
+   Priority: ${i.priority} | Status: ${i.status} | Type: ${i.type}
+   Line: ${i.line || 'N/A'} | Equipment: ${i.equipment || 'N/A'} | Shift: ${i.shift || 'N/A'}
+   Minutes Lost: ${i.minutesLost ?? 'N/A'}
+   Description: ${i.description}
+`;
+      });
+    } else {
+      prompt += `\n═══ TODAY'S STARTUP ISSUES (${todayDayName.toUpperCase()}): None ═══\n`;
+    }
   }
 
   prompt += `
@@ -347,11 +498,11 @@ Adapt your tone to the actual numbers:
     ]
   },
   "startupSection": {
-    "narrative": "<2-3 sentences about today's startup indicators. If no startup issues exist, affirm that both lines are running cleanly. If startup-type issues from the Issues section are relevant, mention them briefly here too.>",
+    "narrative": "<2-3 sentences about TODAY's startup indicators. If the 'TODAY'S STARTUP ISSUES' block above lists issues, you MUST acknowledge them here — name the line/equipment and a brief description. If it says 'None', affirm that both lines are running cleanly at startup today.>",
     "items": [
       {
         "line": "<line name or 'Both Lines'>",
-        "note": "<short startup note>"
+        "note": "<short startup note — if today's startup issues exist, reference them here>"
       }
     ]
   },
@@ -361,6 +512,7 @@ Adapt your tone to the actual numbers:
 
 CRITICAL:
   - Populate number fields from the actual data above. If a value is missing, use null.
+  - DATA FIDELITY RULE: You MUST use the EXACT numbers provided in the "BOTH SHIFTS (AUTHORITATIVE)" block above — do NOT compute, average, round, or re-derive any value yourself. The numeric JSON fields (dieCut1, dieCut2, average, dieCut1Lbs, dieCut2Lbs, totalLbs, averagePct, dieCut1Pct, dieCut2Pct) must match those numbers byte-for-byte. Any number you speak in a narrative must also match the data block exactly.
   - Every narrative MUST sound like a human supervisor — NOT an AI. Contractions welcome ("we're", "that's", "let's"). No bullet-like stiffness in narratives.
   - DO NOT copy the example phrasing verbatim. Use it as tonal reference only.
   - Respond with ONLY the JSON object. No preface, no trailing text.`;
@@ -398,9 +550,17 @@ export async function generateStandupReport(
   const prompt = buildStandupPrompt(data);
   const startTime = Date.now();
 
+  // Log the authoritative numbers so we can verify what the AI was given
+  console.log('[StandupReport] Authoritative Both-Shifts data:', JSON.stringify(data.metrics.bothShifts, null, 2));
+  console.log(`[StandupReport] Production-day issues (${data.dayOfWeek}): ${data.issues.length}`);
+  console.log(`[StandupReport] Today's startup issues (${data.todayDayName}): ${data.todayIssues.length}`);
+  if (data.todayIssues.length > 0) {
+    console.log('[StandupReport] Today issues:', data.todayIssues.map((i) => `[${i.issueNumber}] ${i.title} (${i.line || '?'})`).join(', '));
+  }
+
   try {
-    const model = process.env.AI_MODEL || 'gpt-4o';
-    console.log(`[StandupReport] Generating for ${dayOfWeek} (${weekName})...`);
+    const model = process.env.AI_MODEL || 'gpt-4o-mini';
+    console.log(`[StandupReport] Generating for ${dayOfWeek} (${weekName}) using model ${model}...`);
 
     const response = await client.chat.completions.create({
       model,
@@ -413,7 +573,7 @@ export async function generateStandupReport(
         { role: 'user', content: prompt },
       ],
       temperature: 0.55,
-      max_tokens: 3500,
+      max_tokens: 2000,
       response_format: { type: 'json_object' },
     });
 
@@ -423,6 +583,38 @@ export async function generateStandupReport(
     const parsed = JSON.parse(content);
     const durationMs = Date.now() - startTime;
     const tokenUsage = response.usage?.total_tokens ?? null;
+    console.log(`[StandupReport] Completed in ${durationMs}ms (${tokenUsage} tokens)`);
+
+    // ─── POST-VALIDATION: Overwrite AI numeric fields with source of truth ───
+    // The AI is only responsible for narrative text. Numbers ALWAYS come from
+    // the Both-Shifts data block — never trust the model to echo them.
+    const bs = data.metrics.bothShifts;
+    if (bs) {
+      if (parsed.oeeSection) {
+        parsed.oeeSection.dieCut1 = bs.dieCut1Oee;
+        parsed.oeeSection.dieCut2 = bs.dieCut2Oee;
+        parsed.oeeSection.average = bs.oeeAvg;
+        parsed.oeeSection.target = data.targets.oee;
+      }
+      if (parsed.volumeSection) {
+        parsed.volumeSection.dieCut1Lbs = bs.dieCut1Lbs;
+        parsed.volumeSection.dieCut2Lbs = bs.dieCut2Lbs;
+        parsed.volumeSection.totalLbs = bs.lbsTotal;
+        parsed.volumeSection.target = data.targets.volume;
+      }
+      if (parsed.wasteSection) {
+        parsed.wasteSection.dieCut1Pct = bs.dieCut1Waste;
+        parsed.wasteSection.dieCut2Pct = bs.dieCut2Waste;
+        parsed.wasteSection.averagePct = bs.wasteAvg;
+        parsed.wasteSection.target = data.targets.waste;
+      }
+    }
+
+    console.log('[StandupReport] Final numeric fields (after override):', JSON.stringify({
+      oee: { d1: parsed.oeeSection?.dieCut1, d2: parsed.oeeSection?.dieCut2, avg: parsed.oeeSection?.average },
+      volume: { d1: parsed.volumeSection?.dieCut1Lbs, d2: parsed.volumeSection?.dieCut2Lbs, tot: parsed.volumeSection?.totalLbs },
+      waste: { d1: parsed.wasteSection?.dieCut1Pct, d2: parsed.wasteSection?.dieCut2Pct, avg: parsed.wasteSection?.averagePct },
+    }));
 
     return {
       success: true as const,
@@ -459,11 +651,101 @@ export async function getSavedStandupReport(weekName: string, dayOfWeek: string)
   });
   if (!saved) return null;
 
+  // Always re-fetch live Both-Shifts data (same source the UI table uses) and
+  // override saved numeric fields. This guarantees the report values ALWAYS
+  // match the Bakery Metrics "Both Shifts" column — even for reports saved
+  // before the override logic existed, or if shift data was edited afterward.
+  const core = { ...(saved.reportData as Record<string, any>) };
+  try {
+    const liveRows = await bakeryMetricsService.getBothShiftsRecords({ week: weekName, day: dayOfWeek });
+    const liveRow: any = liveRows?.[0] ?? null;
+
+    // Replicate the UI table's Both-Shifts rule: 0 = "did not run",
+    // fall back to the running shift if the other didn't run.
+    const isMissing = (v: any) => v === null || v === undefined || Number(v) === 0;
+    const combineByLine = (
+      fsVal: any, ssVal: any, fsDnr: boolean, ssDnr: boolean, mode: 'avg' | 'sum',
+    ): number | null => {
+      if (fsDnr && ssDnr) return null;
+      if (fsDnr) return isMissing(ssVal) ? null : Number(ssVal);
+      if (ssDnr) return isMissing(fsVal) ? null : Number(fsVal);
+      if (isMissing(fsVal) || isMissing(ssVal)) return null;
+      return mode === 'sum' ? Number(fsVal) + Number(ssVal) : (Number(fsVal) + Number(ssVal)) / 2;
+    };
+    const avg2 = (a: number | null, b: number | null): number | null => {
+      if (a === null && b === null) return null;
+      if (a === null) return b; if (b === null) return a; return (a + b) / 2;
+    };
+    const sum2 = (a: number | null, b: number | null): number | null => {
+      if (a === null && b === null) return null;
+      return (a ?? 0) + (b ?? 0);
+    };
+
+    let liveBs: any = null;
+    if (liveRow) {
+      const r = liveRow;
+      const fsL1Dnr = isMissing(r.first_shift_die_cut1_oee) && isMissing(r.first_shift_die_cut1_lbs) && isMissing(r.first_shift_die_cut1_waste_pct);
+      const fsL2Dnr = isMissing(r.first_shift_die_cut2_oee) && isMissing(r.first_shift_die_cut2_lbs) && isMissing(r.first_shift_die_cut2_waste_pct);
+      const ssL1Dnr = isMissing(r.second_shift_die_cut1_oee) && isMissing(r.second_shift_die_cut1_lbs) && isMissing(r.second_shift_die_cut1_waste_pct);
+      const ssL2Dnr = isMissing(r.second_shift_die_cut2_oee) && isMissing(r.second_shift_die_cut2_lbs) && isMissing(r.second_shift_die_cut2_waste_pct);
+
+      const l1Oee   = combineByLine(r.first_shift_die_cut1_oee,       r.second_shift_die_cut1_oee,       fsL1Dnr, ssL1Dnr, 'avg');
+      const l2Oee   = combineByLine(r.first_shift_die_cut2_oee,       r.second_shift_die_cut2_oee,       fsL2Dnr, ssL2Dnr, 'avg');
+      const l1Lbs   = combineByLine(r.first_shift_die_cut1_lbs,       r.second_shift_die_cut1_lbs,       fsL1Dnr, ssL1Dnr, 'sum');
+      const l2Lbs   = combineByLine(r.first_shift_die_cut2_lbs,       r.second_shift_die_cut2_lbs,       fsL2Dnr, ssL2Dnr, 'sum');
+      const l1Waste = combineByLine(r.first_shift_die_cut1_waste_pct, r.second_shift_die_cut1_waste_pct, fsL1Dnr, ssL1Dnr, 'avg');
+      const l2Waste = combineByLine(r.first_shift_die_cut2_waste_pct, r.second_shift_die_cut2_waste_pct, fsL2Dnr, ssL2Dnr, 'avg');
+
+      liveBs = {
+        dieCut1Oee: l1Oee,
+        dieCut2Oee: l2Oee,
+        oeeAvg: avg2(l1Oee, l2Oee),
+        dieCut1Lbs: l1Lbs,
+        dieCut2Lbs: l2Lbs,
+        lbsTotal: sum2(l1Lbs, l2Lbs),
+        dieCut1Waste: l1Waste,
+        dieCut2Waste: l2Waste,
+        wasteAvg: avg2(l1Waste, l2Waste),
+      };
+    }
+
+    console.log('[StandupReport][READ] Live Both-Shifts (UI rule) for override:', JSON.stringify(liveBs));
+
+    if (liveBs) {
+      if (core.oeeSection) {
+        core.oeeSection = {
+          ...core.oeeSection,
+          dieCut1: liveBs.dieCut1Oee,
+          dieCut2: liveBs.dieCut2Oee,
+          average: liveBs.oeeAvg,
+        };
+      }
+      if (core.volumeSection) {
+        core.volumeSection = {
+          ...core.volumeSection,
+          dieCut1Lbs: liveBs.dieCut1Lbs,
+          dieCut2Lbs: liveBs.dieCut2Lbs,
+          totalLbs: liveBs.lbsTotal,
+        };
+      }
+      if (core.wasteSection) {
+        core.wasteSection = {
+          ...core.wasteSection,
+          dieCut1Pct: liveBs.dieCut1Waste,
+          dieCut2Pct: liveBs.dieCut2Waste,
+          averagePct: liveBs.wasteAvg,
+        };
+      }
+    }
+  } catch (err: any) {
+    console.error('[StandupReport][READ] Failed to fetch live Both-Shifts for override:', err?.message);
+  }
+
   return {
     success: true as const,
     source: 'database' as const,
     data: {
-      ...(saved.reportData as Record<string, unknown>),
+      ...core,
       _meta: saved.metaData as Record<string, unknown>,
       _rawMetrics: saved.rawMetrics as Record<string, unknown>,
     },
@@ -551,4 +833,19 @@ export async function updateStandupComments(
     commentsUpdatedBy: updated.commentsUpdatedBy,
     commentsUpdatedAt: updated.commentsUpdatedAt?.toISOString() ?? null,
   };
+}
+
+// ─── Delete a saved standup report ──────────────────────────────────────────
+export async function deleteStandupReport(weekName: string, dayOfWeek: string) {
+  if (!WEEK_NAME_PATTERN.test(weekName) || !VALID_DAYS.includes(dayOfWeek)) {
+    return { success: false as const, error: 'Invalid week or day.' };
+  }
+  const existing = await prisma.bakeryStandupReport.findUnique({
+    where: { weekName_dayOfWeek: { weekName, dayOfWeek } },
+  });
+  if (!existing) {
+    return { success: false as const, error: 'No standup report found to delete.' };
+  }
+  await prisma.bakeryStandupReport.delete({ where: { id: existing.id } });
+  return { success: true as const, deletedId: existing.id };
 }
