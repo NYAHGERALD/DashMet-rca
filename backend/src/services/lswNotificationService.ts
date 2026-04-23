@@ -767,8 +767,9 @@ export async function processUserLswNotifications(userId: string): Promise<numbe
 
   // Send overdue notifications
   if (newOverdue.length > 0) {
+    let emailOk = false;
     if (prefs.emailEnabled) {
-      await sendOverdueEmail(user, newOverdue);
+      emailOk = await sendOverdueEmail(user, newOverdue);
     }
 
     // Create in-app notifications for each overdue item
@@ -784,14 +785,23 @@ export async function processUserLswNotifications(userId: string): Promise<numbe
       });
     }
 
-    await logSentNotifications(userId, newOverdue, prefs.emailEnabled ? 'email' : 'browser');
-    sentCount += newOverdue.length;
+    // Only record "sent" when at least one channel actually delivered.
+    // This prevents a failed email / unconfigured Resend from permanently
+    // blocking retries via the dedup log.
+    const delivered = emailOk || prefs.browserEnabled;
+    if (delivered) {
+      await logSentNotifications(userId, newOverdue, emailOk ? 'email' : 'browser');
+      sentCount += newOverdue.length;
+    } else {
+      console.log('[LSW] Overdue: nothing delivered (email failed, browser disabled) — will retry next run');
+    }
   }
 
   // Send reminder notifications
   if (newReminders.length > 0) {
+    let emailOk = false;
     if (prefs.emailEnabled) {
-      await sendReminderEmail(user, newReminders);
+      emailOk = await sendReminderEmail(user, newReminders);
     }
 
     for (const item of newReminders) {
@@ -806,8 +816,13 @@ export async function processUserLswNotifications(userId: string): Promise<numbe
       });
     }
 
-    await logSentNotifications(userId, newReminders, prefs.emailEnabled ? 'email' : 'browser');
-    sentCount += newReminders.length;
+    const delivered = emailOk || prefs.browserEnabled;
+    if (delivered) {
+      await logSentNotifications(userId, newReminders, emailOk ? 'email' : 'browser');
+      sentCount += newReminders.length;
+    } else {
+      console.log('[LSW] Reminder: nothing delivered (email failed, browser disabled) — will retry next run');
+    }
   }
 
   // Update last check timestamps
@@ -939,11 +954,11 @@ function shouldSendNow(prefs: LswNotificationPreference, now: Date): boolean {
 async function sendOverdueEmail(
   user: { email: string; firstName: string },
   items: LswAlertItem[]
-) {
+): Promise<boolean> {
   const resend = getResendClient();
   if (!resend) {
     console.log('[LSW Notifications] Resend not configured — skipping email');
-    return;
+    return false;
   }
 
   try {
@@ -956,22 +971,24 @@ async function sendOverdueEmail(
 
     if (error) {
       console.error('[LSW Notifications] Resend error (overdue):', error);
-    } else {
-      console.log(`[LSW Notifications] Overdue email sent to ${user.email} (${items.length} items)`);
+      return false;
     }
+    console.log(`[LSW Notifications] Overdue email sent to ${user.email} (${items.length} items)`);
+    return true;
   } catch (err) {
     console.error('[LSW Notifications] Failed to send overdue email:', err);
+    return false;
   }
 }
 
 async function sendReminderEmail(
   user: { email: string; firstName: string },
   items: LswAlertItem[]
-) {
+): Promise<boolean> {
   const resend = getResendClient();
   if (!resend) {
     console.log('[LSW Notifications] Resend not configured — skipping email');
-    return;
+    return false;
   }
 
   try {
@@ -984,11 +1001,13 @@ async function sendReminderEmail(
 
     if (error) {
       console.error('[LSW Notifications] Resend error (reminder):', error);
-    } else {
-      console.log(`[LSW Notifications] Reminder email sent to ${user.email} (${items.length} items)`);
+      return false;
     }
+    console.log(`[LSW Notifications] Reminder email sent to ${user.email} (${items.length} items)`);
+    return true;
   } catch (err) {
     console.error('[LSW Notifications] Failed to send reminder email:', err);
+    return false;
   }
 }
 

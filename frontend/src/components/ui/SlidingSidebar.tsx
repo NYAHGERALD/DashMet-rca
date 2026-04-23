@@ -11,6 +11,8 @@ interface SidebarLink {
   label: string;
   show?: boolean;
   onClick?: () => void;
+  /** Optional group name. Consecutive links sharing the same group render under a small heading and are slightly indented. */
+  group?: string;
 }
 
 interface SlidingSidebarProps {
@@ -344,6 +346,9 @@ export default function SlidingSidebar({
         <nav ref={navRef} className="p-2 space-y-0.5 overflow-y-auto scroll-smooth flex-1 min-h-0" style={{ scrollbarWidth: 'thin', scrollbarColor: 'rgba(14,165,233,0.25) transparent' }}>
           {visibleLinks.map((link, index) => {
             const isEmoji = typeof link.icon === 'string';
+            const prevGroup = index > 0 ? visibleLinks[index - 1].group : undefined;
+            const showGroupHeader = !!link.group && link.group !== prevGroup;
+            const inGroup = !!link.group;
             const content = (
               <>
                 <span className={`shrink-0 flex items-center justify-center w-8 h-8 rounded-lg transition-all duration-200 ${
@@ -361,26 +366,33 @@ export default function SlidingSidebar({
               </>
             );
 
-            if (link.onClick) {
-              return (
-                <button
-                  key={index}
-                  onClick={() => { link.onClick!(); }}
-                  className="w-full flex items-center gap-2.5 px-2 py-1.5 rounded-lg text-gray-700 dark:text-gray-200 hover:bg-sky-200/60 dark:hover:bg-primary-900/30 transition-all duration-200 group"
-                >
-                  {content}
-                </button>
-              );
-            }
+            const itemClass = `w-full flex items-center gap-2.5 px-2 py-1.5 rounded-lg text-gray-700 dark:text-gray-200 hover:bg-sky-200/60 dark:hover:bg-primary-900/30 transition-all duration-200 group ${inGroup ? 'ml-3 border-l border-sky-200/70 dark:border-gray-700/60 pl-2' : ''}`;
 
-            return (
+            const item = link.onClick ? (
+              <button
+                onClick={() => { link.onClick!(); }}
+                className={itemClass}
+              >
+                {content}
+              </button>
+            ) : (
               <Link
-                key={index}
                 href={link.href || '#'}
-                className="flex items-center gap-2.5 px-2 py-1.5 rounded-lg text-gray-700 dark:text-gray-200 hover:bg-sky-200/60 dark:hover:bg-primary-900/30 transition-all duration-200 group"
+                className={itemClass}
               >
                 {content}
               </Link>
+            );
+
+            return (
+              <div key={index}>
+                {showGroupHeader && (
+                  <div className="px-2 pt-2 pb-0.5 text-[10px] font-semibold uppercase tracking-wider text-gray-400 dark:text-gray-500">
+                    {link.group}
+                  </div>
+                )}
+                {item}
+              </div>
             );
           })}
         </nav>

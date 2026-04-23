@@ -3149,8 +3149,8 @@ export default function BakeryMetricsForm({ onStepChange, openRecentSubmissions,
       , document.body)}
 
       {/* ═══ Success Modal ═══ */}
-      {successModal.show && (
-        <div className="fixed inset-0 z-[70] flex items-center justify-center bg-black/40 backdrop-blur-sm" onClick={() => { setSuccessModal(prev => ({ ...prev, show: false })); }}>
+      {successModal.show && createPortal(
+        <div className="fixed inset-0 z-[100] flex items-center justify-center bg-black/40 backdrop-blur-sm" onClick={() => { setSuccessModal(prev => ({ ...prev, show: false })); }}>
           <style>{`
             @keyframes confetti-fall {
               0% { transform: translateY(0) rotate(0deg) scale(1); opacity: 1; }
@@ -3323,7 +3323,7 @@ export default function BakeryMetricsForm({ onStepChange, openRecentSubmissions,
             </div>
           </div>
         </div>
-      )}
+      , document.body)}
 
       {/* ═══ Reset Confirm Modal ═══ */}
       {resetConfirm && (

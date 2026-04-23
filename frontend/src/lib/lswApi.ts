@@ -463,9 +463,9 @@ export async function deleteLswEarlyCompletionLog(dailyTaskId: string, dayKey: s
 
 // ─── Export ───────────────────────────────────────────────────────────────────
 
-export async function exportLswReport(weekNumber: number, year: number, weekStart: string): Promise<Blob> {
+export async function exportLswReport(weekNumber: number, year: number, weekStart: string, department?: string): Promise<Blob> {
   const res = await api.get('/lsw/export', {
-    params: { weekNumber, year, weekStart },
+    params: { weekNumber, year, weekStart, department },
     responseType: 'blob',
   });
   return res.data;

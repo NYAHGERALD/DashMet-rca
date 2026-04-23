@@ -716,6 +716,7 @@ router.get('/export', async (req: AuthRequest, res: Response) => {
     const weekNumber = parseInt(req.query.weekNumber as string);
     const year = parseInt(req.query.year as string);
     const weekStart = (req.query.weekStart as string) || '';
+    const department = (req.query.department as string) || '';
 
     if (!weekNumber || !year || !organizationId) {
       return res.status(400).json({ success: false, error: 'weekNumber, year, and organizationId are required' });
@@ -730,6 +731,7 @@ router.get('/export', async (req: AuthRequest, res: Response) => {
       year,
       userName,
       weekStart,
+      department,
     );
 
     const filename = `LSW_Report_Week${weekNumber}_${year}.xlsx`;

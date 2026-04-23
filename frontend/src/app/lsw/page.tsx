@@ -1,6 +1,7 @@
 'use client';
 
 import { useState, useEffect, useRef, useCallback, Fragment } from 'react';
+import { motion, AnimatePresence } from 'framer-motion';
 import { useAuth } from '@/components/providers/AuthProvider';
 import { useWebSocket } from '@/lib/websocket';
 import ProtectedRoute from '@/components/auth/ProtectedRoute';
@@ -340,6 +341,19 @@ function LSWContent() {
   const [showUncheckModal, setShowUncheckModal] = useState(false);
   const [uncheckContext, setUncheckContext] = useState<{ taskId: string; taskName: string; day: keyof DailyTask['days']; dayLabel: string; isEarlyCompleted: boolean } | null>(null);
   const [showEarlyLogModal, setShowEarlyLogModal] = useState(false);
+  // Early Completion Log modal drag position (null = default centered)
+  const [earlyLogPos, setEarlyLogPos] = useState<{ x: number; y: number } | null>(null);
+  const earlyLogDragRef = useRef<{ startX: number; startY: number; origX: number; origY: number } | null>(null);
+  // Print Report Progress Modal state
+  const [showPrintProgressModal, setShowPrintProgressModal] = useState(false);
+  const [printProgress, setPrintProgress] = useState(0);
+  const [printStepIndex, setPrintStepIndex] = useState(0);
+  const [printReady, setPrintReady] = useState(false);
+  const [printBlob, setPrintBlob] = useState<Blob | null>(null);
+  const [printFileName, setPrintFileName] = useState<string>('');
+  const [printError, setPrintError] = useState<string | null>(null);
+  // Warning when user tries to print without selecting a department
+  const [showDeptWarningModal, setShowDeptWarningModal] = useState(false);
   // Early Log modal filter/sort state
   const [earlyLogFilters, setEarlyLogFilters] = useState<{ field: string; value: string }[]>([]);
   const [earlyLogSort, setEarlyLogSort] = useState<{ field: string; dir: 'asc' | 'desc' }>({ field: 'completedAt', dir: 'desc' });
@@ -1596,30 +1610,54 @@ function LSWContent() {
     const todayAllIndex = allDays.indexOf(today as keyof DailyTask['days']);
 
     let totalCount = 0;
-    const tasks: { taskId: string; task: string; time: string; overdueDays: string[] }[] = [];
+    const tasks: { taskId: string; task: string; time: string; overdueDays: string[]; overdueDayKeys: Array<keyof DailyTask['days']> }[] = [];
 
     dailyTasks.forEach(task => {
       const [h, m] = task.time.split(':').map(Number);
       const taskMinutes = h * 60 + (m || 0);
       const overdueDays: string[] = [];
+      const overdueDayKeys: Array<keyof DailyTask['days']> = [];
 
       visibleDays.forEach((day) => {
         if (task.days[day]) return; // Already checked
         const dayAllIndex = allDays.indexOf(day);
         if (dayAllIndex < todayAllIndex) {
           overdueDays.push(dayLabelMap[day]); // Past day this week
+          overdueDayKeys.push(day);
         } else if (dayAllIndex === todayAllIndex && taskMinutes < currentMinutes) {
           overdueDays.push(dayLabelMap[day]); // Today but time passed
+          overdueDayKeys.push(day);
         }
       });
 
       if (overdueDays.length > 0) {
         totalCount += overdueDays.length;
-        tasks.push({ taskId: task.id, task: task.task, time: task.time, overdueDays });
+        tasks.push({ taskId: task.id, task: task.task, time: task.time, overdueDays, overdueDayKeys });
       }
     });
 
     return { totalCount, tasks };
+  };
+
+  // Dismiss overdue notification(s) by marking the day(s) completed
+  const dismissOverdueEntry = (taskId: string, dayKeys: Array<keyof DailyTask['days']>) => {
+    setDailyTasks(tasks =>
+      tasks.map(t => {
+        if (t.id !== taskId) return t;
+        const updatedDays = { ...t.days };
+        dayKeys.forEach(k => { updatedDays[k] = true; });
+        return { ...t, days: updatedDays };
+      })
+    );
+    dayKeys.forEach(k => {
+      updateLswDailyTaskCompletion(taskId, currentWeek, currentYear, DAY_KEY_TO_DB[k], true)
+        .catch(e => console.error('Failed to dismiss overdue day:', e));
+    });
+  };
+
+  const dismissAllOverdue = () => {
+    const { tasks } = getOverdueTasks();
+    tasks.forEach(t => dismissOverdueEntry(t.taskId, t.overdueDayKeys));
   };
 
   // Helper: get the actual Date for a given day key in the current week
@@ -1811,7 +1849,7 @@ function LSWContent() {
   }
 
   return (
-    <div className="min-h-screen bg-gradient-to-br from-slate-50 via-blue-50 to-indigo-100 dark:from-gray-950 dark:via-slate-900 dark:to-indigo-950">
+    <div className="lsw-compact min-h-screen bg-gradient-to-br from-slate-50 via-blue-50 to-indigo-100 dark:from-gray-950 dark:via-slate-900 dark:to-indigo-950">
       {/* Print styles for landscape orientation */}
       <style jsx global>{`
         @media print {
@@ -1820,6 +1858,37 @@ function LSWContent() {
             margin: 0.5in;
           }
         }
+        /* Compact sizing for entire LSW page */
+        .lsw-compact {
+          font-size: 12px;
+          line-height: 1.3;
+        }
+        .lsw-compact table { font-size: 11.5px; }
+        .lsw-compact table th,
+        .lsw-compact table td {
+          padding-top: 2px !important;
+          padding-bottom: 2px !important;
+        }
+        .lsw-compact table th { font-size: 10px; }
+        .lsw-compact table input[type="text"],
+        .lsw-compact table input[type="number"],
+        .lsw-compact table input[type="time"],
+        .lsw-compact table input[type="date"],
+        .lsw-compact table textarea,
+        .lsw-compact table select {
+          font-size: 11.5px !important;
+          padding-top: 1px !important;
+          padding-bottom: 1px !important;
+        }
+        .lsw-compact table input[type="checkbox"] {
+          width: 16px !important;
+          height: 16px !important;
+        }
+        .lsw-compact h2 { font-size: 15px !important; }
+        .lsw-compact .text-sm { font-size: 11.5px !important; }
+        .lsw-compact .text-xs { font-size: 10px !important; }
+        .lsw-compact .text-lg { font-size: 14px !important; }
+        .lsw-compact .text-xl { font-size: 16px !important; }
       `}</style>
       {/* Header - Department & Week Selection */}
       <header className="sticky top-0 z-40 backdrop-blur-xl bg-white/80 dark:bg-gray-900/80 border-b border-gray-200/50 dark:border-gray-700/50 shadow-sm">
@@ -1853,27 +1922,115 @@ function LSWContent() {
               {/* Print Report Button */}
               <button
                 onClick={async () => {
-                  try {
-                    const weekStart = weekDates.start.toISOString().split('T')[0];
-                    const blob = await exportLswReport(currentWeek, currentYear, weekStart);
-                    const url = URL.createObjectURL(blob);
-                    const a = document.createElement('a');
-                    a.href = url;
-                    a.download = `LSW_Report_Week${currentWeek}_${currentYear}.xlsx`;
-                    document.body.appendChild(a);
-                    a.click();
-                    document.body.removeChild(a);
-                    URL.revokeObjectURL(url);
-                  } catch (err) {
+                  // Block print unless a specific department is selected.
+                  if (!selectedDepartment || selectedDepartment === 'all') {
+                    setShowDeptWarningModal(true);
+                    return;
+                  }
+
+                  // Reset modal state
+                  setPrintProgress(0);
+                  setPrintStepIndex(0);
+                  setPrintReady(false);
+                  setPrintBlob(null);
+                  setPrintError(null);
+                  setShowPrintProgressModal(true);
+
+                  const weekStart = weekDates.start.toISOString().split('T')[0];
+                  const fileName = `LSW_Report_Week${currentWeek}_${currentYear}.xlsx`;
+                  setPrintFileName(fileName);
+
+                  // Resolve the selected department to its display name. By
+                  // this point we've already guaranteed a specific department
+                  // was chosen (validation above blocks the "all" case).
+                  const departmentNameForExport =
+                    departments.find(d => d.id === selectedDepartment)?.name || '';
+
+                  // Kick off the real export in parallel
+                  const exportPromise = exportLswReport(currentWeek, currentYear, weekStart, departmentNameForExport)
+                    .then((blob) => ({ ok: true as const, blob }))
+                    .catch((err) => ({ ok: false as const, err }));
+
+                  // ─── Realistic progress simulation ───
+                  // Each step has its own weight (relative size) and its own
+                  // target duration range. While the real export is pending
+                  // we cap the bar at 92% so the UX never "finishes" before
+                  // the file is actually ready.
+                  const steps: Array<{ label: string; weight: number; ms: number }> = [
+                    { label: 'Gathering weekly tasks', weight: 10, ms: 450 },
+                    { label: 'Collecting project updates', weight: 14, ms: 700 },
+                    { label: 'Loading meetings & follow-ups', weight: 18, ms: 900 },
+                    { label: 'Compiling personal goals & RCA', weight: 16, ms: 800 },
+                    { label: 'Formatting Excel workbook', weight: 24, ms: 1400 },
+                    { label: 'Finalizing report', weight: 18, ms: 1100 },
+                  ];
+                  const TOTAL_STEPS = steps.length;
+                  const totalWeight = steps.reduce((s, x) => s + x.weight, 0);
+                  const PROGRESS_CAP = 92; // don't exceed until real export done
+                  let exportDone: { ok: true; blob: Blob } | { ok: false; err: any } | null = null;
+                  exportPromise.then((r) => { exportDone = r; });
+
+                  // Helper: animate from `from` -> `to` over `duration` ms
+                  // using ease-out so motion decelerates naturally per step.
+                  const animateTo = (from: number, to: number, duration: number) =>
+                    new Promise<void>((resolve) => {
+                      const start = performance.now();
+                      const tick = (now: number) => {
+                        const t = Math.min(1, (now - start) / duration);
+                        // ease-out cubic
+                        const eased = 1 - Math.pow(1 - t, 3);
+                        const current = from + (to - from) * eased;
+                        setPrintProgress(Math.min(current, PROGRESS_CAP));
+                        if (t < 1) {
+                          requestAnimationFrame(tick);
+                        } else {
+                          resolve();
+                        }
+                      };
+                      requestAnimationFrame(tick);
+                    });
+
+                  let cumulativeWeight = 0;
+                  for (let i = 0; i < TOTAL_STEPS; i++) {
+                    setPrintStepIndex(i);
+                    const from = (cumulativeWeight / totalWeight) * 100;
+                    cumulativeWeight += steps[i].weight;
+                    const to = Math.min((cumulativeWeight / totalWeight) * 100, PROGRESS_CAP);
+                    await animateTo(from, to, steps[i].ms);
+                  }
+
+                  // Mark all steps visually complete (checklist)
+                  setPrintStepIndex(TOTAL_STEPS);
+
+                  // Hold at PROGRESS_CAP with a slow creep until real export settles.
+                  // This mimics real installers — it keeps moving but clearly isn't done.
+                  let creep = PROGRESS_CAP;
+                  while (!exportDone) {
+                    await new Promise((r) => setTimeout(r, 120));
+                    creep = Math.min(98, creep + 0.15);
+                    setPrintProgress(creep);
+                  }
+
+                  // Final sprint 0-> 100% quickly once the real file is ready
+                  const result = exportDone as typeof exportDone & {};
+                  if (result && (result as any).ok) {
+                    await animateTo(creep, 100, 350);
+                    setPrintProgress(100);
+                    setPrintBlob((result as any).blob);
+                    setPrintReady(true);
+                  } else {
+                    const err = (result as any)?.err;
                     console.error('Export failed:', err);
+                    setPrintError('We couldn\u2019t generate your report. Please try again.');
                   }
                 }}
-                className="flex items-center gap-2 px-4 py-2 text-sm font-medium text-white bg-emerald-600 hover:bg-emerald-700 rounded-lg shadow-sm transition-colors"
+                className="flex items-center justify-center p-2 text-white bg-emerald-600 hover:bg-emerald-700 rounded-lg shadow-sm transition-colors"
+                title="Print Report"
+                aria-label="Print Report"
               >
-                <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
                   <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M17 17h2a2 2 0 002-2v-4a2 2 0 00-2-2H5a2 2 0 00-2 2v4a2 2 0 002 2h2m2 4h6a2 2 0 002-2v-4a2 2 0 00-2-2H9a2 2 0 00-2 2v4a2 2 0 002 2zm8-12V5a2 2 0 00-2-2H9a2 2 0 00-2 2v4h10z" />
                 </svg>
-                Print Report
               </button>
 
               {/* Early Completion Log Button */}
@@ -1948,20 +2105,36 @@ function LSWContent() {
                                   <p className="text-[11px] text-amber-700 dark:text-amber-300 mt-1">
                                     Please check your tasks/meetings if they were already completed. If not, try to complete all your tasks and attend your meetings on time.
                                   </p>
+                                  <button
+                                    onClick={dismissAllOverdue}
+                                    className="mt-2 w-full text-[11px] font-semibold text-white bg-amber-600 hover:bg-amber-700 dark:bg-amber-700 dark:hover:bg-amber-600 rounded-lg py-1.5 transition-colors"
+                                  >
+                                    ✓ Mark all as done
+                                  </button>
                                 </div>
                                 <div className="space-y-2">
                                   {overdue.tasks.map(task => (
                                     <div key={task.taskId} className="flex items-start gap-3 p-3 rounded-xl bg-gray-50 dark:bg-gray-700/50 border border-gray-100 dark:border-gray-600/50">
                                       <span className="text-lg flex-shrink-0">🕐</span>
-                                      <div className="min-w-0">
+                                      <div className="min-w-0 flex-1">
                                         <p className="text-sm font-semibold text-gray-800 dark:text-gray-200">{task.task}</p>
-                                        <div className="flex items-center gap-2 mt-1">
+                                        <div className="flex items-center gap-2 mt-1 flex-wrap">
                                           <span className="text-xs text-gray-500 dark:text-gray-400">Scheduled: {task.time}</span>
                                           <span className="text-[10px] px-2 py-0.5 rounded-full bg-red-100 dark:bg-red-900/30 text-red-700 dark:text-red-300 font-medium">
                                             {task.overdueDays.join(', ')}
                                           </span>
                                         </div>
                                       </div>
+                                      <button
+                                        onClick={() => dismissOverdueEntry(task.taskId, task.overdueDayKeys)}
+                                        title="Mark done and dismiss"
+                                        className="flex-shrink-0 flex items-center gap-1 px-2 py-1 text-[11px] font-semibold text-emerald-700 dark:text-emerald-300 bg-emerald-100 dark:bg-emerald-900/40 hover:bg-emerald-200 dark:hover:bg-emerald-900/60 rounded-lg transition-colors"
+                                      >
+                                        <svg className="w-3 h-3" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={3}>
+                                          <path strokeLinecap="round" strokeLinejoin="round" d="M5 13l4 4L19 7" />
+                                        </svg>
+                                        Done
+                                      </button>
                                     </div>
                                   ))}
                                 </div>
@@ -3982,6 +4155,293 @@ function LSWContent() {
         );
       })()}
 
+      {/* ──── Department Required Warning Modal ──── */}
+      <AnimatePresence>
+        {showDeptWarningModal && (
+          <motion.div
+            key="dept-warning-backdrop"
+            className="fixed inset-0 z-[100] flex items-center justify-center p-4"
+            initial={{ opacity: 0 }}
+            animate={{ opacity: 1 }}
+            exit={{ opacity: 0 }}
+            transition={{ duration: 0.18 }}
+          >
+            <div
+              className="absolute inset-0 bg-black/50 backdrop-blur-sm"
+              onClick={() => setShowDeptWarningModal(false)}
+            />
+            <motion.div
+              key="dept-warning-modal"
+              className="relative w-full max-w-md bg-white dark:bg-gray-900 rounded-2xl shadow-2xl border border-gray-200 dark:border-gray-700 overflow-hidden"
+              initial={{ opacity: 0, scale: 0.85, y: 20 }}
+              animate={{ opacity: 1, scale: 1, y: 0 }}
+              exit={{ opacity: 0, scale: 0.9, y: 10 }}
+              transition={{ type: 'spring', damping: 18, stiffness: 280 }}
+            >
+              <div className="px-6 py-5 bg-gradient-to-r from-amber-500 to-orange-500 text-white">
+                <div className="flex items-center gap-3">
+                  <div className="w-10 h-10 rounded-full bg-white/20 flex items-center justify-center backdrop-blur-sm">
+                    <svg className="w-6 h-6" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                      <path strokeLinecap="round" strokeLinejoin="round" d="M12 9v2m0 4h.01M4.93 19h14.14a2 2 0 001.74-3L13.74 4a2 2 0 00-3.48 0L3.19 16a2 2 0 001.74 3z" />
+                    </svg>
+                  </div>
+                  <div>
+                    <h3 className="text-lg font-bold leading-tight">Department required</h3>
+                    <p className="text-xs text-white/90 mt-0.5">Action needed before printing</p>
+                  </div>
+                </div>
+              </div>
+              <div className="px-6 py-5">
+                <p className="text-sm text-gray-700 dark:text-gray-300 leading-relaxed">
+                  Please select a department in order to Print or download the selected week&apos;s Leaders Standard Work sheet.
+                </p>
+              </div>
+              <div className="px-6 pb-5 flex items-center justify-end">
+                <button
+                  onClick={() => setShowDeptWarningModal(false)}
+                  className="px-5 py-2 text-sm font-semibold text-white bg-gradient-to-r from-amber-500 to-orange-500 hover:from-amber-600 hover:to-orange-600 rounded-xl shadow-md transition-colors"
+                >
+                  Got it
+                </button>
+              </div>
+            </motion.div>
+          </motion.div>
+        )}
+      </AnimatePresence>
+
+      {/* ──── Print Report Progress Modal ──── */}
+      <AnimatePresence>
+        {showPrintProgressModal && (
+          <motion.div
+            key="print-progress-backdrop"
+            className="fixed inset-0 z-[100] flex items-center justify-center p-4"
+            initial={{ opacity: 0 }}
+            animate={{ opacity: 1 }}
+            exit={{ opacity: 0 }}
+            transition={{ duration: 0.2 }}
+          >
+            <div className="absolute inset-0 bg-black/50 backdrop-blur-sm" />
+            <motion.div
+              key="print-progress-modal"
+              className="relative w-full max-w-md bg-white dark:bg-gray-900 rounded-2xl shadow-2xl border border-gray-200 dark:border-gray-700 overflow-hidden"
+              initial={{ opacity: 0, scale: 0.3, y: 40 }}
+              animate={{ opacity: 1, scale: 1, y: 0 }}
+              exit={{ opacity: 0, scale: 0.8, y: 20 }}
+              transition={{ type: 'spring', damping: 14, stiffness: 260, mass: 0.8 }}
+            >
+              {/* Header */}
+              <div className="px-6 py-5 bg-gradient-to-r from-emerald-500 via-teal-500 to-cyan-500 text-white">
+                <div className="flex items-center gap-3">
+                  <motion.div
+                    animate={printReady ? { rotate: 0 } : { rotate: 360 }}
+                    transition={printReady ? {} : { repeat: Infinity, duration: 2, ease: 'linear' }}
+                    className="w-10 h-10 rounded-full bg-white/20 flex items-center justify-center backdrop-blur-sm"
+                  >
+                    {printReady ? (
+                      <svg className="w-6 h-6" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2.5}>
+                        <path strokeLinecap="round" strokeLinejoin="round" d="M5 13l4 4L19 7" />
+                      </svg>
+                    ) : (
+                      <svg className="w-6 h-6" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                        <path strokeLinecap="round" strokeLinejoin="round" d="M17 17h2a2 2 0 002-2v-4a2 2 0 00-2-2H5a2 2 0 00-2 2v4a2 2 0 002 2h2m2 4h6a2 2 0 002-2v-4a2 2 0 00-2-2H9a2 2 0 00-2 2v4a2 2 0 002 2zm8-12V5a2 2 0 00-2-2H9a2 2 0 00-2 2v4h10z" />
+                      </svg>
+                    )}
+                  </motion.div>
+                  <div>
+                    <h3 className="text-lg font-bold leading-tight">
+                      {printError ? 'Something went wrong' : printReady ? 'Your Report is Ready!' : 'Preparing Your LSW Report'}
+                    </h3>
+                    <p className="text-xs text-white/90 mt-0.5">
+                      Week {currentWeek} · {currentYear}
+                    </p>
+                  </div>
+                </div>
+              </div>
+
+              {/* Body */}
+              <div className="px-6 py-6">
+                {printError ? (
+                  <div className="text-center">
+                    <div className="mx-auto w-16 h-16 rounded-full bg-red-100 dark:bg-red-900/30 flex items-center justify-center mb-4">
+                      <svg className="w-8 h-8 text-red-600 dark:text-red-400" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                        <path strokeLinecap="round" strokeLinejoin="round" d="M12 9v2m0 4h.01M4.93 19h14.14a2 2 0 001.74-3L13.74 4a2 2 0 00-3.48 0L3.19 16a2 2 0 001.74 3z" />
+                      </svg>
+                    </div>
+                    <p className="text-sm text-gray-700 dark:text-gray-300">{printError}</p>
+                  </div>
+                ) : (
+                  <>
+                    {/* Circular Progress */}
+                    <div className="flex items-center justify-center mb-5">
+                      <div className="relative w-36 h-36">
+                        <svg className="w-full h-full -rotate-90" viewBox="0 0 120 120">
+                          {/* Track */}
+                          <circle
+                            cx="60"
+                            cy="60"
+                            r="52"
+                            fill="none"
+                            strokeWidth="10"
+                            className="stroke-gray-200 dark:stroke-gray-800"
+                          />
+                          {/* Progress */}
+                          <circle
+                            cx="60"
+                            cy="60"
+                            r="52"
+                            fill="none"
+                            strokeWidth="10"
+                            strokeLinecap="round"
+                            stroke="url(#printGradient)"
+                            strokeDasharray={2 * Math.PI * 52}
+                            strokeDashoffset={2 * Math.PI * 52 * (1 - printProgress / 100)}
+                            style={{ transition: 'stroke-dashoffset 200ms cubic-bezier(0.22, 1, 0.36, 1)' }}
+                          />
+                          <defs>
+                            <linearGradient id="printGradient" x1="0%" y1="0%" x2="100%" y2="100%">
+                              <stop offset="0%" stopColor="#10b981" />
+                              <stop offset="50%" stopColor="#14b8a6" />
+                              <stop offset="100%" stopColor="#06b6d4" />
+                            </linearGradient>
+                          </defs>
+                        </svg>
+                        <div className="absolute inset-0 flex flex-col items-center justify-center">
+                          {printReady ? (
+                            <motion.div
+                              initial={{ scale: 0 }}
+                              animate={{ scale: 1 }}
+                              transition={{ type: 'spring', damping: 10, stiffness: 300 }}
+                              className="w-14 h-14 rounded-full bg-emerald-500 flex items-center justify-center shadow-lg shadow-emerald-500/40"
+                            >
+                              <svg className="w-8 h-8 text-white" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={3}>
+                                <path strokeLinecap="round" strokeLinejoin="round" d="M5 13l4 4L19 7" />
+                              </svg>
+                            </motion.div>
+                          ) : (
+                            <>
+                              <span className="text-3xl font-bold bg-gradient-to-br from-emerald-500 to-cyan-500 bg-clip-text text-transparent tabular-nums">
+                                {Math.round(printProgress)}%
+                              </span>
+                              <span className="text-[10px] uppercase tracking-wider text-gray-400 mt-0.5">Generating</span>
+                            </>
+                          )}
+                        </div>
+                      </div>
+                    </div>
+
+                    {/* Message */}
+                    <p className="text-center text-sm font-medium text-gray-700 dark:text-gray-300 mb-4">
+                      {printReady
+                        ? 'Your LSW report has been generated successfully.'
+                        : 'Hang tight while we prepare your LSW together…'}
+                    </p>
+
+                    {/* Checklist */}
+                    {!printReady && (
+                      <ul className="space-y-2 bg-gray-50 dark:bg-gray-800/40 rounded-xl p-3 border border-gray-100 dark:border-gray-700/50">
+                        {[
+                          'Gathering weekly tasks',
+                          'Collecting project updates',
+                          'Loading meetings & follow-ups',
+                          'Compiling personal goals & RCA',
+                          'Formatting Excel workbook',
+                          'Finalizing report',
+                        ].map((label, idx) => {
+                          const done = idx < printStepIndex;
+                          const active = idx === printStepIndex;
+                          return (
+                            <li key={idx} className="flex items-center gap-2.5 text-xs">
+                              <span
+                                className={`flex-shrink-0 w-4 h-4 rounded-full flex items-center justify-center transition-colors ${
+                                  done
+                                    ? 'bg-emerald-500 text-white'
+                                    : active
+                                    ? 'bg-emerald-100 dark:bg-emerald-900/40 border border-emerald-400'
+                                    : 'bg-gray-200 dark:bg-gray-700'
+                                }`}
+                              >
+                                {done ? (
+                                  <svg className="w-2.5 h-2.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={4}>
+                                    <path strokeLinecap="round" strokeLinejoin="round" d="M5 13l4 4L19 7" />
+                                  </svg>
+                                ) : active ? (
+                                  <motion.span
+                                    className="w-1.5 h-1.5 rounded-full bg-emerald-500"
+                                    animate={{ scale: [1, 1.6, 1] }}
+                                    transition={{ repeat: Infinity, duration: 1 }}
+                                  />
+                                ) : null}
+                              </span>
+                              <span
+                                className={`${
+                                  done
+                                    ? 'text-gray-500 line-through dark:text-gray-500'
+                                    : active
+                                    ? 'text-emerald-700 dark:text-emerald-300 font-medium'
+                                    : 'text-gray-500 dark:text-gray-400'
+                                }`}
+                              >
+                                {label}
+                                {active && '…'}
+                              </span>
+                            </li>
+                          );
+                        })}
+                      </ul>
+                    )}
+                  </>
+                )}
+              </div>
+
+              {/* Footer */}
+              <div className="px-6 pb-6 pt-2 flex items-center justify-end gap-2">
+                {printReady && printBlob ? (
+                  <>
+                    <button
+                      onClick={() => setShowPrintProgressModal(false)}
+                      className="px-4 py-2 text-sm font-medium text-gray-700 dark:text-gray-300 hover:bg-gray-100 dark:hover:bg-gray-800 rounded-lg transition-colors"
+                    >
+                      Close
+                    </button>
+                    <motion.button
+                      initial={{ scale: 0.9, opacity: 0 }}
+                      animate={{ scale: 1, opacity: 1 }}
+                      transition={{ type: 'spring', damping: 12, stiffness: 300 }}
+                      onClick={() => {
+                        if (!printBlob) return;
+                        const url = URL.createObjectURL(printBlob);
+                        const a = document.createElement('a');
+                        a.href = url;
+                        a.download = printFileName;
+                        document.body.appendChild(a);
+                        a.click();
+                        document.body.removeChild(a);
+                        URL.revokeObjectURL(url);
+                        // Close the modal once the download is triggered.
+                        setShowPrintProgressModal(false);
+                      }}
+                      className="flex items-center gap-2 px-5 py-2.5 text-sm font-semibold text-white bg-gradient-to-r from-emerald-500 to-teal-600 hover:from-emerald-600 hover:to-teal-700 rounded-xl shadow-lg shadow-emerald-500/30 transition-all"
+                    >
+                      <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                        <path strokeLinecap="round" strokeLinejoin="round" d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4" />
+                      </svg>
+                      Download Report
+                    </motion.button>
+                  </>
+                ) : printError ? (
+                  <button
+                    onClick={() => setShowPrintProgressModal(false)}
+                    className="px-4 py-2 text-sm font-medium text-white bg-gray-600 hover:bg-gray-700 rounded-lg transition-colors"
+                  >
+                    Close
+                  </button>
+                ) : null}
+              </div>
+            </motion.div>
+          </motion.div>
+        )}
+      </AnimatePresence>
+
       {/* ──── Early Completion Log Modal ──── */}
       {showEarlyLogModal && (() => {
         const EARLY_LOG_FIELDS: { key: string; label: string; align: string }[] = [
@@ -4085,13 +4545,49 @@ function LSWContent() {
 
         const panelOpen = earlyLogFilterPanelOpen;
 
-        return (
-        <div className="fixed inset-0 z-50 flex items-center justify-center" onClick={() => setEarlyLogContextMenu(null)}>
-          {/* Backdrop */}
-          <div className="absolute inset-0 bg-black/40 backdrop-blur-sm" onClick={() => { setShowEarlyLogModal(false); setEarlyLogContextMenu(null); clearAllFilters(); }} />
+        // Drag handlers for the modal header (mouse + touch via pointer events)
+        const onHeaderPointerDown = (e: React.PointerEvent<HTMLDivElement>) => {
+          // Don't start drag when clicking a button/input inside the header
+          const target = e.target as HTMLElement;
+          if (target.closest('button, input, select, textarea, a')) return;
+          const container = (e.currentTarget.closest('[data-early-log-container]') as HTMLElement) || null;
+          if (!container) return;
+          const rect = container.getBoundingClientRect();
+          const origX = earlyLogPos?.x ?? rect.left;
+          const origY = earlyLogPos?.y ?? rect.top;
+          earlyLogDragRef.current = { startX: e.clientX, startY: e.clientY, origX, origY };
+          e.currentTarget.setPointerCapture(e.pointerId);
+          const onMove = (ev: PointerEvent) => {
+            const d = earlyLogDragRef.current;
+            if (!d) return;
+            const maxX = window.innerWidth - 120;
+            const maxY = window.innerHeight - 60;
+            const nextX = Math.min(Math.max(-rect.width + 120, d.origX + (ev.clientX - d.startX)), maxX);
+            const nextY = Math.min(Math.max(0, d.origY + (ev.clientY - d.startY)), maxY);
+            setEarlyLogPos({ x: nextX, y: nextY });
+          };
+          const onUp = () => {
+            earlyLogDragRef.current = null;
+            window.removeEventListener('pointermove', onMove);
+            window.removeEventListener('pointerup', onUp);
+          };
+          window.addEventListener('pointermove', onMove);
+          window.addEventListener('pointerup', onUp);
+        };
 
-          {/* Container: Side Panel + Modal */}
-          <div className="relative flex items-stretch max-h-[85vh]">
+        return (
+        <div
+          className="fixed z-50 pointer-events-none inset-0"
+          onClick={() => setEarlyLogContextMenu(null)}
+        >
+          {/* Container: Side Panel + Modal (draggable) */}
+          <div
+            data-early-log-container
+            className="absolute flex items-stretch max-h-[85vh] pointer-events-auto will-change-transform"
+            style={earlyLogPos
+              ? { left: earlyLogPos.x, top: earlyLogPos.y }
+              : { left: '50%', top: '50%', transform: 'translate(-50%, -50%)' }}
+          >
 
             {/* ─── Side Filter Panel ─── */}
             <div
@@ -4217,7 +4713,10 @@ function LSWContent() {
               panelOpen ? 'rounded-r-2xl' : 'rounded-2xl'
             }`}>
               {/* Header */}
-              <div className="flex items-center justify-between px-6 py-4 bg-gradient-to-r from-amber-50 to-yellow-50 dark:from-amber-900/30 dark:to-yellow-900/30 border-b border-amber-200 dark:border-amber-700/50 flex-shrink-0">
+              <div
+                className="flex items-center justify-between px-6 py-4 bg-gradient-to-r from-amber-50 to-yellow-50 dark:from-amber-900/30 dark:to-yellow-900/30 border-b border-amber-200 dark:border-amber-700/50 flex-shrink-0 cursor-move select-none touch-none"
+                onPointerDown={onHeaderPointerDown}
+              >
                 <div className="flex items-center gap-2">
                   {/* Toggle Filter Panel Button */}
                   <button
@@ -4253,7 +4752,7 @@ function LSWContent() {
                   )}
                 </div>
                 <button
-                  onClick={() => { setShowEarlyLogModal(false); setEarlyLogContextMenu(null); clearAllFilters(); }}
+                  onClick={() => { setShowEarlyLogModal(false); setEarlyLogContextMenu(null); clearAllFilters(); setEarlyLogPos(null); }}
                   className="p-1.5 rounded-lg hover:bg-amber-200/50 dark:hover:bg-amber-800/50 transition-colors"
                   title="Close"
                 >

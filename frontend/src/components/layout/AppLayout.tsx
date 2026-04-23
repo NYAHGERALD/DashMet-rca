@@ -269,24 +269,17 @@ export default function AppLayout({ children }: AppLayoutProps) {
               {/* Browser Notifications */}
               <NotificationCenter isSystemAdmin={isSystemAdmin} />
               
-              {/* Settings Button - Glass style */}
+              {/* Settings Button - Glass style (icon only) */}
               <button
                 onClick={() => openSettings()}
-                className="group p-2.5 sm:px-4 sm:py-2 text-sm font-medium text-gray-600 dark:text-gray-300 hover:text-gray-900 dark:hover:text-white backdrop-blur-md bg-white/50 dark:bg-gray-800/50 hover:bg-white/80 dark:hover:bg-gray-700/80 border border-gray-200/50 dark:border-gray-600/50 rounded-xl transition-all duration-200 hover:shadow-lg hover:shadow-black/5 hover:scale-105"
+                title={t('nav.settings')}
+                aria-label={t('nav.settings')}
+                className="group p-2.5 text-gray-600 dark:text-gray-300 hover:text-gray-900 dark:hover:text-white backdrop-blur-md bg-white/50 dark:bg-gray-800/50 hover:bg-white/80 dark:hover:bg-gray-700/80 border border-gray-200/50 dark:border-gray-600/50 rounded-xl transition-all duration-200 hover:shadow-lg hover:shadow-black/5 hover:scale-105"
               >
-                <span className="hidden sm:inline flex items-center gap-2">
-                  <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M10.325 4.317c.426-1.756 2.924-1.756 3.35 0a1.724 1.724 0 002.573 1.066c1.543-.94 3.31.826 2.37 2.37a1.724 1.724 0 001.065 2.572c1.756.426 1.756 2.924 0 3.35a1.724 1.724 0 00-1.066 2.573c.94 1.543-.826 3.31-2.37 2.37a1.724 1.724 0 00-2.572 1.065c-.426 1.756-2.924 1.756-3.35 0a1.724 1.724 0 00-2.573-1.066c-1.543.94-3.31-.826-2.37-2.37a1.724 1.724 0 00-1.065-2.572c-1.756-.426-1.756-2.924 0-3.35a1.724 1.724 0 001.066-2.573c-.94-1.543.826-3.31 2.37-2.37.996.608 2.296.07 2.572-1.065z" />
-                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 12a3 3 0 11-6 0 3 3 0 016 0z" />
-                  </svg>
-                  {t('nav.settings')}
-                </span>
-                <span className="sm:hidden">
-                  <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M10.325 4.317c.426-1.756 2.924-1.756 3.35 0a1.724 1.724 0 002.573 1.066c1.543-.94 3.31.826 2.37 2.37a1.724 1.724 0 001.065 2.572c1.756.426 1.756 2.924 0 3.35a1.724 1.724 0 00-1.066 2.573c.94 1.543-.826 3.31-2.37 2.37a1.724 1.724 0 00-2.572 1.065c-.426 1.756-2.924 1.756-3.35 0a1.724 1.724 0 00-2.573-1.066c-1.543.94-3.31-.826-2.37-2.37a1.724 1.724 0 00-1.065-2.572c-1.756-.426-1.756-2.924 0-3.35a1.724 1.724 0 001.066-2.573c-.94-1.543.826-3.31 2.37-2.37.996.608 2.296.07 2.572-1.065z" />
-                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 12a3 3 0 11-6 0 3 3 0 016 0z" />
-                  </svg>
-                </span>
+                <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M10.325 4.317c.426-1.756 2.924-1.756 3.35 0a1.724 1.724 0 002.573 1.066c1.543-.94 3.31.826 2.37 2.37a1.724 1.724 0 001.065 2.572c1.756.426 1.756 2.924 0 3.35a1.724 1.724 0 00-1.066 2.573c.94 1.543-.826 3.31-2.37 2.37a1.724 1.724 0 00-2.572 1.065c-.426 1.756-2.924 1.756-3.35 0a1.724 1.724 0 00-2.573-1.066c-1.543.94-3.31-.826-2.37-2.37a1.724 1.724 0 00-1.065-2.572c-1.756-.426-1.756-2.924 0-3.35a1.724 1.724 0 001.066-2.573c-.94-1.543.826-3.31 2.37-2.37.996.608 2.296.07 2.572-1.065z" />
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 12a3 3 0 11-6 0 3 3 0 016 0z" />
+                </svg>
               </button>
               
               {/* User Dropdown - Glass style */}
@@ -385,27 +378,27 @@ export default function AppLayout({ children }: AppLayoutProps) {
             { icon: <Settings size={18} strokeWidth={1.8} />, label: t('nav.settings'), onClick: () => openSettings() },
           ] : [
             { href: '/dashboard', icon: <LayoutDashboard size={18} strokeWidth={1.8} />, label: t('nav.dashboard') || 'Dashboard', show: hasNavAccess(NAV_PRIVILEGES.DASHBOARD) },
-            { href: '/incidents/new', icon: <Plus size={18} strokeWidth={2} />, label: t('nav.createIncident'), show: hasNavAccess(NAV_PRIVILEGES.CREATE_INCIDENT) },
-            { href: '/incidents', icon: <ClipboardList size={18} strokeWidth={1.8} />, label: t('nav.myIncidents'), show: hasNavAccess(NAV_PRIVILEGES.MY_INCIDENTS) },
-            { href: '/incidents?filter=team', icon: <UsersRound size={18} strokeWidth={1.8} />, label: t('nav.teamIncidents'), show: hasNavAccess(NAV_PRIVILEGES.TEAM_INCIDENTS) },
-            { href: '/incidents?filter=public', icon: <Globe size={18} strokeWidth={1.8} />, label: t('nav.publicIncidents'), show: hasNavAccess(NAV_PRIVILEGES.PUBLIC_INCIDENTS) },
-            { href: '/rca', icon: <Microscope size={18} strokeWidth={1.8} />, label: t('nav.rcaWorkspace'), show: hasNavAccess(NAV_PRIVILEGES.RCA) },
-            { href: '/capa', icon: <ListChecks size={18} strokeWidth={1.8} />, label: t('nav.capaBoard'), show: hasNavAccess(NAV_PRIVILEGES.CAPA) },
-            { href: '/reports', icon: <TrendingUp size={18} strokeWidth={1.8} />, label: t('nav.reportsCompliance'), show: hasNavAccess(NAV_PRIVILEGES.REPORTS) },
-            { href: '/analytics', icon: <BarChart3 size={18} strokeWidth={1.8} />, label: t('nav.analyticsInsights'), show: hasNavAccess(NAV_PRIVILEGES.ANALYTICS) },
-            { href: '/knowledge', icon: <Library size={18} strokeWidth={1.8} />, label: t('nav.knowledgeBase'), show: hasNavAccess(NAV_PRIVILEGES.KNOWLEDGE) },
-            { href: '/workplace-report', icon: <FileWarning size={18} strokeWidth={1.8} />, label: t('nav.workplaceReport'), show: hasNavAccess(NAV_PRIVILEGES.WORKPLACE_REPORT) },
-            { href: '/investigation-report', icon: <FileSearch size={18} strokeWidth={1.8} />, label: t('nav.investigationReport'), show: hasNavAccess(NAV_PRIVILEGES.INVESTIGATION_REPORT) },
-            { href: '/fmir', icon: <ShieldAlert size={18} strokeWidth={1.8} />, label: t('nav.fmir') || 'Foreign Material', show: hasNavAccess(NAV_PRIVILEGES.FMIR) },
-            { href: '/workplace-safety', icon: <ShieldCheck size={18} strokeWidth={1.8} />, label: 'Safety Assessment', show: hasNavAccess(NAV_PRIVILEGES.SAFETY_ASSESSMENT) },
-            { href: '/hr', icon: <Gavel size={18} strokeWidth={1.8} />, label: 'Conflict Resolution', show: hasNavAccess(NAV_PRIVILEGES.HR) },
-            { href: '/bakery-metrics', icon: <PieChart size={18} strokeWidth={1.8} />, label: 'Bakery Metrics', show: hasNavAccess(NAV_PRIVILEGES.BAKERY_METRICS) },
-            { href: '/lsw', icon: <ClipboardEdit size={18} strokeWidth={1.8} />, label: 'Leaders Standard Work', show: hasNavAccess(NAV_PRIVILEGES.LSW) },
-            { href: '/vacation', icon: <Palmtree size={18} strokeWidth={1.8} />, label: 'Vacation Hub', show: hasNavAccess(NAV_PRIVILEGES.VACATION) },
-            { href: '/meetings', icon: <Mic size={18} strokeWidth={1.8} />, label: 'Meeting Intelligence', show: hasNavAccess(NAV_PRIVILEGES.MEETINGS) },
-            { href: '/operations', icon: <Wrench size={18} strokeWidth={1.8} />, label: 'Operations', show: hasNavAccess(NAV_PRIVILEGES.OPERATIONS) },
-            { href: '/assigned-actions', icon: <Pin size={18} strokeWidth={1.8} />, label: 'My Action Items', show: hasNavAccess(NAV_PRIVILEGES.ACTION_ITEMS) },
-            { href: '/whiteboard', icon: <PenTool size={18} strokeWidth={1.8} />, label: 'Whiteboard', show: hasNavAccess(NAV_PRIVILEGES.CANVAS_AI) },
+            { href: '/incidents/new', icon: <Plus size={18} strokeWidth={2} />, label: t('nav.createIncident'), show: hasNavAccess(NAV_PRIVILEGES.CREATE_INCIDENT), group: 'Incidents' },
+            { href: '/incidents', icon: <ClipboardList size={18} strokeWidth={1.8} />, label: t('nav.myIncidents'), show: hasNavAccess(NAV_PRIVILEGES.MY_INCIDENTS), group: 'Incidents' },
+            { href: '/incidents?filter=team', icon: <UsersRound size={18} strokeWidth={1.8} />, label: t('nav.teamIncidents'), show: hasNavAccess(NAV_PRIVILEGES.TEAM_INCIDENTS), group: 'Incidents' },
+            { href: '/incidents?filter=public', icon: <Globe size={18} strokeWidth={1.8} />, label: t('nav.publicIncidents'), show: hasNavAccess(NAV_PRIVILEGES.PUBLIC_INCIDENTS), group: 'Incidents' },
+            { href: '/rca', icon: <Microscope size={18} strokeWidth={1.8} />, label: t('nav.rcaWorkspace'), show: hasNavAccess(NAV_PRIVILEGES.RCA), group: 'Analysis' },
+            { href: '/capa', icon: <ListChecks size={18} strokeWidth={1.8} />, label: t('nav.capaBoard'), show: hasNavAccess(NAV_PRIVILEGES.CAPA), group: 'Analysis' },
+            { href: '/reports', icon: <TrendingUp size={18} strokeWidth={1.8} />, label: t('nav.reportsCompliance'), show: hasNavAccess(NAV_PRIVILEGES.REPORTS), group: 'Analysis' },
+            { href: '/analytics', icon: <BarChart3 size={18} strokeWidth={1.8} />, label: t('nav.analyticsInsights'), show: hasNavAccess(NAV_PRIVILEGES.ANALYTICS), group: 'Analysis' },
+            { href: '/knowledge', icon: <Library size={18} strokeWidth={1.8} />, label: t('nav.knowledgeBase'), show: hasNavAccess(NAV_PRIVILEGES.KNOWLEDGE), group: 'Analysis' },
+            { href: '/workplace-report', icon: <FileWarning size={18} strokeWidth={1.8} />, label: t('nav.workplaceReport'), show: hasNavAccess(NAV_PRIVILEGES.WORKPLACE_REPORT), group: 'Safety & Compliance' },
+            { href: '/investigation-report', icon: <FileSearch size={18} strokeWidth={1.8} />, label: t('nav.investigationReport'), show: hasNavAccess(NAV_PRIVILEGES.INVESTIGATION_REPORT), group: 'Safety & Compliance' },
+            { href: '/fmir', icon: <ShieldAlert size={18} strokeWidth={1.8} />, label: t('nav.fmir') || 'Foreign Material', show: hasNavAccess(NAV_PRIVILEGES.FMIR), group: 'Safety & Compliance' },
+            { href: '/workplace-safety', icon: <ShieldCheck size={18} strokeWidth={1.8} />, label: 'Safety Assessment', show: hasNavAccess(NAV_PRIVILEGES.SAFETY_ASSESSMENT), group: 'Safety & Compliance' },
+            { href: '/hr', icon: <Gavel size={18} strokeWidth={1.8} />, label: 'Conflict Resolution', show: hasNavAccess(NAV_PRIVILEGES.HR), group: 'Safety & Compliance' },
+            { href: '/bakery-metrics', icon: <PieChart size={18} strokeWidth={1.8} />, label: 'Bakery Metrics', show: hasNavAccess(NAV_PRIVILEGES.BAKERY_METRICS), group: 'Operations' },
+            { href: '/lsw', icon: <ClipboardEdit size={18} strokeWidth={1.8} />, label: 'LSW', show: hasNavAccess(NAV_PRIVILEGES.LSW), group: 'Operations' },
+            { href: '/vacation', icon: <Palmtree size={18} strokeWidth={1.8} />, label: 'Vacation Hub', show: hasNavAccess(NAV_PRIVILEGES.VACATION), group: 'Operations' },
+            { href: '/meetings', icon: <Mic size={18} strokeWidth={1.8} />, label: 'Meeting Intelligence', show: hasNavAccess(NAV_PRIVILEGES.MEETINGS), group: 'Operations' },
+            { href: '/operations', icon: <Wrench size={18} strokeWidth={1.8} />, label: 'Operations', show: hasNavAccess(NAV_PRIVILEGES.OPERATIONS), group: 'Operations' },
+            { href: '/assigned-actions', icon: <Pin size={18} strokeWidth={1.8} />, label: 'My Action Items', show: hasNavAccess(NAV_PRIVILEGES.ACTION_ITEMS), group: 'Personal' },
+            { href: '/whiteboard', icon: <PenTool size={18} strokeWidth={1.8} />, label: 'Whiteboard', show: hasNavAccess(NAV_PRIVILEGES.CANVAS_AI), group: 'Personal' },
             { icon: <Settings size={18} strokeWidth={1.8} />, label: t('nav.settings'), onClick: () => openSettings() },
           ]}
         />
@@ -525,7 +518,7 @@ export default function AppLayout({ children }: AppLayoutProps) {
                     { href: '/workplace-safety', icon: <ShieldCheck size={18} strokeWidth={1.8} />, label: 'Safety Assessment', show: hasNavAccess(NAV_PRIVILEGES.SAFETY_ASSESSMENT) },
                     { href: '/hr', icon: <Gavel size={18} strokeWidth={1.8} />, label: 'Conflict Resolution', show: hasNavAccess(NAV_PRIVILEGES.HR) },
                     { href: '/bakery-metrics', icon: <PieChart size={18} strokeWidth={1.8} />, label: 'Bakery Metrics', show: hasNavAccess(NAV_PRIVILEGES.BAKERY_METRICS) },
-                    { href: '/lsw', icon: <ClipboardEdit size={18} strokeWidth={1.8} />, label: 'Leaders Standard Work', show: hasNavAccess(NAV_PRIVILEGES.LSW) },
+                    { href: '/lsw', icon: <ClipboardEdit size={18} strokeWidth={1.8} />, label: 'LSW', show: hasNavAccess(NAV_PRIVILEGES.LSW) },
                     { href: '/vacation', icon: <Palmtree size={18} strokeWidth={1.8} />, label: 'Vacation Hub', show: hasNavAccess(NAV_PRIVILEGES.VACATION) },
                     { href: '/meetings', icon: <Mic size={18} strokeWidth={1.8} />, label: 'Meeting Intelligence', show: hasNavAccess(NAV_PRIVILEGES.MEETINGS) },
                     { href: '/operations', icon: <Wrench size={18} strokeWidth={1.8} />, label: 'Operations', show: hasNavAccess(NAV_PRIVILEGES.OPERATIONS) },
