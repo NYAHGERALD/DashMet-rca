@@ -37,6 +37,8 @@ services:
         value: 7d
       - key: JWT_REFRESH_EXPIRE
         value: 30d
+      - key: SESSION_COOKIE_SAME_SITE
+        value: None
       - key: BCRYPT_ROUNDS
         value: 12
       - key: CORS_ORIGIN

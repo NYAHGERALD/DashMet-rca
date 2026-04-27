@@ -4,6 +4,7 @@ const API_BASE_URL = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:5001/a
 const CSRF_COOKIE_NAME = 'dashmet_csrf';
 export const SESSION_EXPIRED_EVENT = 'dashmet:session-expired';
 let sessionExpiredEventEmitted = false;
+let csrfTokenFromHeader: string | null = null;
 
 const api = axios.create({
   baseURL: API_BASE_URL,
@@ -32,13 +33,21 @@ const readCookieValue = (name: string): string | null => {
   return match ? decodeURIComponent(match[1]) : null;
 };
 
+const captureCsrfToken = (headers: any) => {
+  const headerValue = headers?.['x-csrf-token'] || headers?.['X-CSRF-Token'];
+  const token = Array.isArray(headerValue) ? headerValue[0] : headerValue;
+  if (typeof token === 'string' && token.trim()) {
+    csrfTokenFromHeader = token;
+  }
+};
+
 const applyCsrfHeader = (config: InternalAxiosRequestConfig) => {
   const method = String(config.method || 'get').toUpperCase();
   if (method === 'GET' || method === 'HEAD' || method === 'OPTIONS') {
     return config;
   }
 
-  const csrfToken = readCookieValue(CSRF_COOKIE_NAME);
+  const csrfToken = readCookieValue(CSRF_COOKIE_NAME) || csrfTokenFromHeader;
   if (!csrfToken) {
     return config;
   }
@@ -56,6 +65,16 @@ const applyCsrfHeader = (config: InternalAxiosRequestConfig) => {
 
 api.interceptors.request.use(applyCsrfHeader);
 refreshClient.interceptors.request.use(applyCsrfHeader);
+refreshClient.interceptors.response.use(
+  (response) => {
+    captureCsrfToken(response.headers);
+    return response;
+  },
+  (error) => {
+    captureCsrfToken(error.response?.headers);
+    return Promise.reject(error);
+  }
+);
 
 /**
  * Create an axios instance with a custom timeout for long-running AI operations.
@@ -118,8 +137,12 @@ const emitSessionExpired = () => {
 };
 
 api.interceptors.response.use(
-  (response) => response,
+  (response) => {
+    captureCsrfToken(response.headers);
+    return response;
+  },
   async (error) => {
+    captureCsrfToken(error.response?.headers);
     const originalRequest = error.config;
 
     if (

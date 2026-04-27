@@ -24,6 +24,7 @@ import { rateLimiter } from './middleware/rateLimiter';
 import { requestId } from './middleware/requestId';
 import { securityHeaders } from './middleware/securityHeaders';
 import { sanitizeInputs } from './middleware/inputSanitizer';
+import { exposeRequestCsrfToken } from './utils/sessionCookies';
 import hpp from 'hpp';
 console.log('✅ Middleware loaded');
 
@@ -111,13 +112,14 @@ const corsOptions = {
   credentials: true,
   methods: ['GET', 'POST', 'PUT', 'PATCH', 'DELETE', 'OPTIONS'],
   allowedHeaders: ['Content-Type', 'Authorization', 'X-Requested-With', 'X-CSRF-Token', 'Accept', 'Origin'],
-  exposedHeaders: ['Content-Range', 'X-Content-Range', 'X-Request-Id'],
+  exposedHeaders: ['Content-Range', 'X-Content-Range', 'X-Request-Id', 'X-CSRF-Token'],
   maxAge: 3600, // 1 hour (not 24 hours)
 };
 
 // Apply CORS before everything else
 app.use(cors(corsOptions));
 app.options('*', cors(corsOptions));
+app.use(exposeRequestCsrfToken);
 
 // Security headers (Helmet)
 app.use(helmet({
