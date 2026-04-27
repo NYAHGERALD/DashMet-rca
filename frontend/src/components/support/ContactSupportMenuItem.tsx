@@ -2,9 +2,15 @@
 
 import { useState } from 'react';
 import SupportModal from '@/components/support/SupportModal';
+import { useAuth } from '@/components/providers/AuthProvider';
 
 export function ContactSupportMenuItem() {
+  const { user } = useAuth();
   const [showSupportModal, setShowSupportModal] = useState(false);
+
+  if (user?.role === 'SYSTEM_ADMIN') {
+    return null;
+  }
 
   return (
     <>

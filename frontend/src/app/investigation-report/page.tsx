@@ -90,6 +90,7 @@ function InvestigationReportContent() {
       const response = await fetch(
         `${process.env.NEXT_PUBLIC_API_URL}/investigation-report/incidents?${params.toString()}`,
         {
+          credentials: 'include',
           headers: {
             Authorization: `Bearer ${token}`,
           },
@@ -131,6 +132,7 @@ function InvestigationReportContent() {
         `${process.env.NEXT_PUBLIC_API_URL}/investigation-report/${selectedIncident}/generate-pdf`,
         {
           method: 'POST',
+          credentials: 'include',
           headers: {
             Authorization: `Bearer ${token}`,
             'Content-Type': 'application/json',

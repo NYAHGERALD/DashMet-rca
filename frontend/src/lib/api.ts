@@ -1,144 +1,150 @@
-// API Client Configuration (Firebase)
+import axios, { AxiosRequestConfig, InternalAxiosRequestConfig } from 'axios';
 
-import axios, { AxiosRequestConfig } from 'axios';
-import { auth } from './firebase';
+const API_BASE_URL = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:5001/api';
+const CSRF_COOKIE_NAME = 'dashmet_csrf';
+export const SESSION_EXPIRED_EVENT = 'dashmet:session-expired';
+let sessionExpiredEventEmitted = false;
 
 const api = axios.create({
-  baseURL: process.env.NEXT_PUBLIC_API_URL || 'http://localhost:5002/api',
+  baseURL: API_BASE_URL,
   headers: {
     'Content-Type': 'application/json',
+    'X-Requested-With': 'XMLHttpRequest',
   },
-  timeout: 120000, // 2 minutes for AI-powered operations
+  timeout: 120000,
+  withCredentials: true,
 });
 
+const refreshClient = axios.create({
+  baseURL: API_BASE_URL,
+  headers: {
+    'Content-Type': 'application/json',
+    'X-Requested-With': 'XMLHttpRequest',
+  },
+  timeout: 30000,
+  withCredentials: true,
+});
+
+const readCookieValue = (name: string): string | null => {
+  if (typeof document === 'undefined') return null;
+  const escapedName = name.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+  const match = document.cookie.match(new RegExp(`(?:^|; )${escapedName}=([^;]*)`));
+  return match ? decodeURIComponent(match[1]) : null;
+};
+
+const applyCsrfHeader = (config: InternalAxiosRequestConfig) => {
+  const method = String(config.method || 'get').toUpperCase();
+  if (method === 'GET' || method === 'HEAD' || method === 'OPTIONS') {
+    return config;
+  }
+
+  const csrfToken = readCookieValue(CSRF_COOKIE_NAME);
+  if (!csrfToken) {
+    return config;
+  }
+
+  if (typeof config.headers?.set === 'function') {
+    config.headers.set('X-CSRF-Token', csrfToken);
+  } else {
+    config.headers = {
+      ...(config.headers || {}),
+      'X-CSRF-Token': csrfToken,
+    } as any;
+  }
+  return config;
+};
+
+api.interceptors.request.use(applyCsrfHeader);
+refreshClient.interceptors.request.use(applyCsrfHeader);
+
 /**
- * Create an axios instance with a custom timeout for long-running AI operations
- * Used for operations like FMIR lock/close which involve AI audit analysis
+ * Create an axios instance with a custom timeout for long-running AI operations.
  */
 export function createLongRunningRequest(timeoutMs: number = 180000) {
   return axios.create({
-    baseURL: process.env.NEXT_PUBLIC_API_URL || 'http://localhost:5002/api',
+    baseURL: API_BASE_URL,
     headers: {
       'Content-Type': 'application/json',
+      'X-Requested-With': 'XMLHttpRequest',
     },
     timeout: timeoutMs,
+    withCredentials: true,
   });
 }
 
 /**
- * Make an API request with extended timeout for AI-intensive operations
- * Automatically adds Firebase authentication token
+ * Make an API request with extended timeout for AI-intensive operations.
  */
 export async function apiWithExtendedTimeout<T = any>(
   config: AxiosRequestConfig,
-  timeoutMs: number = 180000 // 3 minutes default for AI operations
+  timeoutMs: number = 180000
 ): Promise<T> {
-  const firebaseUser = auth.currentUser;
-  let token: string | null = null;
-
-  if (firebaseUser) {
-    try {
-      token = await firebaseUser.getIdToken();
-    } catch (error) {
-      console.error('Failed to get Firebase token:', error);
-      token = localStorage.getItem('firebaseToken');
-    }
-  } else {
-    token = localStorage.getItem('firebaseToken');
-  }
-
-  const instance = axios.create({
-    baseURL: process.env.NEXT_PUBLIC_API_URL || 'http://localhost:5002/api',
-    timeout: timeoutMs,
-    headers: {
-      'Content-Type': 'application/json',
-      ...(token ? { Authorization: `Bearer ${token}` } : {}),
-    },
-  });
-
+  const instance = createLongRunningRequest(timeoutMs);
   const response = await instance.request<T>(config);
   return response.data;
 }
 
-// Request interceptor - Add Firebase token
-api.interceptors.request.use(
-  async (config) => {
-    const firebaseUser = auth.currentUser;
-    if (firebaseUser) {
-      try {
-        // Force refresh token if it's been more than 55 minutes (tokens expire in 60 minutes)
-        const tokenResult = await firebaseUser.getIdTokenResult();
-        const tokenAge = Date.now() - new Date(tokenResult.issuedAtTime).getTime();
-        const shouldRefresh = tokenAge > 55 * 60 * 1000; // 55 minutes
-        
-        const token = await firebaseUser.getIdToken(shouldRefresh);
-        localStorage.setItem('firebaseToken', token);
-        config.headers.Authorization = `Bearer ${token}`;
-      } catch (error) {
-        console.error('Failed to get Firebase token:', error);
-        // Fallback to stored token if getting fresh token fails
-        const storedToken = localStorage.getItem('firebaseToken');
-        if (storedToken) {
-          config.headers.Authorization = `Bearer ${storedToken}`;
-        } else {
-          localStorage.removeItem('firebaseToken');
-        }
-      }
-    } else {
-      // Firebase auth might not be initialized yet, try using stored token
-      const storedToken = localStorage.getItem('firebaseToken');
-      if (storedToken) {
-        config.headers.Authorization = `Bearer ${storedToken}`;
-      }
-    }
-    return config;
-  },
-  (error) => {
-    return Promise.reject(error);
-  }
-);
+const isAuthRoute = (url = '') =>
+  url.includes('/auth/login') ||
+  url.includes('/auth/logout') ||
+  url.includes('/auth/refresh') ||
+  url.includes('/auth/forgot-password') ||
+  url.includes('/auth/reset-password');
 
-// Response interceptor - Handle errors
+const shouldStayOnAuthPage = () => {
+  if (typeof window === 'undefined') return true;
+
+  const publicPaths = [
+    '/',
+    '/login',
+    '/forgot-password',
+    '/reset-password',
+    '/accept-invite',
+    '/account-locked',
+    '/dashmet-control/login',
+  ];
+
+  const { pathname } = window.location;
+  return publicPaths.some((path) => {
+    if (path === '/') return pathname === '/';
+    return pathname === path || pathname.startsWith(`${path}/`);
+  });
+};
+
+const emitSessionExpired = () => {
+  if (typeof window === 'undefined' || sessionExpiredEventEmitted) return;
+  sessionExpiredEventEmitted = true;
+  window.dispatchEvent(new CustomEvent(SESSION_EXPIRED_EVENT));
+};
+
 api.interceptors.response.use(
   (response) => response,
   async (error) => {
     const originalRequest = error.config;
-    
-    if (error.response?.status === 401 && !originalRequest._retry) {
+
+    if (
+      error.response?.status === 401 &&
+      originalRequest &&
+      !originalRequest._retry &&
+      !isAuthRoute(originalRequest.url)
+    ) {
       originalRequest._retry = true;
-      
-      const firebaseUser = auth.currentUser;
-      if (firebaseUser) {
-        try {
-          // Try to refresh the token
-          const token = await firebaseUser.getIdToken(true);
-          localStorage.setItem('firebaseToken', token);
-          originalRequest.headers.Authorization = `Bearer ${token}`;
-          
-          // Retry the original request
-          return api(originalRequest);
-        } catch (refreshError) {
-          console.error('Token refresh failed:', refreshError);
-          localStorage.removeItem('firebaseToken');
-          await auth.signOut();
-          // Only redirect if not already on landing page
-          if (typeof window !== 'undefined' && window.location.pathname !== '/') {
-            window.location.href = '/';
-          }
-        }
-      } else {
-        localStorage.removeItem('firebaseToken');
-        // Only redirect if not already on landing page
-        if (typeof window !== 'undefined' && window.location.pathname !== '/') {
-          window.location.href = '/';
+
+      try {
+        await refreshClient.post('/auth/refresh');
+        sessionExpiredEventEmitted = false;
+        return api(originalRequest);
+      } catch {
+        if (typeof window !== 'undefined' && !shouldStayOnAuthPage()) {
+          emitSessionExpired();
         }
       }
     }
-    
+
     if (error.response?.status === 429) {
       console.warn('Rate limited, please try again later');
     }
-    
+
     return Promise.reject(error);
   }
 );

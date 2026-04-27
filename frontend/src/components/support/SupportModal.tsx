@@ -1,6 +1,6 @@
 'use client';
 
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import { SupportCategory } from '@/types/support';
 import api from '@/lib/api';
 import { useAuth } from '@/components/providers/AuthProvider';
@@ -15,6 +15,7 @@ interface SupportModalProps {
 
 export default function SupportModal({ open, onOpenChange }: SupportModalProps) {
   const { user } = useAuth();
+  const isSystemAdmin = user?.role === 'SYSTEM_ADMIN';
   const [subject, setSubject] = useState('');
   const [description, setDescription] = useState('');
   const [category, setCategory] = useState<SupportCategory | ''>('');
@@ -23,8 +24,18 @@ export default function SupportModal({ open, onOpenChange }: SupportModalProps) 
   const [success, setSuccess] = useState(false);
   const [email, setEmail] = useState('');
 
+  useEffect(() => {
+    if (open && isSystemAdmin) {
+      onOpenChange(false);
+    }
+  }, [open, isSystemAdmin, onOpenChange]);
+
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
+    if (isSystemAdmin) {
+      setError('System Admin cannot submit support requests from this form.');
+      return;
+    }
     if (!subject || !description || !category) {
       setError('All fields are required.');
       return;
@@ -67,7 +78,7 @@ export default function SupportModal({ open, onOpenChange }: SupportModalProps) 
     }, 300);
   }
 
-  if (!open) return null;
+  if (!open || isSystemAdmin) return null;
 
   return (
     <div className="fixed inset-0 z-50 overflow-y-auto">

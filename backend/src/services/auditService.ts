@@ -27,6 +27,15 @@ interface AuditLogParams {
   userAgent?: string;
 }
 
+function isFailedLoginEvent(changes: unknown): boolean {
+  if (!changes || typeof changes !== 'object' || Array.isArray(changes)) {
+    return false;
+  }
+
+  const result = (changes as { result?: unknown }).result;
+  return typeof result === 'string' && result.toLowerCase() === 'failed';
+}
+
 /**
  * Log an audit event
  * Note: Will NOT log if user is SYSTEM_ADMIN or if no organizationId is provided
@@ -254,8 +263,10 @@ export async function getUserActivitySummary(
     entityCounts[log.entity] = (entityCounts[log.entity] || 0) + 1;
   }
 
-  // Get last login
-  const lastLogin = logs.find(l => l.action === 'LOGIN');
+  // Get last successful login (ignore failed attempts captured as LOGIN with result=failed)
+  const lastLogin =
+    logs.find(l => l.action === 'LOGIN' && !isFailedLoginEvent(l.changes)) ||
+    logs.find(l => l.action === 'LOGIN');
 
   return {
     totalActions: logs.length,
@@ -335,7 +346,11 @@ export async function generateComplianceReport(
     // Categorize events
     switch (log.action) {
       case 'LOGIN':
-        summary.securityEvents.logins++;
+        if (isFailedLoginEvent(log.changes)) {
+          summary.securityEvents.failedLogins++;
+        } else {
+          summary.securityEvents.logins++;
+        }
         break;
       case 'LOGOUT':
         summary.securityEvents.logouts++;

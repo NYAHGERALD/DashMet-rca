@@ -514,8 +514,10 @@ router.get('/employees/departments', async (req: AuthRequest, res: Response) => 
 // Approve / Deny / Get / Update individual vacation
 // POST /api/vacation/:id/approve
 // POST /api/vacation/:id/deny
+// POST /api/vacation/:id/cancel
 // GET /api/vacation/:id
 // PUT /api/vacation/:id
+// DELETE /api/vacation/:id
 // ─────────────────────────────────────────────────────────────────────────────
 router.post('/:id/approve', async (req: AuthRequest, res: Response) => {
   try {
@@ -541,6 +543,20 @@ router.post('/:id/deny', async (req: AuthRequest, res: Response) => {
   } catch (error: any) {
     console.error('Error denying vacation:', error);
     const status = error.message.includes('not found') ? 404 : error.message.includes('required') ? 400 : error.message.includes('pending') ? 400 : 500;
+    res.status(status).json({ success: false, error: error.message });
+  }
+});
+
+router.post('/:id/cancel', async (req: AuthRequest, res: Response) => {
+  try {
+    const vacationId = parseInt(req.params.id);
+    const userId = req.user!.id;
+    const { reason } = req.body;
+    const vacation = await vacationService.cancelVacation(vacationId, userId, reason);
+    res.json({ success: true, data: vacation });
+  } catch (error: any) {
+    console.error('Error cancelling vacation:', error);
+    const status = error.message.includes('not found') ? 404 : error.message.includes('pending') ? 400 : 500;
     res.status(status).json({ success: false, error: error.message });
   }
 });
@@ -571,6 +587,20 @@ router.put('/:id', async (req: AuthRequest, res: Response) => {
   } catch (error: any) {
     console.error('Error updating vacation:', error);
     const status = error.message.includes('not found') ? 404 : error.message.includes('pending') ? 400 : 500;
+    res.status(status).json({ success: false, error: error.message });
+  }
+});
+
+router.delete('/:id', async (req: AuthRequest, res: Response) => {
+  try {
+    const vacationId = parseInt(req.params.id);
+    const organizationId = req.user!.organizationId || undefined;
+    await vacationService.deleteVacationRequest(vacationId, { organizationId });
+    res.json({ success: true, message: 'Vacation request deleted' });
+  } catch (error: any) {
+    console.error('Error deleting vacation request:', error);
+    const msg = String(error.message || '');
+    const status = msg.includes('not found') ? 404 : msg.includes('cancelled') ? 400 : 500;
     res.status(status).json({ success: false, error: error.message });
   }
 });

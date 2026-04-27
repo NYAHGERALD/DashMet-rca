@@ -3,8 +3,7 @@
 import React, { useState, useEffect } from 'react';
 import { useRouter } from 'next/navigation';
 import ProtectedRoute from '@/components/auth/ProtectedRoute';
-import { auth } from '@/lib/firebase';
-import { onAuthStateChanged, User } from 'firebase/auth';
+import { useAuth } from '@/components/providers/AuthProvider';
 import Link from 'next/link';
 import { formatDate } from '@/lib/dateUtils';
 
@@ -121,8 +120,7 @@ interface PredictionData {
 
 function AnalyticsContent() {
   const router = useRouter();
-  const [user, setUser] = useState<User | null>(null);
-  const [loading, setLoading] = useState(true);
+  const { user, loading, getIdToken } = useAuth();
   const [activeTab, setActiveTab] = useState<'trends' | 'downtime' | 'foodsafety' | 'reliability' | 'predictions'>('trends');
   const [period, setPeriod] = useState('90');
   
@@ -136,17 +134,10 @@ function AnalyticsContent() {
   const [error, setError] = useState('');
 
   useEffect(() => {
-    const unsubscribe = onAuthStateChanged(auth, (currentUser) => {
-      if (currentUser) {
-        setUser(currentUser);
-        setLoading(false);
-      } else {
-        router.push('/login');
-      }
-    });
-
-    return () => unsubscribe();
-  }, [router]);
+    if (!loading && !user) {
+      router.push('/login');
+    }
+  }, [loading, user, router]);
 
   useEffect(() => {
     if (user) {
@@ -161,7 +152,7 @@ function AnalyticsContent() {
     setError('');
     
     try {
-      const token = await user.getIdToken();
+      const token = await getIdToken();
       let endpoint = '';
       
       switch (tab) {
@@ -183,6 +174,7 @@ function AnalyticsContent() {
       }
       
       const response = await fetch(`${process.env.NEXT_PUBLIC_API_URL || 'http://localhost:5002/api'}${endpoint}`, {
+        credentials: 'include',
         headers: {
           'Authorization': `Bearer ${token}`,
         },

@@ -1502,6 +1502,7 @@ model User {
   mfaSecret                                                           String?
   theme                                                               Theme                                @default(LIGHT)
   language                                                            Language                             @default(ENGLISH)
+  timezone                                                            String                               @default("America/Chicago")
   defaultSiteId                                                       String?
   defaultLineId                                                       String?
   loginAttempts                                                       Int                                  @default(0)

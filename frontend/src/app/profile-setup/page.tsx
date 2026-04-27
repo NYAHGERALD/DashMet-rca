@@ -6,13 +6,11 @@ import { useState, useEffect } from 'react';
 import { useRouter } from 'next/navigation';
 import Link from 'next/link';
 import { useAuth } from '@/components/providers/AuthProvider';
-import { signOut } from 'firebase/auth';
-import { auth } from '@/lib/firebase';
 import { Mail, AlertTriangle } from 'lucide-react';
 
 export default function ProfileSetupPage() {
   const router = useRouter();
-  const { user, firebaseUser, loading: authLoading, needsProfileSetup } = useAuth();
+  const { user, loading: authLoading } = useAuth();
 
   useEffect(() => {
     // If user has a complete profile, redirect to dashboard
@@ -21,11 +19,10 @@ export default function ProfileSetupPage() {
       return;
     }
 
-    // If auth is done loading and there's no Firebase user, redirect to login
-    if (!authLoading && !firebaseUser && !needsProfileSetup) {
+    if (!authLoading && !user) {
       router.push('/login');
     }
-  }, [user, firebaseUser, authLoading, needsProfileSetup, router]);
+  }, [user, authLoading, router]);
 
   if (authLoading) {
     return (
@@ -73,12 +70,6 @@ export default function ProfileSetupPage() {
               Invitation Required
             </h1>
 
-            {firebaseUser && (
-              <p className="text-xs text-gray-400 mb-4">
-                Signed in as: <span className="font-medium text-white break-all">{firebaseUser.email}</span>
-              </p>
-            )}
-
             <div className="mb-6 p-3 rounded-lg border border-amber-500/30 bg-amber-500/10">
               <div className="flex items-start gap-2">
                 <AlertTriangle className="w-4 h-4 text-amber-400 flex-shrink-0 mt-0.5" />
@@ -103,18 +94,10 @@ export default function ProfileSetupPage() {
 
               <button
                 type="button"
-                onClick={async () => {
-                  try {
-                    await signOut(auth);
-                    localStorage.removeItem('firebaseToken');
-                    router.push('/login');
-                  } catch (err) {
-                    console.error('Failed to sign out:', err);
-                  }
-                }}
+                onClick={() => router.push('/login')}
                 className="block w-full text-xs text-blue-400 hover:text-blue-300 underline"
               >
-                Sign out and use a different account
+                Use a different account
               </button>
             </div>
           </div>
@@ -123,4 +106,3 @@ export default function ProfileSetupPage() {
     </div>
   );
 }
-

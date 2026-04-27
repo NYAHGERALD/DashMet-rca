@@ -59,7 +59,7 @@ export function SupportAlertProvider({ children }: { children: React.ReactNode }
   const dismissingRef = useRef<Set<string>>(new Set());
   
   // Check if user can receive support alerts (Admin or QC Manager)
-  const canReceiveAlerts = user?.role === 'ADMIN' || user?.role === 'SYSTEM_ADMIN' || user?.role === 'QUALITY_CONTROL_MANAGER';
+  const canReceiveAlerts = user?.role === 'ADMIN' || user?.role === 'QUALITY_CONTROL_MANAGER';
   
   // Fetch pending alerts from the database
   const fetchPendingAlerts = useCallback(async () => {
@@ -110,7 +110,7 @@ export function SupportAlertProvider({ children }: { children: React.ReactNode }
       // Check if this alert should be shown to this user based on recipientRole
       const shouldShow = 
         !data.recipientRole || // No specific recipient - show to all
-        (data.recipientRole === 'ADMIN' && (user.role === 'ADMIN' || user.role === 'SYSTEM_ADMIN')) ||
+        (data.recipientRole === 'ADMIN' && user.role === 'ADMIN') ||
         (data.recipientRole === 'QUALITY_CONTROL_MANAGER' && user.role === 'QUALITY_CONTROL_MANAGER');
       
       if (!shouldShow) {

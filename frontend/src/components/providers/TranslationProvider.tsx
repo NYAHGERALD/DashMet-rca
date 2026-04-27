@@ -13,7 +13,6 @@ import React, {
   useMemo,
 } from 'react';
 import api from '@/lib/api';
-import { auth } from '@/lib/firebase';
 
 // Supported language codes
 export type LanguageCode =
@@ -132,20 +131,16 @@ export function TranslationProvider({ children }: { children: React.ReactNode })
         setEnabled(storedEnabled === 'true');
       }
 
-      // Only try to load from user preferences if logged in
-      const firebaseUser = auth.currentUser;
-      if (firebaseUser) {
-        try {
-          const response = await api.get('/preferences');
-          if (response.data?.data?.language) {
-            const dbLang = response.data.data.language;
-            const langCode = DB_TO_CODE[dbLang] || 'en';
-            setLanguageState(langCode);
-            localStorage.setItem('userLanguage', langCode);
-          }
-        } catch (error) {
-          // User might not have preferences set, use localStorage value
+      try {
+        const response = await api.get('/preferences');
+        if (response.data?.data?.language) {
+          const dbLang = response.data.data.language;
+          const langCode = DB_TO_CODE[dbLang] || 'en';
+          setLanguageState(langCode);
+          localStorage.setItem('userLanguage', langCode);
         }
+      } catch (error) {
+        // User might not be logged in or may not have preferences set.
       }
     };
 
@@ -168,15 +163,11 @@ export function TranslationProvider({ children }: { children: React.ReactNode })
     // Force re-render to update translations
     forceUpdate({});
 
-    // Save to user preferences only if logged in
-    const firebaseUser = auth.currentUser;
-    if (firebaseUser) {
-      try {
-        await api.patch('/preferences', { language: lang });
-      } catch (error) {
-        // Failed to save to server, localStorage is still updated
-        console.debug('Could not save language preference to server');
-      }
+    try {
+      await api.patch('/preferences', { language: lang });
+    } catch (error) {
+      // Failed to save to server, localStorage is still updated
+      console.debug('Could not save language preference to server');
     }
   }, []);
 

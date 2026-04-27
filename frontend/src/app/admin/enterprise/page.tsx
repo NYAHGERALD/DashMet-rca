@@ -183,7 +183,7 @@ function EnterpriseAdminContent() {
 
         switch (activeTab) {
           case 'health':
-            const healthRes = await fetch(`${apiUrl}/admin/health`, { headers });
+            const healthRes = await fetch(`${apiUrl}/admin/health`, { credentials: 'include', headers });
             if (!healthRes.ok) throw new Error('Failed to fetch system health');
             const healthData = await healthRes.json();
             setSystemHealth(healthData.data);
@@ -196,7 +196,7 @@ function EnterpriseAdminContent() {
               ...(auditFilters.entity && { entity: auditFilters.entity }),
               ...(auditFilters.action && { action: auditFilters.action }),
             });
-            const auditRes = await fetch(`${apiUrl}/admin/audit-logs?${auditParams}`, { headers });
+            const auditRes = await fetch(`${apiUrl}/admin/audit-logs?${auditParams}`, { credentials: 'include', headers });
             if (!auditRes.ok) throw new Error('Failed to fetch audit logs');
             const auditData = await auditRes.json();
             setAuditLogs(auditData.data.logs);
@@ -206,7 +206,7 @@ function EnterpriseAdminContent() {
           case 'regulatory':
             // Fetch facilities if not already loaded
             if (facilities.length === 0) {
-              const facilitiesRes = await fetch(`${apiUrl}/facilities`, { headers });
+              const facilitiesRes = await fetch(`${apiUrl}/facilities`, { credentials: 'include', headers });
               if (facilitiesRes.ok) {
                 const facilitiesData = await facilitiesRes.json();
                 setFacilities(facilitiesData.data?.Facility || []);
@@ -216,7 +216,7 @@ function EnterpriseAdminContent() {
               regulationType,
               ...(selectedFacility !== 'all' && { facilityId: selectedFacility }),
             });
-            const regRes = await fetch(`${apiUrl}/admin/regulatory-check?${regParams}`, { headers });
+            const regRes = await fetch(`${apiUrl}/admin/regulatory-check?${regParams}`, { credentials: 'include', headers });
             if (!regRes.ok) throw new Error('Failed to fetch regulatory check');
             const regData = await regRes.json();
             setRegulatoryCheck(regData.data);
@@ -225,7 +225,7 @@ function EnterpriseAdminContent() {
           case 'keyresults':
             if (user?.role === 'SYSTEM_ADMIN') break; // No org for system admin
             setKrLoading(true);
-            const krRes = await fetch(`${apiUrl}/lsw/key-result-sets`, { headers });
+            const krRes = await fetch(`${apiUrl}/lsw/key-result-sets`, { credentials: 'include', headers });
             if (!krRes.ok) throw new Error('Failed to fetch key result sets');
             const krData = await krRes.json();
             setKeyResultSets(krData.data || []);
@@ -257,6 +257,7 @@ function EnterpriseAdminContent() {
       const token = await getIdToken();
       const res = await fetch(`${apiUrl}/admin/regulatory-tracking/start`, {
         method: 'POST',
+        credentials: 'include',
         headers: {
           'Authorization': `Bearer ${token}`,
           'Content-Type': 'application/json',
@@ -276,6 +277,7 @@ function EnterpriseAdminContent() {
         ...(selectedFacility !== 'all' && { facilityId: selectedFacility }),
       });
       const regRes = await fetch(`${apiUrl}/admin/regulatory-check?${regParams}`, {
+        credentials: 'include',
         headers: { 'Authorization': `Bearer ${token}` },
       });
       if (regRes.ok) {
@@ -300,6 +302,7 @@ function EnterpriseAdminContent() {
       const token = await getIdToken();
       const res = await fetch(`${apiUrl}/admin/regulatory-tracking/reset`, {
         method: 'POST',
+        credentials: 'include',
         headers: {
           'Authorization': `Bearer ${token}`,
           'Content-Type': 'application/json',
@@ -318,6 +321,7 @@ function EnterpriseAdminContent() {
         ...(selectedFacility !== 'all' && { facilityId: selectedFacility }),
       });
       const regRes = await fetch(`${apiUrl}/admin/regulatory-check?${regParams}`, {
+        credentials: 'include',
         headers: { 'Authorization': `Bearer ${token}` },
       });
       if (regRes.ok) {
@@ -342,6 +346,7 @@ function EnterpriseAdminContent() {
           ...(selectedFacility !== 'all' && { facilityId: selectedFacility }),
         });
         const res = await fetch(`${apiUrl}/admin/regulatory-tracking/history?${historyParams}`, {
+          credentials: 'include',
           headers: { 'Authorization': `Bearer ${token}` },
         });
         if (res.ok) {

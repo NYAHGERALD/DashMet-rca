@@ -26,6 +26,57 @@ function parseLocal(s: string): Date {
   return new Date(s + 'T00:00:00');
 }
 
+const DATE_ONLY_REGEX = /^\d{4}-\d{2}-\d{2}$/;
+const UTC_MIDNIGHT_REGEX = /T00:00:00(?:\.000)?Z$/;
+
+function extractDateOnlyParts(input: string): { year: number; month: number; day: number } | null {
+  if (DATE_ONLY_REGEX.test(input)) {
+    const [year, month, day] = input.split('-').map(Number);
+    return { year, month, day };
+  }
+
+  const parsed = new Date(input);
+  if (Number.isNaN(parsed.getTime())) return null;
+
+  return {
+    year: parsed.getUTCFullYear(),
+    month: parsed.getUTCMonth() + 1,
+    day: parsed.getUTCDate(),
+  };
+}
+
+function formatDateOnly(input: string, options: Intl.DateTimeFormatOptions): string {
+  const parts = extractDateOnlyParts(input);
+  if (!parts) return '—';
+
+  const localDate = new Date(parts.year, parts.month - 1, parts.day);
+  return localDate.toLocaleDateString('en-US', options);
+}
+
+function formatDateWithTimezone(
+  input: string,
+  options: Intl.DateTimeFormatOptions,
+  timezone: string
+): string {
+  const parsed = new Date(input);
+  if (Number.isNaN(parsed.getTime())) return '—';
+  return parsed.toLocaleDateString('en-US', { ...options, timeZone: timezone });
+}
+
+function isDateOnlyLike(input: string): boolean {
+  return DATE_ONLY_REGEX.test(input) || UTC_MIDNIGHT_REGEX.test(input);
+}
+
+function toDateInputValue(input: string | null | undefined): string {
+  if (!input) return '';
+  const parts = extractDateOnlyParts(input);
+  if (!parts) return '';
+  const year = String(parts.year).padStart(4, '0');
+  const month = String(parts.month).padStart(2, '0');
+  const day = String(parts.day).padStart(2, '0');
+  return `${year}-${month}-${day}`;
+}
+
 /** Next business day AFTER the given date */
 function getNextBusinessDay(d: Date): Date {
   const next = new Date(d);
@@ -49,6 +100,7 @@ type Tab = 'overview' | 'employees' | 'requests' | 'activity';
 
 export default function VacationHubPage() {
   const { user } = useAuth();
+  const preferredTimezone = user?.timezone || Intl.DateTimeFormat().resolvedOptions().timeZone || 'America/Chicago';
   const [activeTab, setActiveTab] = useState<Tab>('overview');
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -62,6 +114,7 @@ export default function VacationHubPage() {
 
   // ── Employees ──
   const [employees, setEmployees] = useState<vacApi.EmployeeDirectoryEntry[]>([]);
+  const [requesterEmployees, setRequesterEmployees] = useState<vacApi.EmployeeDirectoryEntry[]>([]);
   const [departments, setDepartments] = useState<string[]>([]);
   const [empDeptFilter, setEmpDeptFilter] = useState('all');
   const [empStatusFilter, setEmpStatusFilter] = useState('all');
@@ -97,6 +150,7 @@ export default function VacationHubPage() {
   const [submitting, setSubmitting] = useState(false);
   const [emailError, setEmailError] = useState('');
   const [dropdowns, setDropdowns] = useState<vacApi.FormDropdowns | null>(null);
+  const [selectedRequesterId, setSelectedRequesterId] = useState('');
 
   // ── Constraints ──
   const [settings, setSettings] = useState<vacApi.VacationSettings | null>(null);
@@ -119,7 +173,15 @@ export default function VacationHubPage() {
   const [showApproveModal, setShowApproveModal] = useState(false);
   const [showDenyModal, setShowDenyModal] = useState(false);
   const [showCreateModal, setShowCreateModal] = useState(false);
+  const [showEditModal, setShowEditModal] = useState(false);
   const [decisionReason, setDecisionReason] = useState('');
+  const [editForm, setEditForm] = useState({
+    id: 0,
+    leaveType: 'vacation',
+    startDate: '',
+    endDate: '',
+    reason: '',
+  });
 
   // ── Notifications ──
   const [notifications, setNotifications] = useState<vacApi.VacationNotification[]>([]);
@@ -161,6 +223,28 @@ export default function VacationHubPage() {
       console.error('Error loading employees:', e);
     }
   }, [empDeptFilter, empStatusFilter]);
+
+  const loadRequesterEmployees = useCallback(async () => {
+    try {
+      const [allRequests, allEmployees] = await Promise.all([
+        vacApi.getVacationRequests('all'),
+        vacApi.getEmployeesDirectory({ department: 'all', status: 'all' }),
+      ]);
+
+      const requesterIds = new Set(allRequests.map(r => r.employeeId).filter(Boolean));
+      const requesters = allEmployees
+        .filter(emp => requesterIds.has(emp.id))
+        .sort((a, b) => {
+          const byFirst = a.firstname.localeCompare(b.firstname);
+          if (byFirst !== 0) return byFirst;
+          return a.lastname.localeCompare(b.lastname);
+        });
+
+      setRequesterEmployees(requesters);
+    } catch (e: any) {
+      console.error('Error loading requester employees:', e);
+    }
+  }, []);
 
   const loadRequests = useCallback(async () => {
     try {
@@ -349,7 +433,14 @@ export default function VacationHubPage() {
     const init = async () => {
       setLoading(true);
       try {
-        await Promise.all([loadOverview(), loadEmployees(), loadNotifications(), loadDropdowns(), loadConstraints()]);
+        await Promise.all([
+          loadOverview(),
+          loadEmployees(),
+          loadNotifications(),
+          loadDropdowns(),
+          loadConstraints(),
+          loadRequesterEmployees(),
+        ]);
       } catch (e: any) {
         setError(e.message);
       } finally {
@@ -357,7 +448,7 @@ export default function VacationHubPage() {
       }
     };
     init();
-  }, [loadOverview, loadEmployees, loadNotifications, loadDropdowns, loadConstraints]);
+  }, [loadOverview, loadEmployees, loadNotifications, loadDropdowns, loadConstraints, loadRequesterEmployees]);
 
   // Tab-specific loads
   useEffect(() => {
@@ -377,6 +468,7 @@ export default function VacationHubPage() {
     setSubmitting(true);
     try {
       await vacApi.createVacationRequest({
+        employeeId: selectedRequesterId ? Number(selectedRequesterId) : undefined,
         firstName: formData.firstName,
         lastName: formData.lastName,
         department: formData.department || undefined,
@@ -397,10 +489,12 @@ export default function VacationHubPage() {
         emergencyEmail: formData.emergencyEmail || undefined,
       });
       setFormData({ firstName: '', lastName: '', department: '', shift: '', line: '', area: '', phone: '', phoneDisplay: '', employeeCode: '', leaveType: 'vacation', startDate: '', endDate: '', durationDays: '', durationHours: '', returnToWork: '', reason: '', coveragePlan: '', emergencyPhone: '', emergencyPhoneDisplay: '', emergencyEmail: '' });
+      setSelectedRequesterId('');
       setShowCreateModal(false);
       await loadOverview();
       await loadRequests();
       await loadEmployees();
+      await loadRequesterEmployees();
     } catch (e: any) {
       alert(e.response?.data?.error || e.message);
     } finally {
@@ -432,6 +526,72 @@ export default function VacationHubPage() {
       setDecisionReason('');
       setSelectedVacation(null);
       await Promise.all([loadOverview(), loadRequests()]);
+    } catch (e: any) {
+      alert(e.response?.data?.error || e.message);
+    }
+  };
+
+  const handleOpenEdit = (vacation: vacApi.VacationRequest) => {
+    setEditForm({
+      id: vacation.id,
+      leaveType: vacation.leaveType || 'vacation',
+      startDate: toDateInputValue(vacation.startDate),
+      endDate: toDateInputValue(vacation.endDate),
+      reason: vacation.reason || '',
+    });
+    setShowEditModal(true);
+  };
+
+  const handleSaveEdit = async () => {
+    if (!editForm.id || !editForm.startDate || !editForm.endDate) {
+      alert('Start date and end date are required.');
+      return;
+    }
+    if (editForm.endDate < editForm.startDate) {
+      alert('End date must be after or equal to start date.');
+      return;
+    }
+    try {
+      const durationDays = countBusinessDays(parseLocal(editForm.startDate), parseLocal(editForm.endDate));
+      await vacApi.updateVacation(editForm.id, {
+        startDate: editForm.startDate,
+        endDate: editForm.endDate,
+        leaveType: editForm.leaveType,
+        reason: editForm.reason,
+        durationDays,
+      });
+      setShowEditModal(false);
+      await Promise.all([loadOverview(), loadRequests(), loadEmployees()]);
+    } catch (e: any) {
+      alert(e.response?.data?.error || e.message);
+    }
+  };
+
+  const handleCancelVacation = async (vacation: vacApi.VacationRequest) => {
+    const employeeName = `${vacation.Employee?.firstName || ''} ${vacation.Employee?.lastName || ''}`.trim();
+    const confirmed = window.confirm(
+      `Cancel this pending vacation request${employeeName ? ` for ${employeeName}` : ''}?`
+    );
+    if (!confirmed) return;
+
+    try {
+      await vacApi.cancelVacation(vacation.id);
+      await Promise.all([loadOverview(), loadRequests(), loadEmployees()]);
+    } catch (e: any) {
+      alert(e.response?.data?.error || e.message);
+    }
+  };
+
+  const handleDeleteCancelled = async (vacation: vacApi.VacationRequest) => {
+    const employeeName = `${vacation.Employee?.firstName || ''} ${vacation.Employee?.lastName || ''}`.trim();
+    const confirmed = window.confirm(
+      `Delete this cancelled vacation request${employeeName ? ` for ${employeeName}` : ''}? This cannot be undone.`
+    );
+    if (!confirmed) return;
+
+    try {
+      await vacApi.deleteVacationRequest(vacation.id);
+      await Promise.all([loadOverview(), loadRequests(), loadEmployees()]);
     } catch (e: any) {
       alert(e.response?.data?.error || e.message);
     }
@@ -512,12 +672,18 @@ export default function VacationHubPage() {
 
   const fmtDate = (d: string | null) => {
     if (!d) return '—';
-    return new Date(d).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' });
+    if (isDateOnlyLike(d)) {
+      return formatDateOnly(d, { month: 'short', day: 'numeric', year: 'numeric' });
+    }
+    return formatDateWithTimezone(d, { month: 'short', day: 'numeric', year: 'numeric' }, preferredTimezone);
   };
 
   const fmtDateShort = (d: string | null) => {
     if (!d) return '—';
-    return new Date(d).toLocaleDateString('en-US', { month: 'short', day: 'numeric' });
+    if (isDateOnlyLike(d)) {
+      return formatDateOnly(d, { month: 'short', day: 'numeric' });
+    }
+    return formatDateWithTimezone(d, { month: 'short', day: 'numeric' }, preferredTimezone);
   };
 
   const statusBadge = (status: string) => {
@@ -555,22 +721,19 @@ export default function VacationHubPage() {
   // ──────────────────────────────────────────────────────────────────────────
 
   const OverviewPanel = () => (
-    <div className="space-y-6">
+    <div className="h-full max-h-full flex flex-col gap-2 overflow-hidden">
       {/* Stats Cards */}
-      <div className="grid grid-cols-2 md:grid-cols-4 lg:grid-cols-7 gap-4">
+      <div className="grid grid-cols-2 md:grid-cols-4 lg:grid-cols-7 gap-2 mb-0.5">
         {[
-          { label: 'Total Requests', value: stats?.total_requests || 0, icon: '📊', color: 'blue' },
-          { label: 'Pending', value: stats?.pending || 0, icon: '⏳', color: 'amber' },
-          { label: 'Approved', value: stats?.approved || 0, icon: '✅', color: 'emerald' },
-          { label: 'Denied', value: stats?.denied || 0, icon: '❌', color: 'red' },
-          { label: 'Cancelled', value: stats?.cancelled || 0, icon: '🚫', color: 'gray' },
-          { label: 'Days Used (YTD)', value: stats?.days_used_ytd || 0, icon: '📅', color: 'purple' },
-          { label: 'Employees', value: stats?.total_employees || 0, icon: '👥', color: 'indigo' },
+          { label: 'Total Requests', value: stats?.total_requests || 0 },
+          { label: 'Pending', value: stats?.pending || 0 },
+          { label: 'Approved', value: stats?.approved || 0 },
+          { label: 'Denied', value: stats?.denied || 0 },
+          { label: 'Cancelled', value: stats?.cancelled || 0 },
+          { label: 'Days Used (YTD)', value: stats?.days_used_ytd || 0 },
+          { label: 'Employees', value: stats?.total_employees || 0 },
         ].map((card, i) => (
-          <div key={i} className={`bg-white dark:bg-gray-800 rounded-xl border border-gray-200 dark:border-gray-700 p-4 shadow-sm hover:shadow-md transition-shadow`}>
-            <div className="flex items-center justify-between mb-2">
-              <span className="text-2xl">{card.icon}</span>
-            </div>
+          <div key={i} className="h-20 overflow-y-auto bg-white dark:bg-gray-800 rounded-xl border border-gray-200 dark:border-gray-700 p-3 shadow-sm hover:shadow-md transition-shadow">
             <p className="text-2xl font-bold text-gray-900 dark:text-white">{card.value}</p>
             <p className="text-xs text-gray-500 dark:text-gray-400 mt-1">{card.label}</p>
           </div>
@@ -592,13 +755,13 @@ export default function VacationHubPage() {
         </div>
       )}
 
-      <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
+      <div className="grid grid-cols-1 lg:grid-cols-3 gap-2 flex-1 min-h-0 pb-0">
         {/* Upcoming */}
-        <div className="bg-white dark:bg-gray-800 rounded-xl border border-gray-200 dark:border-gray-700 shadow-sm">
+        <div className="bg-white dark:bg-gray-800 rounded-xl border border-gray-200 dark:border-gray-700 shadow-sm h-full min-h-0 flex flex-col">
           <div className="px-4 py-3 border-b border-gray-200 dark:border-gray-700">
             <h3 className="text-sm font-semibold text-gray-900 dark:text-white">📅 Upcoming Vacations</h3>
           </div>
-          <div className="p-4 space-y-3 max-h-80 overflow-y-auto">
+          <div className="p-4 space-y-3 flex-1 min-h-0 overflow-y-auto">
             {upcoming.length === 0 && <p className="text-sm text-gray-500 dark:text-gray-400">No upcoming vacations</p>}
             {upcoming.map((v) => (
               <div key={v.id} className="flex items-center justify-between p-3 bg-gray-50 dark:bg-gray-700/50 rounded-lg">
@@ -617,11 +780,11 @@ export default function VacationHubPage() {
         </div>
 
         {/* Pending Approvals */}
-        <div className="bg-white dark:bg-gray-800 rounded-xl border border-gray-200 dark:border-gray-700 shadow-sm">
+        <div className="bg-white dark:bg-gray-800 rounded-xl border border-gray-200 dark:border-gray-700 shadow-sm h-full min-h-0 flex flex-col">
           <div className="px-4 py-3 border-b border-gray-200 dark:border-gray-700">
             <h3 className="text-sm font-semibold text-gray-900 dark:text-white">⏳ Pending Approvals</h3>
           </div>
-          <div className="p-4 space-y-3 max-h-80 overflow-y-auto">
+          <div className="p-4 space-y-3 flex-1 min-h-0 overflow-y-auto">
             {pending.length === 0 && <p className="text-sm text-gray-500 dark:text-gray-400">No pending requests</p>}
             {pending.map((v) => (
               <div key={v.id} className="p-3 bg-amber-50 dark:bg-amber-900/20 rounded-lg">
@@ -654,11 +817,11 @@ export default function VacationHubPage() {
         </div>
 
         {/* Recent Decisions */}
-        <div className="bg-white dark:bg-gray-800 rounded-xl border border-gray-200 dark:border-gray-700 shadow-sm">
+        <div className="bg-white dark:bg-gray-800 rounded-xl border border-gray-200 dark:border-gray-700 shadow-sm h-full min-h-0 flex flex-col">
           <div className="px-4 py-3 border-b border-gray-200 dark:border-gray-700">
             <h3 className="text-sm font-semibold text-gray-900 dark:text-white">📋 Recent Decisions</h3>
           </div>
-          <div className="p-4 space-y-3 max-h-80 overflow-y-auto">
+          <div className="p-4 space-y-3 flex-1 min-h-0 overflow-y-auto">
             {recent.length === 0 && <p className="text-sm text-gray-500 dark:text-gray-400">No recent decisions</p>}
             {recent.map((v) => (
               <div key={v.id} className="flex items-center justify-between p-3 bg-gray-50 dark:bg-gray-700/50 rounded-lg">
@@ -680,9 +843,9 @@ export default function VacationHubPage() {
   );
 
   const EmployeesPanel = () => (
-    <div className="space-y-4">
+    <div className="h-full max-h-full flex flex-col gap-2 overflow-hidden">
       {/* Filters */}
-      <div className="flex flex-wrap gap-3">
+      <div className="flex flex-wrap gap-2 shrink-0">
         <input
           type="text"
           placeholder="Search employees..."
@@ -713,8 +876,8 @@ export default function VacationHubPage() {
       </div>
 
       {/* Table */}
-      <div className="bg-white dark:bg-gray-800 rounded-xl border border-gray-200 dark:border-gray-700 shadow-sm overflow-hidden">
-        <div className="overflow-x-auto">
+      <div className="bg-white dark:bg-gray-800 rounded-xl border border-gray-200 dark:border-gray-700 shadow-sm overflow-hidden flex-1 min-h-0">
+        <div className="h-full overflow-auto">
           <table className="w-full text-sm">
             <thead>
               <tr className="bg-gray-50 dark:bg-gray-700/50 text-left">
@@ -725,7 +888,7 @@ export default function VacationHubPage() {
                 <th className="px-4 py-3 font-medium text-gray-600 dark:text-gray-300">Line</th>
                 <th className="px-4 py-3 font-medium text-gray-600 dark:text-gray-300">Area</th>
                 <th className="px-4 py-3 font-medium text-gray-600 dark:text-gray-300">Phone</th>
-                <th className="px-4 py-3 font-medium text-gray-600 dark:text-gray-300">Used</th>
+                <th className="px-4 py-3 font-medium text-gray-600 dark:text-gray-300">Used (Hours)</th>
                 <th className="px-4 py-3 font-medium text-gray-600 dark:text-gray-300">Status</th>
                 <th className="px-4 py-3 font-medium text-gray-600 dark:text-gray-300">Upcoming</th>
               </tr>
@@ -743,7 +906,7 @@ export default function VacationHubPage() {
                   <td className="px-4 py-3 text-gray-600 dark:text-gray-400">{emp.workline || '—'}</td>
                   <td className="px-4 py-3 text-gray-600 dark:text-gray-400">{emp.workarea || '—'}</td>
                   <td className="px-4 py-3 text-gray-600 dark:text-gray-400 text-xs">{emp.phone || '—'}</td>
-                  <td className="px-4 py-3">{emp.vacation_days_used}d</td>
+                  <td className="px-4 py-3">{((emp.vacation_days_used || 0) * 8)}h</td>
                   <td className="px-4 py-3">
                     <span className={`inline-flex items-center px-2 py-0.5 rounded-full text-xs font-medium ${
                       emp.current_status === 'on_vacation'
@@ -787,7 +950,7 @@ export default function VacationHubPage() {
         ))}
         </div>
         <button
-          onClick={() => { setShowCreateModal(true); if (!dropdowns) loadDropdowns(); }}
+          onClick={() => { setShowCreateModal(true); if (!dropdowns) loadDropdowns(); loadRequesterEmployees(); }}
           className="px-4 py-2 text-sm font-medium bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition-colors flex items-center gap-1.5 shadow-sm"
         >
           <span>➕</span> Create Request
@@ -829,7 +992,13 @@ export default function VacationHubPage() {
                   <td className="px-4 py-3 text-xs text-gray-500 dark:text-gray-400">{fmtDate(req.createdAt)}</td>
                   <td className="px-4 py-3">
                     {req.status === 'pending' && (
-                      <div className="flex gap-1">
+                      <div className="flex gap-1 flex-wrap">
+                        <button
+                          onClick={() => handleOpenEdit(req)}
+                          className="px-2 py-1 text-xs bg-blue-600 text-white rounded hover:bg-blue-700"
+                        >
+                          Edit
+                        </button>
                         <button
                           onClick={() => { setSelectedVacation(req); setShowApproveModal(true); }}
                           className="px-2 py-1 text-xs bg-emerald-600 text-white rounded hover:bg-emerald-700"
@@ -842,7 +1011,21 @@ export default function VacationHubPage() {
                         >
                           Deny
                         </button>
+                        <button
+                          onClick={() => handleCancelVacation(req)}
+                          className="px-2 py-1 text-xs bg-gray-600 text-white rounded hover:bg-gray-700"
+                        >
+                          Cancel
+                        </button>
                       </div>
+                    )}
+                    {req.status === 'cancelled' && (
+                      <button
+                        onClick={() => handleDeleteCancelled(req)}
+                        className="px-2 py-1 text-xs bg-red-700 text-white rounded hover:bg-red-800"
+                      >
+                        Delete
+                      </button>
                     )}
                   </td>
                 </tr>
@@ -870,23 +1053,56 @@ export default function VacationHubPage() {
           </button>
         </div>
         {/* ── Scrollable Body ── */}
-        <div className="modal-fixed-body px-6 py-4">
-        <form id="vacation-create-form" onSubmit={handleCreateRequest} className="space-y-5">
+        <div className="modal-fixed-body px-6 py-3">
+        <form id="vacation-create-form" onSubmit={handleCreateRequest} className="space-y-3">
           {/* ── Employee Information ── */}
-          <div className="border border-gray-200 dark:border-gray-700 rounded-lg p-4 space-y-4 bg-gray-50/50 dark:bg-gray-700/20">
+          <div className="border border-gray-200 dark:border-gray-700 rounded-lg p-3 space-y-3 bg-gray-50/50 dark:bg-gray-700/20">
             <h4 className="text-sm font-semibold text-gray-800 dark:text-gray-200">👤 Employee Information</h4>
 
+            {/* Select existing requester */}
+            <div>
+              <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">Select User from List</label>
+              <select
+                value={selectedRequesterId}
+                onChange={(e) => {
+                  const employeeId = e.target.value;
+                  setSelectedRequesterId(employeeId);
+                  if (!employeeId) return;
+                  const selectedEmployee = requesterEmployees.find(emp => emp.id === Number(employeeId));
+                  if (!selectedEmployee) return;
+                  setFormData(prev => ({
+                    ...prev,
+                    firstName: selectedEmployee.firstname || '',
+                    lastName: selectedEmployee.lastname || '',
+                    employeeCode: selectedEmployee.employeeCode || '',
+                  }));
+                }}
+                title="Select user from existing vacation requesters"
+                className="w-full px-3 py-1.5 text-sm border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-700 text-gray-900 dark:text-white"
+              >
+                <option value="">Select user from list...</option>
+                {requesterEmployees.map(emp => (
+                  <option key={emp.id} value={String(emp.id)}>
+                    {emp.firstname} {emp.lastname}{emp.employeeCode ? ` • ${emp.employeeCode}` : ''}
+                  </option>
+                ))}
+              </select>
+            </div>
+
             {/* Name */}
-            <div className="grid grid-cols-2 gap-4">
+            <div className="grid grid-cols-2 gap-3">
               <div>
                 <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">First Name *</label>
                 <input
                   type="text"
                   value={formData.firstName}
-                  onChange={(e) => setFormData({ ...formData, firstName: e.target.value })}
+                  onChange={(e) => {
+                    if (selectedRequesterId) setSelectedRequesterId('');
+                    setFormData({ ...formData, firstName: e.target.value });
+                  }}
                   required
                   placeholder="John"
-                  className="w-full px-3 py-2 text-sm border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-700 text-gray-900 dark:text-white"
+                  className="w-full px-3 py-1.5 text-sm border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-700 text-gray-900 dark:text-white"
                 />
               </div>
               <div>
@@ -894,23 +1110,26 @@ export default function VacationHubPage() {
                 <input
                   type="text"
                   value={formData.lastName}
-                  onChange={(e) => setFormData({ ...formData, lastName: e.target.value })}
+                  onChange={(e) => {
+                    if (selectedRequesterId) setSelectedRequesterId('');
+                    setFormData({ ...formData, lastName: e.target.value });
+                  }}
                   required
                   placeholder="Doe"
-                  className="w-full px-3 py-2 text-sm border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-700 text-gray-900 dark:text-white"
+                  className="w-full px-3 py-1.5 text-sm border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-700 text-gray-900 dark:text-white"
                 />
               </div>
             </div>
 
             {/* Department + Shift */}
-            <div className="grid grid-cols-2 gap-4">
+            <div className="grid grid-cols-2 gap-3">
               <div>
                 <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">Department</label>
                 <select
                   value={formData.department}
                   onChange={(e) => setFormData({ ...formData, department: e.target.value, shift: '', line: '', area: '' })}
                   title="Department"
-                  className="w-full px-3 py-2 text-sm border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-700 text-gray-900 dark:text-white"
+                  className="w-full px-3 py-1.5 text-sm border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-700 text-gray-900 dark:text-white"
                 >
                   <option value="">Select department...</option>
                   {dropdowns?.departments.map(d => (
@@ -925,7 +1144,7 @@ export default function VacationHubPage() {
                   onChange={(e) => setFormData({ ...formData, shift: e.target.value, area: '', line: '' })}
                   title="Shift"
                   disabled={!formData.department}
-                  className={`w-full px-3 py-2 text-sm border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-700 text-gray-900 dark:text-white ${!formData.department ? 'opacity-50 cursor-not-allowed' : ''}`}
+                  className={`w-full px-3 py-1.5 text-sm border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-700 text-gray-900 dark:text-white ${!formData.department ? 'opacity-50 cursor-not-allowed' : ''}`}
                 >
                   <option value="">{formData.department ? 'Select shift...' : 'Select department first'}</option>
                   {filteredShifts.map(s => (
@@ -936,7 +1155,7 @@ export default function VacationHubPage() {
             </div>
 
             {/* Area + Line */}
-            <div className="grid grid-cols-2 gap-4">
+            <div className="grid grid-cols-2 gap-3">
               <div>
                 <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">Area</label>
                 <select
@@ -944,7 +1163,7 @@ export default function VacationHubPage() {
                   onChange={(e) => setFormData({ ...formData, area: e.target.value, line: '' })}
                   title="Area"
                   disabled={!formData.shift}
-                  className={`w-full px-3 py-2 text-sm border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-700 text-gray-900 dark:text-white ${!formData.shift ? 'opacity-50 cursor-not-allowed' : ''}`}
+                  className={`w-full px-3 py-1.5 text-sm border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-700 text-gray-900 dark:text-white ${!formData.shift ? 'opacity-50 cursor-not-allowed' : ''}`}
                 >
                   <option value="">{formData.shift ? 'Select area...' : 'Select shift first'}</option>
                   {filteredAreas.map(a => (
@@ -959,7 +1178,7 @@ export default function VacationHubPage() {
                   onChange={(e) => setFormData({ ...formData, line: e.target.value })}
                   title="Line"
                   disabled={!formData.area}
-                  className={`w-full px-3 py-2 text-sm border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-700 text-gray-900 dark:text-white ${!formData.area ? 'opacity-50 cursor-not-allowed' : ''}`}
+                  className={`w-full px-3 py-1.5 text-sm border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-700 text-gray-900 dark:text-white ${!formData.area ? 'opacity-50 cursor-not-allowed' : ''}`}
                 >
                   <option value="">{formData.area ? 'Select line...' : 'Select area first'}</option>
                   {filteredLines.map(l => (
@@ -970,7 +1189,7 @@ export default function VacationHubPage() {
             </div>
 
             {/* Phone + Employee ID */}
-            <div className="grid grid-cols-2 gap-4">
+            <div className="grid grid-cols-2 gap-3">
               <div>
                 <PhoneInput
                   label="Phone Number"
@@ -986,6 +1205,7 @@ export default function VacationHubPage() {
                   type="text"
                   value={formData.employeeCode}
                   onChange={(e) => {
+                    if (selectedRequesterId) setSelectedRequesterId('');
                     const val = e.target.value.replace(/\D/g, '').slice(0, 5);
                     setFormData({ ...formData, employeeCode: val });
                   }}
@@ -993,14 +1213,14 @@ export default function VacationHubPage() {
                   maxLength={5}
                   pattern="\d{5}"
                   title="5-digit employee ID"
-                  className="w-full px-3 py-2 text-sm border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-700 text-gray-900 dark:text-white"
+                  className="w-full px-3 py-1.5 text-sm border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-700 text-gray-900 dark:text-white"
                 />
               </div>
             </div>
           </div>
 
           {/* ── Leave Details ── */}
-          <div className="border border-gray-200 dark:border-gray-700 rounded-lg p-4 space-y-4 bg-gray-50/50 dark:bg-gray-700/20">
+          <div className="border border-gray-200 dark:border-gray-700 rounded-lg p-3 space-y-3 bg-gray-50/50 dark:bg-gray-700/20">
             <h4 className="text-sm font-semibold text-gray-800 dark:text-gray-200">📋 Leave Details</h4>
 
           {/* Leave Type */}
@@ -1010,7 +1230,7 @@ export default function VacationHubPage() {
               value={formData.leaveType}
               onChange={(e) => setFormData({ ...formData, leaveType: e.target.value })}
               title="Leave type"
-              className="w-full px-3 py-2 text-sm border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-700 text-gray-900 dark:text-white"
+              className="w-full px-3 py-1.5 text-sm border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-700 text-gray-900 dark:text-white"
             >
               <option value="vacation">🏖️ Vacation</option>
               <option value="bereavement">🕯️ Bereavement</option>
@@ -1022,7 +1242,7 @@ export default function VacationHubPage() {
           </div>
 
           {/* Dates */}
-          <div className="grid grid-cols-2 gap-4">
+          <div className="grid grid-cols-2 gap-3">
             <div>
               <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">Start Date *</label>
               <DatePicker
@@ -1040,10 +1260,10 @@ export default function VacationHubPage() {
                 placeholderText="Select start date"
                 dateFormat="MM/dd/yyyy"
                 portalId="datepicker-portal"
-                className="w-full px-3 py-2 text-sm border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-700 text-gray-900 dark:text-white"
+                className="w-full px-3 py-1.5 text-sm border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-700 text-gray-900 dark:text-white"
                 required
               />
-              {settings?.minimumNoticeDays && (
+              {typeof settings?.minimumNoticeDays === 'number' && settings.minimumNoticeDays > 0 && (
                 <p className="text-xs text-gray-400 mt-1">Must be at least {settings.minimumNoticeDays} days from today</p>
               )}
             </div>
@@ -1061,10 +1281,10 @@ export default function VacationHubPage() {
                 placeholderText="Select end date"
                 dateFormat="MM/dd/yyyy"
                 portalId="datepicker-portal"
-                className="w-full px-3 py-2 text-sm border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-700 text-gray-900 dark:text-white"
+                className="w-full px-3 py-1.5 text-sm border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-700 text-gray-900 dark:text-white"
                 required
               />
-              {settings?.maxConsecutiveDays && formData.startDate && (
+              {typeof settings?.maxConsecutiveDays === 'number' && settings.maxConsecutiveDays > 0 && formData.startDate && (
                 <p className="text-xs text-gray-400 mt-1">Max {settings.maxConsecutiveDays} consecutive days from start date</p>
               )}
             </div>
@@ -1082,7 +1302,7 @@ export default function VacationHubPage() {
           )}
 
           {/* Duration + Hours + Return */}
-          <div className="grid grid-cols-3 gap-4">
+          <div className="grid grid-cols-3 gap-3">
             <div>
               <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">Days</label>
               <input
@@ -1092,7 +1312,7 @@ export default function VacationHubPage() {
                 readOnly
                 placeholder="Auto"
                 min="1"
-                className="w-full px-3 py-2 text-sm border border-gray-300 dark:border-gray-600 rounded-lg bg-gray-100 dark:bg-gray-600 text-gray-900 dark:text-white cursor-not-allowed"
+                className="w-full px-3 py-1.5 text-sm border border-gray-300 dark:border-gray-600 rounded-lg bg-gray-100 dark:bg-gray-600 text-gray-900 dark:text-white cursor-not-allowed"
               />
             </div>
             <div>
@@ -1103,7 +1323,7 @@ export default function VacationHubPage() {
                 value={formData.durationHours}
                 readOnly
                 placeholder="Auto"
-                className="w-full px-3 py-2 text-sm border border-gray-300 dark:border-gray-600 rounded-lg bg-gray-100 dark:bg-gray-600 text-gray-900 dark:text-white cursor-not-allowed"
+                className="w-full px-3 py-1.5 text-sm border border-gray-300 dark:border-gray-600 rounded-lg bg-gray-100 dark:bg-gray-600 text-gray-900 dark:text-white cursor-not-allowed"
               />
             </div>
             <div>
@@ -1158,15 +1378,15 @@ export default function VacationHubPage() {
             <textarea
               value={formData.reason}
               onChange={(e) => setFormData({ ...formData, reason: e.target.value })}
-              rows={3}
+              rows={2}
               placeholder="Select a quick reason above or type your own..."
-              className="w-full px-3 py-2 text-sm border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-700 text-gray-900 dark:text-white resize-none"
+              className="w-full px-3 py-1.5 text-sm border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-700 text-gray-900 dark:text-white resize-none"
             />
           </div>
           </div>
 
           {/* ── Coverage & Emergency ── */}
-          <div className="border border-gray-200 dark:border-gray-700 rounded-lg p-4 space-y-4 bg-gray-50/50 dark:bg-gray-700/20">
+          <div className="border border-gray-200 dark:border-gray-700 rounded-lg p-3 space-y-3 bg-gray-50/50 dark:bg-gray-700/20">
             <h4 className="text-sm font-semibold text-gray-800 dark:text-gray-200">📞 Coverage & Emergency</h4>
 
           {/* Coverage Plan */}
@@ -1177,12 +1397,12 @@ export default function VacationHubPage() {
               onChange={(e) => setFormData({ ...formData, coveragePlan: e.target.value })}
               rows={2}
               placeholder="Who will cover your responsibilities?"
-              className="w-full px-3 py-2 text-sm border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-700 text-gray-900 dark:text-white resize-none"
+              className="w-full px-3 py-1.5 text-sm border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-700 text-gray-900 dark:text-white resize-none"
             />
           </div>
 
           {/* Emergency Contact */}
-          <div className="grid grid-cols-2 gap-4">
+          <div className="grid grid-cols-2 gap-3">
             <div>
               <PhoneInput
                 label="Emergency Phone"
@@ -1207,7 +1427,7 @@ export default function VacationHubPage() {
                   }
                 }}
                 placeholder="emergency@email.com"
-                className={`w-full px-3 py-2 text-sm border rounded-lg bg-white dark:bg-gray-700 text-gray-900 dark:text-white ${
+                className={`w-full px-3 py-1.5 text-sm border rounded-lg bg-white dark:bg-gray-700 text-gray-900 dark:text-white ${
                   emailError ? 'border-red-500' : 'border-gray-300 dark:border-gray-600'
                 }`}
               />
@@ -1364,6 +1584,76 @@ export default function VacationHubPage() {
     </div>
   ) : null;
 
+  const EditModal = () => showEditModal ? (
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 backdrop-blur-sm">
+      <div className="bg-white dark:bg-gray-800 rounded-xl shadow-xl w-full max-w-md mx-4 p-6">
+        <h3 className="text-lg font-semibold text-gray-900 dark:text-white mb-4">Edit Pending Vacation Request</h3>
+        <div className="space-y-3">
+          <div>
+            <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">Leave Type</label>
+            <select
+              value={editForm.leaveType}
+              onChange={(e) => setEditForm(prev => ({ ...prev, leaveType: e.target.value }))}
+              className="w-full px-3 py-2 text-sm border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-700 text-gray-900 dark:text-white"
+            >
+              <option value="vacation">Vacation</option>
+              <option value="bereavement">Bereavement</option>
+              <option value="sick">Sick</option>
+              <option value="emergency">Emergency</option>
+              <option value="unpaid">Unpaid</option>
+              <option value="personal">Personal</option>
+            </select>
+          </div>
+          <div className="grid grid-cols-2 gap-3">
+            <div>
+              <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">Start Date</label>
+              <input
+                type="date"
+                value={editForm.startDate}
+                onChange={(e) => setEditForm(prev => ({ ...prev, startDate: e.target.value }))}
+                className="w-full px-3 py-2 text-sm border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-700 text-gray-900 dark:text-white"
+              />
+            </div>
+            <div>
+              <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">End Date</label>
+              <input
+                type="date"
+                value={editForm.endDate}
+                min={editForm.startDate || undefined}
+                onChange={(e) => setEditForm(prev => ({ ...prev, endDate: e.target.value }))}
+                className="w-full px-3 py-2 text-sm border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-700 text-gray-900 dark:text-white"
+              />
+            </div>
+          </div>
+          <div>
+            <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">Reason</label>
+            <textarea
+              rows={3}
+              value={editForm.reason}
+              onChange={(e) => setEditForm(prev => ({ ...prev, reason: e.target.value }))}
+              placeholder="Optional note..."
+              className="w-full px-3 py-2 text-sm border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-700 text-gray-900 dark:text-white resize-none"
+            />
+          </div>
+        </div>
+        <div className="flex gap-2 justify-end mt-5">
+          <button
+            onClick={() => setShowEditModal(false)}
+            className="px-4 py-2 text-sm border border-gray-300 dark:border-gray-600 rounded-lg hover:bg-gray-50 dark:hover:bg-gray-700"
+          >
+            Close
+          </button>
+          <button
+            onClick={handleSaveEdit}
+            className="px-4 py-2 text-sm bg-blue-600 text-white rounded-lg hover:bg-blue-700"
+          >
+            Save Changes
+          </button>
+        </div>
+      </div>
+    </div>
+  ) : null;
+
   // ──────────────────────────────────────────────────────────────────────────
   // Main Render
   // ──────────────────────────────────────────────────────────────────────────
@@ -1394,16 +1684,16 @@ export default function VacationHubPage() {
     );
   }
 
-  const tabs: { key: Tab; label: string; icon: string }[] = [
-    { key: 'overview', label: 'Overview', icon: '📊' },
-    { key: 'employees', label: 'Employees', icon: '👥' },
-    { key: 'requests', label: 'Requests', icon: '📋' },
-    { key: 'activity', label: 'Activity Log', icon: '📜' },
+  const tabs: { key: Tab; label: string }[] = [
+    { key: 'overview', label: 'Overview' },
+    { key: 'employees', label: 'Employees' },
+    { key: 'requests', label: 'Requests' },
+    { key: 'activity', label: 'Activity Log' },
   ];
 
   return (
     <ProtectedRoute>
-      <div className="min-h-screen bg-gradient-to-br from-slate-50 via-blue-50 to-indigo-100 dark:from-gray-950 dark:via-slate-900 dark:to-indigo-950">
+      <div className="h-full min-h-0 bg-gradient-to-br from-slate-50 via-blue-50 to-indigo-100 dark:from-gray-950 dark:via-slate-900 dark:to-indigo-950 flex flex-col overflow-hidden">
         {/* Header */}
         <header className="sticky top-0 z-40 backdrop-blur-xl bg-white/80 dark:bg-gray-900/80 border-b border-gray-200/50 dark:border-gray-700/50 shadow-sm">
           <div className="px-4 py-3">
@@ -1411,7 +1701,7 @@ export default function VacationHubPage() {
               <div className="flex items-center gap-4">
                 <div>
                   <h1 className="text-xl font-bold text-gray-900 dark:text-white flex items-center gap-2">
-                    🏖️ Vacation Hub
+                    Vacation Hub
                   </h1>
                   <p className="text-xs text-gray-500 dark:text-gray-400">Manage employee vacation requests, schedules & constraints</p>
                 </div>
@@ -1486,7 +1776,6 @@ export default function VacationHubPage() {
                     : 'border-transparent text-gray-500 dark:text-gray-400 hover:text-gray-700 dark:hover:text-gray-300'
                 }`}
               >
-                <span className="mr-1.5">{tab.icon}</span>
                 {tab.label}
               </button>
             ))}
@@ -1494,7 +1783,7 @@ export default function VacationHubPage() {
         </header>
 
         {/* Content */}
-        <main className="p-4 md:p-6">
+        <main className={`p-3 md:p-4 flex-1 min-h-0 ${activeTab === 'overview' || activeTab === 'employees' ? 'overflow-hidden' : 'overflow-y-auto'}`}>
           {activeTab === 'overview' && <OverviewPanel />}
           {activeTab === 'employees' && <EmployeesPanel />}
           {activeTab === 'requests' && <RequestsPanel />}
@@ -1504,6 +1793,7 @@ export default function VacationHubPage() {
         {/* Modals */}
         <ApproveModal />
         <DenyModal />
+        <EditModal />
         {createRequestModalJSX}
         <div id="datepicker-portal" />
 

@@ -13,8 +13,6 @@ import FMIRCommentModal from '@/components/fmir/FMIRCommentModal';
 import FMIRCommentPopup from '@/components/fmir/FMIRCommentPopup';
 import AIEnhancedTextarea from '@/components/fmir/AIEnhancedTextarea';
 import api from '@/lib/api';
-import { auth } from '@/lib/firebase';
-import { EmailAuthProvider, reauthenticateWithCredential } from 'firebase/auth';
 import {
   ArrowLeft,
   Save,
@@ -2108,31 +2106,13 @@ function FMIRNewPageContent() {
     setPasswordError('');
 
     try {
-      // Verify password using Firebase reauthentication
-      const firebaseUser = auth.currentUser;
-      if (!firebaseUser || !firebaseUser.email) {
-        setPasswordError('Not authenticated. Please log in again.');
-        setVerifyingPassword(false);
-        return;
-      }
-
-      const credential = EmailAuthProvider.credential(firebaseUser.email, enteredPassword);
-      await reauthenticateWithCredential(firebaseUser, credential);
+      await api.post('/auth/verify-password', { password: enteredPassword });
 
       // Password verified, proceed with submission
       handleSubmit();
     } catch (err: any) {
       console.error('Error verifying password:', err);
-      // Handle Firebase-specific error codes
-      if (err.code === 'auth/wrong-password' || err.code === 'auth/invalid-credential') {
-        setPasswordError('Incorrect password. Please try again.');
-      } else if (err.code === 'auth/too-many-requests') {
-        setPasswordError('Too many failed attempts. Please try again later.');
-      } else if (err.code === 'auth/user-mismatch') {
-        setPasswordError('Authentication error. Please log in again.');
-      } else {
-        setPasswordError(err.message || 'Failed to verify password');
-      }
+      setPasswordError(err.response?.data?.error || err.message || 'Failed to verify password');
     } finally {
       setVerifyingPassword(false);
     }

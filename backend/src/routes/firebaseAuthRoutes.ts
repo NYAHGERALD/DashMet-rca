@@ -69,7 +69,7 @@ router.post('/check-user', async (req, res) => {
     },
   });
 
-  // SECURITY: System Admins must use the dedicated System Admin portal with Master Key
+  // SECURITY: System Admins must use the dedicated System Admin portal.
   if (dbUser && dbUser.role === 'SYSTEM_ADMIN') {
     await normalizeResponseTime(startTime);
     return res.status(403).json({

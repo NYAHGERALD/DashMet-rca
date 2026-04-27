@@ -33,6 +33,15 @@ const LANGUAGE_MAP: Record<string, string> = {
 
 const VALID_LANGUAGES = Object.values(LANGUAGE_MAP);
 
+const isValidIanaTimezone = (value: string): boolean => {
+  try {
+    Intl.DateTimeFormat('en-US', { timeZone: value });
+    return true;
+  } catch {
+    return false;
+  }
+};
+
 // GET /api/preferences - Get current user's preferences
 router.get(
   '/',
@@ -43,6 +52,7 @@ router.get(
       select: {
         theme: true,
         language: true,
+        timezone: true,
         autoSaveEnabled: true,
         defaultSiteId: true,
         defaultLineId: true,
@@ -61,7 +71,7 @@ router.patch(
   '/',
   authenticate,
   asyncHandler(async (req: AuthRequest, res: Response): Promise<void> => {
-    const { theme, language, autoSaveEnabled, defaultSiteId, defaultLineId } = req.body;
+    const { theme, language, timezone, autoSaveEnabled, defaultSiteId, defaultLineId } = req.body;
 
     // Validate theme if provided
     if (theme && !['LIGHT', 'DARK', 'SYSTEM'].includes(theme)) {
@@ -83,11 +93,20 @@ router.patch(
       languageValue = languageValue.toUpperCase();
     }
 
+    let timezoneValue: string | undefined;
+    if (timezone !== undefined) {
+      timezoneValue = String(timezone).trim();
+      if (!timezoneValue || !isValidIanaTimezone(timezoneValue)) {
+        throw new ValidationError('Invalid timezone value');
+      }
+    }
+
     const user = await prisma.user.update({
       where: { id: req.user!.id },
       data: {
         ...(theme && { theme }),
         ...(languageValue && { language: languageValue }),
+        ...(timezoneValue && { timezone: timezoneValue }),
         ...(autoSaveEnabled !== undefined && { autoSaveEnabled }),
         ...(defaultSiteId !== undefined && { defaultSiteId }),
         ...(defaultLineId !== undefined && { defaultLineId }),
@@ -101,6 +120,7 @@ router.patch(
         organizationId: true,
         theme: true,
         language: true,
+        timezone: true,
         autoSaveEnabled: true,
         defaultSiteId: true,
         defaultLineId: true,

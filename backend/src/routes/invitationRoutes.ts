@@ -5,7 +5,7 @@
  *   1. System Admin creates Organization → invites first ADMIN
  *   2. ADMIN invites employees with specific roles to their organization
  *   3. Invitee receives email with secure link containing token
- *   4. Invitee clicks link → registers with Firebase → calls /create-profile with token
+ *   4. Invitee clicks link → accepts invite and creates backend-owned credentials
  *   5. Profile creation uses invitation to assign org, role, facility automatically
  *
  * Endpoints:
@@ -19,6 +19,7 @@
 import { Router, Request, Response } from 'express';
 import asyncHandler from 'express-async-handler';
 import crypto from 'crypto';
+import bcrypt from 'bcryptjs';
 import { prisma } from '../utils/prisma';
 import { authenticate, AuthRequest } from '../middleware/auth';
 import { requireMinimumRole } from '../middleware/rbac';
@@ -26,6 +27,10 @@ import { UserRole } from '@prisma/client';
 import { ValidationError } from '../middleware/errorHandler';
 import { sendEmailNotification } from '../services/notificationService';
 import { v4 as uuidv4 } from 'uuid';
+import { authRateLimiter } from '../middleware/rateLimiter';
+import { encryptPhone } from '../utils/encryption';
+import { assertPasswordPolicy } from '../utils/passwordPolicy';
+import { websocketService } from '../services/websocketService';
 
 const router = Router();
 
@@ -42,6 +47,19 @@ const INVITABLE_ROLES: UserRole[] = [
   'QUALITY_CONTROL_MANAGER',
   'ADMIN',
 ];
+
+type InvitationStatusKey = 'PENDING' | 'ACCEPTED' | 'EXPIRED' | 'REVOKED';
+
+interface InvitationStatusCounts {
+  pending: number;
+  accepted: number;
+  expired: number;
+  revoked: number;
+}
+
+function emptyInvitationStatusCounts(): InvitationStatusCounts {
+  return { pending: 0, accepted: 0, expired: 0, revoked: 0 };
+}
 
 function generateSecureToken(): string {
   return crypto.randomBytes(32).toString('hex'); // 64-char hex
@@ -98,6 +116,10 @@ router.post('/', authenticate, requireMinimumRole(UserRole.ADMIN), asyncHandler(
   // Validate role is invitable
   if (!INVITABLE_ROLES.includes(role as UserRole)) {
     throw new ValidationError(`Invalid role. Allowed roles: ${INVITABLE_ROLES.join(', ')}`);
+  }
+
+  if (user.role === 'SYSTEM_ADMIN' && role !== 'ADMIN') {
+    throw new ValidationError('System Admin can only invite organization admins');
   }
 
   // Determine target organization
@@ -205,23 +227,6 @@ router.post('/', authenticate, requireMinimumRole(UserRole.ADMIN), asyncHandler(
 // ─────────────────────────────────────────────────────────────────────────────
 router.get('/', authenticate, requireMinimumRole(UserRole.ADMIN), asyncHandler(async (req: AuthRequest, res: Response) => {
   const user = req.user!;
-  const { status } = req.query;
-
-  const where: any = {};
-
-  if (user.role === 'SYSTEM_ADMIN') {
-    // System admin can see all invitations, optionally filtered by orgId
-    if (req.query.organizationId) {
-      where.organizationId = req.query.organizationId;
-    }
-  } else {
-    // ADMIN sees only their organization's invitations
-    where.organizationId = user.organizationId;
-  }
-
-  if (status) {
-    where.status = status;
-  }
 
   // Auto-expire stale invitations
   await prisma.invitation.updateMany({
@@ -231,6 +236,84 @@ router.get('/', authenticate, requireMinimumRole(UserRole.ADMIN), asyncHandler(a
     },
     data: { status: 'EXPIRED' },
   });
+
+  if (user.role === 'SYSTEM_ADMIN') {
+    const organizationIdFilter = typeof req.query.organizationId === 'string'
+      ? req.query.organizationId
+      : undefined;
+
+    const [organizations, groupedInvitations] = await Promise.all([
+      prisma.organization.findMany({
+        where: organizationIdFilter ? { id: organizationIdFilter } : {},
+        select: {
+          id: true,
+          name: true,
+          region: true,
+          createdAt: true,
+          _count: {
+            select: {
+              User: true,
+              Facility: true,
+              Invitations: true,
+            },
+          },
+        },
+        orderBy: { name: 'asc' },
+      }),
+      prisma.invitation.groupBy({
+        by: ['organizationId', 'status'],
+        ...(organizationIdFilter ? { where: { organizationId: organizationIdFilter } } : {}),
+        _count: { _all: true },
+      }),
+    ]);
+
+    const countsByOrganization = new Map<string, InvitationStatusCounts>();
+    for (const group of groupedInvitations) {
+      const statusCounts = countsByOrganization.get(group.organizationId) || emptyInvitationStatusCounts();
+      const count = group._count._all;
+      const status = group.status as InvitationStatusKey;
+      if (status === 'PENDING') statusCounts.pending = count;
+      if (status === 'ACCEPTED') statusCounts.accepted = count;
+      if (status === 'EXPIRED') statusCounts.expired = count;
+      if (status === 'REVOKED') statusCounts.revoked = count;
+      countsByOrganization.set(group.organizationId, statusCounts);
+    }
+
+    const organizationSummaries = organizations.map((org) => {
+      const invitationCounts = countsByOrganization.get(org.id) || emptyInvitationStatusCounts();
+      return {
+        organizationName: org.name,
+        region: org.region,
+        createdAt: org.createdAt,
+        userCount: org._count.User,
+        facilityCount: org._count.Facility,
+        invitationCounts: {
+          total: org._count.Invitations,
+          pending: invitationCounts.pending,
+          accepted: invitationCounts.accepted,
+          expired: invitationCounts.expired,
+          revoked: invitationCounts.revoked,
+        },
+      };
+    });
+
+    res.json({
+      success: true,
+      data: {
+        mode: 'ORGANIZATION_SUMMARY',
+        organizations: organizationSummaries,
+      },
+    });
+    return;
+  }
+
+  const where: any = {
+    organizationId: user.organizationId,
+  };
+
+  if (typeof req.query.status === 'string' && req.query.status) {
+    where.status = req.query.status;
+  }
 
   const invitations = await prisma.invitation.findMany({
     where,
@@ -260,6 +343,7 @@ router.get('/:token/validate', asyncHandler(async (req: Request, res: Response) 
     where: { token },
     include: {
       Organization: { select: { name: true } },
+      InvitedBy: { select: { firstName: true, lastName: true } },
     },
   });
 
@@ -290,8 +374,184 @@ router.get('/:token/validate', asyncHandler(async (req: Request, res: Response) 
       organizationName: invitation.Organization.name,
       organizationId: invitation.organizationId,
       facilityId: invitation.facilityId,
+      invitedBy: `${invitation.InvitedBy.firstName} ${invitation.InvitedBy.lastName}`,
       expiresAt: invitation.expiresAt,
     },
+  });
+}));
+
+// ─────────────────────────────────────────────────────────────────────────────
+// POST /api/invitations/:token/accept — Accept invitation and create DB account
+// This replaces the old Firebase Auth account creation step.
+// ─────────────────────────────────────────────────────────────────────────────
+router.post('/:token/accept', authRateLimiter, asyncHandler(async (req: Request, res: Response) => {
+  const { token } = req.params;
+  const { firstName, lastName, password, phone, countryCode } = req.body;
+
+  if (!token || token.length !== 64) {
+    throw new ValidationError('Invalid invitation token');
+  }
+
+  if (!firstName || !lastName || !password) {
+    throw new ValidationError('First name, last name, and password are required');
+  }
+
+  const invitation = await prisma.invitation.findUnique({
+    where: { token },
+    include: {
+      Organization: { select: { name: true } },
+    },
+  });
+
+  if (!invitation) {
+    throw new ValidationError('Invitation not found');
+  }
+
+  if (invitation.expiresAt < new Date()) {
+    if (invitation.status === 'PENDING') {
+      await prisma.invitation.update({
+        where: { id: invitation.id },
+        data: { status: 'EXPIRED' },
+      });
+    }
+    throw new ValidationError('This invitation has expired');
+  }
+
+  if (invitation.status !== 'PENDING') {
+    throw new ValidationError(`This invitation has already been ${invitation.status.toLowerCase()}`);
+  }
+
+  const passwordPolicyError = assertPasswordPolicy(password, [
+    invitation.email,
+    firstName,
+    lastName,
+  ]);
+  if (passwordPolicyError) {
+    throw new ValidationError(passwordPolicyError);
+  }
+
+  const existingUserByEmail = await prisma.user.findUnique({
+    where: { email: invitation.email },
+    select: { id: true },
+  });
+
+  if (existingUserByEmail) {
+    throw new ValidationError('This email is already registered. Please sign in or ask your administrator for help.');
+  }
+
+  let phoneData: { phone?: string; phoneHash?: string; phoneVerified?: boolean; initialPhoneHash?: string } = {};
+  if (phone && countryCode) {
+    const digits = String(phone).replace(/\D/g, '');
+    if (digits.length < 10 || digits.length > 15) {
+      throw new ValidationError('Phone number must be between 10 and 15 digits');
+    }
+
+    const { encryptedPhone, phoneHash } = encryptPhone(digits, String(countryCode));
+    const existingPhone = await prisma.user.findUnique({ where: { phoneHash } });
+    if (existingPhone) {
+      throw new ValidationError('This phone number is already registered to another account');
+    }
+
+    phoneData = {
+      phone: encryptedPhone,
+      phoneHash,
+      phoneVerified: true,
+      initialPhoneHash: phoneHash,
+    };
+  }
+
+  const hashedPassword = await bcrypt.hash(
+    password,
+    parseInt(process.env.BCRYPT_ROUNDS || '12', 10)
+  );
+
+  const user = await prisma.$transaction(async (tx) => {
+    const createdUser = await tx.user.create({
+      data: {
+        id: uuidv4(),
+        updatedAt: new Date(),
+        email: invitation.email,
+        password: hashedPassword,
+        firstName: String(firstName).trim(),
+        lastName: String(lastName).trim(),
+        role: invitation.role,
+        organizationId: invitation.organizationId,
+        emailVerified: true,
+        ...phoneData,
+      },
+      select: {
+        id: true,
+        email: true,
+        firstName: true,
+        lastName: true,
+        role: true,
+        organizationId: true,
+        theme: true,
+        language: true,
+        profilePicture: true,
+      },
+    });
+
+    await tx.invitation.update({
+      where: { id: invitation.id },
+      data: {
+        status: 'ACCEPTED',
+        acceptedAt: new Date(),
+        acceptedUserId: createdUser.id,
+      },
+    });
+
+    return createdUser;
+  });
+
+  if (
+    (invitation.role === 'QA_FOOD_SAFETY' || invitation.role === 'QUALITY_CONTROL_MANAGER') &&
+    invitation.organizationId
+  ) {
+    const openReports = await prisma.foreignMaterialIncident.findMany({
+      where: {
+        organizationId: invitation.organizationId,
+        status: { not: 'CLOSED' },
+      },
+      select: {
+        id: true,
+        collaboratorIds: true,
+        createdById: true,
+      },
+    });
+
+    const updatedReportIds: string[] = [];
+    for (const report of openReports) {
+      const existingIds = report.collaboratorIds || [];
+      if (report.createdById !== user.id && !existingIds.includes(user.id)) {
+        await prisma.foreignMaterialIncident.update({
+          where: { id: report.id },
+          data: { collaboratorIds: [...existingIds, user.id] },
+        });
+        updatedReportIds.push(report.id);
+      }
+    }
+
+    if (updatedReportIds.length > 0) {
+      websocketService.emitToOrganization(invitation.organizationId, 'fmir:collaborator-added', {
+        userId: user.id,
+        user: {
+          id: user.id,
+          firstName: user.firstName,
+          lastName: user.lastName,
+          email: user.email,
+          role: user.role,
+          profilePicture: user.profilePicture,
+          isQAFoodSafety: true,
+        },
+        reportIds: updatedReportIds,
+      });
+    }
+  }
+
+  res.status(201).json({
+    success: true,
+    data: { user },
   });
 }));
 
@@ -313,6 +573,10 @@ router.patch('/:id/revoke', authenticate, requireMinimumRole(UserRole.ADMIN), as
   // ADMIN can only revoke invitations for their own org
   if (user.role !== 'SYSTEM_ADMIN' && invitation.organizationId !== user.organizationId) {
     throw new ValidationError('You can only revoke invitations for your own organization');
+  }
+
+  if (user.role === 'SYSTEM_ADMIN' && invitation.role !== 'ADMIN') {
+    throw new ValidationError('System Admin can only manage organization admin invitations');
   }
 
   if (invitation.status !== 'PENDING') {
@@ -345,6 +609,10 @@ router.post('/resend/:id', authenticate, requireMinimumRole(UserRole.ADMIN), asy
 
   if (user.role !== 'SYSTEM_ADMIN' && invitation.organizationId !== user.organizationId) {
     throw new ValidationError('Access denied');
+  }
+
+  if (user.role === 'SYSTEM_ADMIN' && invitation.role !== 'ADMIN') {
+    throw new ValidationError('System Admin can only manage organization admin invitations');
   }
 
   if (invitation.status !== 'PENDING') {

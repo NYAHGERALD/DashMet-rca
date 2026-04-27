@@ -1,11 +1,8 @@
 'use client';
 
-import { useState, useEffect, useCallback } from 'react';
-import { useRouter, useSearchParams } from 'next/navigation';
+import { useState, useEffect, useMemo } from 'react';
+import { useSearchParams } from 'next/navigation';
 import dynamic from 'next/dynamic';
-import { sendPasswordResetEmail } from 'firebase/auth';
-import { auth } from '@/lib/firebase';
-import { getFirebaseErrorMessage } from '@/lib/firebaseErrors';
 import ProtectedRoute from '@/components/auth/ProtectedRoute';
 import { useAuth } from '@/components/providers/AuthProvider';
 import { useTheme } from '@/components/providers/ThemeProvider';
@@ -25,9 +22,42 @@ type Tab = 'profile' | 'preferences' | 'notifications' | 'security';
 
 interface Preferences {
   theme: 'LIGHT' | 'DARK' | 'SYSTEM';
+  timezone: string;
   defaultSiteId: string | null;
   defaultLineId: string | null;
 }
+
+const DEFAULT_TIMEZONE = 'America/Chicago';
+
+const getBrowserTimezone = (): string =>
+  Intl.DateTimeFormat().resolvedOptions().timeZone || DEFAULT_TIMEZONE;
+
+const getAvailableTimezones = (): string[] => {
+  const intlWithSupported = Intl as unknown as {
+    supportedValuesOf?: (key: 'timeZone') => string[];
+  };
+
+  if (typeof intlWithSupported.supportedValuesOf === 'function') {
+    const zones = intlWithSupported.supportedValuesOf('timeZone');
+    if (zones.length) return zones;
+  }
+
+  return [
+    'America/Chicago',
+    'America/New_York',
+    'America/Denver',
+    'America/Los_Angeles',
+    'America/Phoenix',
+    'America/Anchorage',
+    'Pacific/Honolulu',
+    'UTC',
+    'Europe/London',
+    'Europe/Paris',
+    'Asia/Tokyo',
+    'Asia/Shanghai',
+    'Australia/Sydney',
+  ];
+};
 
 const TABS: { key: Tab; label: string; icon: string }[] = [
   { key: 'profile', label: 'Profile', icon: '👤' },
@@ -37,12 +67,12 @@ const TABS: { key: Tab; label: string; icon: string }[] = [
 ];
 
 function SettingsPage() {
-  const router = useRouter();
   const searchParams = useSearchParams();
   const { user, refreshUser, logout } = useAuth();
   const { theme: currentTheme, setTheme: setAppTheme } = useTheme();
   const { language, setLanguage, t, availableLanguages } = useI18n();
   const isAdmin = useIsAdmin();
+  const isSystemAdminRole = user?.role === 'SYSTEM_ADMIN';
 
   const initialTab = (searchParams.get('tab') as Tab) || 'profile';
   const [activeTab, setActiveTab] = useState<Tab>(initialTab);
@@ -51,6 +81,7 @@ function SettingsPage() {
 
   const [preferences, setPreferences] = useState<Preferences>({
     theme: 'DARK',
+    timezone: getBrowserTimezone(),
     defaultSiteId: null,
     defaultLineId: null,
   });
@@ -61,6 +92,9 @@ function SettingsPage() {
   const [error, setError] = useState('');
   const [profilePicture, setProfilePicture] = useState<string | null>(null);
   const [passwordLoading, setPasswordLoading] = useState(false);
+  const visibleTabs = isSystemAdminRole
+    ? TABS.filter((tab) => tab.key !== 'notifications')
+    : TABS;
 
   // Phone number state
   const COUNTRY_CODES = [
@@ -89,6 +123,7 @@ function SettingsPage() {
   const [showSessionsModal, setShowSessionsModal] = useState(false);
   const [sessionsLoading, setSessionsLoading] = useState(false);
   const [revokingSession, setRevokingSession] = useState<string | null>(null);
+  const timezoneOptions = useMemo(() => getAvailableTimezones(), []);
 
   useEffect(() => {
     setMounted(true);
@@ -98,10 +133,24 @@ function SettingsPage() {
 
   useEffect(() => {
     const tab = searchParams.get('tab') as Tab;
-    if (tab && TABS.some((t) => t.key === tab)) {
+    if (
+      tab &&
+      TABS.some((t) => t.key === tab) &&
+      !(isSystemAdminRole && tab === 'notifications')
+    ) {
       switchTab(tab);
+      return;
     }
-  }, [searchParams]);
+    if (tab === 'notifications' && isSystemAdminRole) {
+      switchTab('profile');
+    }
+  }, [searchParams, isSystemAdminRole]);
+
+  useEffect(() => {
+    if (isSystemAdminRole && activeTab === 'notifications') {
+      setActiveTab('profile');
+    }
+  }, [isSystemAdminRole, activeTab]);
 
   const switchTab = (tab: Tab) => {
     if (tab === activeTab) return;
@@ -116,7 +165,16 @@ function SettingsPage() {
     try {
       const response = await api.get('/preferences');
       const prefs = response.data.data;
-      setPreferences(prefs);
+      const timezone = prefs?.timezone || getBrowserTimezone();
+      if (typeof window !== 'undefined') {
+        window.localStorage.setItem('userTimezone', timezone);
+      }
+      setPreferences({
+        theme: prefs?.theme || 'DARK',
+        timezone,
+        defaultSiteId: prefs?.defaultSiteId ?? null,
+        defaultLineId: prefs?.defaultLineId ?? null,
+      });
     } catch (err: any) {
       console.error('Failed to load preferences:', err);
     }
@@ -124,7 +182,7 @@ function SettingsPage() {
 
   const loadProfilePicture = async () => {
     try {
-      const response = await api.get('/firebase-auth/me');
+      const response = await api.get('/auth/me');
       if (response.data.data.user.profilePicture) {
         setProfilePicture(response.data.data.user.profilePicture);
       }
@@ -204,7 +262,7 @@ function SettingsPage() {
     setError('');
     setMessage('');
     try {
-      const response = await api.patch('/firebase-auth/update-phone', {
+      const response = await api.patch('/auth/update-phone', {
         phone: phoneDigits,
         countryCode: selectedCountry.code,
       });
@@ -232,7 +290,7 @@ function SettingsPage() {
     setError('');
     setMessage('');
     try {
-      await api.patch('/firebase-auth/update-phone', {
+      await api.patch('/auth/update-phone', {
         phone: phoneDigits,
         countryCode: selectedCountry.code,
         verificationCode: phoneVerificationCode,
@@ -256,12 +314,16 @@ function SettingsPage() {
     setError('');
     try {
       await api.patch('/preferences', preferences);
+      if (typeof window !== 'undefined') {
+        window.localStorage.setItem('userTimezone', preferences.timezone);
+      }
       const themeMap: Record<string, 'light' | 'dark'> = {
         LIGHT: 'light',
         DARK: 'dark',
         SYSTEM: window.matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light',
       };
       setAppTheme(themeMap[preferences.theme]);
+      if (refreshUser) await refreshUser();
       setMessage('Preferences saved!');
       setTimeout(() => setMessage(''), 3000);
     } catch (err: any) {
@@ -277,11 +339,11 @@ function SettingsPage() {
     setMessage('');
     setError('');
     try {
-      await sendPasswordResetEmail(auth, user.email);
+      await api.post('/auth/forgot-password', { email: user.email });
       setMessage('Password reset email sent. Check your inbox.');
       setTimeout(() => setMessage(''), 5000);
     } catch (err: any) {
-      setError(getFirebaseErrorMessage(err, 'Failed to send password reset email.'));
+      setError(err.response?.data?.error || 'Failed to send password reset email.');
     } finally {
       setPasswordLoading(false);
     }
@@ -427,7 +489,7 @@ function SettingsPage() {
         {/* ── Tab Bar ── */}
         <div className={"bg-white dark:bg-gray-800 rounded-2xl shadow-lg border border-gray-200/60 dark:border-gray-700/60 overflow-hidden transform transition-all duration-500 delay-100 " + (mounted ? "translate-y-0 opacity-100" : "translate-y-4 opacity-0")}>
           <div className="flex border-b border-gray-200 dark:border-gray-700">
-            {TABS.map((tab) => (
+            {visibleTabs.map((tab) => (
               <button
                 key={tab.key}
                 onClick={() => switchTab(tab.key)}
@@ -551,9 +613,11 @@ function SettingsPage() {
                   )}
                 </div>
 
-                <p className="text-sm text-gray-500 dark:text-gray-400 flex items-center gap-2 pt-2 border-t border-gray-200 dark:border-gray-700">
-                  💡 To update your name or role, contact your system administrator.
-                </p>
+                {!isSystemAdminRole && (
+                  <p className="text-sm text-gray-500 dark:text-gray-400 flex items-center gap-2 pt-2 border-t border-gray-200 dark:border-gray-700">
+                    💡 To update your name or role, contact your organization administrator.
+                  </p>
+                )}
               </div>
             )}
 
@@ -598,6 +662,22 @@ function SettingsPage() {
                   )}
                 </div>
 
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">{t('settings.timezone')}</label>
+                  <select
+                    value={preferences.timezone}
+                    onChange={(e) => setPreferences({ ...preferences, timezone: e.target.value })}
+                    aria-label="Timezone"
+                    className="w-full px-4 py-2.5 border border-gray-200 dark:border-gray-600 rounded-xl bg-white dark:bg-gray-700 text-gray-900 dark:text-white focus:ring-2 focus:ring-primary-500 text-sm"
+                  >
+                    {timezoneOptions.map((tz) => (
+                      <option key={tz} value={tz}>
+                        {tz.replace(/_/g, ' ')}
+                      </option>
+                    ))}
+                  </select>
+                </div>
+
                 <div className="pt-4 border-t border-gray-200 dark:border-gray-700">
                   <button onClick={savePreferences} disabled={loading} className="px-6 py-2.5 bg-primary-600 hover:bg-primary-700 text-white rounded-xl font-medium text-sm transition-all duration-200 disabled:opacity-50 hover:shadow-lg hover:shadow-primary-500/25">
                     {loading ? t('common.loading') : t('settings.savePreferences')}
@@ -607,7 +687,7 @@ function SettingsPage() {
             )}
 
             {/* ── Notifications ── */}
-            {activeTab === 'notifications' && (
+            {activeTab === 'notifications' && !isSystemAdminRole && (
               <div className="animate-in fade-in slide-in-from-bottom-2 duration-300">
                 <LswNotificationSettings />
               </div>

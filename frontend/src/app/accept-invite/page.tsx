@@ -5,15 +5,8 @@ import { useState, useEffect, useMemo } from 'react';
 import { useRouter, useSearchParams } from 'next/navigation';
 import Link from 'next/link';
 import Image from 'next/image';
-import {
-  createUserWithEmailAndPassword,
-  signInWithEmailAndPassword,
-  signOut,
-} from 'firebase/auth';
-import { auth } from '@/lib/firebase';
 import { useAuth } from '@/components/providers/AuthProvider';
 import api from '@/lib/api';
-import { getFirebaseErrorMessage } from '@/lib/firebaseErrors';
 import { Eye, EyeOff, Mail, Building2, Shield, CheckCircle2, AlertTriangle, Loader2, Phone, ChevronDown, Check, X } from 'lucide-react';
 
 const COUNTRY_CODES = [
@@ -49,7 +42,7 @@ export default function AcceptInvitePage() {
   const router = useRouter();
   const searchParams = useSearchParams();
   const token = searchParams.get('token');
-  const { user, firebaseUser, loading: authLoading, refreshUser } = useAuth();
+  const { user, loading: authLoading } = useAuth();
 
   // Invitation state
   const [invitation, setInvitation] = useState<InvitationData | null>(null);
@@ -74,7 +67,7 @@ export default function AcceptInvitePage() {
 
   // Password strength
   const passwordChecks = useMemo(() => ({
-    minLength: password.length >= 8,
+    minLength: password.length >= 12,
     hasUpper: /[A-Z]/.test(password),
     hasLower: /[a-z]/.test(password),
     hasNumber: /[0-9]/.test(password),
@@ -114,10 +107,7 @@ export default function AcceptInvitePage() {
       const response = await api.get(`/invitations/${token}/validate`);
       if (response.data.success) {
         setInvitation(response.data.data);
-        // If no Firebase user, show registration form
-        if (!firebaseUser) {
-          setStep('register');
-        }
+        setStep('register');
       }
     } catch (err: any) {
       const msg = err.response?.data?.error || 'This invitation link is invalid or has expired.';
@@ -145,8 +135,8 @@ export default function AcceptInvitePage() {
       return;
     }
 
-    if (password.length < 8) {
-      setError('Password must be at least 8 characters');
+    if (password.length < 12) {
+      setError('Password must be at least 12 characters');
       setLoading(false);
       return;
     }
@@ -164,77 +154,25 @@ export default function AcceptInvitePage() {
     }
 
     try {
-      // 1. Create Firebase account
-      await createUserWithEmailAndPassword(auth, invitation.email, password);
-
-      // 2. Create profile in PostgreSQL using invitation token
-      const idToken = await auth.currentUser?.getIdToken();
       await api.post(
-        '/firebase-auth/create-profile',
+        `/invitations/${token}/accept`,
         {
           firstName: firstName.trim(),
           lastName: lastName.trim(),
-          invitationToken: token,
+          password,
           ...(phoneDigits.length >= 10 ? {
             phone: phoneDigits,
             countryCode: selectedCountry.code,
           } : {}),
-        },
-        { headers: { Authorization: `Bearer ${idToken}` } }
+        }
       );
 
-      // 3. Sign out so user must log in with their new credentials
-      await signOut(auth);
       setStep('success');
 
       // Redirect to login after brief success message
       setTimeout(() => router.push('/login'), 3000);
     } catch (err: any) {
-      // If Firebase account already exists, try signing in
-      if (err.code === 'auth/email-already-in-use') {
-        setError('An account with this email already exists. Please sign in on the login page.');
-        setStep('register');
-      } else {
-        const msg = err.response?.data?.error || getFirebaseErrorMessage(err, 'Registration failed. Please try again.');
-        setError(msg);
-      }
-    } finally {
-      setLoading(false);
-    }
-  };
-
-  const handleSignInAndComplete = async (e: React.FormEvent) => {
-    e.preventDefault();
-    if (!invitation || !token) return;
-
-    setLoading(true);
-    setError('');
-
-    try {
-      // Sign in to existing Firebase account
-      await signInWithEmailAndPassword(auth, invitation.email, password);
-
-      // Complete profile with invitation token
-      const idToken = await auth.currentUser?.getIdToken();
-      await api.post(
-        '/firebase-auth/create-profile',
-        {
-          firstName: firstName.trim(),
-          lastName: lastName.trim(),
-          invitationToken: token,
-          ...(phoneDigits.length >= 10 ? {
-            phone: phoneDigits,
-            countryCode: selectedCountry.code,
-          } : {}),
-        },
-        { headers: { Authorization: `Bearer ${idToken}` } }
-      );
-
-      await refreshUser();
-      setStep('success');
-      setTimeout(() => router.push('/dashboard'), 2000);
-    } catch (err: any) {
-      const msg = err.response?.data?.error || getFirebaseErrorMessage(err, 'Sign-in failed. Please try again.');
+      const msg = err.response?.data?.error || 'Registration failed. Please try again.';
       setError(msg);
     } finally {
       setLoading(false);
@@ -480,9 +418,9 @@ export default function AcceptInvitePage() {
                     value={password}
                     onChange={(e) => setPassword(e.target.value)}
                     required
-                    minLength={8}
+                    minLength={12}
                     className="w-full px-3 py-2.5 pr-10 bg-white/5 border border-white/10 rounded-lg text-white text-sm placeholder-gray-400 focus:outline-none focus:ring-2 focus:ring-blue-500/50"
-                    placeholder="Minimum 8 characters"
+                    placeholder="Minimum 12 characters"
                   />
                   <button
                     type="button"
@@ -513,7 +451,7 @@ export default function AcceptInvitePage() {
                   {/* Checklist */}
                   <div className="grid grid-cols-2 gap-x-3 gap-y-1">
                     {[
-                      { key: 'minLength', label: '8+ characters' },
+                      { key: 'minLength', label: '12+ characters' },
                       { key: 'hasUpper', label: 'Uppercase (A-Z)' },
                       { key: 'hasLower', label: 'Lowercase (a-z)' },
                       { key: 'hasNumber', label: 'Number (0-9)' },

@@ -4,9 +4,7 @@ import { useRouter, useSearchParams } from 'next/navigation';
 import Image from 'next/image';
 import { useState, useEffect, Suspense } from 'react';
 import { Shield, Mail, ArrowLeft, CheckCircle2, Lock } from 'lucide-react';
-import { sendPasswordResetEmail } from 'firebase/auth';
-import { auth } from '@/lib/firebase';
-import { getFirebaseErrorMessage } from '@/lib/firebaseErrors';
+import api from '@/lib/api';
 
 function AccountLockedContent() {
   const router = useRouter();
@@ -17,7 +15,6 @@ function AccountLockedContent() {
   const [resetEmailSent, setResetEmailSent] = useState(false);
   const [resetInProgress, setResetInProgress] = useState(false);
   const [error, setError] = useState('');
-  const [message, setMessage] = useState('');
 
   useEffect(() => {
     // If no email provided, redirect back to login
@@ -31,11 +28,10 @@ function AccountLockedContent() {
     setError('');
 
     try {
-      await sendPasswordResetEmail(auth, email);
+      await api.post('/auth/forgot-password', { email: email.toLowerCase().trim() });
       setResetEmailSent(true);
-      setMessage('');
     } catch (err: any) {
-      setError(getFirebaseErrorMessage(err, 'Failed to send password reset email. Please try again.'));
+      setError(err.response?.data?.error || 'Failed to send password reset email. Please try again.');
     } finally {
       setResetInProgress(false);
     }

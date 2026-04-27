@@ -75,7 +75,7 @@ export default function Sidebar() {
   ];
 
   const adminItems = [
-    { name: 'Support Inbox', href: '/support-inbox', icon: Inbox, roles: ['ADMIN', 'SYSTEM_ADMIN', 'QUALITY_CONTROL_MANAGER'] },
+    { name: 'Support Inbox', href: '/support-inbox', icon: Inbox, roles: ['ADMIN', 'QUALITY_CONTROL_MANAGER'] },
     { name: t('profile.organization'), href: '/organization', icon: Building2, roles: ['ADMIN', 'SYSTEM_ADMIN'] },
     { name: t('nav.users'), href: '/users', icon: Users, roles: ['ADMIN', 'SYSTEM_ADMIN'] },
   ];

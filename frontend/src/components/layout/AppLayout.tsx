@@ -332,7 +332,20 @@ export default function AppLayout({ children }: AppLayoutProps) {
                         </div>
                         {t('nav.profile')}
                       </button>
-                      <ContactSupportMenuItem />
+                      {isSystemAdmin ? (
+                        <Link
+                          href="/admin/support"
+                          onClick={() => setShowDropdown(false)}
+                          className="w-full text-left px-4 py-2.5 text-sm text-gray-700 dark:text-gray-300 hover:bg-gradient-to-r hover:from-blue-50 hover:to-indigo-50 dark:hover:from-blue-900/30 dark:hover:to-indigo-900/30 flex items-center gap-3 transition-colors"
+                        >
+                          <div className="w-8 h-8 rounded-lg bg-indigo-100 dark:bg-indigo-900/50 flex items-center justify-center">
+                            <MailOpen className="w-4 h-4 text-indigo-600 dark:text-indigo-400" />
+                          </div>
+                          Support Requests
+                        </Link>
+                      ) : (
+                        <ContactSupportMenuItem />
+                      )}
                     </div>
                     <div className="border-t border-gray-200/50 dark:border-gray-700/50 py-1">
                       <button
@@ -374,7 +387,6 @@ export default function AppLayout({ children }: AppLayoutProps) {
           onOpenChange={setSidebarOpen}
           links={isSystemAdmin ? [
             { href: '/dashboard', icon: <LayoutDashboard size={18} strokeWidth={1.8} />, label: t('nav.dashboard') || 'Dashboard' },
-            { href: '/system-admin', icon: <Building2 size={18} strokeWidth={1.8} />, label: t('nav.systemAdmin') || 'System Admin Portal' },
             { icon: <Settings size={18} strokeWidth={1.8} />, label: t('nav.settings'), onClick: () => openSettings() },
           ] : [
             { href: '/dashboard', icon: <LayoutDashboard size={18} strokeWidth={1.8} />, label: t('nav.dashboard') || 'Dashboard', show: hasNavAccess(NAV_PRIVILEGES.DASHBOARD) },
@@ -416,10 +428,9 @@ export default function AppLayout({ children }: AppLayoutProps) {
             title={t('common.organizationManagement')}
             position="right"
             links={user.role === 'SYSTEM_ADMIN' ? [
-              { href: '/system-admin', icon: <Building2 size={18} strokeWidth={1.8} />, label: t('nav.systemAdmin') || 'System Admin Portal' },
+              { href: '/system-admin', icon: <Building2 size={18} strokeWidth={1.8} />, label: 'Organizations' },
               { href: '/admin/policies', icon: <FileKey size={18} strokeWidth={1.8} />, label: t('nav.policies') },
-              { href: '/admin/support', icon: <MailOpen size={18} strokeWidth={1.8} />, label: t('nav.supportRequests') },
-              { href: '/support-inbox', icon: <MailOpen size={18} strokeWidth={1.8} />, label: 'Support Inbox' },
+              { href: '/admin/support', icon: <MailOpen size={18} strokeWidth={1.8} />, label: 'Support Requests' },
             ] : [
               { href: '/admin/organizations', icon: <Building2 size={18} strokeWidth={1.8} />, label: t('nav.organizations'), show: hasNavAccess(NAV_PRIVILEGES.ADMIN_ORGANIZATIONS) },
               { href: '/admin/facilities', icon: <Factory size={18} strokeWidth={1.8} />, label: t('nav.facilities'), show: hasNavAccess(NAV_PRIVILEGES.ADMIN_FACILITIES) },
@@ -431,7 +442,7 @@ export default function AppLayout({ children }: AppLayoutProps) {
               { href: '/admin/categories', icon: <Tag size={18} strokeWidth={1.8} />, label: t('nav.categories'), show: hasNavAccess(NAV_PRIVILEGES.ADMIN_CATEGORIES) },
               { href: '/admin', icon: <UserCog size={18} strokeWidth={1.8} />, label: t('nav.userManagement'), show: hasNavAccess(NAV_PRIVILEGES.ADMIN_USERS) },
               { href: '/admin/invitations', icon: <UserPlus size={18} strokeWidth={1.8} />, label: 'Invitations', show: hasNavAccess(NAV_PRIVILEGES.ADMIN_INVITATIONS) },
-              { href: '/admin/privileges', icon: <KeyRound size={18} strokeWidth={1.8} />, label: t('nav.privileges') || 'Role Privileges', show: hasNavAccess(NAV_PRIVILEGES.ADMIN_PRIVILEGES) },
+              { href: '/admin/privileges', icon: <KeyRound size={18} strokeWidth={1.8} />, label: 'Priviledges', show: hasNavAccess(NAV_PRIVILEGES.ADMIN_PRIVILEGES) },
               { href: '/admin/work-order-templates', icon: <ListTodo size={18} strokeWidth={1.8} />, label: 'Work Order Templates', show: hasNavAccess(NAV_PRIVILEGES.ADMIN_WORK_ORDERS) },
               { href: '/admin/enterprise', icon: <Shield size={18} strokeWidth={1.8} />, label: t('nav.enterprise'), show: hasNavAccess(NAV_PRIVILEGES.ADMIN_ENTERPRISE) },
               { href: '/admin/calendar-config', icon: <CalendarDays size={18} strokeWidth={1.8} />, label: 'Calendar Year Config', show: hasNavAccess(NAV_PRIVILEGES.ADMIN_CALENDAR) },
@@ -499,7 +510,6 @@ export default function AppLayout({ children }: AppLayoutProps) {
                 <div className="space-y-0.5">
                   {(isSystemAdmin ? [
                     { href: '/dashboard', icon: <LayoutDashboard size={18} strokeWidth={1.8} />, label: t('nav.dashboard') || 'Dashboard' },
-                    { href: '/system-admin', icon: <Building2 size={18} strokeWidth={1.8} />, label: t('nav.systemAdmin') || 'System Admin Portal' },
                     { icon: <Settings size={18} strokeWidth={1.8} />, label: t('nav.settings'), onClick: () => { openSettings(); setMobileMenuOpen(false); } },
                   ] : [
                     { href: '/dashboard', icon: <LayoutDashboard size={18} strokeWidth={1.8} />, label: t('nav.dashboard') || 'Dashboard', show: hasNavAccess(NAV_PRIVILEGES.DASHBOARD) },
@@ -560,10 +570,9 @@ export default function AppLayout({ children }: AppLayoutProps) {
                     { href: '/support-inbox', icon: <MailOpen size={18} strokeWidth={1.8} />, label: 'Support Inbox' },
                     { href: '/fmir/privileges', icon: <KeyRound size={18} strokeWidth={1.8} />, label: 'FMIR Privileges' },
                   ] : user?.role === 'SYSTEM_ADMIN' ? [
-                    { href: '/system-admin', icon: <Building2 size={18} strokeWidth={1.8} />, label: t('nav.systemAdmin') || 'System Admin Portal' },
+                    { href: '/system-admin', icon: <Building2 size={18} strokeWidth={1.8} />, label: 'Organizations' },
                     { href: '/admin/policies', icon: <FileKey size={18} strokeWidth={1.8} />, label: t('nav.policies') },
-                    { href: '/admin/support', icon: <MailOpen size={18} strokeWidth={1.8} />, label: t('nav.supportRequests') },
-                    { href: '/support-inbox', icon: <MailOpen size={18} strokeWidth={1.8} />, label: 'Support Inbox' },
+                    { href: '/admin/support', icon: <MailOpen size={18} strokeWidth={1.8} />, label: 'Support Requests' },
                   ] : [
                     { href: '/admin/organizations', icon: <Building2 size={18} strokeWidth={1.8} />, label: t('nav.organizations'), show: hasNavAccess(NAV_PRIVILEGES.ADMIN_ORGANIZATIONS) },
                     { href: '/admin/facilities', icon: <Factory size={18} strokeWidth={1.8} />, label: t('nav.facilities'), show: hasNavAccess(NAV_PRIVILEGES.ADMIN_FACILITIES) },
@@ -575,7 +584,7 @@ export default function AppLayout({ children }: AppLayoutProps) {
                     { href: '/admin/categories', icon: <Tag size={18} strokeWidth={1.8} />, label: t('nav.categories'), show: hasNavAccess(NAV_PRIVILEGES.ADMIN_CATEGORIES) },
                     { href: '/admin', icon: <UserCog size={18} strokeWidth={1.8} />, label: t('nav.userManagement'), show: hasNavAccess(NAV_PRIVILEGES.ADMIN_USERS) },
                     { href: '/admin/invitations', icon: <UserPlus size={18} strokeWidth={1.8} />, label: 'Invitations', show: hasNavAccess(NAV_PRIVILEGES.ADMIN_INVITATIONS) },
-                    { href: '/admin/privileges', icon: <KeyRound size={18} strokeWidth={1.8} />, label: t('nav.privileges') || 'Role Privileges', show: hasNavAccess(NAV_PRIVILEGES.ADMIN_PRIVILEGES) },
+                    { href: '/admin/privileges', icon: <KeyRound size={18} strokeWidth={1.8} />, label: 'Priviledges', show: hasNavAccess(NAV_PRIVILEGES.ADMIN_PRIVILEGES) },
                     { href: '/admin/work-order-templates', icon: <ListTodo size={18} strokeWidth={1.8} />, label: 'Work Order Templates', show: hasNavAccess(NAV_PRIVILEGES.ADMIN_WORK_ORDERS) },
                     { href: '/admin/enterprise', icon: <Shield size={18} strokeWidth={1.8} />, label: t('nav.enterprise'), show: hasNavAccess(NAV_PRIVILEGES.ADMIN_ENTERPRISE) },
                     { href: '/admin/calendar-config', icon: <CalendarDays size={18} strokeWidth={1.8} />, label: 'Calendar Year Config', show: hasNavAccess(NAV_PRIVILEGES.ADMIN_CALENDAR) },

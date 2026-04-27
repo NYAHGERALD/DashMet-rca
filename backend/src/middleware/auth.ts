@@ -2,7 +2,13 @@ import { Request, Response, NextFunction } from 'express';
 import { adminAuth } from '../config/firebase-admin';
 import { AuthenticationError, AuthorizationError } from './errorHandler';
 import { prisma } from '../utils/prisma';
-import { phoneHashVariants } from '../utils/encryption';
+import jwt from 'jsonwebtoken';
+import { getAccessTokenFromRequest, hashToken } from '../utils/sessionCookies';
+import { logger } from '../utils/logger';
+import {
+  getIdleTimeoutMsForRole,
+  isSessionAbsoluteExpired,
+} from '../utils/sessionPolicy';
 
 export interface AuthRequest extends Request {
   user?: {
@@ -34,7 +40,8 @@ export const authenticateFirebaseOnly = async (
     const token = req.headers.authorization?.replace('Bearer ', '');
 
     if (!token) {
-      throw new AuthenticationError('No token provided');
+      logger.warn('Firebase-only authentication failed: missing token', { ip: req.ip });
+      throw new AuthenticationError();
     }
 
     // Verify Firebase ID token only (check revocation) - don't look up in PostgreSQL
@@ -47,15 +54,12 @@ export const authenticateFirebaseOnly = async (
     
     next();
   } catch (error: any) {
-    if (error.code === 'auth/id-token-expired') {
-      next(new AuthenticationError('Token expired'));
-    } else if (error.code === 'auth/id-token-revoked') {
-      next(new AuthenticationError('Token revoked'));
-    } else if (error.code === 'auth/argument-error') {
-      next(new AuthenticationError('Invalid token format'));
-    } else {
-      next(new AuthenticationError('Authentication failed'));
-    }
+    logger.warn('Firebase-only authentication rejected', {
+      ip: req.ip,
+      code: error?.code || 'unknown',
+      reason: error?.message || 'unknown',
+    });
+    next(new AuthenticationError());
   }
 };
 
@@ -66,19 +70,49 @@ export const authenticate = async (
   next: NextFunction
 ) => {
   try {
-    const token = req.headers.authorization?.replace('Bearer ', '');
+    const token = getAccessTokenFromRequest(req);
 
     if (!token) {
-      throw new AuthenticationError('No token provided');
+      logger.warn('Authentication failed: missing token', { ip: req.ip });
+      throw new AuthenticationError();
     }
 
-    // Verify Firebase ID token (with revocation check)
-    const decodedToken = await adminAuth.verifyIdToken(token, true);
+    let decodedToken: any;
+    try {
+      decodedToken = jwt.verify(token, process.env.JWT_SECRET!);
+    } catch (error) {
+      logger.warn('Authentication failed: invalid JWT', { ip: req.ip });
+      throw new AuthenticationError();
+    }
 
-    // Look up user in PostgreSQL by Firebase UID first
-    let user = await prisma.user.findFirst({
+    if (!decodedToken?.userId) {
+      logger.warn('Authentication failed: JWT missing userId', { ip: req.ip });
+      throw new AuthenticationError();
+    }
+
+    const session = await prisma.session.findFirst({
       where: {
-        firebaseUid: decodedToken.uid,
+        userId: decodedToken.userId,
+        token: hashToken(token),
+      },
+      select: {
+        id: true,
+        expiresAt: true,
+        createdAt: true,
+      },
+    });
+
+    if (!session) {
+      logger.warn('Authentication failed: session missing/expired', {
+        ip: req.ip,
+        userId: decodedToken.userId,
+      });
+      throw new AuthenticationError();
+    }
+
+    const user = await prisma.user.findFirst({
+      where: {
+        id: decodedToken.userId,
         isActive: true,
       },
       select: {
@@ -96,76 +130,48 @@ export const authenticate = async (
       },
     });
 
-    // If not found by firebaseUid, try to find by email (handles cross-platform auth)
-    // This supports users who registered on mobile (phone auth) and login on web (email/Google auth)
-    if (!user && decodedToken.email) {
-      user = await prisma.user.findFirst({
-        where: {
-          email: decodedToken.email.toLowerCase(),
-          isActive: true,
-        },
-        select: {
-          id: true,
-          email: true,
-          firstName: true,
-          lastName: true,
-          role: true,
-          organizationId: true,
-          firebaseUid: true,
-          isActive: true,
-          profilePicture: true,
-          loginAttempts: true,
-          lockedUntil: true,
-        },
-      });
-
-      // If found by email, link this Firebase UID to the existing account
-      if (user) {
-        console.log('Linking Firebase UID to existing user account');
-        await prisma.user.update({
-          where: { id: user.id },
-          data: { firebaseUid: decodedToken.uid },
-        });
-        user.firebaseUid = decodedToken.uid;
-      }
-    }
-
-    // If still not found, try phone number (handles phone auth where UID changed)
-    if (!user && decodedToken.phone_number) {
-      const hashes = phoneHashVariants(decodedToken.phone_number);
-      user = await prisma.user.findFirst({
-        where: {
-          phoneHash: { in: hashes },
-          isActive: true,
-        },
-        select: {
-          id: true,
-          email: true,
-          firstName: true,
-          lastName: true,
-          role: true,
-          organizationId: true,
-          firebaseUid: true,
-          isActive: true,
-          profilePicture: true,
-          loginAttempts: true,
-          lockedUntil: true,
-        },
-      });
-
-      // If found by phone, link this Firebase UID to the existing account
-      if (user) {
-        console.log(`Linking Firebase UID to user ${user.id} via phone match`);
-        await prisma.user.update({
-          where: { id: user.id },
-          data: { firebaseUid: decodedToken.uid },
-        });
-        user.firebaseUid = decodedToken.uid;
-      }
-    }
-
     if (!user) {
-      throw new AuthenticationError('User not found in database');
+      logger.warn('Authentication failed: user missing or inactive', {
+        ip: req.ip,
+        userId: decodedToken.userId,
+      });
+      throw new AuthenticationError();
+    }
+
+    const now = new Date();
+    if (session.expiresAt <= now) {
+      await prisma.session.delete({
+        where: { id: session.id },
+      });
+      logger.warn('Authentication failed: idle timeout reached', {
+        ip: req.ip,
+        userId: decodedToken.userId,
+        role: user.role,
+      });
+      throw new AuthenticationError();
+    }
+
+    if (isSessionAbsoluteExpired(session.createdAt, user.role, now)) {
+      await prisma.session.delete({
+        where: { id: session.id },
+      });
+      logger.warn('Authentication failed: absolute session timeout reached', {
+        ip: req.ip,
+        userId: decodedToken.userId,
+        role: user.role,
+      });
+      throw new AuthenticationError();
+    }
+
+    const idleTimeoutMs = getIdleTimeoutMsForRole(user.role);
+    const idleTimeRemainingMs = session.expiresAt.getTime() - now.getTime();
+    if (idleTimeRemainingMs < Math.floor(idleTimeoutMs / 2)) {
+      await prisma.session.update({
+        where: { id: session.id },
+        data: {
+          expiresAt: new Date(now.getTime() + idleTimeoutMs),
+        },
+      });
     }
 
     // SERVER-SIDE LOCKOUT ENFORCEMENT
@@ -178,26 +184,27 @@ export const authenticate = async (
       user.lockedUntil &&
       new Date(user.lockedUntil) > new Date()
     ) {
-      throw new AuthorizationError(
-        'Account locked due to suspicious activity. Reset your password to regain access.'
-      );
+      logger.warn('Authorization denied: locked account access attempt', {
+        ip: req.ip,
+        userId: user.id,
+        lockedUntil: user.lockedUntil,
+      });
+      throw new AuthorizationError();
     }
 
     req.user = user as any;
     next();
   } catch (error: any) {
-    if (error.code === 'auth/id-token-expired') {
-      next(new AuthenticationError('Token expired'));
-    } else if (error.code === 'auth/argument-error') {
-      next(new AuthenticationError('Invalid token format'));
-    } else if (error.code === 'auth/id-token-revoked') {
-      next(new AuthenticationError('Token revoked'));
-    } else if (error.message === 'User not found in database') {
-      next(new AuthenticationError('User not found'));
-    } else if (!req.headers.authorization) {
-      next(new AuthenticationError('No authentication token provided'));
+    if (error instanceof AuthenticationError) {
+      next(new AuthenticationError());
+    } else if (error instanceof AuthorizationError) {
+      next(new AuthorizationError());
     } else {
-      next(new AuthenticationError('Authentication failed'));
+      logger.error('Unexpected authentication middleware error', {
+        ip: req.ip,
+        error: error?.message || error,
+      });
+      next(new AuthenticationError());
     }
   }
 };
@@ -210,11 +217,12 @@ export const authorize = (...allowedRoles: string[]) => {
     }
 
     if (!allowedRoles.includes(req.user.role)) {
-      return next(
-        new AuthorizationError(
-          `Access denied. Required roles: ${allowedRoles.join(', ')}`
-        )
-      );
+      logger.warn('Authorization denied: role mismatch', {
+        userId: req.user.id,
+        userRole: req.user.role,
+        requiredRoles: allowedRoles,
+      });
+      return next(new AuthorizationError());
     }
 
     next();
@@ -237,7 +245,12 @@ export const verifyOrganization = async (
     }
 
     if (req.user?.organizationId !== organizationId) {
-      throw new AuthorizationError('Access to this organization is denied');
+      logger.warn('Authorization denied: organization mismatch', {
+        userId: req.user?.id,
+        userOrganizationId: req.user?.organizationId,
+        requestedOrganizationId: organizationId,
+      });
+      throw new AuthorizationError();
     }
 
     next();

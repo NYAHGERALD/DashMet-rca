@@ -4,7 +4,8 @@ import { Prisma } from '@prisma/client';
 import { prisma } from '../utils/prisma';
 import { v4 as uuidv4 } from 'uuid';
 import { clearRoomFromCache } from '../routes/videoCallRoutes';
-import { adminAuth } from '../config/firebase-admin';
+import jwt from 'jsonwebtoken';
+import { ACCESS_COOKIE_NAME, hashToken } from '../utils/sessionCookies';
 
 interface ConnectedUser {
   socketId: string;
@@ -19,6 +20,19 @@ class WebSocketService {
   private io: Server | null = null;
   private connectedUsers: Map<string, ConnectedUser> = new Map(); // socketId -> user info
   private userSockets: Map<string, Set<string>> = new Map(); // userId -> socketIds
+
+  private getCookieFromHeader(cookieHeader: string | undefined, name: string): string | undefined {
+    if (!cookieHeader) return undefined;
+
+    for (const part of cookieHeader.split(';')) {
+      const [rawKey, ...rawValue] = part.trim().split('=');
+      if (rawKey === name) {
+        return decodeURIComponent(rawValue.join('='));
+      }
+    }
+
+    return undefined;
+  }
 
   initialize(httpServer: HTTPServer, corsOrigins: string[]) {
     this.io = new Server(httpServer, {
@@ -47,44 +61,47 @@ class WebSocketService {
   }
 
   private async handleConnection(socket: Socket) {
-    // Authentication — require a Firebase token in handshake
-    const { token, userId, organizationId } = socket.handshake.auth;
+    const { token: handshakeToken, userId, organizationId } = socket.handshake.auth;
+    const cookieToken = this.getCookieFromHeader(socket.handshake.headers.cookie, ACCESS_COOKIE_NAME);
+    const token = cookieToken || handshakeToken;
+
+    if (!userId || !organizationId) {
+      console.log(`❌ Socket ${socket.id} rejected: missing auth`);
+      socket.disconnect();
+      return;
+    }
 
     if (!token) {
-      console.log(`❌ Socket ${socket.id} rejected: missing Firebase token`);
+      console.log(`❌ Socket ${socket.id} rejected: missing auth token`);
       socket.disconnect();
       return;
     }
 
-    if (!userId || !organizationId) {
-      console.log(`❌ Socket ${socket.id} rejected: missing auth`);
-      socket.disconnect();
-      return;
-    }
+    let user = null;
 
-    // Verify Firebase token (with revocation check)
-    let decodedToken;
     try {
-      decodedToken = await adminAuth.verifyIdToken(token, true);
-    } catch (err: any) {
-      console.log(`❌ Socket ${socket.id} rejected: invalid Firebase token`);
-      socket.disconnect();
-      return;
+      const decoded = jwt.verify(token, process.env.JWT_SECRET!) as any;
+      if (decoded?.userId) {
+        const session = await prisma.session.findFirst({
+          where: {
+            userId: decoded.userId,
+            token: hashToken(token),
+            expiresAt: { gt: new Date() },
+          },
+        });
+
+        if (session) {
+          user = await prisma.user.findFirst({
+            where: { id: decoded.userId, isActive: true },
+            select: { id: true, organizationId: true, firstName: true, lastName: true, firebaseUid: true },
+          });
+        }
+      }
+    } catch {
+      user = null;
     }
 
-    if (!userId || !organizationId) {
-      console.log(`❌ Socket ${socket.id} rejected: missing auth`);
-      socket.disconnect();
-      return;
-    }
-
-    // Verify user exists and Firebase UID matches
-    const user = await prisma.user.findUnique({
-      where: { id: userId },
-      select: { id: true, organizationId: true, firstName: true, lastName: true, firebaseUid: true },
-    });
-
-    if (!user || user.organizationId !== organizationId || user.firebaseUid !== decodedToken.uid) {
+    if (!user || user.id !== userId || user.organizationId !== organizationId) {
       console.log(`❌ Socket ${socket.id} rejected: user/token mismatch`);
       socket.disconnect();
       return;

@@ -74,7 +74,7 @@ export default function SystemAdminWarningModal({
                     <p>
                       System Administrators must authenticate through the{' '}
                       <span className="font-bold">dedicated Control Center portal</span>{' '}
-                      with Master Key validation. This is required for security compliance.
+                      using enterprise authentication controls. This is required for security compliance.
                     </p>
                   </div>
                 </div>

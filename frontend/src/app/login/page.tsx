@@ -1,37 +1,29 @@
-// Phase 1.1: Firebase Email-First Login
+// Backend-owned email/password login
 'use client';
 
 import { useState, useEffect } from 'react';
 import { useRouter } from 'next/navigation';
 import Link from 'next/link';
 import Image from 'next/image';
-import {
-  signInWithEmailAndPassword,
-  sendPasswordResetEmail,
-  fetchSignInMethodsForEmail,
-} from 'firebase/auth';
-import { auth } from '@/lib/firebase';
 import { useAuth } from '@/components/providers/AuthProvider';
 import api from '@/lib/api';
-import { getFirebaseErrorMessage, isTooManyRequestsError } from '@/lib/firebaseErrors';
-import SystemAdminWarningModal from '@/components/modals/SystemAdminWarningModal';
-import { Eye, EyeOff } from 'lucide-react';
+import { Eye, EyeOff, KeyRound } from 'lucide-react';
+
+type MfaMethod = 'email_otp';
 
 export default function LoginPage() {
   const router = useRouter();
-  const { user, loading: authLoading, needsProfileSetup: authNeedsProfileSetup } = useAuth();
+  const { user, loading: authLoading, needsProfileSetup: authNeedsProfileSetup, refreshUser } = useAuth();
   const [step, setStep] = useState<'email' | 'password' | 'register'>('email');
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
-  const [confirmPassword, setConfirmPassword] = useState('');
+  const [mfaCode, setMfaCode] = useState('');
+  const [mfaMethod, setMfaMethod] = useState<MfaMethod>('email_otp');
+  const [requiresMfa, setRequiresMfa] = useState(false);
+  const [mfaNotice, setMfaNotice] = useState('');
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
-  const [message, setMessage] = useState('');
   const [needsProfileSetup, setNeedsProfileSetup] = useState(false);
-  
-  // System Admin warning modal state
-  const [showSystemAdminWarning, setShowSystemAdminWarning] = useState(false);
-  
   // Forgot password modal state
   const [showForgotPasswordModal, setShowForgotPasswordModal] = useState(false);
   const [resetEmail, setResetEmail] = useState('');
@@ -41,7 +33,6 @@ export default function LoginPage() {
   
   // Password visibility toggle state
   const [showPassword, setShowPassword] = useState(false);
-  const [showConfirmPassword, setShowConfirmPassword] = useState(false);
   
   // Check if redirected here due to account lockout
   useEffect(() => {
@@ -55,7 +46,7 @@ export default function LoginPage() {
     }
     // Handle return from successful unlock
     if (params.get('unlocked') === 'true') {
-      setMessage('Account unlocked. Please sign in with your new password.');
+      setError('Account unlocked. Please sign in with your new password.');
       window.history.replaceState({}, '', '/login');
     }
   }, [router]);
@@ -129,78 +120,16 @@ export default function LoginPage() {
     e.preventDefault();
     setLoading(true);
     setError('');
-    setMessage('');
 
     try {
-      const response = await api.post('/firebase-auth/check-user', { email });
-      const { existsInFirebase, existsInDatabase, hasProfile } = response.data.data;
-
-      if (existsInFirebase && existsInDatabase && hasProfile) {
-        // SECURITY: Check if account is locked BEFORE showing password form
-        try {
-          const securityCheck = await api.post('/firebase-auth/check-login-security', { email });
-          if (securityCheck.data.data?.accountLocked) {
-            router.push(`/account-locked?email=${encodeURIComponent(email)}`);
-            return;
-          }
-        } catch {
-          // If security check fails, proceed to password — server-side lockout will still block
-        }
-        // User exists in both Firebase and DB with complete profile - show password login
-        setStep('password');
-      } else if (existsInFirebase && !existsInDatabase) {
-        // SECURITY: Check if account is locked BEFORE showing password form
-        try {
-          const securityCheck = await api.post('/firebase-auth/check-login-security', { email });
-          if (securityCheck.data.data?.accountLocked) {
-            router.push(`/account-locked?email=${encodeURIComponent(email)}`);
-            return;
-          }
-        } catch {
-          // If security check fails, proceed to password — server-side lockout will still block
-        }
-        // User exists in Firebase but not in DB - they need to complete profile setup
-        setNeedsProfileSetup(true);
-        setMessage('Your account exists but profile setup was not completed. Please enter your password to continue.');
-        setStep('password');
-      } else if (existsInFirebase && existsInDatabase && !hasProfile) {
-        // SECURITY: Check if account is locked BEFORE showing password form
-        try {
-          const securityCheck = await api.post('/firebase-auth/check-login-security', { email });
-          if (securityCheck.data.data?.accountLocked) {
-            router.push(`/account-locked?email=${encodeURIComponent(email)}`);
-            return;
-          }
-        } catch {
-          // If security check fails, proceed to password — server-side lockout will still block
-        }
-        // User exists in both but profile incomplete
-        setNeedsProfileSetup(true);
-        setMessage('Please enter your password to complete your profile setup.');
-        setStep('password');
-      } else {
-        // User doesn't exist — invitation required (self-registration disabled)
-        setStep('register');
-      }
-    } catch (err: any) {
-      // Handle System Admin trying to use regular login
-      if (err.response?.status === 403) {
-        setShowSystemAdminWarning(true);
-        setLoading(false);
-        return;
-      }
-      // DEBUG: Log the actual error for diagnosis
-      console.error('[LOGIN DEBUG] check-user error:', {
-        message: err.message,
-        code: err.code,
-        status: err.response?.status,
-        data: err.response?.data,
-        name: err.name,
-      });
-      const errorMsg = typeof err.response?.data?.error === 'string' 
-        ? err.response.data.error 
-        : getFirebaseErrorMessage(err, 'Failed to verify email');
-      setError(errorMsg);
+      setEmail(email.toLowerCase().trim());
+      setNeedsProfileSetup(false);
+      setRequiresMfa(false);
+      setMfaCode('');
+      setMfaNotice('');
+      setStep('password');
+    } catch {
+      setError('Unable to continue. Please try again.');
     } finally {
       setLoading(false);
     }
@@ -208,58 +137,76 @@ export default function LoginPage() {
 
   const handlePasswordLogin = async (e: React.FormEvent) => {
     e.preventDefault();
+    if (requiresMfa && !mfaCode.trim()) {
+      setError('Enter the verification code sent to your email.');
+      return;
+    }
+
     setLoading(true);
     setError('');
 
     try {
-      await signInWithEmailAndPassword(auth, email, password);
-      
-      // SECURITY: Check if account is locked due to brute-force detection
-      try {
-        const securityCheck = await api.post('/firebase-auth/check-login-security', { email });
-        if (securityCheck.data.data?.accountLocked) {
-          await auth.signOut();
-          router.push(`/account-locked?email=${encodeURIComponent(email)}`);
-          return;
-        }
-      } catch {
-        console.warn('Security check unavailable');
+      const payload: { email: string; password: string; mfaCode?: string } = {
+        email,
+        password,
+      };
+      if (requiresMfa) {
+        payload.mfaCode = mfaCode.trim();
       }
 
-      // No suspicious activity — report successful login and proceed
-      api.post('/firebase-auth/report-successful-login', { email }).catch(() => {});
-      
-      // Check if user has completed profile in PostgreSQL
-      const response = await api.post('/firebase-auth/check-user', { email });
-      const { existsInDatabase, hasProfile } = response.data.data;
-
-      if (existsInDatabase && hasProfile) {
-        router.push('/dashboard');
-      } else {
-        // User authenticated with Firebase but hasn't set up profile in DB
-        router.push('/profile-setup');
+      const response = await api.post('/auth/login', payload);
+      if (response.data?.requiresMfa) {
+        setRequiresMfa(true);
+        setMfaMethod('email_otp');
+        setMfaNotice(response.data?.message || 'Enter the verification code sent to your email.');
+        setError('');
+        return;
       }
+
+      if (!response.data?.success) {
+        throw new Error(response.data?.error || 'Unable to sign in');
+      }
+
+      await refreshUser();
+      router.push('/dashboard');
     } catch (err: any) {
-      // Report the failed attempt to backend for tracking
-      api.post('/firebase-auth/report-failed-login', { email }).catch(() => {});
+      const apiError = err.response?.data;
+      if (apiError?.requiresMfa) {
+        setRequiresMfa(true);
+        setMfaMethod('email_otp');
+        setMfaNotice(apiError?.message || 'Enter the verification code sent to your email.');
+        setError(typeof apiError?.error === 'string' ? apiError.error : 'Invalid verification code');
+        return;
+      }
 
-      // Handle System Admin trying to use regular login
-      if (err.response?.status === 403) {
-        // Sign out from Firebase to clear the session
-        await auth.signOut();
-        setShowSystemAdminWarning(true);
-        setLoading(false);
+      const errorMsg = typeof err.response?.data?.error === 'string'
+        ? err.response.data.error
+        : 'Invalid email or password';
+
+      setError(errorMsg);
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const handleResendMfaCode = async () => {
+    if (!email || !password) return;
+
+    setLoading(true);
+    setError('');
+    try {
+      const response = await api.post('/auth/login', { email, password });
+      if (response.data?.requiresMfa) {
+        setMfaNotice(response.data?.message || 'Enter the verification code sent to your email.');
+        setMfaCode('');
         return;
       }
-      // Account disabled at Firebase level OR Firebase rate-limited = account locked
-      if (isTooManyRequestsError(err) || err.code === 'auth/user-disabled') {
-        // Report to backend so it can disable the account if not already
-        api.post('/firebase-auth/report-failed-login', { email }).catch(() => {});
-        router.push(`/account-locked?email=${encodeURIComponent(email)}`);
-        return;
-      } else {
-        setError(getFirebaseErrorMessage(err, 'Login failed. Please try again.'));
-      }
+      setError('Unable to send a new verification code. Please try again.');
+    } catch (err: any) {
+      const message = typeof err.response?.data?.error === 'string'
+        ? err.response.data.error
+        : 'Unable to send a new verification code. Please try again.';
+      setError(message);
     } finally {
       setLoading(false);
     }
@@ -295,29 +242,10 @@ export default function LoginPage() {
     setResetError('');
 
     try {
-      // Check if email exists in Firebase
-      const signInMethods = await fetchSignInMethodsForEmail(auth, resetEmail);
-      
-      if (signInMethods.length === 0) {
-        // Don't reveal if account doesn't exist for security
-        // But still show success message
-      }
-      
-      await sendPasswordResetEmail(auth, resetEmail, {
-        // This URL is where users land AFTER completing password reset
-        // The actual reset happens on our custom /reset-password page
-        url: `${window.location.origin}/login`,
-        handleCodeInApp: true, // This enables custom action URL handling
-      });
-      
+      await api.post('/auth/forgot-password', { email: resetEmail.toLowerCase().trim() });
       setResetSuccess(true);
     } catch (err: any) {
-      if (err.code === 'auth/user-not-found') {
-        // Don't reveal if user doesn't exist - just show success
-        setResetSuccess(true);
-      } else {
-        setResetError(getFirebaseErrorMessage(err, 'Failed to send reset email. Please try again.'));
-      }
+      setResetError(err.response?.data?.error || 'Failed to send reset email. Please try again.');
     } finally {
       setResetLoading(false);
     }
@@ -356,9 +284,9 @@ export default function LoginPage() {
           Back to Home
         </Link>
 
-        <div className="bg-white/10 backdrop-blur-xl border border-white/20 rounded-xl sm:rounded-2xl shadow-2xl p-5 sm:p-8">
-          <div className="text-center mb-5 sm:mb-8">
-            <div className="flex justify-center mb-4">
+        <div className="bg-white/10 backdrop-blur-xl border border-white/20 rounded-xl sm:rounded-2xl shadow-2xl p-4 sm:p-6">
+          <div className="text-center mb-4 sm:mb-6">
+            <div className="flex justify-center mb-3">
               <div className="relative w-16 h-16">
                 <Image 
                   src="/images/logo.png" 
@@ -374,23 +302,17 @@ export default function LoginPage() {
             <p className="text-sm sm:text-base text-gray-300">
               Enterprise Root Cause Analysis Platform
             </p>
-            <p className="text-xs text-gray-400 mt-3">Sign in with your email. New users must be invited by their organization admin.</p>
+            <p className="text-xs text-gray-400 mt-2">Sign in with your email. New users must be invited by their organization admin.</p>
           </div>
 
           {error && (
-            <div className="mb-4 sm:mb-6 p-3 sm:p-4 bg-danger-50 dark:bg-danger-900/20 border border-danger-200 dark:border-danger-800 rounded-lg text-danger-700 dark:text-danger-300 text-xs sm:text-sm">
+            <div className="mb-3 sm:mb-4 p-2.5 sm:p-3 bg-danger-50 dark:bg-danger-900/20 border border-danger-200 dark:border-danger-800 rounded-lg text-danger-700 dark:text-danger-300 text-xs sm:text-sm">
               {error}
             </div>
           )}
 
-          {message && (
-            <div className="mb-4 sm:mb-6 p-3 sm:p-4 bg-success-50 dark:bg-success-900/20 border border-success-200 dark:border-success-800 rounded-lg text-success-700 dark:text-success-300 text-xs sm:text-sm">
-              {message}
-            </div>
-          )}
-
           {step === 'email' && (
-            <form onSubmit={handleEmailSubmit} className="space-y-6">
+            <form onSubmit={handleEmailSubmit} className="space-y-4">
               <div>
                 <label className="block text-sm font-medium text-gray-200 mb-2">
                   Email Address
@@ -400,14 +322,14 @@ export default function LoginPage() {
                   value={email}
                   onChange={(e) => setEmail(e.target.value)}
                   required
-                  className="w-full px-4 py-3 bg-white/5 border border-white/10 rounded-lg text-white placeholder-gray-400 focus:outline-none focus:ring-2 focus:ring-blue-500/50 focus:border-transparent"
+                  className="w-full px-4 py-2.5 bg-white/5 border border-white/10 rounded-lg text-white placeholder-gray-400 focus:outline-none focus:ring-2 focus:ring-blue-500/50 focus:border-transparent"
                   placeholder="you@company.com"
                 />
               </div>
               <button
                 type="submit"
                 disabled={loading}
-                className="w-full px-6 py-3 bg-gradient-to-r from-blue-600 to-blue-500 text-white rounded-lg hover:from-blue-700 hover:to-blue-600 transition-all disabled:opacity-50 disabled:cursor-not-allowed font-medium shadow-lg"
+                className="w-full px-6 py-2.5 bg-gradient-to-r from-blue-600 to-blue-500 text-white rounded-lg hover:from-blue-700 hover:to-blue-600 transition-all disabled:opacity-50 disabled:cursor-not-allowed font-medium shadow-lg"
               >
                 {loading ? 'Checking...' : 'Continue'}
               </button>
@@ -415,49 +337,104 @@ export default function LoginPage() {
           )}
 
           {step === 'password' && (
-            <form onSubmit={handlePasswordLogin} className="space-y-6">
+            <form onSubmit={handlePasswordLogin} className="space-y-4">
               <div>
                 <div className="flex items-center justify-between mb-2">
                   <label className="block text-sm font-medium text-gray-200">Email</label>
-                  <button type="button" onClick={() => { setStep('email'); setNeedsProfileSetup(false); }} className="text-sm text-blue-400 hover:text-blue-300">Change</button>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setStep('email');
+                      setNeedsProfileSetup(false);
+                      setRequiresMfa(false);
+                      setMfaCode('');
+                      setMfaNotice('');
+                      setError('');
+                    }}
+                    className="text-sm text-blue-400 hover:text-blue-300"
+                  >
+                    Change
+                  </button>
                 </div>
-                <div className="px-4 py-3 rounded-lg bg-white/5 border border-white/10 text-white">{email}</div>
+                <div className="px-4 py-2.5 rounded-lg bg-white/5 border border-white/10 text-white">{email}</div>
               </div>
               {needsProfileSetup && (
-                <div className="p-4 bg-amber-500/10 border border-amber-500/30 rounded-lg text-sm">
+                <div className="p-3 bg-amber-500/10 border border-amber-500/30 rounded-lg text-sm">
                   <p className="text-amber-200 font-medium mb-1">Complete Your Profile</p>
                   <p className="text-amber-300/80">Your account was created but profile setup wasn't completed. Sign in to finish setting up your profile.</p>
                 </div>
               )}
-              <div>
-                <label className="block text-sm font-medium text-gray-200 mb-2">Password</label>
-                <div className="relative">
-                  <input
-                    type={showPassword ? 'text' : 'password'}
-                    value={password}
-                    onChange={(e) => setPassword(e.target.value)}
-                    required
-                    className="w-full px-4 py-3 pr-12 bg-white/5 border border-white/10 rounded-lg text-white placeholder-gray-400 focus:outline-none focus:ring-2 focus:ring-blue-500/50 focus:border-transparent"
-                    placeholder="Enter your password"
-                  />
-                  <button
-                    type="button"
-                    onClick={() => setShowPassword(!showPassword)}
-                    className="absolute right-3 top-1/2 -translate-y-1/2 text-gray-400 hover:text-white transition-colors"
-                  >
-                    {showPassword ? <EyeOff className="h-5 w-5" /> : <Eye className="h-5 w-5" />}
-                  </button>
+              {!requiresMfa && (
+                <div>
+                  <label className="block text-sm font-medium text-gray-200 mb-2">Password</label>
+                  <div className="relative">
+                    <input
+                      type={showPassword ? 'text' : 'password'}
+                      value={password}
+                      onChange={(e) => setPassword(e.target.value)}
+                      required
+                      className="w-full px-4 py-2.5 pr-12 bg-white/5 border border-white/10 rounded-lg text-white placeholder-gray-400 focus:outline-none focus:ring-2 focus:ring-blue-500/50 focus:border-transparent"
+                      placeholder="Enter your password"
+                    />
+                    <button
+                      type="button"
+                      onClick={() => setShowPassword(!showPassword)}
+                      className="absolute right-3 top-1/2 -translate-y-1/2 text-gray-400 hover:text-white transition-colors"
+                    >
+                      {showPassword ? <EyeOff className="h-5 w-5" /> : <Eye className="h-5 w-5" />}
+                    </button>
+                  </div>
                 </div>
-              </div>
-              <div className="flex items-center justify-between text-sm">
-                <button type="button" onClick={handleForgotPassword} className="text-blue-400 hover:text-blue-300">Forgot password?</button>
-              </div>
+              )}
+              {requiresMfa && (
+                <>
+                  <div className="p-3 bg-blue-500/10 border border-blue-500/30 rounded-lg text-sm text-blue-100">
+                    {mfaNotice || 'Enter the verification code sent to your email.'}
+                  </div>
+                  <div>
+                    <label className="block text-sm font-medium text-gray-200 mb-2">
+                      {mfaMethod === 'email_otp' ? 'Email Verification Code' : 'Verification Code'}
+                    </label>
+                    <div className="relative">
+                      <input
+                        type="text"
+                        inputMode="numeric"
+                        pattern="[0-9]*"
+                        maxLength={6}
+                        value={mfaCode}
+                        onChange={(e) => setMfaCode(e.target.value.replace(/\D/g, '').slice(0, 6))}
+                        required
+                        className="w-full px-4 py-2.5 pr-12 bg-white/5 border border-white/10 rounded-lg text-white placeholder-gray-400 focus:outline-none focus:ring-2 focus:ring-blue-500/50 focus:border-transparent tracking-[0.35em]"
+                        placeholder="000000"
+                      />
+                      <div className="absolute right-3 top-1/2 -translate-y-1/2">
+                        <KeyRound className="h-5 w-5 text-gray-400" />
+                      </div>
+                    </div>
+                    <div className="mt-2 flex items-center justify-between text-xs text-gray-300">
+                      <span>Codes expire in 10 minutes.</span>
+                      <button
+                        type="button"
+                        onClick={handleResendMfaCode}
+                        className="text-blue-300 hover:text-blue-200"
+                      >
+                        Resend code
+                      </button>
+                    </div>
+                  </div>
+                </>
+              )}
+              {!requiresMfa && (
+                <div className="flex items-center justify-between text-sm">
+                  <button type="button" onClick={handleForgotPassword} className="text-blue-400 hover:text-blue-300">Forgot password?</button>
+                </div>
+              )}
               <button
                 type="submit"
                 disabled={loading}
-                className="w-full px-6 py-3 bg-gradient-to-r from-blue-600 to-blue-500 text-white rounded-lg hover:from-blue-700 hover:to-blue-600 transition-all disabled:opacity-50 disabled:cursor-not-allowed font-medium shadow-lg"
+                className="w-full px-6 py-2.5 bg-gradient-to-r from-blue-600 to-blue-500 text-white rounded-lg hover:from-blue-700 hover:to-blue-600 transition-all disabled:opacity-50 disabled:cursor-not-allowed font-medium shadow-lg"
               >
-                {loading ? 'Signing in...' : 'Sign In'}
+                {loading ? (requiresMfa ? 'Verifying...' : 'Signing in...') : (requiresMfa ? 'Verify & Sign In' : 'Sign In')}
               </button>
             </form>
           )}
@@ -634,15 +611,6 @@ export default function LoginPage() {
         </div>
       )}
 
-      {/* System Admin Warning Modal */}
-      <SystemAdminWarningModal
-        isOpen={showSystemAdminWarning}
-        onClose={() => setShowSystemAdminWarning(false)}
-        onRedirect={() => {
-          setShowSystemAdminWarning(false);
-          router.push('/dashmet-control/login');
-        }}
-      />
     </div>
   );
 }

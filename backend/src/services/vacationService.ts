@@ -3,13 +3,50 @@ import { prisma } from '../utils/prisma';
 // ─────────────────────────────────────────────────────────────────────────────
 // Helper: calculate business days between two dates
 // ─────────────────────────────────────────────────────────────────────────────
+const DATE_ONLY_REGEX = /^\d{4}-\d{2}-\d{2}$/;
+
+function startOfUtcDay(input: Date): Date {
+  return new Date(Date.UTC(input.getUTCFullYear(), input.getUTCMonth(), input.getUTCDate()));
+}
+
+function endOfUtcDay(input: Date): Date {
+  return new Date(Date.UTC(input.getUTCFullYear(), input.getUTCMonth(), input.getUTCDate(), 23, 59, 59, 999));
+}
+
+function addUtcDays(input: Date, days: number): Date {
+  const next = new Date(input);
+  next.setUTCDate(next.getUTCDate() + days);
+  return next;
+}
+
+function parseVacationDateInput(input: string, endOfDay = false): Date {
+  if (DATE_ONLY_REGEX.test(input)) {
+    const [year, month, day] = input.split('-').map(Number);
+    return endOfDay
+      ? new Date(Date.UTC(year, month - 1, day, 23, 59, 59, 999))
+      : new Date(Date.UTC(year, month - 1, day));
+  }
+
+  const parsed = new Date(input);
+  if (Number.isNaN(parsed.getTime())) {
+    throw new Error('Invalid date value');
+  }
+
+  return endOfDay ? endOfUtcDay(parsed) : startOfUtcDay(parsed);
+}
+
+function formatVacationDate(date: Date, options: Intl.DateTimeFormatOptions): string {
+  return date.toLocaleDateString('en-US', { ...options, timeZone: 'UTC' });
+}
+
 function calcBusinessDays(start: Date, end: Date): number {
   let count = 0;
-  const cur = new Date(start);
-  while (cur <= end) {
-    const day = cur.getDay();
+  const cur = startOfUtcDay(start);
+  const last = startOfUtcDay(end);
+  while (cur <= last) {
+    const day = cur.getUTCDay();
     if (day !== 0 && day !== 6) count++;
-    cur.setDate(cur.getDate() + 1);
+    cur.setUTCDate(cur.getUTCDate() + 1);
   }
   return Math.max(count, 1);
 }
@@ -105,8 +142,8 @@ export async function createVacationRequest(data: {
   const leaveType = data.leaveType.toLowerCase();
   if (!validTypes.includes(leaveType)) throw new Error(`Invalid leave type. Must be one of: ${validTypes.join(', ')}`);
 
-  const startDate = new Date(data.startDate);
-  const endDate = new Date(data.endDate);
+  const startDate = parseVacationDateInput(data.startDate);
+  const endDate = parseVacationDateInput(data.endDate);
   const durationDays = data.durationDays && data.durationDays > 0 ? data.durationDays : calcBusinessDays(startDate, endDate);
 
   // ── Constraint enforcement ──────────────────────────────────────────────
@@ -118,17 +155,15 @@ export async function createVacationRequest(data: {
   }
 
   // 2. Minimum notice period
-  const today = new Date();
-  today.setHours(0, 0, 0, 0);
-  const noticeDate = new Date(today);
-  noticeDate.setDate(noticeDate.getDate() + constraintSettings.minimumNoticeDays);
+  const today = startOfUtcDay(new Date());
+  const noticeDate = addUtcDays(today, constraintSettings.minimumNoticeDays);
   if (startDate < noticeDate) {
     throw new Error(`Vacation must be requested at least ${constraintSettings.minimumNoticeDays} days in advance.`);
   }
 
   // 3. Standard allocation check — prevent exceeding annual days
-  const yearStart = new Date(today.getFullYear(), 0, 1);
-  const yearEnd = new Date(today.getFullYear(), 11, 31);
+  const yearStart = new Date(Date.UTC(today.getUTCFullYear(), 0, 1));
+  const yearEnd = new Date(Date.UTC(today.getUTCFullYear(), 11, 31, 23, 59, 59, 999));
   const usedThisYear = await prisma.vacation.aggregate({
     where: {
       employeeId: employeeId!,
@@ -145,13 +180,11 @@ export async function createVacationRequest(data: {
   // 4. Blackout period check
   const blackouts = await getBlackoutPeriods(data.organizationId);
   for (const bp of blackouts) {
-    const bpStart = new Date(bp.startDate);
-    const bpEnd = new Date(bp.endDate);
-    bpStart.setHours(0, 0, 0, 0);
-    bpEnd.setHours(23, 59, 59, 999);
+    const bpStart = startOfUtcDay(new Date(bp.startDate));
+    const bpEnd = endOfUtcDay(new Date(bp.endDate));
     // Check if requested range overlaps with blackout
     if (startDate <= bpEnd && endDate >= bpStart) {
-      throw new Error(`Requested dates overlap with blackout period "${bp.name}" (${bpStart.toLocaleDateString('en-US', { month: 'short', day: 'numeric' })} - ${bpEnd.toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' })}).`);
+      throw new Error(`Requested dates overlap with blackout period "${bp.name}" (${formatVacationDate(bpStart, { month: 'short', day: 'numeric' })} - ${formatVacationDate(bpEnd, { month: 'short', day: 'numeric', year: 'numeric' })}).`);
     }
   }
 
@@ -184,7 +217,7 @@ export async function createVacationRequest(data: {
       startDate,
       endDate,
       durationDays,
-      returnToWork: data.returnToWork ? new Date(data.returnToWork) : null,
+      returnToWork: data.returnToWork ? parseVacationDateInput(data.returnToWork) : null,
       reason: data.reason,
       coveragePlan: data.coveragePlan || null,
       emergencyPhone: data.emergencyPhone || null,
@@ -202,8 +235,8 @@ export async function createVacationRequest(data: {
   });
 
   // Create notification
-  const startStr = startDate.toLocaleDateString('en-US', { month: 'short', day: 'numeric' });
-  const endStr = endDate.toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' });
+  const startStr = formatVacationDate(startDate, { month: 'short', day: 'numeric' });
+  const endStr = formatVacationDate(endDate, { month: 'short', day: 'numeric', year: 'numeric' });
   await createVacationNotification({
     employeeId: employeeId!,
     notificationType: 'vacation_submitted',
@@ -240,9 +273,8 @@ export async function getVacationStats(organizationId?: string) {
 }
 
 export async function getUpcomingVacations(organizationId?: string) {
-  const now = new Date();
-  const thirtyDays = new Date();
-  thirtyDays.setDate(thirtyDays.getDate() + 30);
+  const now = startOfUtcDay(new Date());
+  const thirtyDays = addUtcDays(now, 30);
 
   return prisma.vacation.findMany({
     where: {
@@ -297,8 +329,8 @@ export async function approveVacation(vacationId: number, userId: string, reason
     data: { status: 'approved', approvedByUserId: userId, decidedAt: new Date(), decisionReason: reason || null },
   });
 
-  const startStr = vacation.startDate.toLocaleDateString('en-US', { month: 'short', day: 'numeric' });
-  const endStr = vacation.endDate.toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' });
+  const startStr = formatVacationDate(vacation.startDate, { month: 'short', day: 'numeric' });
+  const endStr = formatVacationDate(vacation.endDate, { month: 'short', day: 'numeric', year: 'numeric' });
   let msg = `Your vacation request for ${startStr} - ${endStr} has been approved.`;
   if (reason) msg += ` Note: ${reason}`;
 
@@ -329,13 +361,47 @@ export async function denyVacation(vacationId: number, userId: string, reason: s
     data: { status: 'denied', approvedByUserId: userId, decidedAt: new Date(), decisionReason: reason },
   });
 
-  const startStr = vacation.startDate.toLocaleDateString('en-US', { month: 'short', day: 'numeric' });
-  const endStr = vacation.endDate.toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' });
+  const startStr = formatVacationDate(vacation.startDate, { month: 'short', day: 'numeric' });
+  const endStr = formatVacationDate(vacation.endDate, { month: 'short', day: 'numeric', year: 'numeric' });
   await createVacationNotification({
     employeeId: vacation.employeeId,
     notificationType: 'vacation_denied',
     title: 'Vacation Request Denied',
     message: `Your vacation request for ${startStr} - ${endStr} was not approved. Reason: ${reason}`,
+    relatedVacationId: vacationId,
+    organizationId: vacation.organizationId || undefined,
+  });
+
+  return updated;
+}
+
+export async function cancelVacation(vacationId: number, userId: string, reason?: string) {
+  const vacation = await prisma.vacation.findUnique({
+    where: { id: vacationId },
+    include: { Employee: true },
+  });
+  if (!vacation) throw new Error('Vacation request not found');
+  if (vacation.status !== 'pending') throw new Error('Only pending requests can be cancelled');
+
+  const decisionReason = reason?.trim() || 'Cancelled by administrator';
+
+  const updated = await prisma.vacation.update({
+    where: { id: vacationId },
+    data: {
+      status: 'cancelled',
+      approvedByUserId: userId,
+      decidedAt: new Date(),
+      decisionReason,
+    },
+  });
+
+  const startStr = formatVacationDate(vacation.startDate, { month: 'short', day: 'numeric' });
+  const endStr = formatVacationDate(vacation.endDate, { month: 'short', day: 'numeric', year: 'numeric' });
+  await createVacationNotification({
+    employeeId: vacation.employeeId,
+    notificationType: 'vacation_cancelled',
+    title: 'Vacation Request Cancelled',
+    message: `Your vacation request for ${startStr} - ${endStr} was cancelled. ${decisionReason}`,
     relatedVacationId: vacationId,
     organizationId: vacation.organizationId || undefined,
   });
@@ -366,8 +432,8 @@ export async function updateVacationRequest(vacationId: number, data: {
   if (!vacation) throw new Error('Vacation request not found');
   if (vacation.status !== 'pending') throw new Error('Only pending requests can be edited');
 
-  const startDate = new Date(data.startDate);
-  const endDate = new Date(data.endDate);
+  const startDate = parseVacationDateInput(data.startDate);
+  const endDate = parseVacationDateInput(data.endDate);
   if (endDate < startDate) throw new Error('End date must be after or equal to start date');
 
   const durationDays = data.durationDays && data.durationDays > 0 ? data.durationDays : calcBusinessDays(startDate, endDate);
@@ -403,6 +469,27 @@ export async function updateVacationRequest(vacationId: number, data: {
   }
 
   return updated;
+}
+
+export async function deleteVacationRequest(vacationId: number, options?: { organizationId?: string }) {
+  const vacation = await prisma.vacation.findUnique({
+    where: { id: vacationId },
+  });
+  if (!vacation) throw new Error('Vacation request not found');
+
+  if (options?.organizationId && vacation.organizationId !== options.organizationId) {
+    throw new Error('Vacation request not found');
+  }
+
+  if (vacation.status !== 'cancelled') {
+    throw new Error('Only cancelled requests can be deleted');
+  }
+
+  await prisma.vacation.delete({
+    where: { id: vacationId },
+  });
+
+  return { id: vacationId };
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -600,8 +687,8 @@ export async function createBlackoutPeriod(data: {
   return prisma.vacationBlackoutPeriod.create({
     data: {
       name: data.name,
-      startDate: new Date(data.startDate),
-      endDate: new Date(data.endDate),
+      startDate: parseVacationDateInput(data.startDate),
+      endDate: parseVacationDateInput(data.endDate),
       description: data.description || null,
       isActive: data.isActive ?? true,
       createdByUserId: data.createdByUserId || null,
@@ -624,8 +711,8 @@ export async function updateBlackoutPeriod(periodId: number, data: {
     where: { id: periodId },
     data: {
       name: data.name,
-      startDate: data.startDate ? new Date(data.startDate) : undefined,
-      endDate: data.endDate ? new Date(data.endDate) : undefined,
+      startDate: data.startDate ? parseVacationDateInput(data.startDate) : undefined,
+      endDate: data.endDate ? parseVacationDateInput(data.endDate) : undefined,
       description: data.description,
       isActive: data.isActive,
     },
@@ -648,9 +735,8 @@ export async function getVacationConflicts(organizationId?: string) {
   const conflicts: any[] = [];
 
   // Get all active vacations (approved + pending) in the next 90 days
-  const now = new Date();
-  const ninetyDays = new Date();
-  ninetyDays.setDate(ninetyDays.getDate() + 90);
+  const now = startOfUtcDay(new Date());
+  const ninetyDays = addUtcDays(now, 90);
 
   const activeVacations = await prisma.vacation.findMany({
     where: {
@@ -666,8 +752,8 @@ export async function getVacationConflicts(organizationId?: string) {
   // Check for overlapping vacations per day (simplified)
   const dayMap = new Map<string, any[]>();
   for (const vac of activeVacations) {
-    const cur = new Date(vac.startDate);
-    const end = new Date(vac.endDate);
+    const cur = startOfUtcDay(vac.startDate);
+    const end = startOfUtcDay(vac.endDate);
     while (cur <= end) {
       const key = cur.toISOString().split('T')[0];
       if (!dayMap.has(key)) dayMap.set(key, []);
@@ -678,7 +764,7 @@ export async function getVacationConflicts(organizationId?: string) {
         status: vac.status,
         role: vac.Employee.role,
       });
-      cur.setDate(cur.getDate() + 1);
+      cur.setUTCDate(cur.getUTCDate() + 1);
     }
   }
 
@@ -707,7 +793,7 @@ export async function getVacationConflicts(organizationId?: string) {
           description: `Vacation request during restricted period: ${bp.name}`,
           details: {
             Employee: `${vac.Employee.firstName} ${vac.Employee.lastName}`,
-            'Requested Dates': `${vac.startDate.toLocaleDateString('en-US', { month: 'short', day: 'numeric' })} - ${vac.endDate.toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' })}`,
+            'Requested Dates': `${formatVacationDate(vac.startDate, { month: 'short', day: 'numeric' })} - ${formatVacationDate(vac.endDate, { month: 'short', day: 'numeric', year: 'numeric' })}`,
             'Blackout Period': bp.name,
           },
         });
@@ -866,9 +952,8 @@ export async function getMyVacationActivity(employeeId: number) {
 }
 
 export async function getMyUpcomingVacations(employeeId: number) {
-  const now = new Date();
-  const thirtyDays = new Date();
-  thirtyDays.setDate(thirtyDays.getDate() + 30);
+  const now = startOfUtcDay(new Date());
+  const thirtyDays = addUtcDays(now, 30);
 
   return prisma.vacation.findMany({
     where: { employeeId, status: 'approved', startDate: { gte: now, lte: thirtyDays } },
@@ -901,7 +986,7 @@ export async function getMyVacationConflicts(employeeId: number) {
   const maxSimultaneous = (settings as any).maxSimultaneousAbsences || 3;
 
   const myVacations = await prisma.vacation.findMany({
-    where: { employeeId, status: { in: ['approved', 'pending'] }, endDate: { gte: new Date() } },
+    where: { employeeId, status: { in: ['approved', 'pending'] }, endDate: { gte: startOfUtcDay(new Date()) } },
     orderBy: { startDate: 'asc' },
   });
 
@@ -920,8 +1005,8 @@ export async function getMyVacationConflicts(employeeId: number) {
 
     const totalOff = overlapping.length + 1;
     if (totalOff > maxSimultaneous) {
-      const startStr = vac.startDate.toLocaleDateString('en-US', { month: 'short', day: 'numeric' });
-      const endStr = vac.endDate.toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' });
+      const startStr = formatVacationDate(vac.startDate, { month: 'short', day: 'numeric' });
+      const endStr = formatVacationDate(vac.endDate, { month: 'short', day: 'numeric', year: 'numeric' });
       conflicts.push({
         severity: totalOff > maxSimultaneous + 1 ? 'critical' : 'warning',
         title: `Scheduling Conflict: ${startStr} - ${endStr}`,

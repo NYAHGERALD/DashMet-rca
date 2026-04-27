@@ -1,10 +1,7 @@
 'use client';
 
-import { useState, useEffect, useCallback } from 'react';
+import { useState, useEffect, useCallback, useMemo } from 'react';
 import dynamic from 'next/dynamic';
-import { sendPasswordResetEmail } from 'firebase/auth';
-import { auth } from '@/lib/firebase';
-import { getFirebaseErrorMessage } from '@/lib/firebaseErrors';
 import { useAuth } from '@/components/providers/AuthProvider';
 import { useTheme } from '@/components/providers/ThemeProvider';
 import { useI18n } from '@/lib/i18n/I18nProvider';
@@ -20,18 +17,53 @@ const ProfilePictureCropper = dynamic(
 
 interface Preferences {
   theme: 'LIGHT' | 'DARK' | 'SYSTEM';
+  timezone: string;
   defaultSiteId: string | null;
   defaultLineId: string | null;
 }
+
+const DEFAULT_TIMEZONE = 'America/Chicago';
+
+const getBrowserTimezone = (): string =>
+  Intl.DateTimeFormat().resolvedOptions().timeZone || DEFAULT_TIMEZONE;
+
+const getAvailableTimezones = (): string[] => {
+  const intlWithSupported = Intl as unknown as {
+    supportedValuesOf?: (key: 'timeZone') => string[];
+  };
+
+  if (typeof intlWithSupported.supportedValuesOf === 'function') {
+    const zones = intlWithSupported.supportedValuesOf('timeZone');
+    if (zones.length) return zones;
+  }
+
+  return [
+    'America/Chicago',
+    'America/New_York',
+    'America/Denver',
+    'America/Los_Angeles',
+    'America/Phoenix',
+    'America/Anchorage',
+    'Pacific/Honolulu',
+    'UTC',
+    'Europe/London',
+    'Europe/Paris',
+    'Asia/Tokyo',
+    'Asia/Shanghai',
+    'Australia/Sydney',
+  ];
+};
 
 export default function SettingsModal() {
   const { isOpen, closeSettings, initialTab } = useSettingsModal();
   const { user, refreshUser } = useAuth();
   const { theme: currentTheme, setTheme: setAppTheme } = useTheme();
   const { language, setLanguage, t, availableLanguages } = useI18n();
+  const isSystemAdminRole = user?.role === 'SYSTEM_ADMIN';
 
   const [preferences, setPreferences] = useState<Preferences>({
     theme: 'DARK',
+    timezone: getBrowserTimezone(),
     defaultSiteId: null,
     defaultLineId: null,
   });
@@ -71,6 +103,7 @@ export default function SettingsModal() {
   const [showSessionsModal, setShowSessionsModal] = useState(false);
   const [sessionsLoading, setSessionsLoading] = useState(false);
   const [revokingSession, setRevokingSession] = useState<string | null>(null);
+  const timezoneOptions = useMemo(() => getAvailableTimezones(), []);
 
   // Reset tab when opened with a new initialTab
   useEffect(() => {
@@ -86,7 +119,16 @@ export default function SettingsModal() {
     try {
       const response = await api.get('/preferences');
       const prefs = response.data.data;
-      setPreferences(prefs);
+      const timezone = prefs?.timezone || getBrowserTimezone();
+      if (typeof window !== 'undefined') {
+        window.localStorage.setItem('userTimezone', timezone);
+      }
+      setPreferences({
+        theme: prefs?.theme || 'DARK',
+        timezone,
+        defaultSiteId: prefs?.defaultSiteId ?? null,
+        defaultLineId: prefs?.defaultLineId ?? null,
+      });
     } catch (err: any) {
       console.error('Failed to load preferences:', err);
     }
@@ -94,7 +136,7 @@ export default function SettingsModal() {
 
   const loadProfilePicture = async () => {
     try {
-      const response = await api.get('/firebase-auth/me');
+      const response = await api.get('/auth/me');
       if (response.data.data.user.profilePicture) {
         setProfilePicture(response.data.data.user.profilePicture);
       }
@@ -188,7 +230,7 @@ export default function SettingsModal() {
     setMessage('');
 
     try {
-      const response = await api.patch('/firebase-auth/update-phone', {
+      const response = await api.patch('/auth/update-phone', {
         phone: phoneDigits,
         countryCode: selectedCountry.code,
       });
@@ -221,7 +263,7 @@ export default function SettingsModal() {
     setMessage('');
 
     try {
-      await api.patch('/firebase-auth/update-phone', {
+      await api.patch('/auth/update-phone', {
         phone: phoneDigits,
         countryCode: selectedCountry.code,
         verificationCode: phoneVerificationCode,
@@ -247,12 +289,16 @@ export default function SettingsModal() {
 
     try {
       await api.patch('/preferences', preferences);
+      if (typeof window !== 'undefined') {
+        window.localStorage.setItem('userTimezone', preferences.timezone);
+      }
       const themeMap: Record<string, 'light' | 'dark'> = {
         'LIGHT': 'light',
         'DARK': 'dark',
         'SYSTEM': window.matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light',
       };
       setAppTheme(themeMap[preferences.theme]);
+      if (refreshUser) await refreshUser();
       setMessage('Preferences saved successfully!');
       setTimeout(() => setMessage(''), 3000);
     } catch (err: any) {
@@ -273,12 +319,12 @@ export default function SettingsModal() {
     setError('');
 
     try {
-      await sendPasswordResetEmail(auth, user.email);
+      await api.post('/auth/forgot-password', { email: user.email });
       setMessage(`Password reset email sent to ${user.email}. Please check your inbox.`);
       setTimeout(() => setMessage(''), 5000);
     } catch (err: any) {
       console.error('Failed to send password reset email:', err);
-      setError(getFirebaseErrorMessage(err, 'Failed to send password reset email. Please try again.'));
+      setError(err.response?.data?.error || 'Failed to send password reset email. Please try again.');
     } finally {
       setPasswordLoading(false);
     }
@@ -658,11 +704,13 @@ export default function SettingsModal() {
                 )}
               </div>
 
-              <div className="pt-3 border-t border-gray-200 dark:border-gray-700">
-                <p className="text-sm text-gray-600 dark:text-gray-400">
-                  💡 To update your profile information, contact your system administrator.
-                </p>
-              </div>
+              {!isSystemAdminRole && (
+                <div className="pt-3 border-t border-gray-200 dark:border-gray-700">
+                  <p className="text-sm text-gray-600 dark:text-gray-400">
+                    💡 To update your profile information, contact your organization administrator.
+                  </p>
+                </div>
+              )}
             </div>
 
             {/* Divider */}
@@ -728,6 +776,23 @@ export default function SettingsModal() {
                 )}
               </div>
 
+              <div>
+                <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">
+                  {t('settings.timezone')}
+                </label>
+                <select
+                  value={preferences.timezone}
+                  onChange={(e) => setPreferences({ ...preferences, timezone: e.target.value })}
+                  className="w-full px-4 py-2 border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-700 text-gray-900 dark:text-white focus:ring-2 focus:ring-primary-500 focus:border-primary-500 text-sm"
+                >
+                  {timezoneOptions.map((tz) => (
+                    <option key={tz} value={tz}>
+                      {tz.replace(/_/g, ' ')}
+                    </option>
+                  ))}
+                </select>
+              </div>
+
               <div className="pt-4 border-t border-gray-200 dark:border-gray-700">
                 <button
                   onClick={savePreferences}
@@ -739,13 +804,17 @@ export default function SettingsModal() {
               </div>
             </div>
 
-            {/* Divider */}
-            <hr className="border-gray-200 dark:border-gray-700" />
+            {!isSystemAdminRole && (
+              <>
+                {/* Divider */}
+                <hr className="border-gray-200 dark:border-gray-700" />
 
-            {/* NOTIFICATIONS */}
-            <div>
-              <LswNotificationSettings />
-            </div>
+                {/* NOTIFICATIONS */}
+                <div>
+                  <LswNotificationSettings />
+                </div>
+              </>
+            )}
 
             {/* Divider */}
             <hr className="border-gray-200 dark:border-gray-700" />

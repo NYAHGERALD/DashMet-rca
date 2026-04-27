@@ -197,6 +197,7 @@ function PrivilegesContent() {
   const [reverting, setReverting] = useState<string | null>(null);
   
   // Audit log filter state
+  const [logSearchQuery, setLogSearchQuery] = useState('');
   const [logFilterRevert, setLogFilterRevert] = useState<'all' | 'reverted' | 'active'>('all');
   const [logFilterType, setLogFilterType] = useState<'all' | 'ENABLE' | 'DISABLE' | 'REVERT'>('all');
   const [logFilterDateFrom, setLogFilterDateFrom] = useState<string>('');
@@ -235,13 +236,11 @@ function PrivilegesContent() {
     const setupSocket = async () => {
       const wsUrl = process.env.NEXT_PUBLIC_WS_URL || process.env.NEXT_PUBLIC_API_URL?.replace('/api', '') || 'http://localhost:5002';
 
-      const firebaseUser = (await import('@/lib/firebase')).auth.currentUser;
-      const firebaseToken = firebaseUser ? await firebaseUser.getIdToken() : null;
       if (cancelled) return;
       
       socketRef.current = io(wsUrl, {
+        withCredentials: true,
         auth: {
-          token: firebaseToken,
           userId: user.id,
           organizationId: user.organizationId,
         },
@@ -352,6 +351,22 @@ function PrivilegesContent() {
   // Filter audit logs based on selected filters
   const filteredAuditLogs = useMemo(() => {
     return auditLogs.filter(log => {
+      // Filter by search query
+      if (logSearchQuery.trim()) {
+        const query = logSearchQuery.trim().toLowerCase();
+        const searchable = [
+          log.displayName,
+          log.module,
+          log.role,
+          log.changedByName,
+          log.changeType,
+        ]
+          .filter(Boolean)
+          .join(' ')
+          .toLowerCase();
+        if (!searchable.includes(query)) return false;
+      }
+
       // Filter by revert status
       if (logFilterRevert === 'reverted' && !log.isReverted) return false;
       if (logFilterRevert === 'active' && log.isReverted) return false;
@@ -375,10 +390,11 @@ function PrivilegesContent() {
       
       return true;
     });
-  }, [auditLogs, logFilterRevert, logFilterType, logFilterDateFrom, logFilterDateTo]);
+  }, [auditLogs, logSearchQuery, logFilterRevert, logFilterType, logFilterDateFrom, logFilterDateTo]);
 
   // Clear all audit log filters
   const clearLogFilters = () => {
+    setLogSearchQuery('');
     setLogFilterRevert('all');
     setLogFilterType('all');
     setLogFilterDateFrom('');
@@ -404,8 +420,8 @@ function PrivilegesContent() {
         }, {});
         setGroupedDefinitions(grouped);
         
-        // Expand all categories by default
-        setExpandedCategories(new Set(Object.keys(grouped)));
+        // Keep categories collapsed by default for cleaner first load
+        setExpandedCategories(new Set());
         
         // Select first editable role by default
         if (!selectedRole && editableRoles.length > 0) {
@@ -746,10 +762,12 @@ function PrivilegesContent() {
     return <LoadingState message="Loading privilege settings..." icon="lock" />;
   }
 
+  const isFixedViewportMode = viewMode === 'role' || viewMode === 'matrix' || viewMode === 'logs' || viewMode === 'navigation';
+
   return (
-    <div className="min-h-screen bg-gray-50 dark:bg-gray-900">
+    <div className={`bg-gray-50 dark:bg-gray-900 ${isFixedViewportMode ? 'h-full min-h-0 flex flex-col overflow-hidden' : 'min-h-screen'}`}>
       {/* Header */}
-      <div className="bg-white dark:bg-gray-800 border-b border-gray-200 dark:border-gray-700 sticky top-0 z-20">
+      <div className="bg-white dark:bg-gray-800 border-b border-gray-200 dark:border-gray-700 sticky top-0 z-40 shrink-0">
         <div className="w-full px-4 sm:px-6 lg:px-8 py-4">
           <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4">
             <div className="flex items-center gap-3">
@@ -767,7 +785,22 @@ function PrivilegesContent() {
             </div>
             
             {/* View Mode Toggle */}
-            <div className="flex items-center gap-2">
+            <div className="flex flex-wrap items-center justify-end gap-2">
+              {viewMode === 'role' && selectedRole && (
+                <button
+                  onClick={() => setShowResetConfirm(true)}
+                  disabled={saving === 'reset'}
+                  className="flex items-center gap-2 px-3 py-1.5 text-sm font-medium text-amber-700 dark:text-amber-300 bg-amber-50 dark:bg-amber-900/30 hover:bg-amber-100 dark:hover:bg-amber-900/50 rounded-lg transition-colors disabled:opacity-50"
+                  title={`Reset ${ROLE_CONFIG[selectedRole]?.label || selectedRole} privileges to defaults`}
+                >
+                  {saving === 'reset' ? (
+                    <Loader2 className="w-4 h-4 animate-spin" />
+                  ) : (
+                    <RotateCcw className="w-4 h-4" />
+                  )}
+                  Reset to Defaults
+                </button>
+              )}
               <button
                 onClick={() => fetchAuditLogs()}
                 className="p-2 text-gray-500 hover:text-gray-700 dark:text-gray-400 dark:hover:text-gray-200 hover:bg-gray-100 dark:hover:bg-gray-700 rounded-lg transition-colors"
@@ -867,20 +900,21 @@ function PrivilegesContent() {
         </div>
       )}
 
-      <div className="w-full px-4 sm:px-6 lg:px-8 py-6">
+      <div className={`w-full px-4 sm:px-6 lg:px-8 ${isFixedViewportMode ? 'pt-1 pb-1 flex-1 min-h-0 overflow-hidden' : 'py-6'}`}>
         {viewMode === 'role' && (
           /* ===================== ROLE VIEW ===================== */
-          <div className="grid grid-cols-1 lg:grid-cols-4 gap-6">
+          <div className="grid h-full min-h-0 grid-rows-[minmax(0,1fr)_auto] gap-1">
+          <div className="grid grid-cols-1 lg:grid-cols-4 gap-1 min-h-0">
             {/* Role Selector Sidebar */}
-            <div className="lg:col-span-1">
-              <div className="bg-white dark:bg-gray-800 rounded-xl shadow-sm border border-gray-200 dark:border-gray-700 overflow-hidden sticky top-24">
-                <div className="p-4 border-b border-gray-200 dark:border-gray-700">
-                  <h2 className="font-semibold text-gray-900 dark:text-white flex items-center gap-2">
+            <div className="lg:col-span-1 min-h-0">
+              <div className="bg-white dark:bg-gray-800 rounded-xl shadow-sm border border-gray-200 dark:border-gray-700 overflow-hidden lg:h-full flex flex-col">
+                <div className="p-3 border-b border-gray-200 dark:border-gray-700">
+                  <h2 className="text-sm font-semibold text-gray-900 dark:text-white flex items-center gap-2">
                     <Users className="w-4 h-4" />
                     Select Role
                   </h2>
                 </div>
-                <div className="divide-y divide-gray-100 dark:divide-gray-700">
+                <div className="divide-y divide-gray-100 dark:divide-gray-700 flex-1 overflow-y-auto">
                   {editableRoles.map(role => {
                     const config = ROLE_CONFIG[role];
                     const stats = getRoleStats(role);
@@ -888,7 +922,7 @@ function PrivilegesContent() {
                       <button
                         key={role}
                         onClick={() => setSelectedRole(role)}
-                        className={`w-full p-3 text-left transition-colors ${
+                        className={`w-full px-3 py-2.5 text-left transition-colors ${
                           selectedRole === role
                             ? 'bg-primary-50 dark:bg-primary-900/20 border-l-4 border-primary-600'
                             : 'hover:bg-gray-50 dark:hover:bg-gray-700/50 border-l-4 border-transparent'
@@ -896,15 +930,15 @@ function PrivilegesContent() {
                       >
                         <div className="flex items-center justify-between">
                           <div>
-                            <p className={`font-medium text-sm ${config.color}`}>
+                            <p className={`font-medium text-[13px] ${config.color}`}>
                               {config.label}
                             </p>
-                            <p className="text-xs text-gray-500 dark:text-gray-400 mt-0.5">
+                            <p className="text-[11px] text-gray-500 dark:text-gray-400 mt-0.5">
                               {stats.enabled} / {stats.total} privileges
                             </p>
                           </div>
                           <div className="text-right">
-                            <div className={`text-xs font-medium ${
+                            <div className={`text-[11px] font-medium ${
                               stats.percentage >= 80 ? 'text-green-600 dark:text-green-400' :
                               stats.percentage >= 50 ? 'text-amber-600 dark:text-amber-400' :
                               'text-gray-500 dark:text-gray-400'
@@ -929,14 +963,14 @@ function PrivilegesContent() {
                 </div>
                 
                 {/* SYSTEM_ADMIN Note */}
-                <div className="p-3 bg-rose-50 dark:bg-rose-900/20 border-t border-gray-200 dark:border-gray-700">
+                <div className="p-2.5 bg-rose-50 dark:bg-rose-900/20 border-t border-gray-200 dark:border-gray-700">
                   <div className="flex items-start gap-2">
                     <Lock className="w-4 h-4 text-rose-600 dark:text-rose-400 flex-shrink-0 mt-0.5" />
                     <div>
-                      <p className="text-xs font-medium text-rose-700 dark:text-rose-300">
-                        System Admin
+                      <p className="text-[11px] font-medium text-rose-700 dark:text-rose-300">
+                        Organization Admin
                       </p>
-                      <p className="text-xs text-rose-600/80 dark:text-rose-400/80">
+                      <p className="text-[11px] text-rose-600/80 dark:text-rose-400/80">
                         Always has full access. Cannot be modified.
                       </p>
                     </div>
@@ -946,61 +980,386 @@ function PrivilegesContent() {
             </div>
 
             {/* Privilege Editor */}
-            <div className="lg:col-span-3">
+            <div className="lg:col-span-3 min-h-0">
               {selectedRole && (
-                <div className="space-y-4">
-                  {/* Role Header */}
-                  <div className="bg-white dark:bg-gray-800 rounded-xl shadow-sm border border-gray-200 dark:border-gray-700 p-4">
-                    <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4">
-                      <div className="flex items-center gap-3">
-                        <div className={`p-2 rounded-lg ${ROLE_CONFIG[selectedRole]?.bgColor}`}>
-                          <Shield className={`w-5 h-5 ${ROLE_CONFIG[selectedRole]?.color}`} />
-                        </div>
-                        <div>
-                          <h2 className={`text-lg font-semibold ${ROLE_CONFIG[selectedRole]?.color}`}>
-                            {ROLE_CONFIG[selectedRole]?.label}
-                          </h2>
-                          <p className="text-sm text-gray-500 dark:text-gray-400">
-                            {ROLE_CONFIG[selectedRole]?.description}
-                          </p>
-                        </div>
+                <div className="grid grid-cols-1 xl:grid-cols-4 gap-1 h-full min-h-0">
+                  {/* Filters Panel */}
+                  <div className="xl:col-span-1 xl:order-2 min-h-0">
+                    <div className="bg-white dark:bg-gray-800 rounded-xl shadow-sm border border-gray-200 dark:border-gray-700 overflow-hidden lg:h-full flex flex-col">
+                      <div className="px-4 py-2.5 border-b border-gray-200 dark:border-gray-700 bg-gray-50 dark:bg-gray-700/40">
+                        <h3 className="text-sm font-semibold text-gray-900 dark:text-white flex items-center gap-2">
+                          <Filter className="w-4 h-4" />
+                          Filters
+                        </h3>
                       </div>
-                      
-                      <button
-                        onClick={() => setShowResetConfirm(true)}
-                        disabled={saving === 'reset'}
-                        className="flex items-center gap-2 px-4 py-2 text-sm font-medium text-amber-700 dark:text-amber-300 bg-amber-50 dark:bg-amber-900/30 hover:bg-amber-100 dark:hover:bg-amber-900/50 rounded-lg transition-colors disabled:opacity-50"
-                      >
-                        {saving === 'reset' ? (
-                          <Loader2 className="w-4 h-4 animate-spin" />
-                        ) : (
-                          <RotateCcw className="w-4 h-4" />
+                      <div className="p-3 space-y-2.5 flex-1 overflow-y-auto">
+                        <div>
+                          <label className="block text-[11px] font-medium text-gray-600 dark:text-gray-400 mb-1">
+                            Search
+                          </label>
+                          <div className="relative">
+                            <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-gray-400" />
+                            <input
+                              type="text"
+                              value={searchQuery}
+                              onChange={(e) => setSearchQuery(e.target.value)}
+                              placeholder="Search privileges..."
+                              className="w-full pl-10 pr-4 py-2 bg-gray-50 dark:bg-gray-700 border border-gray-200 dark:border-gray-600 rounded-lg text-xs focus:ring-2 focus:ring-primary-500 focus:border-transparent"
+                            />
+                          </div>
+                        </div>
+
+                        <div>
+                          <label className="block text-[11px] font-medium text-gray-600 dark:text-gray-400 mb-1">
+                            Action
+                          </label>
+                          <select
+                            value={filterAction}
+                            onChange={(e) => setFilterAction(e.target.value)}
+                            className="w-full px-3 py-2 bg-gray-50 dark:bg-gray-700 border border-gray-200 dark:border-gray-600 rounded-lg text-xs focus:ring-2 focus:ring-primary-500"
+                          >
+                            <option value="">All Actions</option>
+                            <option value="VIEW">View</option>
+                            <option value="CREATE">Create</option>
+                            <option value="EDIT">Edit</option>
+                            <option value="DELETE">Delete</option>
+                            <option value="MANAGE">Manage</option>
+                            <option value="APPROVE">Approve</option>
+                            <option value="EXECUTE">Execute</option>
+                            <option value="EXPORT">Export</option>
+                          </select>
+                        </div>
+
+                        <div>
+                          <label className="block text-[11px] font-medium text-gray-600 dark:text-gray-400 mb-1">
+                            Module
+                          </label>
+                          <select
+                            value={filterModule}
+                            onChange={(e) => setFilterModule(e.target.value)}
+                            className="w-full px-3 py-2 bg-gray-50 dark:bg-gray-700 border border-gray-200 dark:border-gray-600 rounded-lg text-xs focus:ring-2 focus:ring-primary-500"
+                          >
+                            <option value="">All Modules</option>
+                            {availableModules.map(mod => (
+                              <option key={mod} value={mod}>{mod}</option>
+                            ))}
+                          </select>
+                        </div>
+
+                        <div>
+                          <label className="block text-[11px] font-medium text-gray-600 dark:text-gray-400 mb-1">
+                            Status
+                          </label>
+                          <select
+                            value={filterStatus}
+                            onChange={(e) => setFilterStatus(e.target.value as 'all' | 'enabled' | 'disabled')}
+                            className="w-full px-3 py-2 bg-gray-50 dark:bg-gray-700 border border-gray-200 dark:border-gray-600 rounded-lg text-xs focus:ring-2 focus:ring-primary-500"
+                          >
+                            <option value="all">All Status</option>
+                            <option value="enabled">Enabled</option>
+                            <option value="disabled">Disabled</option>
+                          </select>
+                        </div>
+
+                        {hasActiveFilters && (
+                          <button
+                            onClick={clearFilters}
+                            className="w-full px-3 py-2 text-xs text-red-600 dark:text-red-400 hover:bg-red-50 dark:hover:bg-red-900/20 rounded-lg flex items-center justify-center gap-1"
+                          >
+                            <X className="w-4 h-4" />
+                            Clear Filters
+                          </button>
                         )}
-                        Reset to Defaults
-                      </button>
+                      </div>
                     </div>
                   </div>
 
-                  {/* Search & Filter */}
-                  <div className="bg-white dark:bg-gray-800 rounded-xl shadow-sm border border-gray-200 dark:border-gray-700 p-4">
-                    <div className="flex flex-wrap items-center gap-3">
-                      {/* Search */}
-                      <div className="flex-1 min-w-[200px] relative">
+                  {/* Privilege Categories */}
+                  <div className="xl:col-span-3 xl:order-1 bg-white dark:bg-gray-800 rounded-xl shadow-sm border border-gray-200 dark:border-gray-700 overflow-hidden lg:h-full flex flex-col">
+                    <div className="px-4 py-2.5 border-b border-gray-200 dark:border-gray-700 bg-gray-50 dark:bg-gray-700/40">
+                      <div className="flex items-center justify-between">
+                        <h3 className="text-sm font-semibold text-gray-900 dark:text-white">Privileges</h3>
+                        <span className="text-[11px] text-gray-500 dark:text-gray-400">
+                          {Object.keys(filteredGrouped).length} categories
+                        </span>
+                      </div>
+                      {hasActiveFilters && (
+                        <p className="mt-1 text-[11px] text-gray-500 dark:text-gray-400">
+                          Showing {Object.values(filteredGrouped).flat().length} of {definitions.length} privileges
+                        </p>
+                      )}
+                    </div>
+
+                    <div className="flex-1 overflow-y-auto">
+                      {Object.entries(filteredGrouped).map(([category, privs]) => (
+                        <div key={category} className="border-b border-gray-200 dark:border-gray-700 last:border-b-0">
+                          {/* Category Header */}
+                          <button
+                            onClick={() => toggleCategory(category)}
+                            className="w-full px-4 py-2.5 flex items-center justify-between bg-gray-50/60 dark:bg-gray-700/30 hover:bg-gray-100 dark:hover:bg-gray-700/50 transition-colors"
+                          >
+                            <div className="flex items-center gap-3">
+                              <span className="text-base">{CATEGORY_ICONS[category] || '📁'}</span>
+                              <span className="text-sm font-medium text-gray-900 dark:text-white">{category}</span>
+                              <span className="text-[11px] text-gray-500 dark:text-gray-400 bg-gray-200 dark:bg-gray-600 px-2 py-0.5 rounded-full">
+                                {privs.length}
+                              </span>
+                            </div>
+                            {expandedCategories.has(category) ? (
+                              <ChevronDown className="w-5 h-5 text-gray-400" />
+                            ) : (
+                              <ChevronRight className="w-5 h-5 text-gray-400" />
+                            )}
+                          </button>
+
+                          {/* Privileges List */}
+                          {expandedCategories.has(category) && (
+                            <div className="divide-y divide-gray-100 dark:divide-gray-700">
+                              {privs.map(priv => {
+                                const isEnabled = matrix[selectedRole]?.[priv.key] ?? false;
+                                const isDefault = priv.defaultRoles.includes(selectedRole);
+                                const isSaving = saving === `${selectedRole}:${priv.key}`;
+                                
+                                return (
+                                  <div
+                                    key={priv.key}
+                                    className="px-4 py-3 flex items-center justify-between hover:bg-gray-50 dark:hover:bg-gray-700/30 transition-colors"
+                                  >
+                                    <div className="flex items-start gap-3 flex-1 min-w-0">
+                                      <div className={`p-1.5 rounded-md ${
+                                        isEnabled 
+                                          ? 'bg-primary-100 dark:bg-primary-900/30 text-primary-600 dark:text-primary-400'
+                                          : 'bg-gray-100 dark:bg-gray-700 text-gray-400 dark:text-gray-500'
+                                      }`}>
+                                        {ACTION_ICONS[priv.action] || <Settings className="w-3 h-3" />}
+                                      </div>
+                                      <div className="flex-1 min-w-0">
+                                        <div className="flex items-center gap-2 flex-wrap">
+                                          <p className="font-medium text-sm text-gray-900 dark:text-white">
+                                            {priv.displayName}
+                                          </p>
+                                          <span className={`text-xs px-1.5 py-0.5 rounded ${
+                                            priv.action === 'VIEW' ? 'bg-blue-100 dark:bg-blue-900/30 text-blue-700 dark:text-blue-300' :
+                                            priv.action === 'CREATE' ? 'bg-green-100 dark:bg-green-900/30 text-green-700 dark:text-green-300' :
+                                            priv.action === 'EDIT' ? 'bg-amber-100 dark:bg-amber-900/30 text-amber-700 dark:text-amber-300' :
+                                            priv.action === 'DELETE' ? 'bg-red-100 dark:bg-red-900/30 text-red-700 dark:text-red-300' :
+                                            priv.action === 'MANAGE' ? 'bg-purple-100 dark:bg-purple-900/30 text-purple-700 dark:text-purple-300' :
+                                            priv.action === 'APPROVE' ? 'bg-emerald-100 dark:bg-emerald-900/30 text-emerald-700 dark:text-emerald-300' :
+                                            priv.action === 'EXECUTE' ? 'bg-cyan-100 dark:bg-cyan-900/30 text-cyan-700 dark:text-cyan-300' :
+                                            'bg-gray-100 dark:bg-gray-700 text-gray-700 dark:text-gray-300'
+                                          }`}>
+                                            {priv.action}
+                                          </span>
+                                          {!isDefault && isEnabled && (
+                                            <span className="text-xs px-1.5 py-0.5 rounded bg-primary-100 dark:bg-primary-900/30 text-primary-700 dark:text-primary-300">
+                                              Custom
+                                            </span>
+                                          )}
+                                          {isDefault && !isEnabled && (
+                                            <span className="text-xs px-1.5 py-0.5 rounded bg-amber-100 dark:bg-amber-900/30 text-amber-700 dark:text-amber-300">
+                                              Restricted
+                                            </span>
+                                          )}
+                                        </div>
+                                        <p className="text-xs text-gray-500 dark:text-gray-400 mt-0.5 truncate">
+                                          {priv.description}
+                                        </p>
+                                      </div>
+                                    </div>
+                                    
+                                    {/* Toggle Switch */}
+                                    <button
+                                      onClick={() => togglePrivilege(selectedRole, priv.key, isEnabled)}
+                                      disabled={isSaving}
+                                      className={`relative inline-flex h-6 w-11 flex-shrink-0 cursor-pointer rounded-full border-2 border-transparent transition-colors duration-200 ease-in-out focus:outline-none focus:ring-2 focus:ring-primary-500 focus:ring-offset-2 disabled:opacity-50 disabled:cursor-not-allowed ${
+                                        isEnabled ? 'bg-primary-600' : 'bg-gray-200 dark:bg-gray-600'
+                                      }`}
+                                    >
+                                      <span
+                                        className={`pointer-events-none inline-block h-5 w-5 transform rounded-full bg-white shadow ring-0 transition duration-200 ease-in-out ${
+                                          isEnabled ? 'translate-x-5' : 'translate-x-0'
+                                        }`}
+                                      >
+                                        {isSaving && (
+                                          <Loader2 className="w-3 h-3 animate-spin absolute top-1 left-1 text-gray-400" />
+                                        )}
+                                      </span>
+                                    </button>
+                                  </div>
+                                );
+                              })}
+                            </div>
+                          )}
+                        </div>
+                      ))}
+
+                      {Object.keys(filteredGrouped).length === 0 && (
+                        <div className="p-8 text-center">
+                          <Search className="w-12 h-12 text-gray-300 dark:text-gray-600 mx-auto mb-3" />
+                          <p className="text-gray-500 dark:text-gray-400">
+                            No privileges match your search criteria
+                          </p>
+                        </div>
+                      )}
+                    </div>
+                  </div>
+                </div>
+              )}
+            </div>
+          </div>
+          <div className="sticky bottom-0 z-30 bg-white/95 dark:bg-gray-800/95 backdrop-blur rounded-xl shadow-sm border border-gray-200 dark:border-gray-700 p-2 shrink-0">
+            <h3 className="text-sm font-medium text-gray-900 dark:text-white mb-1 flex items-center gap-2">
+              <Info className="w-4 h-4 text-gray-400" />
+              Action Types Legend
+            </h3>
+            <div className="flex flex-wrap gap-1.5">
+              {Object.entries(ACTION_ICONS).map(([action, icon]) => (
+                <div key={action} className="flex items-center gap-2 text-xs text-gray-600 dark:text-gray-400">
+                  <div className={`p-1 rounded ${
+                    action === 'VIEW' ? 'bg-blue-100 dark:bg-blue-900/30 text-blue-600 dark:text-blue-400' :
+                    action === 'CREATE' ? 'bg-green-100 dark:bg-green-900/30 text-green-600 dark:text-green-400' :
+                    action === 'EDIT' ? 'bg-amber-100 dark:bg-amber-900/30 text-amber-600 dark:text-amber-400' :
+                    action === 'DELETE' ? 'bg-red-100 dark:bg-red-900/30 text-red-600 dark:text-red-400' :
+                    action === 'MANAGE' ? 'bg-purple-100 dark:bg-purple-900/30 text-purple-600 dark:text-purple-400' :
+                    action === 'APPROVE' ? 'bg-emerald-100 dark:bg-emerald-900/30 text-emerald-600 dark:text-emerald-400' :
+                    action === 'EXECUTE' ? 'bg-cyan-100 dark:bg-cyan-900/30 text-cyan-600 dark:text-cyan-400' :
+                    'bg-gray-100 dark:bg-gray-700 text-gray-600 dark:text-gray-400'
+                  }`}>
+                    {icon}
+                  </div>
+                  <span>{action}</span>
+                </div>
+              ))}
+            </div>
+          </div>
+          </div>
+        )}
+
+        {viewMode === 'matrix' && (
+          /* ===================== MATRIX VIEW ===================== */
+          <div className="grid h-full min-h-0 grid-rows-[minmax(0,1fr)_auto] gap-1">
+            <div className="grid grid-cols-1 xl:grid-cols-4 gap-1 min-h-0">
+              {/* Matrix Card */}
+              <div className="xl:col-span-3 xl:order-1 min-h-0">
+                <div className="bg-white dark:bg-gray-800 rounded-xl shadow-sm border border-gray-200 dark:border-gray-700 overflow-hidden h-full flex flex-col">
+                  <div className="px-4 py-2.5 border-b border-gray-200 dark:border-gray-700 bg-gray-50 dark:bg-gray-700/40">
+                    <div className="flex items-center justify-between">
+                      <h3 className="text-sm font-semibold text-gray-900 dark:text-white">Privilege Matrix</h3>
+                      <span className="text-[11px] text-gray-500 dark:text-gray-400">
+                        Showing {filteredDefinitions.length} of {definitions.length}
+                      </span>
+                    </div>
+                  </div>
+
+                  {filteredDefinitions.length === 0 ? (
+                    <div className="p-8 text-center flex-1 overflow-y-auto">
+                      <Search className="w-12 h-12 text-gray-300 dark:text-gray-600 mx-auto mb-3" />
+                      <p className="text-gray-500 dark:text-gray-400">
+                        No privileges match your search criteria
+                      </p>
+                    </div>
+                  ) : (
+                    <div className="flex-1 overflow-auto">
+                      <table className="min-w-[1100px] w-full divide-y divide-gray-200 dark:divide-gray-700">
+                        <thead className="bg-gray-50 dark:bg-gray-700/50">
+                          <tr>
+                            <th className="sticky left-0 z-10 bg-gray-50 dark:bg-gray-700/50 px-4 py-3 text-left text-xs font-medium text-gray-500 dark:text-gray-400 uppercase tracking-wider min-w-[250px]">
+                              Privilege
+                            </th>
+                            {editableRoles.map(role => (
+                              <th key={role} className="px-3 py-3 text-center text-xs font-medium text-gray-500 dark:text-gray-400 uppercase tracking-wider min-w-[100px]">
+                                <div className={`${ROLE_CONFIG[role]?.color}`}>
+                                  {ROLE_CONFIG[role]?.label.split(' ')[0]}
+                                </div>
+                              </th>
+                            ))}
+                          </tr>
+                        </thead>
+                        <tbody className="divide-y divide-gray-200 dark:divide-gray-700">
+                          {filteredDefinitions.map(priv => (
+                            <tr key={priv.key} className="hover:bg-gray-50 dark:hover:bg-gray-700/30">
+                              <td className="sticky left-0 z-10 bg-white dark:bg-gray-800 px-4 py-3 whitespace-nowrap border-r border-gray-200 dark:border-gray-700">
+                                <div className="flex items-center gap-2">
+                                  <span className="text-sm">{CATEGORY_ICONS[priv.category] || '📁'}</span>
+                                  <div>
+                                    <p className="text-sm font-medium text-gray-900 dark:text-white">
+                                      {priv.displayName}
+                                    </p>
+                                    <p className="text-xs text-gray-500 dark:text-gray-400">
+                                      {priv.category}
+                                    </p>
+                                  </div>
+                                </div>
+                              </td>
+                              {editableRoles.map(role => {
+                                const isEnabled = matrix[role]?.[priv.key] ?? false;
+                                const isSaving = saving === `${role}:${priv.key}`;
+                                
+                                return (
+                                  <td key={role} className="px-3 py-3 text-center">
+                                    <button
+                                      onClick={() => togglePrivilege(role, priv.key, isEnabled)}
+                                      disabled={isSaving}
+                                      className={`inline-flex items-center justify-center w-8 h-8 rounded-lg transition-colors ${
+                                        isEnabled
+                                          ? 'bg-green-100 dark:bg-green-900/30 text-green-600 dark:text-green-400 hover:bg-green-200 dark:hover:bg-green-900/50'
+                                          : 'bg-gray-100 dark:bg-gray-700 text-gray-400 dark:text-gray-500 hover:bg-gray-200 dark:hover:bg-gray-600'
+                                      } disabled:opacity-50 disabled:cursor-not-allowed`}
+                                    >
+                                      {isSaving ? (
+                                        <Loader2 className="w-4 h-4 animate-spin" />
+                                      ) : isEnabled ? (
+                                        <Check className="w-4 h-4" />
+                                      ) : (
+                                        <X className="w-4 h-4" />
+                                      )}
+                                    </button>
+                                  </td>
+                                );
+                              })}
+                            </tr>
+                          ))}
+                        </tbody>
+                      </table>
+                    </div>
+                  )}
+                </div>
+              </div>
+
+              {/* Filters Panel */}
+              <div className="xl:col-span-1 xl:order-2 min-h-0">
+                <div className="bg-white dark:bg-gray-800 rounded-xl shadow-sm border border-gray-200 dark:border-gray-700 overflow-hidden h-full flex flex-col">
+                  <div className="px-4 py-2.5 border-b border-gray-200 dark:border-gray-700 bg-gray-50 dark:bg-gray-700/40">
+                    <h3 className="text-sm font-semibold text-gray-900 dark:text-white flex items-center gap-2">
+                      <Filter className="w-4 h-4" />
+                      Filters
+                    </h3>
+                  </div>
+                  <div className="p-3 space-y-2.5 flex-1 overflow-y-auto">
+                    <div>
+                      <label className="block text-[11px] font-medium text-gray-600 dark:text-gray-400 mb-1">
+                        Search
+                      </label>
+                      <div className="relative">
                         <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-gray-400" />
                         <input
                           type="text"
                           value={searchQuery}
                           onChange={(e) => setSearchQuery(e.target.value)}
                           placeholder="Search privileges..."
-                          className="w-full pl-10 pr-4 py-2 bg-gray-50 dark:bg-gray-700 border border-gray-200 dark:border-gray-600 rounded-lg text-sm focus:ring-2 focus:ring-primary-500 focus:border-transparent"
+                          className="w-full pl-10 pr-4 py-2 bg-gray-50 dark:bg-gray-700 border border-gray-200 dark:border-gray-600 rounded-lg text-xs focus:ring-2 focus:ring-primary-500 focus:border-transparent"
                         />
                       </div>
-                      
-                      {/* Action Filter */}
+                    </div>
+
+                    <div>
+                      <label className="block text-[11px] font-medium text-gray-600 dark:text-gray-400 mb-1">
+                        Action
+                      </label>
                       <select
                         value={filterAction}
                         onChange={(e) => setFilterAction(e.target.value)}
-                        className="px-3 py-2 bg-gray-50 dark:bg-gray-700 border border-gray-200 dark:border-gray-600 rounded-lg text-sm focus:ring-2 focus:ring-primary-500"
+                        className="w-full px-3 py-2 bg-gray-50 dark:bg-gray-700 border border-gray-200 dark:border-gray-600 rounded-lg text-xs focus:ring-2 focus:ring-primary-500"
                       >
                         <option value="">All Actions</option>
                         <option value="VIEW">View</option>
@@ -1012,536 +1371,327 @@ function PrivilegesContent() {
                         <option value="EXECUTE">Execute</option>
                         <option value="EXPORT">Export</option>
                       </select>
-                      
-                      {/* Module Filter */}
+                    </div>
+
+                    <div>
+                      <label className="block text-[11px] font-medium text-gray-600 dark:text-gray-400 mb-1">
+                        Module
+                      </label>
                       <select
                         value={filterModule}
                         onChange={(e) => setFilterModule(e.target.value)}
-                        className="px-3 py-2 bg-gray-50 dark:bg-gray-700 border border-gray-200 dark:border-gray-600 rounded-lg text-sm focus:ring-2 focus:ring-primary-500"
+                        className="w-full px-3 py-2 bg-gray-50 dark:bg-gray-700 border border-gray-200 dark:border-gray-600 rounded-lg text-xs focus:ring-2 focus:ring-primary-500"
                       >
                         <option value="">All Modules</option>
                         {availableModules.map(mod => (
                           <option key={mod} value={mod}>{mod}</option>
                         ))}
                       </select>
-                      
-                      {/* Status Filter */}
+                    </div>
+
+                    <div>
+                      <label className="block text-[11px] font-medium text-gray-600 dark:text-gray-400 mb-1">
+                        Status
+                      </label>
                       <select
                         value={filterStatus}
                         onChange={(e) => setFilterStatus(e.target.value as 'all' | 'enabled' | 'disabled')}
-                        className="px-3 py-2 bg-gray-50 dark:bg-gray-700 border border-gray-200 dark:border-gray-600 rounded-lg text-sm focus:ring-2 focus:ring-primary-500"
+                        className="w-full px-3 py-2 bg-gray-50 dark:bg-gray-700 border border-gray-200 dark:border-gray-600 rounded-lg text-xs focus:ring-2 focus:ring-primary-500"
                       >
                         <option value="all">All Status</option>
-                        <option value="enabled">Enabled</option>
-                        <option value="disabled">Disabled</option>
+                        <option value="enabled">Has Enabled</option>
+                        <option value="disabled">All Disabled</option>
                       </select>
-                      
-                      {/* Clear Filters */}
-                      {hasActiveFilters && (
-                        <button
-                          onClick={clearFilters}
-                          className="px-3 py-2 text-sm text-red-600 dark:text-red-400 hover:bg-red-50 dark:hover:bg-red-900/20 rounded-lg flex items-center gap-1"
-                        >
-                          <X className="w-4 h-4" />
-                          Clear
-                        </button>
-                      )}
                     </div>
-                    
-                    {/* Filter Results Summary */}
+
                     {hasActiveFilters && (
-                      <div className="mt-3 pt-3 border-t border-gray-200 dark:border-gray-700">
-                        <p className="text-xs text-gray-500 dark:text-gray-400">
-                          Showing {Object.values(filteredGrouped).flat().length} of {definitions.length} privileges
-                        </p>
-                      </div>
+                      <button
+                        onClick={clearFilters}
+                        className="w-full px-3 py-2 text-xs text-red-600 dark:text-red-400 hover:bg-red-50 dark:hover:bg-red-900/20 rounded-lg flex items-center justify-center gap-1"
+                      >
+                        <X className="w-4 h-4" />
+                        Clear Filters
+                      </button>
                     )}
                   </div>
+                </div>
+              </div>
+            </div>
 
-                  {/* Privilege Categories */}
-                  <div className="space-y-3">
-                    {Object.entries(filteredGrouped).map(([category, privs]) => (
-                      <div key={category} className="bg-white dark:bg-gray-800 rounded-xl shadow-sm border border-gray-200 dark:border-gray-700 overflow-hidden">
-                        {/* Category Header */}
-                        <button
-                          onClick={() => toggleCategory(category)}
-                          className="w-full px-4 py-3 flex items-center justify-between bg-gray-50 dark:bg-gray-700/50 hover:bg-gray-100 dark:hover:bg-gray-700 transition-colors"
-                        >
-                          <div className="flex items-center gap-3">
-                            <span className="text-lg">{CATEGORY_ICONS[category] || '📁'}</span>
-                            <span className="font-medium text-gray-900 dark:text-white">{category}</span>
-                            <span className="text-xs text-gray-500 dark:text-gray-400 bg-gray-200 dark:bg-gray-600 px-2 py-0.5 rounded-full">
-                              {privs.length}
-                            </span>
-                          </div>
-                          {expandedCategories.has(category) ? (
-                            <ChevronDown className="w-5 h-5 text-gray-400" />
-                          ) : (
-                            <ChevronRight className="w-5 h-5 text-gray-400" />
-                          )}
-                        </button>
-
-                        {/* Privileges List */}
-                        {expandedCategories.has(category) && (
-                          <div className="divide-y divide-gray-100 dark:divide-gray-700">
-                            {privs.map(priv => {
-                              const isEnabled = matrix[selectedRole]?.[priv.key] ?? false;
-                              const isDefault = priv.defaultRoles.includes(selectedRole);
-                              const isSaving = saving === `${selectedRole}:${priv.key}`;
-                              
-                              return (
-                                <div
-                                  key={priv.key}
-                                  className="px-4 py-3 flex items-center justify-between hover:bg-gray-50 dark:hover:bg-gray-700/30 transition-colors"
-                                >
-                                  <div className="flex items-start gap-3 flex-1 min-w-0">
-                                    <div className={`p-1.5 rounded-md ${
-                                      isEnabled 
-                                        ? 'bg-primary-100 dark:bg-primary-900/30 text-primary-600 dark:text-primary-400'
-                                        : 'bg-gray-100 dark:bg-gray-700 text-gray-400 dark:text-gray-500'
-                                    }`}>
-                                      {ACTION_ICONS[priv.action] || <Settings className="w-3 h-3" />}
-                                    </div>
-                                    <div className="flex-1 min-w-0">
-                                      <div className="flex items-center gap-2 flex-wrap">
-                                        <p className="font-medium text-sm text-gray-900 dark:text-white">
-                                          {priv.displayName}
-                                        </p>
-                                        <span className={`text-xs px-1.5 py-0.5 rounded ${
-                                          priv.action === 'VIEW' ? 'bg-blue-100 dark:bg-blue-900/30 text-blue-700 dark:text-blue-300' :
-                                          priv.action === 'CREATE' ? 'bg-green-100 dark:bg-green-900/30 text-green-700 dark:text-green-300' :
-                                          priv.action === 'EDIT' ? 'bg-amber-100 dark:bg-amber-900/30 text-amber-700 dark:text-amber-300' :
-                                          priv.action === 'DELETE' ? 'bg-red-100 dark:bg-red-900/30 text-red-700 dark:text-red-300' :
-                                          priv.action === 'MANAGE' ? 'bg-purple-100 dark:bg-purple-900/30 text-purple-700 dark:text-purple-300' :
-                                          priv.action === 'APPROVE' ? 'bg-emerald-100 dark:bg-emerald-900/30 text-emerald-700 dark:text-emerald-300' :
-                                          priv.action === 'EXECUTE' ? 'bg-cyan-100 dark:bg-cyan-900/30 text-cyan-700 dark:text-cyan-300' :
-                                          'bg-gray-100 dark:bg-gray-700 text-gray-700 dark:text-gray-300'
-                                        }`}>
-                                          {priv.action}
-                                        </span>
-                                        {!isDefault && isEnabled && (
-                                          <span className="text-xs px-1.5 py-0.5 rounded bg-primary-100 dark:bg-primary-900/30 text-primary-700 dark:text-primary-300">
-                                            Custom
-                                          </span>
-                                        )}
-                                        {isDefault && !isEnabled && (
-                                          <span className="text-xs px-1.5 py-0.5 rounded bg-amber-100 dark:bg-amber-900/30 text-amber-700 dark:text-amber-300">
-                                            Restricted
-                                          </span>
-                                        )}
-                                      </div>
-                                      <p className="text-xs text-gray-500 dark:text-gray-400 mt-0.5 truncate">
-                                        {priv.description}
-                                      </p>
-                                    </div>
-                                  </div>
-                                  
-                                  {/* Toggle Switch */}
-                                  <button
-                                    onClick={() => togglePrivilege(selectedRole, priv.key, isEnabled)}
-                                    disabled={isSaving}
-                                    className={`relative inline-flex h-6 w-11 flex-shrink-0 cursor-pointer rounded-full border-2 border-transparent transition-colors duration-200 ease-in-out focus:outline-none focus:ring-2 focus:ring-primary-500 focus:ring-offset-2 disabled:opacity-50 disabled:cursor-not-allowed ${
-                                      isEnabled ? 'bg-primary-600' : 'bg-gray-200 dark:bg-gray-600'
-                                    }`}
-                                  >
-                                    <span
-                                      className={`pointer-events-none inline-block h-5 w-5 transform rounded-full bg-white shadow ring-0 transition duration-200 ease-in-out ${
-                                        isEnabled ? 'translate-x-5' : 'translate-x-0'
-                                      }`}
-                                    >
-                                      {isSaving && (
-                                        <Loader2 className="w-3 h-3 animate-spin absolute top-1 left-1 text-gray-400" />
-                                      )}
-                                    </span>
-                                  </button>
-                                </div>
-                              );
-                            })}
-                          </div>
-                        )}
-                      </div>
-                    ))}
-                  </div>
-
-                  {Object.keys(filteredGrouped).length === 0 && (
-                    <div className="bg-white dark:bg-gray-800 rounded-xl shadow-sm border border-gray-200 dark:border-gray-700 p-8 text-center">
-                      <Search className="w-12 h-12 text-gray-300 dark:text-gray-600 mx-auto mb-3" />
-                      <p className="text-gray-500 dark:text-gray-400">
-                        No privileges match your search criteria
-                      </p>
+            <div className="sticky bottom-0 z-30 bg-white/95 dark:bg-gray-800/95 backdrop-blur rounded-xl shadow-sm border border-gray-200 dark:border-gray-700 p-2 shrink-0">
+              <h3 className="text-sm font-medium text-gray-900 dark:text-white mb-1 flex items-center gap-2">
+                <Info className="w-4 h-4 text-gray-400" />
+                Action Types Legend
+              </h3>
+              <div className="flex flex-wrap gap-1.5">
+                {Object.entries(ACTION_ICONS).map(([action, icon]) => (
+                  <div key={action} className="flex items-center gap-2 text-xs text-gray-600 dark:text-gray-400">
+                    <div className={`p-1 rounded ${
+                      action === 'VIEW' ? 'bg-blue-100 dark:bg-blue-900/30 text-blue-600 dark:text-blue-400' :
+                      action === 'CREATE' ? 'bg-green-100 dark:bg-green-900/30 text-green-600 dark:text-green-400' :
+                      action === 'EDIT' ? 'bg-amber-100 dark:bg-amber-900/30 text-amber-600 dark:text-amber-400' :
+                      action === 'DELETE' ? 'bg-red-100 dark:bg-red-900/30 text-red-600 dark:text-red-400' :
+                      action === 'MANAGE' ? 'bg-purple-100 dark:bg-purple-900/30 text-purple-600 dark:text-purple-400' :
+                      action === 'APPROVE' ? 'bg-emerald-100 dark:bg-emerald-900/30 text-emerald-600 dark:text-emerald-400' :
+                      action === 'EXECUTE' ? 'bg-cyan-100 dark:bg-cyan-900/30 text-cyan-600 dark:text-cyan-400' :
+                      'bg-gray-100 dark:bg-gray-700 text-gray-600 dark:text-gray-400'
+                    }`}>
+                      {icon}
                     </div>
-                  )}
-                </div>
-              )}
-            </div>
-          </div>
-        )}
-
-        {viewMode === 'matrix' && (
-          /* ===================== MATRIX VIEW ===================== */
-          <div className="bg-white dark:bg-gray-800 rounded-xl shadow-sm border border-gray-200 dark:border-gray-700 overflow-hidden">
-            <div className="p-4 border-b border-gray-200 dark:border-gray-700">
-              <div className="flex flex-wrap items-center gap-3">
-                {/* Search */}
-                <div className="flex-1 min-w-[200px] relative">
-                  <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-gray-400" />
-                  <input
-                    type="text"
-                    value={searchQuery}
-                    onChange={(e) => setSearchQuery(e.target.value)}
-                    placeholder="Search privileges..."
-                    className="w-full pl-10 pr-4 py-2 bg-gray-50 dark:bg-gray-700 border border-gray-200 dark:border-gray-600 rounded-lg text-sm focus:ring-2 focus:ring-primary-500 focus:border-transparent"
-                  />
-                </div>
-                
-                {/* Action Filter */}
-                <select
-                  value={filterAction}
-                  onChange={(e) => setFilterAction(e.target.value)}
-                  className="px-3 py-2 bg-gray-50 dark:bg-gray-700 border border-gray-200 dark:border-gray-600 rounded-lg text-sm focus:ring-2 focus:ring-primary-500"
-                >
-                  <option value="">All Actions</option>
-                  <option value="VIEW">View</option>
-                  <option value="CREATE">Create</option>
-                  <option value="EDIT">Edit</option>
-                  <option value="DELETE">Delete</option>
-                  <option value="MANAGE">Manage</option>
-                  <option value="APPROVE">Approve</option>
-                  <option value="EXECUTE">Execute</option>
-                  <option value="EXPORT">Export</option>
-                </select>
-                
-                {/* Module Filter */}
-                <select
-                  value={filterModule}
-                  onChange={(e) => setFilterModule(e.target.value)}
-                  className="px-3 py-2 bg-gray-50 dark:bg-gray-700 border border-gray-200 dark:border-gray-600 rounded-lg text-sm focus:ring-2 focus:ring-primary-500"
-                >
-                  <option value="">All Modules</option>
-                  {availableModules.map(mod => (
-                    <option key={mod} value={mod}>{mod}</option>
-                  ))}
-                </select>
-                
-                {/* Status Filter */}
-                <select
-                  value={filterStatus}
-                  onChange={(e) => setFilterStatus(e.target.value as 'all' | 'enabled' | 'disabled')}
-                  className="px-3 py-2 bg-gray-50 dark:bg-gray-700 border border-gray-200 dark:border-gray-600 rounded-lg text-sm focus:ring-2 focus:ring-primary-500"
-                >
-                  <option value="all">All Status</option>
-                  <option value="enabled">Has Enabled</option>
-                  <option value="disabled">All Disabled</option>
-                </select>
-                
-                {/* Clear Filters */}
-                {hasActiveFilters && (
-                  <button
-                    onClick={clearFilters}
-                    className="px-3 py-2 text-sm text-red-600 dark:text-red-400 hover:bg-red-50 dark:hover:bg-red-900/20 rounded-lg flex items-center gap-1"
-                  >
-                    <X className="w-4 h-4" />
-                    Clear
-                  </button>
-                )}
+                    <span>{action}</span>
+                  </div>
+                ))}
               </div>
-              
-              {/* Filter Results Summary */}
-              {hasActiveFilters && (
-                <div className="mt-3 pt-3 border-t border-gray-200 dark:border-gray-700">
-                  <p className="text-xs text-gray-500 dark:text-gray-400">
-                    Showing {filteredDefinitions.length} of {definitions.length} privileges
-                  </p>
-                </div>
-              )}
             </div>
-            
-            <div className="overflow-x-auto">
-              <table className="min-w-full divide-y divide-gray-200 dark:divide-gray-700">
-                <thead className="bg-gray-50 dark:bg-gray-700/50">
-                  <tr>
-                    <th className="sticky left-0 z-10 bg-gray-50 dark:bg-gray-700/50 px-4 py-3 text-left text-xs font-medium text-gray-500 dark:text-gray-400 uppercase tracking-wider min-w-[250px]">
-                      Privilege
-                    </th>
-                    {editableRoles.map(role => (
-                      <th key={role} className="px-3 py-3 text-center text-xs font-medium text-gray-500 dark:text-gray-400 uppercase tracking-wider min-w-[100px]">
-                        <div className={`${ROLE_CONFIG[role]?.color}`}>
-                          {ROLE_CONFIG[role]?.label.split(' ')[0]}
-                        </div>
-                      </th>
-                    ))}
-                  </tr>
-                </thead>
-                <tbody className="divide-y divide-gray-200 dark:divide-gray-700">
-                  {filteredDefinitions.map(priv => (
-                    <tr key={priv.key} className="hover:bg-gray-50 dark:hover:bg-gray-700/30">
-                      <td className="sticky left-0 z-10 bg-white dark:bg-gray-800 px-4 py-3 whitespace-nowrap border-r border-gray-200 dark:border-gray-700">
-                        <div className="flex items-center gap-2">
-                          <span className="text-sm">{CATEGORY_ICONS[priv.category] || '📁'}</span>
-                          <div>
-                            <p className="text-sm font-medium text-gray-900 dark:text-white">
-                              {priv.displayName}
-                            </p>
-                            <p className="text-xs text-gray-500 dark:text-gray-400">
-                              {priv.category}
-                            </p>
-                          </div>
-                        </div>
-                      </td>
-                      {editableRoles.map(role => {
-                        const isEnabled = matrix[role]?.[priv.key] ?? false;
-                        const isSaving = saving === `${role}:${priv.key}`;
-                        
-                        return (
-                          <td key={role} className="px-3 py-3 text-center">
-                            <button
-                              onClick={() => togglePrivilege(role, priv.key, isEnabled)}
-                              disabled={isSaving}
-                              className={`inline-flex items-center justify-center w-8 h-8 rounded-lg transition-colors ${
-                                isEnabled
-                                  ? 'bg-green-100 dark:bg-green-900/30 text-green-600 dark:text-green-400 hover:bg-green-200 dark:hover:bg-green-900/50'
-                                  : 'bg-gray-100 dark:bg-gray-700 text-gray-400 dark:text-gray-500 hover:bg-gray-200 dark:hover:bg-gray-600'
-                              } disabled:opacity-50 disabled:cursor-not-allowed`}
-                            >
-                              {isSaving ? (
-                                <Loader2 className="w-4 h-4 animate-spin" />
-                              ) : isEnabled ? (
-                                <Check className="w-4 h-4" />
-                              ) : (
-                                <X className="w-4 h-4" />
-                              )}
-                            </button>
-                          </td>
-                        );
-                      })}
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
-            </div>
-            
-            {filteredDefinitions.length === 0 && (
-              <div className="p-8 text-center">
-                <Search className="w-12 h-12 text-gray-300 dark:text-gray-600 mx-auto mb-3" />
-                <p className="text-gray-500 dark:text-gray-400">
-                  No privileges match your search criteria
-                </p>
-              </div>
-            )}
           </div>
         )}
 
         {/* ===================== AUDIT LOG VIEW ===================== */}
         {viewMode === 'logs' && (
-          <div className="bg-white dark:bg-gray-800 rounded-xl shadow-sm border border-gray-200 dark:border-gray-700 overflow-hidden">
-            <div className="p-4 border-b border-gray-200 dark:border-gray-700">
-              <div className="flex items-center justify-between mb-4">
-                <div className="flex items-center gap-3">
-                  <History className="w-5 h-5 text-gray-600 dark:text-gray-400" />
-                  <h2 className="font-semibold text-gray-900 dark:text-white">Privilege Change History</h2>
-                  <span className="text-xs bg-gray-100 dark:bg-gray-700 px-2 py-1 rounded-full text-gray-600 dark:text-gray-400">
-                    {filteredAuditLogs.length} of {auditLogs.length} entries
-                  </span>
+          <div className="grid h-full min-h-0 grid-cols-1 xl:grid-cols-4 xl:items-stretch gap-1 pb-1">
+            <div className="xl:col-span-3 min-h-0 h-full">
+              <div className="bg-white dark:bg-gray-800 rounded-xl shadow-sm border border-gray-200 dark:border-gray-700 overflow-hidden h-full flex flex-col">
+                <div className="px-4 py-2.5 border-b border-gray-200 dark:border-gray-700 bg-gray-50 dark:bg-gray-700/40">
+                  <div className="flex items-center justify-between">
+                    <div className="flex items-center gap-3">
+                      <History className="w-5 h-5 text-gray-600 dark:text-gray-400" />
+                      <h2 className="font-semibold text-gray-900 dark:text-white">Privilege Change History</h2>
+                      <span className="text-xs bg-gray-100 dark:bg-gray-700 px-2 py-1 rounded-full text-gray-600 dark:text-gray-400">
+                        {filteredAuditLogs.length} of {auditLogs.length} entries
+                      </span>
+                    </div>
+                    <button
+                      onClick={() => fetchAuditLogs()}
+                      disabled={loadingLogs}
+                      className="flex items-center gap-2 px-3 py-1.5 text-sm font-medium text-gray-600 dark:text-gray-400 hover:text-gray-900 dark:hover:text-white hover:bg-gray-100 dark:hover:bg-gray-700 rounded-lg transition-colors"
+                    >
+                      <RefreshCw className={`w-4 h-4 ${loadingLogs ? 'animate-spin' : ''}`} />
+                      Refresh
+                    </button>
+                  </div>
                 </div>
-                <button
-                  onClick={() => fetchAuditLogs()}
-                  disabled={loadingLogs}
-                  className="flex items-center gap-2 px-3 py-1.5 text-sm font-medium text-gray-600 dark:text-gray-400 hover:text-gray-900 dark:hover:text-white hover:bg-gray-100 dark:hover:bg-gray-700 rounded-lg transition-colors"
-                >
-                  <RefreshCw className={`w-4 h-4 ${loadingLogs ? 'animate-spin' : ''}`} />
-                  Refresh
-                </button>
-              </div>
-              
-              {/* Filters */}
-              <div className="flex flex-wrap items-center gap-3">
-                <div className="flex items-center gap-2">
-                  <Filter className="w-4 h-4 text-gray-400" />
-                  <span className="text-sm text-gray-500 dark:text-gray-400">Filters:</span>
-                </div>
-                
-                {/* Revert Status Filter */}
-                <select
-                  value={logFilterRevert}
-                  onChange={(e) => setLogFilterRevert(e.target.value as 'all' | 'reverted' | 'active')}
-                  className="text-sm px-3 py-1.5 bg-gray-50 dark:bg-gray-700 border border-gray-200 dark:border-gray-600 rounded-lg focus:ring-2 focus:ring-primary-500"
-                >
-                  <option value="all">All Status</option>
-                  <option value="active">Active Only</option>
-                  <option value="reverted">Reverted Only</option>
-                </select>
-                
-                {/* Change Type Filter */}
-                <select
-                  value={logFilterType}
-                  onChange={(e) => setLogFilterType(e.target.value as 'all' | 'ENABLE' | 'DISABLE' | 'REVERT')}
-                  className="text-sm px-3 py-1.5 bg-gray-50 dark:bg-gray-700 border border-gray-200 dark:border-gray-600 rounded-lg focus:ring-2 focus:ring-primary-500"
-                >
-                  <option value="all">All Types</option>
-                  <option value="ENABLE">Enabled</option>
-                  <option value="DISABLE">Disabled</option>
-                  <option value="REVERT">Reverted</option>
-                </select>
-                
-                {/* Date From */}
-                <div className="flex items-center gap-1">
-                  <Calendar className="w-4 h-4 text-gray-400" />
-                  <input
-                    type="date"
-                    value={logFilterDateFrom}
-                    onChange={(e) => setLogFilterDateFrom(e.target.value)}
-                    className="text-sm px-2 py-1.5 bg-gray-50 dark:bg-gray-700 border border-gray-200 dark:border-gray-600 rounded-lg focus:ring-2 focus:ring-primary-500"
-                    placeholder="From"
-                  />
-                </div>
-                
-                {/* Date To */}
-                <div className="flex items-center gap-1">
-                  <span className="text-gray-400">to</span>
-                  <input
-                    type="date"
-                    value={logFilterDateTo}
-                    onChange={(e) => setLogFilterDateTo(e.target.value)}
-                    className="text-sm px-2 py-1.5 bg-gray-50 dark:bg-gray-700 border border-gray-200 dark:border-gray-600 rounded-lg focus:ring-2 focus:ring-primary-500"
-                    placeholder="To"
-                  />
-                </div>
-                
-                {/* Clear Filters */}
-                {(logFilterRevert !== 'all' || logFilterType !== 'all' || logFilterDateFrom || logFilterDateTo) && (
-                  <button
-                    onClick={clearLogFilters}
-                    className="text-sm px-3 py-1.5 text-red-600 dark:text-red-400 hover:bg-red-50 dark:hover:bg-red-900/20 rounded-lg flex items-center gap-1"
-                  >
-                    <X className="w-4 h-4" />
-                    Clear
-                  </button>
-                )}
-              </div>
-            </div>
-            
-            {loadingLogs ? (
-              <div className="p-8 flex items-center justify-center">
-                <Loader2 className="w-8 h-8 animate-spin text-primary-500" />
-              </div>
-            ) : filteredAuditLogs.length === 0 ? (
-              <div className="p-8 text-center">
-                <History className="w-12 h-12 text-gray-300 dark:text-gray-600 mx-auto mb-3" />
-                <p className="text-gray-500 dark:text-gray-400">
-                  {auditLogs.length === 0 ? 'No privilege changes recorded yet' : 'No logs match your filters'}
-                </p>
-                {auditLogs.length > 0 && (
-                  <button
-                    onClick={clearLogFilters}
-                    className="mt-2 text-sm text-primary-600 dark:text-primary-400 hover:underline"
-                  >
-                    Clear filters
-                  </button>
-                )}
-              </div>
-            ) : (
-              <div className="divide-y divide-gray-100 dark:divide-gray-700">
-                {filteredAuditLogs.map((log) => (
-                  <div key={log.id} className={`p-4 hover:bg-gray-50 dark:hover:bg-gray-700/50 transition-colors ${log.isReverted ? 'bg-gray-50 dark:bg-gray-700/30' : ''}`}>
-                    <div className="flex items-start justify-between gap-4">
-                      <div className="flex-1 min-w-0">
-                        <div className="flex items-center gap-2 mb-1">
-                          <span className={`inline-flex items-center px-2 py-0.5 rounded text-xs font-medium ${
-                            log.changeType === 'ENABLE' ? 'bg-green-100 dark:bg-green-900/30 text-green-700 dark:text-green-400' :
-                            log.changeType === 'DISABLE' ? 'bg-red-100 dark:bg-red-900/30 text-red-700 dark:text-red-400' :
-                            log.changeType === 'BULK_UPDATE' ? 'bg-purple-100 dark:bg-purple-900/30 text-purple-700 dark:text-purple-400' :
-                            'bg-blue-100 dark:bg-blue-900/30 text-blue-700 dark:text-blue-400'
-                          }`}>
-                            {log.changeType}
-                          </span>
-                          {log.isReverted && (
-                            <span className="inline-flex items-center px-2 py-0.5 rounded text-xs font-medium bg-gray-100 dark:bg-gray-700 text-gray-600 dark:text-gray-400">
-                              <Undo2 className="w-3 h-3 mr-1" />
-                              Reverted
-                            </span>
-                          )}
-                        </div>
-                        <p className="text-sm text-gray-900 dark:text-white">
-                          <span className="font-medium">{log.displayName}</span>
-                          {' for '}
-                          <span className={`font-medium ${ROLE_CONFIG[log.role as keyof typeof ROLE_CONFIG]?.color || ''}`}>
-                            {ROLE_CONFIG[log.role as keyof typeof ROLE_CONFIG]?.label || log.role}
-                          </span>
-                          {' in '}
-                          <span className="font-medium">{log.module}</span>
-                        </p>
-                        <div className="flex items-center gap-4 mt-2 text-xs text-gray-500 dark:text-gray-400">
-                          <span className="flex items-center gap-1">
-                            <Clock className="w-3 h-3" />
-                            {formatDate(log.changedAt)}
-                          </span>
-                          <span>by {log.changedByName}</span>
-                        </div>
-                      </div>
-                      {!log.isReverted && (
+
+                <div className="flex-1 overflow-y-auto">
+                  {loadingLogs ? (
+                    <div className="p-8 flex items-center justify-center">
+                      <Loader2 className="w-8 h-8 animate-spin text-primary-500" />
+                    </div>
+                  ) : filteredAuditLogs.length === 0 ? (
+                    <div className="p-8 text-center">
+                      <History className="w-12 h-12 text-gray-300 dark:text-gray-600 mx-auto mb-3" />
+                      <p className="text-gray-500 dark:text-gray-400">
+                        {auditLogs.length === 0 ? 'No privilege changes recorded yet' : 'No logs match your filters'}
+                      </p>
+                      {auditLogs.length > 0 && (
                         <button
-                          onClick={() => revertChange(log.id)}
-                          disabled={reverting === log.id}
-                          className="flex items-center gap-1.5 px-3 py-1.5 text-sm font-medium text-amber-600 dark:text-amber-400 hover:bg-amber-50 dark:hover:bg-amber-900/20 rounded-lg transition-colors disabled:opacity-50"
+                          onClick={clearLogFilters}
+                          className="mt-2 text-sm text-primary-600 dark:text-primary-400 hover:underline"
                         >
-                          {reverting === log.id ? (
-                            <Loader2 className="w-4 h-4 animate-spin" />
-                          ) : (
-                            <Undo2 className="w-4 h-4" />
-                          )}
-                          Revert
+                          Clear filters
                         </button>
                       )}
                     </div>
-                  </div>
-                ))}
+                  ) : (
+                    <div className="divide-y divide-gray-100 dark:divide-gray-700">
+                      {filteredAuditLogs.map((log) => (
+                        <div key={log.id} className={`p-4 hover:bg-gray-50 dark:hover:bg-gray-700/50 transition-colors ${log.isReverted ? 'bg-gray-50 dark:bg-gray-700/30' : ''}`}>
+                          <div className="flex items-start justify-between gap-4">
+                            <div className="flex-1 min-w-0">
+                              <div className="flex items-center gap-2 mb-1">
+                                <span className={`inline-flex items-center px-2 py-0.5 rounded text-xs font-medium ${
+                                  log.changeType === 'ENABLE' ? 'bg-green-100 dark:bg-green-900/30 text-green-700 dark:text-green-400' :
+                                  log.changeType === 'DISABLE' ? 'bg-red-100 dark:bg-red-900/30 text-red-700 dark:text-red-400' :
+                                  log.changeType === 'BULK_UPDATE' ? 'bg-purple-100 dark:bg-purple-900/30 text-purple-700 dark:text-purple-400' :
+                                  'bg-blue-100 dark:bg-blue-900/30 text-blue-700 dark:text-blue-400'
+                                }`}>
+                                  {log.changeType}
+                                </span>
+                                {log.isReverted && (
+                                  <span className="inline-flex items-center px-2 py-0.5 rounded text-xs font-medium bg-gray-100 dark:bg-gray-700 text-gray-600 dark:text-gray-400">
+                                    <Undo2 className="w-3 h-3 mr-1" />
+                                    Reverted
+                                  </span>
+                                )}
+                              </div>
+                              <p className="text-sm text-gray-900 dark:text-white">
+                                <span className="font-medium">{log.displayName}</span>
+                                {' for '}
+                                <span className={`font-medium ${ROLE_CONFIG[log.role as keyof typeof ROLE_CONFIG]?.color || ''}`}>
+                                  {ROLE_CONFIG[log.role as keyof typeof ROLE_CONFIG]?.label || log.role}
+                                </span>
+                                {' in '}
+                                <span className="font-medium">{log.module}</span>
+                              </p>
+                              <div className="flex items-center gap-4 mt-2 text-xs text-gray-500 dark:text-gray-400">
+                                <span className="flex items-center gap-1">
+                                  <Clock className="w-3 h-3" />
+                                  {formatDate(log.changedAt)}
+                                </span>
+                                <span>by {log.changedByName}</span>
+                              </div>
+                            </div>
+                            {!log.isReverted && (
+                              <button
+                                onClick={() => revertChange(log.id)}
+                                disabled={reverting === log.id}
+                                className="flex items-center gap-1.5 px-3 py-1.5 text-sm font-medium text-amber-600 dark:text-amber-400 hover:bg-amber-50 dark:hover:bg-amber-900/20 rounded-lg transition-colors disabled:opacity-50"
+                              >
+                                {reverting === log.id ? (
+                                  <Loader2 className="w-4 h-4 animate-spin" />
+                                ) : (
+                                  <Undo2 className="w-4 h-4" />
+                                )}
+                                Revert
+                              </button>
+                            )}
+                          </div>
+                        </div>
+                      ))}
+                    </div>
+                  )}
+                </div>
               </div>
-            )}
+            </div>
+
+            <div className="xl:col-span-1 min-h-0 h-full">
+              <div className="bg-white dark:bg-gray-800 rounded-xl shadow-sm border border-gray-200 dark:border-gray-700 overflow-hidden h-full flex flex-col">
+                <div className="px-4 py-2.5 border-b border-gray-200 dark:border-gray-700 bg-gray-50 dark:bg-gray-700/40">
+                  <h3 className="text-sm font-semibold text-gray-900 dark:text-white flex items-center gap-2">
+                    <Filter className="w-4 h-4" />
+                    Filters
+                  </h3>
+                </div>
+                <div className="p-3 space-y-2.5 flex-1 overflow-y-auto">
+                  <div>
+                    <label className="block text-[11px] font-medium text-gray-600 dark:text-gray-400 mb-1">
+                      Search
+                    </label>
+                    <div className="relative">
+                      <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-gray-400" />
+                      <input
+                        type="text"
+                        value={logSearchQuery}
+                        onChange={(e) => setLogSearchQuery(e.target.value)}
+                        placeholder="Search logs..."
+                        className="w-full pl-10 pr-4 py-2 bg-gray-50 dark:bg-gray-700 border border-gray-200 dark:border-gray-600 rounded-lg text-xs focus:ring-2 focus:ring-primary-500 focus:border-transparent"
+                      />
+                    </div>
+                  </div>
+
+                  <div>
+                    <label className="block text-[11px] font-medium text-gray-600 dark:text-gray-400 mb-1">
+                      Status
+                    </label>
+                    <select
+                      value={logFilterRevert}
+                      onChange={(e) => setLogFilterRevert(e.target.value as 'all' | 'reverted' | 'active')}
+                      className="w-full px-3 py-2 bg-gray-50 dark:bg-gray-700 border border-gray-200 dark:border-gray-600 rounded-lg text-xs focus:ring-2 focus:ring-primary-500"
+                    >
+                      <option value="all">All Status</option>
+                      <option value="active">Active Only</option>
+                      <option value="reverted">Reverted Only</option>
+                    </select>
+                  </div>
+
+                  <div>
+                    <label className="block text-[11px] font-medium text-gray-600 dark:text-gray-400 mb-1">
+                      Change Type
+                    </label>
+                    <select
+                      value={logFilterType}
+                      onChange={(e) => setLogFilterType(e.target.value as 'all' | 'ENABLE' | 'DISABLE' | 'REVERT')}
+                      className="w-full px-3 py-2 bg-gray-50 dark:bg-gray-700 border border-gray-200 dark:border-gray-600 rounded-lg text-xs focus:ring-2 focus:ring-primary-500"
+                    >
+                      <option value="all">All Types</option>
+                      <option value="ENABLE">Enabled</option>
+                      <option value="DISABLE">Disabled</option>
+                      <option value="REVERT">Reverted</option>
+                    </select>
+                  </div>
+
+                  <div>
+                    <label className="block text-[11px] font-medium text-gray-600 dark:text-gray-400 mb-1">
+                      Date From
+                    </label>
+                    <input
+                      type="date"
+                      value={logFilterDateFrom}
+                      onChange={(e) => setLogFilterDateFrom(e.target.value)}
+                      className="w-full px-3 py-2 bg-gray-50 dark:bg-gray-700 border border-gray-200 dark:border-gray-600 rounded-lg text-xs focus:ring-2 focus:ring-primary-500"
+                    />
+                  </div>
+
+                  <div>
+                    <label className="block text-[11px] font-medium text-gray-600 dark:text-gray-400 mb-1">
+                      Date To
+                    </label>
+                    <input
+                      type="date"
+                      value={logFilterDateTo}
+                      onChange={(e) => setLogFilterDateTo(e.target.value)}
+                      className="w-full px-3 py-2 bg-gray-50 dark:bg-gray-700 border border-gray-200 dark:border-gray-600 rounded-lg text-xs focus:ring-2 focus:ring-primary-500"
+                    />
+                  </div>
+
+                  {(logSearchQuery.trim() || logFilterRevert !== 'all' || logFilterType !== 'all' || logFilterDateFrom || logFilterDateTo) && (
+                    <button
+                      onClick={clearLogFilters}
+                      className="w-full px-3 py-2 text-xs text-red-600 dark:text-red-400 hover:bg-red-50 dark:hover:bg-red-900/20 rounded-lg flex items-center justify-center gap-1"
+                    >
+                      <X className="w-4 h-4" />
+                      Clear Filters
+                    </button>
+                  )}
+                </div>
+              </div>
+            </div>
           </div>
         )}
 
         {/* Legend */}
-        <div className="mt-6 bg-white dark:bg-gray-800 rounded-xl shadow-sm border border-gray-200 dark:border-gray-700 p-4">
-          <h3 className="text-sm font-medium text-gray-900 dark:text-white mb-3 flex items-center gap-2">
-            <Info className="w-4 h-4 text-gray-400" />
-            Action Types Legend
-          </h3>
-          <div className="flex flex-wrap gap-3">
-            {Object.entries(ACTION_ICONS).map(([action, icon]) => (
-              <div key={action} className="flex items-center gap-2 text-xs text-gray-600 dark:text-gray-400">
-                <div className={`p-1 rounded ${
-                  action === 'VIEW' ? 'bg-blue-100 dark:bg-blue-900/30 text-blue-600 dark:text-blue-400' :
-                  action === 'CREATE' ? 'bg-green-100 dark:bg-green-900/30 text-green-600 dark:text-green-400' :
-                  action === 'EDIT' ? 'bg-amber-100 dark:bg-amber-900/30 text-amber-600 dark:text-amber-400' :
-                  action === 'DELETE' ? 'bg-red-100 dark:bg-red-900/30 text-red-600 dark:text-red-400' :
-                  action === 'MANAGE' ? 'bg-purple-100 dark:bg-purple-900/30 text-purple-600 dark:text-purple-400' :
-                  action === 'APPROVE' ? 'bg-emerald-100 dark:bg-emerald-900/30 text-emerald-600 dark:text-emerald-400' :
-                  action === 'EXECUTE' ? 'bg-cyan-100 dark:bg-cyan-900/30 text-cyan-600 dark:text-cyan-400' :
-                  'bg-gray-100 dark:bg-gray-700 text-gray-600 dark:text-gray-400'
-                }`}>
-                  {icon}
+        {viewMode !== 'logs' && viewMode !== 'role' && viewMode !== 'matrix' && viewMode !== 'navigation' && (
+          <div className="mt-2 bg-white dark:bg-gray-800 rounded-xl shadow-sm border border-gray-200 dark:border-gray-700 p-3">
+            <h3 className="text-sm font-medium text-gray-900 dark:text-white mb-2 flex items-center gap-2">
+              <Info className="w-4 h-4 text-gray-400" />
+              Action Types Legend
+            </h3>
+            <div className="flex flex-wrap gap-2">
+              {Object.entries(ACTION_ICONS).map(([action, icon]) => (
+                <div key={action} className="flex items-center gap-2 text-xs text-gray-600 dark:text-gray-400">
+                  <div className={`p-1 rounded ${
+                    action === 'VIEW' ? 'bg-blue-100 dark:bg-blue-900/30 text-blue-600 dark:text-blue-400' :
+                    action === 'CREATE' ? 'bg-green-100 dark:bg-green-900/30 text-green-600 dark:text-green-400' :
+                    action === 'EDIT' ? 'bg-amber-100 dark:bg-amber-900/30 text-amber-600 dark:text-amber-400' :
+                    action === 'DELETE' ? 'bg-red-100 dark:bg-red-900/30 text-red-600 dark:text-red-400' :
+                    action === 'MANAGE' ? 'bg-purple-100 dark:bg-purple-900/30 text-purple-600 dark:text-purple-400' :
+                    action === 'APPROVE' ? 'bg-emerald-100 dark:bg-emerald-900/30 text-emerald-600 dark:text-emerald-400' :
+                    action === 'EXECUTE' ? 'bg-cyan-100 dark:bg-cyan-900/30 text-cyan-600 dark:text-cyan-400' :
+                    'bg-gray-100 dark:bg-gray-700 text-gray-600 dark:text-gray-400'
+                  }`}>
+                    {icon}
+                  </div>
+                  <span>{action}</span>
                 </div>
-                <span>{action}</span>
-              </div>
-            ))}
+              ))}
+            </div>
           </div>
-        </div>
+        )}
       </div>
 
       {/* ===================== NAVIGATION VIEW ===================== */}
       {viewMode === 'navigation' && (
-        <div className="w-full px-4 sm:px-6 lg:px-8 py-6">
-          <div className="grid grid-cols-1 lg:grid-cols-5 gap-6">
+        <div className="w-full px-4 sm:px-6 lg:px-8 h-full min-h-0 pb-1">
+          <div className="grid grid-cols-1 lg:grid-cols-5 gap-1 h-full min-h-0 lg:items-stretch">
             {/* Role Selector */}
-            <div className="lg:col-span-1">
-              <div className="bg-white dark:bg-gray-800 rounded-xl shadow-sm border border-gray-200 dark:border-gray-700 overflow-hidden sticky top-24">
+            <div className="lg:col-span-1 min-h-0 h-full">
+              <div className="bg-white dark:bg-gray-800 rounded-xl shadow-sm border border-gray-200 dark:border-gray-700 overflow-hidden h-full flex flex-col">
                 <div className="p-3 border-b border-gray-200 dark:border-gray-700">
                   <h2 className="text-sm font-semibold text-gray-900 dark:text-white flex items-center gap-2">
                     <Shield className="w-4 h-4" />
                     Role
                   </h2>
                 </div>
-                <div className="divide-y divide-gray-100 dark:divide-gray-700">
+                <div className="divide-y divide-gray-100 dark:divide-gray-700 flex-1 overflow-y-auto">
                   {editableRoles.map(role => (
                     <button
                       key={role}
@@ -1565,8 +1715,8 @@ function PrivilegesContent() {
             </div>
 
             {/* Navigation Access Matrix */}
-            <div className="lg:col-span-4">
-              <div className="bg-white dark:bg-gray-800 rounded-xl shadow-sm border border-gray-200 dark:border-gray-700 overflow-hidden">
+            <div className="lg:col-span-4 min-h-0 h-full">
+              <div className="bg-white dark:bg-gray-800 rounded-xl shadow-sm border border-gray-200 dark:border-gray-700 overflow-hidden h-full flex flex-col">
                 {/* Header with sub-tabs */}
                 <div className="px-4 py-3 border-b border-gray-200 dark:border-gray-700 flex flex-wrap items-center justify-between gap-3">
                   <div>
@@ -1605,120 +1755,122 @@ function PrivilegesContent() {
                 </div>
 
                 {/* Matrix Table */}
-                {navUserLoading ? (
-                  <div className="flex items-center justify-center py-12">
-                    <Loader2 className="w-6 h-6 animate-spin text-primary-500" />
-                  </div>
-                ) : (
-                  <div className="overflow-x-auto">
-                    <table className="w-full text-sm">
-                      <thead>
-                        <tr className="border-b border-gray-200 dark:border-gray-700 bg-gray-50 dark:bg-gray-700/30">
-                          <th className="sticky left-0 z-10 bg-gray-50 dark:bg-gray-700/30 px-4 py-2 text-left text-xs font-semibold text-gray-500 dark:text-gray-400 uppercase tracking-wider min-w-[180px]">
-                            Link
-                          </th>
-                          <th className="px-3 py-2 text-center text-xs font-semibold text-gray-500 dark:text-gray-400 uppercase tracking-wider whitespace-nowrap border-l border-r border-gray-200 dark:border-gray-700 min-w-[90px]">
-                            All {ROLE_CONFIG[navSelectedRole]?.label?.split(' ')[0] || navSelectedRole}
-                          </th>
-                          {navUsers.map(u => (
-                            <th key={u.id} className="px-2 py-2 text-center min-w-[60px]">
-                              <div className="flex flex-col items-center gap-0.5" title={`${u.name || u.email}\n${u.email}`}>
-                                <div className="w-7 h-7 rounded-full bg-primary-100 dark:bg-primary-900/30 text-primary-700 dark:text-primary-300 text-[10px] font-bold flex items-center justify-center">
-                                  {(u.name || u.email).charAt(0).toUpperCase()}
-                                </div>
-                                <span className="text-[10px] font-medium text-gray-600 dark:text-gray-400 truncate max-w-[64px]">
-                                  {(u.name || '').split(' ')[0] || u.email.split('@')[0]}
-                                </span>
-                                {u.PrivilegeOverrides.length > 0 && (
-                                  <span className="text-[9px] text-amber-600 dark:text-amber-400 font-semibold">
-                                    {u.PrivilegeOverrides.length} ovr
-                                  </span>
-                                )}
-                              </div>
+                <div className="flex-1 min-h-0">
+                  {navUserLoading ? (
+                    <div className="h-full flex items-center justify-center">
+                      <Loader2 className="w-6 h-6 animate-spin text-primary-500" />
+                    </div>
+                  ) : (
+                    <div className="h-full overflow-auto">
+                      <table className="w-full text-sm">
+                        <thead>
+                          <tr className="border-b border-gray-200 dark:border-gray-700 bg-gray-50 dark:bg-gray-700/30">
+                            <th className="sticky left-0 z-10 bg-gray-50 dark:bg-gray-700/30 px-4 py-2 text-left text-xs font-semibold text-gray-500 dark:text-gray-400 uppercase tracking-wider min-w-[180px]">
+                              Link
                             </th>
-                          ))}
-                        </tr>
-                      </thead>
-                      <tbody className="divide-y divide-gray-100 dark:divide-gray-700/50">
-                        {(navSubTab === 'quick' ? navQuickLinks : navAdminLinks).map(def => {
-                          const roleEnabled = matrix[navSelectedRole]?.[def.key] ?? false;
-                          const isRoleSaving = navSaving === `nav:${navSelectedRole}:${def.key}`;
-
-                          return (
-                            <tr key={def.key} className="hover:bg-gray-50/50 dark:hover:bg-gray-700/20 transition-colors">
-                              {/* Link name */}
-                              <td className="sticky left-0 z-10 bg-white dark:bg-gray-800 px-4 py-2.5 border-r border-gray-100 dark:border-gray-700/50">
-                                <span className="text-sm font-medium text-gray-900 dark:text-white">{def.displayName}</span>
-                              </td>
-
-                              {/* Role default toggle */}
-                              <td className="px-3 py-2.5 text-center border-r border-gray-200 dark:border-gray-700">
-                                <div className="flex items-center justify-center">
-                                  <button
-                                    onClick={() => toggleNavPrivilege(navSelectedRole, def.key, roleEnabled)}
-                                    disabled={isRoleSaving}
-                                    className={`relative inline-flex h-5 w-9 flex-shrink-0 cursor-pointer rounded-full border-2 border-transparent transition-colors duration-200 ease-in-out focus:outline-none ${
-                                      roleEnabled ? 'bg-primary-600' : 'bg-gray-300 dark:bg-gray-600'
-                                    } ${isRoleSaving ? 'opacity-50' : ''}`}
-                                    title={roleEnabled ? 'Enabled for all' : 'Disabled for all'}
-                                  >
-                                    <span className={`pointer-events-none inline-block h-4 w-4 transform rounded-full bg-white shadow transition duration-200 ease-in-out ${
-                                      roleEnabled ? 'translate-x-4' : 'translate-x-0'
-                                    }`}>
-                                      {isRoleSaving && <Loader2 className="w-2.5 h-2.5 animate-spin text-gray-400 m-[3px]" />}
+                            <th className="px-3 py-2 text-center text-xs font-semibold text-gray-500 dark:text-gray-400 uppercase tracking-wider whitespace-nowrap border-l border-r border-gray-200 dark:border-gray-700 min-w-[90px]">
+                              All {ROLE_CONFIG[navSelectedRole]?.label?.split(' ')[0] || navSelectedRole}
+                            </th>
+                            {navUsers.map(u => (
+                              <th key={u.id} className="px-2 py-2 text-center min-w-[60px]">
+                                <div className="flex flex-col items-center gap-0.5" title={`${u.name || u.email}\n${u.email}`}>
+                                  <div className="w-7 h-7 rounded-full bg-primary-100 dark:bg-primary-900/30 text-primary-700 dark:text-primary-300 text-[10px] font-bold flex items-center justify-center">
+                                    {(u.name || u.email).charAt(0).toUpperCase()}
+                                  </div>
+                                  <span className="text-[10px] font-medium text-gray-600 dark:text-gray-400 truncate max-w-[64px]">
+                                    {(u.name || '').split(' ')[0] || u.email.split('@')[0]}
+                                  </span>
+                                  {u.PrivilegeOverrides.length > 0 && (
+                                    <span className="text-[9px] text-amber-600 dark:text-amber-400 font-semibold">
+                                      {u.PrivilegeOverrides.length} ovr
                                     </span>
-                                  </button>
+                                  )}
                                 </div>
-                              </td>
+                              </th>
+                            ))}
+                          </tr>
+                        </thead>
+                        <tbody className="divide-y divide-gray-100 dark:divide-gray-700/50">
+                          {(navSubTab === 'quick' ? navQuickLinks : navAdminLinks).map(def => {
+                            const roleEnabled = matrix[navSelectedRole]?.[def.key] ?? false;
+                            const isRoleSaving = navSaving === `nav:${navSelectedRole}:${def.key}`;
 
-                              {/* Per-user cells */}
-                              {navUsers.map(u => {
-                                const { value, isOverridden } = getUserEffectiveNav(u.id, def.key);
-                                const isSaving = navSaving === `user:${u.id}:${def.key}`;
+                            return (
+                              <tr key={def.key} className="hover:bg-gray-50/50 dark:hover:bg-gray-700/20 transition-colors">
+                                {/* Link name */}
+                                <td className="sticky left-0 z-10 bg-white dark:bg-gray-800 px-4 py-2.5 border-r border-gray-100 dark:border-gray-700/50">
+                                  <span className="text-sm font-medium text-gray-900 dark:text-white">{def.displayName}</span>
+                                </td>
 
-                                return (
-                                  <td key={u.id} className={`px-2 py-2.5 text-center ${isOverridden ? 'bg-amber-50/60 dark:bg-amber-900/10' : ''}`}>
-                                    <div className="flex items-center justify-center group relative">
-                                      <button
-                                        onClick={() => toggleUserOverride(u.id, def.key, !value)}
-                                        disabled={isSaving}
-                                        className={`relative inline-flex h-4 w-7 flex-shrink-0 cursor-pointer rounded-full transition-colors duration-200 ease-in-out focus:outline-none ${
-                                          value ? 'bg-green-500' : 'bg-gray-300 dark:bg-gray-600'
-                                        } ${isSaving ? 'opacity-50' : ''} ${
-                                          isOverridden ? 'ring-2 ring-amber-400 dark:ring-amber-500 ring-offset-1 dark:ring-offset-gray-800' : 'opacity-50'
-                                        }`}
-                                        title={isOverridden
-                                          ? `Override: ${value ? 'Granted' : 'Denied'} — click to toggle, hover X to remove`
-                                          : `Following role default: ${value ? 'Visible' : 'Hidden'} — click to create override`
-                                        }
-                                      >
-                                        <span className={`pointer-events-none inline-block h-3 w-3 mt-[1px] ml-[1px] transform rounded-full bg-white shadow transition duration-200 ease-in-out ${
-                                          value ? 'translate-x-3' : 'translate-x-0'
-                                        }`}>
-                                          {isSaving && <Loader2 className="w-2 h-2 animate-spin text-gray-400" />}
-                                        </span>
-                                      </button>
-                                      {isOverridden && (
+                                {/* Role default toggle */}
+                                <td className="px-3 py-2.5 text-center border-r border-gray-200 dark:border-gray-700">
+                                  <div className="flex items-center justify-center">
+                                    <button
+                                      onClick={() => toggleNavPrivilege(navSelectedRole, def.key, roleEnabled)}
+                                      disabled={isRoleSaving}
+                                      className={`relative inline-flex h-5 w-9 flex-shrink-0 cursor-pointer rounded-full border-2 border-transparent transition-colors duration-200 ease-in-out focus:outline-none ${
+                                        roleEnabled ? 'bg-primary-600' : 'bg-gray-300 dark:bg-gray-600'
+                                      } ${isRoleSaving ? 'opacity-50' : ''}`}
+                                      title={roleEnabled ? 'Enabled for all' : 'Disabled for all'}
+                                    >
+                                      <span className={`pointer-events-none inline-block h-4 w-4 transform rounded-full bg-white shadow transition duration-200 ease-in-out ${
+                                        roleEnabled ? 'translate-x-4' : 'translate-x-0'
+                                      }`}>
+                                        {isRoleSaving && <Loader2 className="w-2.5 h-2.5 animate-spin text-gray-400 m-[3px]" />}
+                                      </span>
+                                    </button>
+                                  </div>
+                                </td>
+
+                                {/* Per-user cells */}
+                                {navUsers.map(u => {
+                                  const { value, isOverridden } = getUserEffectiveNav(u.id, def.key);
+                                  const isSaving = navSaving === `user:${u.id}:${def.key}`;
+
+                                  return (
+                                    <td key={u.id} className={`px-2 py-2.5 text-center ${isOverridden ? 'bg-amber-50/60 dark:bg-amber-900/10' : ''}`}>
+                                      <div className="flex items-center justify-center group relative">
                                         <button
-                                          onClick={(e) => { e.stopPropagation(); removeUserOverride(u.id, def.key); }}
+                                          onClick={() => toggleUserOverride(u.id, def.key, !value)}
                                           disabled={isSaving}
-                                          className="absolute -top-1 -right-1 opacity-0 group-hover:opacity-100 bg-white dark:bg-gray-800 rounded-full shadow-sm border border-gray-200 dark:border-gray-600 text-gray-400 hover:text-red-500 hover:border-red-300 transition-all p-0.5"
-                                          title="Remove override (revert to role default)"
+                                          className={`relative inline-flex h-4 w-7 flex-shrink-0 cursor-pointer rounded-full transition-colors duration-200 ease-in-out focus:outline-none ${
+                                            value ? 'bg-green-500' : 'bg-gray-300 dark:bg-gray-600'
+                                          } ${isSaving ? 'opacity-50' : ''} ${
+                                            isOverridden ? 'ring-2 ring-amber-400 dark:ring-amber-500 ring-offset-1 dark:ring-offset-gray-800' : 'opacity-50'
+                                          }`}
+                                          title={isOverridden
+                                            ? `Override: ${value ? 'Granted' : 'Denied'} — click to toggle, hover X to remove`
+                                            : `Following role default: ${value ? 'Visible' : 'Hidden'} — click to create override`
+                                          }
                                         >
-                                          <X className="w-2.5 h-2.5" />
+                                          <span className={`pointer-events-none inline-block h-3 w-3 mt-[1px] ml-[1px] transform rounded-full bg-white shadow transition duration-200 ease-in-out ${
+                                            value ? 'translate-x-3' : 'translate-x-0'
+                                          }`}>
+                                            {isSaving && <Loader2 className="w-2 h-2 animate-spin text-gray-400" />}
+                                          </span>
                                         </button>
-                                      )}
-                                    </div>
-                                  </td>
-                                );
-                              })}
-                            </tr>
-                          );
-                        })}
-                      </tbody>
-                    </table>
-                  </div>
-                )}
+                                        {isOverridden && (
+                                          <button
+                                            onClick={(e) => { e.stopPropagation(); removeUserOverride(u.id, def.key); }}
+                                            disabled={isSaving}
+                                            className="absolute -top-1 -right-1 opacity-0 group-hover:opacity-100 bg-white dark:bg-gray-800 rounded-full shadow-sm border border-gray-200 dark:border-gray-600 text-gray-400 hover:text-red-500 hover:border-red-300 transition-all p-0.5"
+                                            title="Remove override (revert to role default)"
+                                          >
+                                            <X className="w-2.5 h-2.5" />
+                                          </button>
+                                        )}
+                                      </div>
+                                    </td>
+                                  );
+                                })}
+                              </tr>
+                            );
+                          })}
+                        </tbody>
+                      </table>
+                    </div>
+                  )}
+                </div>
 
                 {/* Legend + Stats */}
                 <div className="px-4 py-2.5 border-t border-gray-200 dark:border-gray-700 bg-gray-50/50 dark:bg-gray-700/20 flex flex-wrap items-center justify-between gap-3">

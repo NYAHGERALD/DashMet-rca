@@ -477,12 +477,11 @@ export async function documentTextToSpeech(payload: {
   skipIntro?: boolean;
 }): Promise<{ audioBlob: Blob; languageCode: string; introWordCount: number }> {
   const baseURL = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:5002/api';
-  const token = typeof window !== 'undefined' ? localStorage.getItem('firebaseToken') : null;
   const res = await fetch(`${baseURL}/document-ocr/text-to-speech`, {
     method: 'POST',
+    credentials: 'include',
     headers: {
       'Content-Type': 'application/json',
-      ...(token ? { Authorization: `Bearer ${token}` } : {}),
     },
     body: JSON.stringify(payload),
   });
@@ -517,12 +516,11 @@ export async function submitDocumentAuditLog(payload: {
   versionHash: string;
 }): Promise<void> {
   const baseURL = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:5002/api';
-  const token = typeof window !== 'undefined' ? localStorage.getItem('firebaseToken') : null;
   const res = await fetch(`${baseURL}/document-ocr/audit-log`, {
     method: 'POST',
+    credentials: 'include',
     headers: {
       'Content-Type': 'application/json',
-      ...(token ? { Authorization: `Bearer ${token}` } : {}),
     },
     body: JSON.stringify(payload),
   });

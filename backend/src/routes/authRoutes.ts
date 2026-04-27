@@ -1,7 +1,15 @@
 import { Router } from 'express';
 import asyncHandler from 'express-async-handler';
 import { authenticate } from '../middleware/auth';
-import { authRateLimiter } from '../middleware/rateLimiter';
+import {
+  forgotPasswordIpRateLimiter,
+  forgotPasswordRateLimiter,
+  loginIpRateLimiter,
+  loginRateLimiter,
+  passwordResetRateLimiter,
+  refreshRateLimiter,
+} from '../middleware/rateLimiter';
+import { requireAjaxRequest, requireCsrf } from '../middleware/csrf';
 import { validateLogin, validateRegister } from '../middleware/validators';
 import { validationResult } from 'express-validator';
 import { ValidationError } from '../middleware/errorHandler';
@@ -20,7 +28,7 @@ const validate = (req: any, res: any, next: any) => {
 
 // Phase 1.1: Authentication Routes
 
-// POST /api/auth/register - DISABLED: Registration is now invitation-only via /firebase-auth/create-profile
+// POST /api/auth/register - DISABLED: Registration is now invitation-only via invitation acceptance
 // The legacy self-registration endpoint has been disabled for security.
 // Users must be invited by an organization admin and register through the invitation flow.
 router.post(
@@ -36,7 +44,9 @@ router.post(
 // POST /api/auth/login - Email/Password login
 router.post(
   '/login',
-  authRateLimiter,
+  requireAjaxRequest,
+  loginIpRateLimiter,
+  loginRateLimiter,
   validateLogin,
   validate,
   asyncHandler(authController.login)
@@ -53,26 +63,32 @@ router.get(
 router.post(
   '/logout',
   authenticate,
+  requireCsrf,
   asyncHandler(authController.logout)
 );
 
 // POST /api/auth/refresh - Refresh access token
 router.post(
   '/refresh',
+  refreshRateLimiter,
+  requireCsrf,
   asyncHandler(authController.refreshToken)
 );
 
 // POST /api/auth/forgot-password - Request password reset
 router.post(
   '/forgot-password',
-  authRateLimiter,
+  requireAjaxRequest,
+  forgotPasswordIpRateLimiter,
+  forgotPasswordRateLimiter,
   asyncHandler(authController.forgotPassword)
 );
 
 // POST /api/auth/reset-password - Reset password with token
 router.post(
   '/reset-password',
-  authRateLimiter,
+  requireAjaxRequest,
+  passwordResetRateLimiter,
   asyncHandler(authController.resetPassword)
 );
 
@@ -80,13 +96,23 @@ router.post(
 router.post(
   '/change-password',
   authenticate,
+  requireCsrf,
   asyncHandler(authController.changePassword)
+);
+
+// PATCH /api/auth/update-phone - Update phone with email OTP verification
+router.patch(
+  '/update-phone',
+  authenticate,
+  requireCsrf,
+  asyncHandler(authController.updatePhone)
 );
 
 // POST /api/auth/verify-password - Verify password for secure actions (authenticated)
 router.post(
   '/verify-password',
   authenticate,
+  requireCsrf,
   asyncHandler(authController.verifyPassword)
 );
 
@@ -101,6 +127,7 @@ router.get(
 router.delete(
   '/sessions/:sessionId',
   authenticate,
+  requireCsrf,
   asyncHandler(authController.revokeSession)
 );
 
@@ -108,6 +135,7 @@ router.delete(
 router.delete(
   '/sessions',
   authenticate,
+  requireCsrf,
   asyncHandler(authController.revokeAllOtherSessions)
 );
 

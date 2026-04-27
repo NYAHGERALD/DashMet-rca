@@ -85,9 +85,15 @@ const ALLOWED_ORIGINS: string[] = (() => {
     'http://localhost:3000',
     'http://localhost:3001',
     'http://localhost:3002',
+    'http://127.0.0.1:3000',
+    'http://127.0.0.1:3001',
+    'http://127.0.0.1:3002',
     'https://localhost:3000',
     'https://localhost:3001',
     'https://localhost:3002',
+    'https://127.0.0.1:3000',
+    'https://127.0.0.1:3001',
+    'https://127.0.0.1:3002',
   ];
 })();
 
@@ -104,7 +110,7 @@ const corsOptions = {
   },
   credentials: true,
   methods: ['GET', 'POST', 'PUT', 'PATCH', 'DELETE', 'OPTIONS'],
-  allowedHeaders: ['Content-Type', 'Authorization', 'X-Requested-With', 'Accept', 'Origin'],
+  allowedHeaders: ['Content-Type', 'Authorization', 'X-Requested-With', 'X-CSRF-Token', 'Accept', 'Origin'],
   exposedHeaders: ['Content-Range', 'X-Content-Range', 'X-Request-Id'],
   maxAge: 3600, // 1 hour (not 24 hours)
 };
@@ -236,4 +242,3 @@ process.on('uncaughtException', (error) => {
 });
 
 export default app;
-

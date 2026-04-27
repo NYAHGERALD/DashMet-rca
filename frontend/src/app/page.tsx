@@ -15,36 +15,21 @@ import {
   Eye,
   EyeOff
 } from 'lucide-react';
-import {
-  signInWithEmailAndPassword,
-  createUserWithEmailAndPassword,
-  sendPasswordResetEmail,
-  fetchSignInMethodsForEmail,
-} from 'firebase/auth';
-import { auth } from '@/lib/firebase';
 import api from '@/lib/api';
-import { getFirebaseErrorMessage, isTooManyRequestsError } from '@/lib/firebaseErrors';
 import SupportModal from '@/components/support/SupportModal';
-import SystemAdminWarningModal from '@/components/modals/SystemAdminWarningModal';
 
 export default function HomePage() {
   const router = useRouter();
-  const { user, loading: authLoading } = useAuth();
+  const { user, loading: authLoading, refreshUser } = useAuth();
   
   // Login form state
   const [step, setStep] = useState<'email' | 'password' | 'register'>('email');
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
-  const [confirmPassword, setConfirmPassword] = useState('');
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
-  const [message, setMessage] = useState('');
   const [needsProfileSetup, setNeedsProfileSetup] = useState(false);
   const [showSupportModal, setShowSupportModal] = useState(false);
-  
-  // System Admin warning modal state
-  const [showSystemAdminWarning, setShowSystemAdminWarning] = useState(false);
-  
   // Forgot password modal state
   const [showForgotPasswordModal, setShowForgotPasswordModal] = useState(false);
   const [resetEmail, setResetEmail] = useState('');
@@ -54,7 +39,6 @@ export default function HomePage() {
   
   // Password visibility toggle state
   const [showPassword, setShowPassword] = useState(false);
-  const [showConfirmPassword, setShowConfirmPassword] = useState(false);
   
   // Check if redirected here due to account lockout
   useEffect(() => {
@@ -106,51 +90,17 @@ export default function HomePage() {
     );
   }
 
-  // Login handlers (unchanged logic)
   const handleEmailSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     setLoading(true);
     setError('');
-    setMessage('');
 
     try {
-      const response = await api.post('/firebase-auth/check-user', { email });
-      const { existsInFirebase, existsInDatabase, hasProfile } = response.data.data;
-
-      if (existsInFirebase && existsInDatabase && hasProfile) {
-        // SECURITY: Check if account is locked BEFORE showing password form
-        try {
-          const securityCheck = await api.post('/firebase-auth/check-login-security', { email });
-          if (securityCheck.data.data?.accountLocked) {
-            router.push(`/account-locked?email=${encodeURIComponent(email)}`);
-            return;
-          }
-        } catch {
-          // If security check fails, proceed to password — server-side lockout will still block
-        }
-        setStep('password');
-      } else if (existsInFirebase && !existsInDatabase) {
-        setNeedsProfileSetup(true);
-        setMessage('Your account exists but profile setup was not completed. Please enter your password to continue.');
-        setStep('password');
-      } else if (existsInFirebase && existsInDatabase && !hasProfile) {
-        setNeedsProfileSetup(true);
-        setMessage('Please enter your password to complete your profile setup.');
-        setStep('password');
-      } else {
-        setStep('register');
-      }
-    } catch (err: any) {
-      // Handle System Admin trying to use regular login
-      if (err.response?.status === 403) {
-        setShowSystemAdminWarning(true);
-        setLoading(false);
-        return;
-      }
-      const errorMsg = typeof err.response?.data?.error === 'string' 
-        ? err.response.data.error 
-        : getFirebaseErrorMessage(err, 'Failed to verify email');
-      setError(errorMsg);
+      setEmail(email.toLowerCase().trim());
+      setNeedsProfileSetup(false);
+      setStep('password');
+    } catch {
+      setError('Unable to continue. Please try again.');
     } finally {
       setLoading(false);
     }
@@ -162,48 +112,15 @@ export default function HomePage() {
     setError('');
 
     try {
-      await signInWithEmailAndPassword(auth, email, password);
-      
-      // SECURITY: Check if account is locked due to brute-force detection
-      try {
-        const securityCheck = await api.post('/firebase-auth/check-login-security', { email });
-        if (securityCheck.data.data?.accountLocked) {
-          await auth.signOut();
-          router.push(`/account-locked?email=${encodeURIComponent(email)}`);
-          return;
-        }
-      } catch {
-        console.warn('Security check unavailable');
-      }
-
-      api.post('/firebase-auth/report-successful-login', { email }).catch(() => {});
-      
-      const response = await api.post('/firebase-auth/check-user', { email });
-      const { existsInDatabase, hasProfile } = response.data.data;
-
-      if (existsInDatabase && hasProfile) {
-        router.push('/dashboard');
-      } else {
-        router.push('/profile-setup');
-      }
+      await api.post('/auth/login', { email, password });
+      await refreshUser();
+      router.push('/dashboard');
     } catch (err: any) {
-      api.post('/firebase-auth/report-failed-login', { email }).catch(() => {});
+      const errorMsg = typeof err.response?.data?.error === 'string'
+        ? err.response.data.error
+        : 'Invalid email or password';
 
-      if (err.response?.status === 403) {
-        await auth.signOut();
-        setShowSystemAdminWarning(true);
-        setLoading(false);
-        return;
-      }
-      // Account disabled at Firebase level OR Firebase rate-limited = account locked
-      if (isTooManyRequestsError(err) || err.code === 'auth/user-disabled') {
-        // Report to backend so it can disable the account if not already
-        api.post('/firebase-auth/report-failed-login', { email }).catch(() => {});
-        router.push(`/account-locked?email=${encodeURIComponent(email)}`);
-        return;
-      } else {
-        setError(getFirebaseErrorMessage(err, 'Login failed. Please try again.'));
-      }
+      setError(errorMsg);
     } finally {
       setLoading(false);
     }
@@ -213,36 +130,7 @@ export default function HomePage() {
 
   const handleRegister = async (e: React.FormEvent) => {
     e.preventDefault();
-    setLoading(true);
-    setError('');
-
-    if (password !== confirmPassword) {
-      setError('Passwords do not match');
-      setLoading(false);
-      return;
-    }
-
-    if (password.length < 6) {
-      setError('Password must be at least 6 characters');
-      setLoading(false);
-      return;
-    }
-
-    try {
-      await createUserWithEmailAndPassword(auth, email, password);
-      router.push('/profile-setup');
-    } catch (err: any) {
-      if (err.code === 'auth/email-already-in-use') {
-        setNeedsProfileSetup(true);
-        setMessage('This email is already registered. Please enter your password to complete your profile setup.');
-        setError('');
-        setStep('password');
-      } else {
-        setError(getFirebaseErrorMessage(err, 'Registration failed. Please try again.'));
-      }
-    } finally {
-      setLoading(false);
-    }
+    setError('Self-registration is disabled. Please use an invitation link from your organization administrator.');
   };
 
   const handleForgotPassword = async () => {
@@ -270,18 +158,10 @@ export default function HomePage() {
     setResetError('');
 
     try {
-      await sendPasswordResetEmail(auth, resetEmail, {
-        url: `${window.location.origin}/login`,
-        handleCodeInApp: true,
-      });
-      
+      await api.post('/auth/forgot-password', { email: resetEmail.toLowerCase().trim() });
       setResetSuccess(true);
     } catch (err: any) {
-      if (err.code === 'auth/user-not-found') {
-        setResetSuccess(true); // Don't reveal whether user exists
-      } else {
-        setResetError(getFirebaseErrorMessage(err, 'Failed to send reset email. Please try again.'));
-      }
+      setResetError(err.response?.data?.error || 'Failed to send reset email. Please try again.');
     } finally {
       setResetLoading(false);
     }
@@ -381,19 +261,13 @@ export default function HomePage() {
                 <div className="text-center mb-4 sm:mb-6">
                   <h2 className="text-lg sm:text-xl md:text-2xl font-bold text-white mb-1 sm:mb-2">Welcome</h2>
                   <p className="text-xs sm:text-sm md:text-base text-blue-200/70">Sign in to access your dashboard</p>
-                  <p className="text-[10px] sm:text-xs text-slate-400 mt-1 sm:mt-2">Sign in or register with Google, Microsoft (Work/School/Personal), or your email.</p>
+                  <p className="text-[10px] sm:text-xs text-slate-400 mt-1 sm:mt-2">Sign in with your organization account. New users must use an invitation link.</p>
                 </div>
 
                 <div className="space-y-4">
                   {error && (
                     <div className="p-3 bg-red-500/20 border border-red-500/30 rounded-lg text-red-200 text-sm">
                       {error}
-                    </div>
-                  )}
-
-                  {message && (
-                    <div className="p-3 bg-green-500/20 border border-green-500/30 rounded-lg text-green-200 text-sm">
-                      {message}
                     </div>
                   )}
 
@@ -486,10 +360,10 @@ export default function HomePage() {
 
                   {/* Register Form */}
                   {step === 'register' && (
-                    <div>
+                    <div className="space-y-4">
                       <div className="mb-4">
                         <p className="text-blue-200/70 text-sm">
-                          Create account for <span className="text-white font-medium">{email}</span>
+                          Invitation required for <span className="text-white font-medium">{email}</span>
                         </p>
                         <button
                           onClick={() => setStep('email')}
@@ -498,61 +372,17 @@ export default function HomePage() {
                           Change email
                         </button>
                       </div>
+                      <div className="p-4 bg-amber-500/10 border border-amber-500/30 rounded-lg text-sm">
+                        <p className="text-amber-200 font-medium mb-1">Self-registration is disabled</p>
+                        <p className="text-amber-300/80">Ask your organization administrator to send an invitation link.</p>
+                      </div>
                       <form onSubmit={handleRegister}>
-                        <div className="mb-4">
-                          <label htmlFor="password" className="block text-sm font-medium text-blue-200 mb-2">
-                            Password
-                          </label>
-                          <div className="relative">
-                            <input
-                              id="password"
-                              type={showPassword ? 'text' : 'password'}
-                              value={password}
-                              onChange={(e) => setPassword(e.target.value)}
-                              className="w-full px-4 py-3 pr-12 bg-white/5 border border-white/10 rounded-lg text-white placeholder-gray-400 focus:outline-none focus:ring-2 focus:ring-blue-500/50 focus:border-transparent"
-                              placeholder="Create a password"
-                              required
-                              disabled={loading}
-                            />
-                            <button
-                              type="button"
-                              onClick={() => setShowPassword(!showPassword)}
-                              className="absolute right-3 top-1/2 -translate-y-1/2 text-gray-400 hover:text-white transition-colors"
-                            >
-                              {showPassword ? <EyeOff className="h-5 w-5" /> : <Eye className="h-5 w-5" />}
-                            </button>
-                          </div>
-                        </div>
-                        <div className="mb-4">
-                          <label htmlFor="confirmPassword" className="block text-sm font-medium text-blue-200 mb-2">
-                            Confirm Password
-                          </label>
-                          <div className="relative">
-                            <input
-                              id="confirmPassword"
-                              type={showConfirmPassword ? 'text' : 'password'}
-                              value={confirmPassword}
-                              onChange={(e) => setConfirmPassword(e.target.value)}
-                              className="w-full px-4 py-3 pr-12 bg-white/5 border border-white/10 rounded-lg text-white placeholder-gray-400 focus:outline-none focus:ring-2 focus:ring-blue-500/50 focus:border-transparent"
-                              placeholder="Confirm your password"
-                              required
-                              disabled={loading}
-                            />
-                            <button
-                              type="button"
-                              onClick={() => setShowConfirmPassword(!showConfirmPassword)}
-                              className="absolute right-3 top-1/2 -translate-y-1/2 text-gray-400 hover:text-white transition-colors"
-                            >
-                              {showConfirmPassword ? <EyeOff className="h-5 w-5" /> : <Eye className="h-5 w-5" />}
-                            </button>
-                          </div>
-                        </div>
                         <button
                           type="submit"
                           disabled={loading}
                           className="w-full px-6 py-3 bg-gradient-to-r from-blue-600 to-cyan-600 text-white rounded-lg hover:from-blue-700 hover:to-cyan-700 transition-all duration-200 disabled:opacity-50 disabled:cursor-not-allowed font-medium"
                         >
-                          {loading ? 'Creating account...' : 'Create Account'}
+                          Request Invitation
                         </button>
                       </form>
                     </div>
@@ -737,15 +567,6 @@ export default function HomePage() {
         </div>
       )}
 
-      {/* System Admin Warning Modal */}
-      <SystemAdminWarningModal
-        isOpen={showSystemAdminWarning}
-        onClose={() => setShowSystemAdminWarning(false)}
-        onRedirect={() => {
-          setShowSystemAdminWarning(false);
-          router.push('/dashmet-control/login');
-        }}
-      />
     </div>
   );
 }

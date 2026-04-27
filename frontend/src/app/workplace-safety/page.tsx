@@ -8,9 +8,8 @@ import { useAuth } from '@/components/providers/AuthProvider';
 import { useHasMinimumRole } from '@/lib/rbac';
 import ProtectedRoute from '@/components/auth/ProtectedRoute';
 import api from '@/lib/api';
-import { storage, auth } from '@/lib/firebase';
+import { storage } from '@/lib/firebase';
 import { ref, uploadBytesResumable, getDownloadURL } from 'firebase/storage';
-import { getIdToken } from 'firebase/auth';
 import AIEnhancedTextarea from '@/components/fmir/AIEnhancedTextarea';
 import {
   Shield,
@@ -784,7 +783,7 @@ function WorkplaceSafetyContent() {
   const router = useRouter();
   const searchParams = useSearchParams();
   const editId = searchParams.get('edit');
-  const { user } = useAuth();
+  const { user, getIdToken } = useAuth();
   const isSupervisorPlus = useHasMinimumRole('SUPERVISOR');
 
   // Get user's full name
@@ -1535,9 +1534,10 @@ function WorkplaceSafetyContent() {
           // Create WorkOrder record in backend for uploaded file
           if (assessment.id) {
             try {
-              const token = await getIdToken(auth.currentUser!);
+              const token = await getIdToken();
               await fetch(`${API_BASE}/work-orders/uploaded`, {
                 method: 'POST',
+                credentials: 'include',
                 headers: {
                   'Content-Type': 'application/json',
                   Authorization: `Bearer ${token}`,
@@ -4757,12 +4757,12 @@ function WorkplaceSafetyContent() {
                         console.log('[Work Order] Form data:', workOrderFormData);
                         console.log('[Work Order] Form context:', workOrderFormContext);
                         
-                        if (!auth.currentUser) {
+                        if (!user) {
                           throw new Error('User not authenticated');
                         }
                         
-                        const token = await getIdToken(auth.currentUser);
-                        console.log('[Work Order] Got Firebase token');
+                        const token = await getIdToken();
+                        console.log('[Work Order] Got session marker');
                         
                         // First, ensure the assessment is saved if it doesn't have an ID
                         let currentAssessmentId = assessment.id;
@@ -4776,6 +4776,7 @@ function WorkplaceSafetyContent() {
                           // Save the assessment first
                           const saveResponse = await fetch(`${API_BASE}/workplace-safety`, {
                             method: 'POST',
+                            credentials: 'include',
                             headers: {
                               'Content-Type': 'application/json',
                               Authorization: `Bearer ${token}`,
@@ -4815,6 +4816,7 @@ function WorkplaceSafetyContent() {
                         console.log('[Work Order] Creating work order with assessmentId:', currentAssessmentId);
                         const response = await fetch(`${API_BASE}/work-orders`, {
                           method: 'POST',
+                          credentials: 'include',
                           headers: {
                             'Content-Type': 'application/json',
                             Authorization: `Bearer ${token}`,

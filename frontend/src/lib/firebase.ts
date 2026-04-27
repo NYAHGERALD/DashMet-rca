@@ -1,8 +1,7 @@
-// Phase 1.1: Firebase Client Configuration
+// Firebase Client Configuration
 // NOTE: NEXT_PUBLIC_ values are PUBLIC by design (Firebase docs confirm client keys are not secrets).
-// Security is enforced by Firebase Security Rules + backend token verification, not by hiding these.
+// Web identity is backend-owned; Firebase is used here only for client storage helpers.
 import { initializeApp, getApps } from 'firebase/app';
-import { getAuth } from 'firebase/auth';
 import { getStorage } from 'firebase/storage';
 
 // Firebase config from environment variables (baked into JS at build time by Next.js)
@@ -23,12 +22,6 @@ function createApp() {
   return getApps().length === 0 ? initializeApp(firebaseConfig) : getApps()[0];
 }
 
-let _auth: ReturnType<typeof getAuth> | null = null;
-export function getFirebaseAuth() {
-  if (!_auth) _auth = getAuth(createApp());
-  return _auth;
-}
-
 let _storage: ReturnType<typeof getStorage> | null = null;
 export function getFirebaseStorage() {
   if (!_storage) _storage = getStorage(createApp());
@@ -39,9 +32,6 @@ export function getFirebaseStorage() {
 // Backward-compatible named exports for existing code.
 // These use getter properties so Firebase only initializes when actually accessed at runtime.
 // During build/prerender, if these are never accessed, no crash occurs.
-export const auth = typeof window !== 'undefined' || firebaseConfig.apiKey
-  ? getFirebaseAuth()
-  : (undefined as any);
 export const storage = typeof window !== 'undefined' || firebaseConfig.apiKey
   ? getFirebaseStorage()
   : (undefined as any);

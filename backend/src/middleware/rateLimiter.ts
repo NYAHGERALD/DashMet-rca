@@ -1,5 +1,8 @@
 import rateLimit from 'express-rate-limit';
 import { Request } from 'express';
+import crypto from 'crypto';
+
+const isProduction = process.env.NODE_ENV === 'production';
 
 // ── Key generator: use X-Forwarded-For behind proxy, fallback to IP ──
 const getClientKey = (req: Request): string => {
@@ -8,10 +11,26 @@ const getClientKey = (req: Request): string => {
     || 'unknown';
 };
 
+const normalizeIdentifier = (value: unknown): string =>
+  String(value ?? '').trim().toLowerCase();
+
+const hashIdentifier = (value: string): string =>
+  crypto.createHash('sha256').update(value).digest('hex').slice(0, 24);
+
+const getEmailOrPhoneIdentifier = (req: Request): string => {
+  const email = normalizeIdentifier(req.body?.email);
+  if (email) return `email:${email}`;
+
+  const phone = normalizeIdentifier(req.body?.phone);
+  if (phone) return `phone:${phone}`;
+
+  return 'anonymous';
+};
+
 // ── Global API Rate Limiter ──
 export const rateLimiter = rateLimit({
   windowMs: 15 * 60 * 1000,     // 15 minutes
-  max: process.env.NODE_ENV === 'production' ? 200 : 10000,
+  max: isProduction ? 200 : 10000,
   standardHeaders: true,
   legacyHeaders: false,
   keyGenerator: getClientKey,
@@ -21,7 +40,7 @@ export const rateLimiter = rateLimit({
   },
   skip: (req) => {
     if (process.env.NODE_ENV !== 'production') {
-      const skipPaths = ['/firebase-auth/me', '/health'];
+      const skipPaths = ['/auth/me', '/health'];
       return skipPaths.some(path => req.path.includes(path));
     }
     return false;
@@ -31,7 +50,7 @@ export const rateLimiter = rateLimit({
 // ── Strict Auth Rate Limiter (Login/Register) ──
 export const authRateLimiter = rateLimit({
   windowMs: 15 * 60 * 1000,     // 15 minutes
-  max: process.env.NODE_ENV === 'production' ? 10 : 10000,
+  max: isProduction ? 10 : 10000,
   skipSuccessfulRequests: true,  // Only count failures
   standardHeaders: true,
   legacyHeaders: false,
@@ -46,10 +65,41 @@ export const authRateLimiter = rateLimit({
   },
 });
 
+// ── Login Rate Limiter (per-account+IP failures) ──
+export const loginRateLimiter = rateLimit({
+  windowMs: 15 * 60 * 1000, // 15 minutes
+  max: isProduction ? 5 : 10000,
+  skipSuccessfulRequests: true,
+  standardHeaders: true,
+  legacyHeaders: false,
+  keyGenerator: (req: Request) => {
+    const ip = getClientKey(req);
+    const subject = getEmailOrPhoneIdentifier(req);
+    return `login-subject:${hashIdentifier(subject)}:${ip}`;
+  },
+  message: {
+    success: false,
+    error: 'Too many authentication attempts. Please try again in 15 minutes.',
+  },
+});
+
+// ── Login Burst Limiter (per-IP total attempts) ──
+export const loginIpRateLimiter = rateLimit({
+  windowMs: 15 * 60 * 1000, // 15 minutes
+  max: isProduction ? 20 : 10000,
+  standardHeaders: true,
+  legacyHeaders: false,
+  keyGenerator: (req: Request) => `login-ip:${getClientKey(req)}`,
+  message: {
+    success: false,
+    error: 'Too many authentication attempts from this network. Please try again later.',
+  },
+});
+
 // ── User Enumeration Protection (check-user, check-phone, check-email) ──
 export const enumerationRateLimiter = rateLimit({
   windowMs: 60 * 60 * 1000,     // 1 hour
-  max: process.env.NODE_ENV === 'production' ? 10 : 10000,
+  max: isProduction ? 10 : 10000,
   standardHeaders: true,
   legacyHeaders: false,
   keyGenerator: getClientKey,
@@ -62,7 +112,7 @@ export const enumerationRateLimiter = rateLimit({
 // ── OTP / Access Code Rate Limiter ──
 export const otpRateLimiter = rateLimit({
   windowMs: 60 * 60 * 1000,     // 1 hour
-  max: process.env.NODE_ENV === 'production' ? 5 : 10000,
+  max: isProduction ? 5 : 10000,
   skipSuccessfulRequests: false,
   standardHeaders: true,
   legacyHeaders: false,
@@ -76,7 +126,7 @@ export const otpRateLimiter = rateLimit({
 // ── File Upload Rate Limiter ──
 export const uploadRateLimiter = rateLimit({
   windowMs: 60 * 60 * 1000,     // 1 hour
-  max: process.env.NODE_ENV === 'production' ? 50 : 10000,
+  max: isProduction ? 50 : 10000,
   standardHeaders: true,
   legacyHeaders: false,
   keyGenerator: getClientKey,
@@ -89,7 +139,7 @@ export const uploadRateLimiter = rateLimit({
 // ── AI/OpenAI Endpoint Rate Limiter ──
 export const aiRateLimiter = rateLimit({
   windowMs: 60 * 1000,           // 1 minute
-  max: process.env.NODE_ENV === 'production' ? 10 : 10000,
+  max: isProduction ? 10 : 10000,
   standardHeaders: true,
   legacyHeaders: false,
   keyGenerator: getClientKey,
@@ -99,32 +149,79 @@ export const aiRateLimiter = rateLimit({
   },
 });
 
-// ── Password Reset Rate Limiter (server-reset-password) ──
-// Strict limit: 3 attempts per hour per IP. oobCodes are single-use and time-limited,
-// but rate limiting prevents brute-force attempts against the endpoint.
-export const passwordResetRateLimiter = rateLimit({
-  windowMs: 60 * 60 * 1000,     // 1 hour
-  max: process.env.NODE_ENV === 'production' ? 3 : 10000,
-  skipSuccessfulRequests: false,
+// ── Forgot Password Rate Limiter (per-account+IP request limit) ──
+export const forgotPasswordRateLimiter = rateLimit({
+  windowMs: 60 * 60 * 1000, // 1 hour
+  max: isProduction ? 3 : 10000,
   standardHeaders: true,
   legacyHeaders: false,
-  keyGenerator: getClientKey,
+  keyGenerator: (req: Request) => {
+    const ip = getClientKey(req);
+    const email = normalizeIdentifier(req.body?.email) || 'anonymous';
+    return `forgot-password:${hashIdentifier(email)}:${ip}`;
+  },
+  message: {
+    success: false,
+    error: 'Too many password reset requests. Please try again in 1 hour.',
+  },
+});
+
+// ── Forgot Password IP Burst Limiter ──
+export const forgotPasswordIpRateLimiter = rateLimit({
+  windowMs: 60 * 60 * 1000, // 1 hour
+  max: isProduction ? 20 : 10000,
+  standardHeaders: true,
+  legacyHeaders: false,
+  keyGenerator: (req: Request) => `forgot-password-ip:${getClientKey(req)}`,
+  message: {
+    success: false,
+    error: 'Too many password reset requests from this network. Please try again later.',
+  },
+});
+
+// ── Reset Password Rate Limiter ──
+// Strict limit: reset tokens are single-use and time-limited; this protects
+// against token-guessing and brute-force attempts.
+export const passwordResetRateLimiter = rateLimit({
+  windowMs: 60 * 60 * 1000,     // 1 hour
+  max: isProduction ? 5 : 10000,
+  standardHeaders: true,
+  legacyHeaders: false,
+  keyGenerator: (req: Request) => {
+    const ip = getClientKey(req);
+    const token = normalizeIdentifier(req.body?.token);
+    const tokenFingerprint = token ? hashIdentifier(token) : 'no-token';
+    return `reset-password:${tokenFingerprint}:${ip}`;
+  },
   message: {
     success: false,
     error: 'Too many password reset attempts. Please try again in 1 hour.',
   },
 });
 
-// ── System Admin Master Key Rate Limiter ──
-export const masterKeyRateLimiter = rateLimit({
+// ── Refresh Token Rate Limiter ──
+export const refreshRateLimiter = rateLimit({
+  windowMs: 15 * 60 * 1000, // 15 minutes
+  max: isProduction ? 30 : 10000,
+  standardHeaders: true,
+  legacyHeaders: false,
+  keyGenerator: (req: Request) => `refresh:${getClientKey(req)}`,
+  message: {
+    success: false,
+    error: 'Too many token refresh attempts. Please try again later.',
+  },
+});
+
+// ── System Admin Authentication Rate Limiter ──
+export const systemAdminAuthRateLimiter = rateLimit({
   windowMs: 60 * 60 * 1000,     // 1 hour
-  max: process.env.NODE_ENV === 'production' ? 3 : 10000,
-  skipSuccessfulRequests: false,
+  max: isProduction ? 20 : 10000,
+  skipSuccessfulRequests: true,
   standardHeaders: true,
   legacyHeaders: false,
   keyGenerator: getClientKey,
   message: {
     success: false,
-    error: 'Access denied. Too many attempts.',
+    error: 'Too many authentication attempts. Please try again later.',
   },
 });

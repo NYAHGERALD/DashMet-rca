@@ -1,25 +1,19 @@
-// Professional Password Reset Page - Handles Firebase password reset action
+// Professional Password Reset Page - Handles backend password reset links
 'use client';
 
 import { useState, useEffect, Suspense } from 'react';
-import { useRouter, useSearchParams } from 'next/navigation';
+import { useSearchParams } from 'next/navigation';
 import Link from 'next/link';
 import Image from 'next/image';
-import { verifyPasswordResetCode } from 'firebase/auth';
-import { auth } from '@/lib/firebase';
 import api from '@/lib/api';
-import { getFirebaseErrorMessage } from '@/lib/firebaseErrors';
 import { Eye, EyeOff } from 'lucide-react';
 
 function ResetPasswordForm() {
-  const router = useRouter();
   const searchParams = useSearchParams();
-  const oobCode = searchParams.get('oobCode');
-  const mode = searchParams.get('mode');
+  const resetToken = searchParams.get('token');
 
   const [password, setPassword] = useState('');
   const [confirmPassword, setConfirmPassword] = useState('');
-  const [email, setEmail] = useState('');
   const [loading, setLoading] = useState(false);
   const [verifying, setVerifying] = useState(true);
   const [error, setError] = useState('');
@@ -41,30 +35,22 @@ function ResetPasswordForm() {
 
   useEffect(() => {
     const verifyCode = async () => {
-      if (!oobCode) {
+      if (!resetToken) {
         setError('Invalid password reset link. Please request a new one.');
         setVerifying(false);
         return;
       }
 
-      try {
-        const userEmail = await verifyPasswordResetCode(auth, oobCode);
-        setEmail(userEmail);
-        setCodeValid(true);
-      } catch (err: any) {
-        setError(getFirebaseErrorMessage(err, 'Unable to verify reset link. Please try again.'));
-        setCodeValid(false);
-      } finally {
-        setVerifying(false);
-      }
+      setCodeValid(true);
+      setVerifying(false);
     };
 
     verifyCode();
-  }, [oobCode]);
+  }, [resetToken]);
 
   useEffect(() => {
     setPasswordStrength({
-      hasMinLength: password.length >= 8,
+      hasMinLength: password.length >= 12,
       hasUppercase: /[A-Z]/.test(password),
       hasLowercase: /[a-z]/.test(password),
       hasNumber: /[0-9]/.test(password),
@@ -77,7 +63,8 @@ function ResetPasswordForm() {
       passwordStrength.hasMinLength &&
       passwordStrength.hasUppercase &&
       passwordStrength.hasLowercase &&
-      passwordStrength.hasNumber
+      passwordStrength.hasNumber &&
+      passwordStrength.hasSpecial
     );
   };
 
@@ -112,12 +99,8 @@ function ResetPasswordForm() {
     setLoading(true);
 
     try {
-      // ALL password resets go through the server-side endpoint.
-      // The server verifies the oobCode (proves email ownership), sets the new password
-      // via Admin SDK, re-enables the account if locked, and clears DB lockout.
-      // No client-side Firebase password reset is used — it fails for disabled accounts.
-      await api.post('/firebase-auth/server-reset-password', {
-        oobCode,
+      await api.post('/auth/reset-password', {
+        token: resetToken,
         newPassword: password,
       });
 
@@ -125,7 +108,11 @@ function ResetPasswordForm() {
     } catch (err: any) {
       const serverError = err.response?.data?.error || '';
 
-      if (serverError.includes('expired') || serverError.includes('Invalid')) {
+      if (
+        serverError.includes('expired') ||
+        serverError.includes('Invalid') ||
+        serverError.includes('Unable to reset password')
+      ) {
         setCodeValid(false);
         setError('This reset link has expired or was already used. Please request a new one.');
       } else {
@@ -279,9 +266,7 @@ function ResetPasswordForm() {
             <h1 className="text-2xl font-bold text-white mb-2">
               Create New Password
             </h1>
-            <p className="text-gray-300 text-sm">
-              for <span className="font-medium text-white">{email}</span>
-            </p>
+            <p className="text-gray-300 text-sm">Choose a strong password for your account.</p>
           </div>
 
           {error && (
@@ -339,7 +324,7 @@ function ResetPasswordForm() {
                           <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
                         )}
                       </svg>
-                      8+ characters
+                      12+ characters
                     </div>
                     <div className={`flex items-center ${passwordStrength.hasUppercase ? 'text-green-400' : 'text-gray-500'}`}>
                       <svg className="h-3.5 w-3.5 mr-1" fill="none" viewBox="0 0 24 24" stroke="currentColor">
@@ -370,6 +355,16 @@ function ResetPasswordForm() {
                         )}
                       </svg>
                       Number
+                    </div>
+                    <div className={`flex items-center ${passwordStrength.hasSpecial ? 'text-green-400' : 'text-gray-500'}`}>
+                      <svg className="h-3.5 w-3.5 mr-1" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                        {passwordStrength.hasSpecial ? (
+                          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 13l4 4L19 7" />
+                        ) : (
+                          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
+                        )}
+                      </svg>
+                      Special character
                     </div>
                   </div>
                 </div>

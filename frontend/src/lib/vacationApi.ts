@@ -244,6 +244,15 @@ export async function denyVacation(id: number, reason: string): Promise<Vacation
   return res.data.data;
 }
 
+export async function cancelVacation(id: number, reason?: string): Promise<VacationRequest> {
+  const res = await api.post(`/vacation/${id}/cancel`, { reason });
+  return res.data.data;
+}
+
+export async function deleteVacationRequest(id: number): Promise<void> {
+  await api.delete(`/vacation/${id}`);
+}
+
 // Activity Log
 export async function getVacationActivityLog(options?: {
   type?: string;

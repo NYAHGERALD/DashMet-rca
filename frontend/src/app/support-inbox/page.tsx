@@ -88,7 +88,7 @@ export default function SupportInboxPage() {
   const [newRequestAlert, setNewRequestAlert] = useState(false);
   
   // Check if user has access to this page
-  const hasAccess = user?.role === 'ADMIN' || user?.role === 'SYSTEM_ADMIN' || user?.role === 'QUALITY_CONTROL_MANAGER';
+  const hasAccess = user?.role === 'ADMIN' || user?.role === 'QUALITY_CONTROL_MANAGER';
   
   // Auto-connect WebSocket
   useEffect(() => {
@@ -107,7 +107,7 @@ export default function SupportInboxPage() {
       // Check if this request should be shown to this user
       const shouldShow = 
         !data.recipientRole ||
-        (data.recipientRole === 'ADMIN' && (user.role === 'ADMIN' || user.role === 'SYSTEM_ADMIN')) ||
+        (data.recipientRole === 'ADMIN' && user.role === 'ADMIN') ||
         (data.recipientRole === 'QUALITY_CONTROL_MANAGER' && user.role === 'QUALITY_CONTROL_MANAGER');
       
       if (!shouldShow) return;
@@ -163,6 +163,11 @@ export default function SupportInboxPage() {
   
   useEffect(() => {
     if (!user) return;
+
+    if (user.role === 'SYSTEM_ADMIN') {
+      router.push('/admin/support');
+      return;
+    }
     
     if (!hasAccess) {
       router.push('/dashboard');

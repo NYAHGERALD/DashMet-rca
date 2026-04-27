@@ -6,7 +6,6 @@
 import React, { createContext, useContext, useState, useEffect, useCallback, useMemo } from 'react';
 import { getTranslation, LanguageCode, LANGUAGES, getAvailableLanguages, isLanguageAvailable } from './index';
 import api from '@/lib/api';
-import { auth } from '@/lib/firebase';
 
 // Map database enum to language code
 const DB_TO_CODE: Record<string, LanguageCode> = {
@@ -67,22 +66,18 @@ export function I18nProvider({ children, defaultLanguage = 'en' }: I18nProviderP
           setLanguageState(stored);
         }
 
-        // Only try to load from user preferences if user is logged in
-        const firebaseUser = auth.currentUser;
-        if (firebaseUser) {
-          try {
-            const response = await api.get('/preferences');
-            if (response.data?.data?.language) {
-              const dbLang = response.data.data.language;
-              const langCode = DB_TO_CODE[dbLang] || 'en';
-              if (isLanguageAvailable(langCode)) {
-                setLanguageState(langCode);
-                localStorage.setItem('userLanguage', langCode);
-              }
+        try {
+          const response = await api.get('/preferences');
+          if (response.data?.data?.language) {
+            const dbLang = response.data.data.language;
+            const langCode = DB_TO_CODE[dbLang] || 'en';
+            if (isLanguageAvailable(langCode)) {
+              setLanguageState(langCode);
+              localStorage.setItem('userLanguage', langCode);
             }
-          } catch {
-            // User might not have preferences set, use localStorage value
           }
+        } catch {
+          // User might not be logged in or may not have preferences set.
         }
       } finally {
         setIsLoading(false);
@@ -103,14 +98,10 @@ export function I18nProvider({ children, defaultLanguage = 'en' }: I18nProviderP
     setLanguageState(lang);
     localStorage.setItem('userLanguage', lang);
 
-    // Save to user preferences only if logged in
-    const firebaseUser = auth.currentUser;
-    if (firebaseUser) {
-      try {
-        await api.patch('/preferences', { language: CODE_TO_DB[lang] || 'ENGLISH' });
-      } catch {
-        // Failed to save to server, localStorage is still updated
-      }
+    try {
+      await api.patch('/preferences', { language: CODE_TO_DB[lang] || 'ENGLISH' });
+    } catch {
+      // Failed to save to server, localStorage is still updated
     }
   }, []);
 

@@ -33,7 +33,6 @@ router.get('/', authenticate, requireMinimumRole(UserRole.ADMIN), async (req: Au
         select: {
           Facility: true,
           User: true,
-          Incident: true,
         },
       },
     },
@@ -48,11 +47,10 @@ router.get('/', authenticate, requireMinimumRole(UserRole.ADMIN), async (req: Au
 
 // GET /api/organizations/stats - Get system-wide stats (SYSTEM_ADMIN only)
 router.get('/stats', authenticate, requireMinimumRole(UserRole.SYSTEM_ADMIN), async (req: AuthRequest, res) => {
-  const [totalOrganizations, totalUsers, totalFacilities, totalIncidents] = await Promise.all([
+  const [totalOrganizations, totalUsers, totalFacilities] = await Promise.all([
     prisma.organization.count(),
     prisma.user.count(),
     prisma.facility.count(),
-    prisma.incident.count(),
   ]);
 
   res.json({
@@ -61,7 +59,6 @@ router.get('/stats', authenticate, requireMinimumRole(UserRole.SYSTEM_ADMIN), as
       totalOrganizations,
       totalUsers,
       totalFacilities,
-      totalIncidents,
     },
   });
 });

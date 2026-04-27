@@ -73,6 +73,7 @@ export default function SystemAdminDashboard() {
       const response = await fetch(
         `${process.env.NEXT_PUBLIC_API_URL || 'http://localhost:5002/api'}/system-admin/dashboard/stats`,
         {
+          credentials: 'include',
           headers: {
             'Authorization': `Bearer ${token}`,
           },

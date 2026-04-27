@@ -12,6 +12,12 @@ import { websocketService } from '../services/websocketService';
 
 const router = Router();
 
+const getInboxRecipientRoleForUser = (role?: string): SupportRecipientRole | null => {
+  if (role === 'ADMIN') return 'ADMIN';
+  if (role === 'QUALITY_CONTROL_MANAGER') return 'QUALITY_CONTROL_MANAGER';
+  return null;
+};
+
 const optionalAuthenticate = (req: AuthRequest, res: Response, next: NextFunction) => {
   if (req.headers.authorization) {
     authenticate(req, res, next);
@@ -106,6 +112,14 @@ router.post(
         if (!user && !email) {
             res.status(400).json({ message: 'Email is required for unauthenticated users.' });
         } else {
+            if (user?.role === 'SYSTEM_ADMIN') {
+              res.status(403).json({
+                success: false,
+                message: 'System Admin does not submit support requests. Use Support Request Management.'
+              });
+              return;
+            }
+
             // Upload attachments to Firebase Storage
             let attachments = null;
             if (files && files.length > 0) {
@@ -287,13 +301,9 @@ router.get(
     const { status, page = '1', limit = '20' } = req.query;
     
     // Determine which role this user can receive messages for
-    let recipientRole: string | null = null;
-    
-    if (user.role === 'ADMIN' || user.role === 'SYSTEM_ADMIN') {
-      recipientRole = 'ADMIN';
-    } else if (user.role === 'QUALITY_CONTROL_MANAGER') {
-      recipientRole = 'QUALITY_CONTROL_MANAGER';
-    } else {
+    const recipientRole = getInboxRecipientRoleForUser(user.role);
+
+    if (!recipientRole) {
       res.status(403).json({ 
         success: false, 
         message: 'Only Admin or QC Manager can access support inbox.' 
@@ -551,13 +561,9 @@ router.patch(
     const { status, internalNotes } = req.body;
     
     // Determine which role this user can manage
-    let recipientRole: string | null = null;
-    
-    if (user.role === 'ADMIN' || user.role === 'SYSTEM_ADMIN') {
-      recipientRole = 'ADMIN';
-    } else if (user.role === 'QUALITY_CONTROL_MANAGER') {
-      recipientRole = 'QUALITY_CONTROL_MANAGER';
-    } else {
+    const recipientRole = getInboxRecipientRoleForUser(user.role);
+
+    if (!recipientRole) {
       res.status(403).json({ 
         success: false, 
         message: 'Only Admin or QC Manager can manage support requests.' 
@@ -666,9 +672,8 @@ router.get(
   asyncHandler(async (req: AuthRequest, res: Response) => {
     const user = req.user!;
     
-    // Only Admin, System Admin, or QC Manager can receive alerts
-    const allowedRoles = ['ADMIN', 'SYSTEM_ADMIN', 'QUALITY_CONTROL_MANAGER'];
-    if (!allowedRoles.includes(user.role)) {
+    const recipientRole = getInboxRecipientRoleForUser(user.role);
+    if (!recipientRole) {
       res.status(200).json({ data: [] });
       return;
     }
@@ -689,12 +694,12 @@ router.get(
     
     // Filter by recipient role if specified
     // If recipientRole is null, show to all. Otherwise, only show to matching role
-    if (user.role === 'QUALITY_CONTROL_MANAGER') {
+    if (recipientRole === 'QUALITY_CONTROL_MANAGER') {
       whereClause.OR = [
         { recipientRole: null },
         { recipientRole: 'QUALITY_CONTROL_MANAGER' }
       ];
-    } else if (user.role === 'ADMIN' || user.role === 'SYSTEM_ADMIN') {
+    } else if (recipientRole === 'ADMIN') {
       whereClause.OR = [
         { recipientRole: null },
         { recipientRole: 'ADMIN' }
@@ -744,14 +749,34 @@ router.post(
   asyncHandler(async (req: AuthRequest, res: Response) => {
     const user = req.user!;
     const { requestId } = req.params;
+    const recipientRole = getInboxRecipientRoleForUser(user.role);
+
+    if (!recipientRole) {
+      res.status(403).json({
+        success: false,
+        message: 'Only Admin or QC Manager can dismiss support alerts.'
+      });
+      return;
+    }
     
-    // Verify the support request exists
-    const supportRequest = await prisma.supportRequest.findUnique({
-      where: { id: requestId }
+    // Verify the support request exists in the same organization
+    const supportRequest = await prisma.supportRequest.findFirst({
+      where: {
+        id: requestId,
+        organizationId: user.organizationId,
+      }
     });
     
     if (!supportRequest) {
       res.status(404).json({ error: 'Support request not found' });
+      return;
+    }
+
+    if (supportRequest.recipientRole && supportRequest.recipientRole !== recipientRole) {
+      res.status(403).json({
+        success: false,
+        message: 'You can only dismiss alerts directed to your role.'
+      });
       return;
     }
     
@@ -782,12 +807,25 @@ router.post(
   authenticate,
   asyncHandler(async (req: AuthRequest, res: Response) => {
     const user = req.user!;
+    const recipientRole = getInboxRecipientRoleForUser(user.role);
+
+    if (!recipientRole) {
+      res.status(403).json({
+        success: false,
+        message: 'Only Admin or QC Manager can dismiss support alerts.'
+      });
+      return;
+    }
     
     // Get all OPEN support requests for this organization
     const openRequests = await prisma.supportRequest.findMany({
       where: {
         organizationId: user.organizationId,
-        status: 'OPEN'
+        status: 'OPEN',
+        OR: [
+          { recipientRole: null },
+          { recipientRole }
+        ]
       },
       select: { id: true }
     });

@@ -5,24 +5,49 @@
 import { useState, useEffect } from 'react';
 import { useRouter, useSearchParams } from 'next/navigation';
 import Image from 'next/image';
-import { signInWithEmailAndPassword } from 'firebase/auth';
-import { auth } from '@/lib/firebase';
-import { getFirebaseErrorMessage } from '@/lib/firebaseErrors';
+import Link from 'next/link';
+import {
+  AlertCircle,
+  ArrowLeft,
+  CheckCircle2,
+  Eye,
+  EyeOff,
+  Info,
+  KeyRound,
+  Loader2,
+  LockKeyhole,
+  Mail,
+  ShieldCheck,
+} from 'lucide-react';
 import { useAuth } from '@/components/providers/AuthProvider';
 import api from '@/lib/api';
 import SystemAdminWarningModal from '@/components/modals/SystemAdminWarningModal';
 
+type MfaMethod = 'email_otp' | 'totp';
+
+const INVALID_CREDENTIALS_MESSAGE = 'Invalid email or password. Please try again.';
+
+const normalizeLoginError = (message?: string) => {
+  const normalized = message?.toLowerCase().trim();
+  if (!normalized || normalized === 'authentication failed' || normalized.includes('account is not authorized')) {
+    return INVALID_CREDENTIALS_MESSAGE;
+  }
+  return message;
+};
+
 export default function SystemAdminLoginPage() {
   const router = useRouter();
   const searchParams = useSearchParams();
-  const { user, loading: authLoading } = useAuth();
+  const { user, loading: authLoading, refreshUser } = useAuth();
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
-  const [masterKey, setMasterKey] = useState('');
+  const [showPassword, setShowPassword] = useState(false);
+  const [mfaCode, setMfaCode] = useState('');
+  const [requiresMfa, setRequiresMfa] = useState(false);
+  const [mfaMethod, setMfaMethod] = useState<MfaMethod>('email_otp');
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
-  const [showMasterKey, setShowMasterKey] = useState(false);
-  const [loginAttempts, setLoginAttempts] = useState(0);
+  const [notice, setNotice] = useState('');
   const [isLocked, setIsLocked] = useState(false);
   const [lockTimer, setLockTimer] = useState(0);
   const [loginSuccess, setLoginSuccess] = useState(false);
@@ -62,7 +87,6 @@ export default function SystemAdminLoginPage() {
       return () => clearTimeout(timer);
     } else if (lockTimer === 0 && isLocked) {
       setIsLocked(false);
-      setLoginAttempts(0);
     }
   }, [isLocked, lockTimer]);
 
@@ -74,66 +98,54 @@ export default function SystemAdminLoginPage() {
       return;
     }
 
-    if (!email || !password || !masterKey) {
-      setError('All fields are required');
+    if (!email || !password) {
+      setError('Enter your email and password.');
+      return;
+    }
+    if (requiresMfa && !mfaCode.trim()) {
+      setError('Enter the verification code.');
       return;
     }
 
     setLoading(true);
     setError('');
+    setNotice('');
 
     try {
-      // Step 1: Verify master key with backend first (public endpoint)
-      const verifyResponse = await api.post('/system-admin-auth/verify-master-key', {
-        email,
-        masterKey,
+      // Single secure authentication flow with optional MFA challenge.
+      const authResponse = await api.post('/system-admin-auth/authenticate', {
+        email: email.toLowerCase().trim(),
+        password,
+        mfaCode: mfaCode.trim(),
       });
-
-      if (!verifyResponse.data.success) {
-        if (verifyResponse.data.locked) {
-          setIsLocked(true);
-          setLockTimer((verifyResponse.data.remainingMinutes || 15) * 60);
-        }
-        throw new Error(verifyResponse.data.error || 'Invalid master key');
-      }
-
-      // Step 2: Firebase authentication
-      const userCredential = await signInWithEmailAndPassword(auth, email, password);
-      const idToken = await userCredential.user.getIdToken();
-
-      // Step 3: Full authentication with backend (Firebase token + master key)
-      let authResponse;
-      try {
-        authResponse = await api.post('/system-admin-auth/authenticate', {
-          firebaseToken: idToken,
-          masterKey,
-        });
-      } catch (authErr: any) {
-        // If authenticate fails, sign out of Firebase immediately
-        await auth.signOut();
-        throw authErr;
-      }
 
       if (authResponse.data.success && authResponse.data.user?.role === 'SYSTEM_ADMIN') {
         // Success! Set flags to prevent any re-renders or duplicate redirects
         setIsRedirecting(true);
         setLoginSuccess(true);
         setError(''); // Clear any errors
+        await refreshUser();
         // Use window.location for a clean redirect without React state race conditions
         window.location.href = '/system-admin';
         return; // Exit early, keep loading state
+      } else if (authResponse.data.requiresMfa) {
+        const method: MfaMethod = authResponse.data.mfaMethod === 'totp' ? 'totp' : 'email_otp';
+        setRequiresMfa(true);
+        setMfaMethod(method);
+        setMfaCode('');
+        setLoading(false);
+        setNotice(
+          authResponse.data.message ||
+            (method === 'totp'
+              ? 'Enter the verification code from your authenticator app.'
+              : 'Enter the verification code sent to your email.')
+        );
+        return;
       } else {
-        await auth.signOut();
         throw new Error(authResponse.data.error || 'Account is not authorized for System Admin access');
       }
     } catch (err: any) {
       console.error('System Admin login error:', err);
-      // Make sure we're signed out on any error
-      try {
-        await auth.signOut();
-      } catch (signOutErr) {
-        // Ignore signout errors
-      }
       setLoading(false); // Only set loading false on error
       
       // Check if this is an API error with lockout info
@@ -141,18 +153,43 @@ export default function SystemAdminLoginPage() {
       if (apiError?.locked) {
         setIsLocked(true);
         setLockTimer((apiError.remainingMinutes || 15) * 60);
-        setError(apiError.error || 'Account locked due to too many failed attempts');
+        setError(
+          apiError.error && apiError.error.toLowerCase() !== 'authentication failed'
+            ? apiError.error
+            : 'Account locked due to too many failed attempts.'
+        );
+      } else if (apiError?.requiresMfa) {
+        const method: MfaMethod = apiError?.mfaMethod === 'totp' ? 'totp' : 'email_otp';
+        setRequiresMfa(true);
+        setMfaMethod(method);
+        setNotice('');
+        setError(
+          method === 'totp'
+            ? 'Invalid authenticator code. Try again.'
+            : 'Invalid verification code. Try again.'
+        );
       } else {
-        setError(getFirebaseErrorMessage(err, 'Authentication failed. Please try again.'));
+        setError(normalizeLoginError(apiError?.error || err.message));
       }
     }
+  };
+
+  const handleBackToCredentials = () => {
+    setRequiresMfa(false);
+    setMfaCode('');
+    setError('');
+    setNotice('');
   };
 
   // Show loading state while auth is initializing
   if (authLoading) {
     return (
-      <div className="min-h-screen flex items-center justify-center bg-slate-950">
-        <div className="animate-spin rounded-full h-8 w-8 border-t-2 border-b-2 border-blue-500"></div>
+      <div className="relative min-h-screen flex items-center justify-center p-4">
+        <div className="absolute inset-0">
+          <div className="absolute inset-0 bg-[url('/images/landing-page-image.jpg')] bg-cover bg-center" />
+          <div className="absolute inset-0 bg-gradient-to-br from-slate-950/90 via-slate-900/85 to-blue-950/92" />
+        </div>
+        <Loader2 className="relative z-10 h-8 w-8 animate-spin text-blue-400" />
       </div>
     );
   }
@@ -160,40 +197,37 @@ export default function SystemAdminLoginPage() {
   // Show success state while redirecting
   if (loginSuccess) {
     return (
-      <div className="min-h-screen flex flex-col items-center justify-center bg-gradient-to-br from-slate-950 via-slate-900 to-slate-950">
-        <div className="flex flex-col items-center space-y-4">
-          <div className="w-16 h-16 rounded-full bg-green-500/20 flex items-center justify-center">
-            <svg className="w-8 h-8 text-green-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 13l4 4L19 7" />
-            </svg>
+      <div className="relative min-h-screen flex items-center justify-center p-4">
+        <div className="absolute inset-0">
+          <div className="absolute inset-0 bg-[url('/images/landing-page-image.jpg')] bg-cover bg-center" />
+          <div className="absolute inset-0 bg-gradient-to-br from-slate-950/90 via-slate-900/85 to-blue-950/92" />
+        </div>
+        <div className="relative z-10 flex flex-col items-center space-y-4 rounded-2xl border border-white/20 bg-white/10 px-8 py-9 backdrop-blur-xl">
+          <div className="w-16 h-16 rounded-full bg-emerald-500/20 flex items-center justify-center">
+            <CheckCircle2 className="h-8 w-8 text-emerald-300" />
           </div>
-          <div className="text-white text-lg font-medium">Authentication Successful</div>
-          <div className="text-slate-400 text-sm">Redirecting to System Admin Portal...</div>
-          <div className="animate-spin rounded-full h-6 w-6 border-t-2 border-b-2 border-blue-500 mt-2"></div>
+          <div className="text-white text-lg font-semibold">Authentication successful</div>
+          <div className="text-slate-200 text-sm">Redirecting to System Admin Portal...</div>
+          <Loader2 className="h-6 w-6 animate-spin text-blue-300" />
         </div>
       </div>
     );
   }
 
   return (
-    <div className="min-h-screen flex items-center justify-center bg-gradient-to-br from-slate-950 via-slate-900 to-slate-950 relative overflow-hidden">
-      {/* Animated background */}
-      <div className="absolute inset-0 overflow-hidden">
-        <div className="absolute -top-1/2 -left-1/2 w-full h-full bg-gradient-to-br from-blue-500/5 to-transparent rounded-full blur-3xl animate-pulse"></div>
-        <div className="absolute -bottom-1/2 -right-1/2 w-full h-full bg-gradient-to-tl from-indigo-500/5 to-transparent rounded-full blur-3xl animate-pulse delay-1000"></div>
+    <div className="relative min-h-screen flex items-center justify-center p-3 sm:p-4">
+      <div className="absolute inset-0">
+        <div className="absolute inset-0 bg-[url('/images/landing-page-image.jpg')] bg-cover bg-center" />
+        <div className="absolute inset-0 bg-gradient-to-br from-slate-950/90 via-slate-900/85 to-blue-950/92" />
       </div>
-
-      {/* Security grid pattern */}
-      <div className="absolute inset-0 bg-[url('data:image/svg+xml;base64,PHN2ZyB3aWR0aD0iNDAiIGhlaWdodD0iNDAiIHhtbG5zPSJodHRwOi8vd3d3LnczLm9yZy8yMDAwL3N2ZyI+PGRlZnM+PHBhdHRlcm4gaWQ9ImdyaWQiIHdpZHRoPSI0MCIgaGVpZ2h0PSI0MCIgcGF0dGVyblVuaXRzPSJ1c2VyU3BhY2VPblVzZSI+PHBhdGggZD0iTSAwIDEwIEwgNDAgMTAgTSAxMCAwIEwgMTAgNDAgTSAwIDIwIEwgNDAgMjAgTSAyMCAwIEwgMjAgNDAgTSAwIDMwIEwgNDAgMzAgTSAzMCAwIEwgMzAgNDAiIGZpbGw9Im5vbmUiIHN0cm9rZT0iIzFmMjkzNyIgc3Ryb2tlLXdpZHRoPSIxIi8+PC9wYXR0ZXJuPjwvZGVmcz48cmVjdCB3aWR0aD0iMTAwJSIgaGVpZ2h0PSIxMDAlIiBmaWxsPSJ1cmwoI2dyaWQpIi8+PC9zdmc+')] opacity-20"></div>
-
-      <div className="relative z-10 w-full max-w-md p-4">
-        {/* Login Card */}
-        <div className="backdrop-blur-xl bg-slate-900/80 border border-slate-700/50 rounded-2xl shadow-2xl shadow-black/50 overflow-hidden">
+      <div className="relative z-10 w-full max-w-md">
+        <div className="w-full">
+          <div className="bg-white/10 backdrop-blur-xl border border-white/20 rounded-xl sm:rounded-2xl shadow-2xl overflow-hidden">
           {/* Header */}
-          <div className="p-6 border-b border-slate-700/50 bg-gradient-to-r from-slate-800/50 to-slate-900/50">
+          <div className="px-6 pt-7 pb-6 border-b border-white/10 bg-white/5">
             <div className="flex items-center justify-center gap-3 mb-4">
-              <div className="relative w-12 h-12 rounded-xl bg-gradient-to-br from-blue-500 to-indigo-600 p-0.5 shadow-lg shadow-blue-500/25">
-                <div className="w-full h-full rounded-[10px] bg-slate-900 flex items-center justify-center overflow-hidden">
+              <div className="relative w-12 h-12 rounded-xl border border-white/20 bg-white/10 p-1 shadow-lg">
+                <div className="w-full h-full rounded-lg bg-white/10 flex items-center justify-center overflow-hidden">
                   <Image 
                     src="/images/logo.png" 
                     alt="DASHMET" 
@@ -204,21 +238,19 @@ export default function SystemAdminLoginPage() {
                 </div>
               </div>
             </div>
-            <h1 className="text-xl font-bold text-center bg-gradient-to-r from-white to-slate-300 bg-clip-text text-transparent">
-              DASHMET Control Center
+            <h1 className="text-2xl font-bold text-center text-white drop-shadow-[0_2px_10px_rgba(0,0,0,0.65)]">
+              {requiresMfa ? 'Verify Sign In' : 'System Admin Sign In'}
             </h1>
-            <p className="text-sm text-center text-slate-400 mt-1">
-              System Administrator Access
+            <p className="text-sm text-center text-gray-200 mt-2 drop-shadow-[0_1px_6px_rgba(0,0,0,0.55)]">
+              {requiresMfa ? 'Enter the verification code to continue.' : 'Authorized access only.'}
             </p>
           </div>
 
           {/* Security Notice */}
-          <div className="px-6 py-3 bg-amber-500/10 border-b border-amber-500/20">
-            <div className="flex items-center gap-2 text-amber-400 text-xs">
-              <svg className="w-4 h-4 flex-shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z" />
-              </svg>
-              <span>This portal is monitored. All access attempts are logged.</span>
+          <div className="px-6 py-3 bg-amber-500/10 border-b border-amber-500/30">
+            <div className="flex items-center gap-2 text-amber-200 text-sm font-semibold">
+              <ShieldCheck className="h-4 w-4 flex-shrink-0" />
+              <span>Authorized personnel only.</span>
             </div>
           </div>
 
@@ -226,137 +258,163 @@ export default function SystemAdminLoginPage() {
           <form onSubmit={handleLogin} className="p-6 space-y-5">
             {error && !loginSuccess && (
               <div className="p-3 bg-red-500/10 border border-red-500/30 rounded-lg">
-                <p className="text-red-400 text-sm flex items-center gap-2">
-                  <svg className="w-4 h-4 flex-shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 8v4m0 4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
-                  </svg>
+                <p className="text-red-200 text-sm flex items-center gap-2">
+                  <AlertCircle className="h-4 w-4 flex-shrink-0" />
                   {error}
                 </p>
               </div>
             )}
 
+            {notice && !error && (
+              <div className="p-3 bg-blue-500/10 border border-blue-500/30 rounded-lg">
+                <p className="text-blue-200 text-sm flex items-center gap-2">
+                  <Info className="h-4 w-4 flex-shrink-0" />
+                  {notice}
+                </p>
+              </div>
+            )}
+
             {/* Email */}
-            <div>
-              <label className="block text-sm font-medium text-slate-300 mb-2">
-                Administrator Email
-              </label>
-              <div className="relative">
-                <input
-                  type="email"
-                  value={email}
-                  onChange={(e) => setEmail(e.target.value)}
-                  disabled={isLocked}
-                  className="w-full px-4 py-3 bg-slate-800/50 border border-slate-600/50 rounded-lg text-white placeholder-slate-500 focus:outline-none focus:ring-2 focus:ring-blue-500/50 focus:border-blue-500/50 disabled:opacity-50 transition-all"
-                  placeholder="admin@dashmet.com"
-                />
-                <div className="absolute right-3 top-1/2 -translate-y-1/2">
-                  <svg className="w-5 h-5 text-slate-500" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M16 12a4 4 0 10-8 0 4 4 0 008 0zm0 0v1.5a2.5 2.5 0 005 0V12a9 9 0 10-9 9m4.5-1.206a8.959 8.959 0 01-4.5 1.207" />
-                  </svg>
+            {!requiresMfa && (
+              <>
+                <div>
+                  <label className="block text-sm font-semibold text-gray-200 mb-2">
+                    Administrator Email
+                  </label>
+                  <div className="relative">
+                    <input
+                      type="email"
+                      value={email}
+                      onChange={(e) => setEmail(e.target.value)}
+                      autoComplete="username"
+                      disabled={isLocked}
+                      className="w-full px-4 py-3 bg-white/5 border border-white/10 rounded-lg text-white placeholder-gray-400 focus:outline-none focus:ring-2 focus:ring-blue-500/50 focus:border-transparent disabled:opacity-50 transition-all"
+                      placeholder="admin@dashmet.com"
+                    />
+                    <div className="absolute right-3 top-1/2 -translate-y-1/2">
+                      <Mail className="h-5 w-5 text-gray-400" />
+                    </div>
+                  </div>
                 </div>
-              </div>
-            </div>
 
-            {/* Password */}
-            <div>
-              <label className="block text-sm font-medium text-slate-300 mb-2">
-                Password
-              </label>
-              <div className="relative">
-                <input
-                  type="password"
-                  value={password}
-                  onChange={(e) => setPassword(e.target.value)}
-                  disabled={isLocked}
-                  className="w-full px-4 py-3 bg-slate-800/50 border border-slate-600/50 rounded-lg text-white placeholder-slate-500 focus:outline-none focus:ring-2 focus:ring-blue-500/50 focus:border-blue-500/50 disabled:opacity-50 transition-all"
-                  placeholder="••••••••••••"
-                />
-                <div className="absolute right-3 top-1/2 -translate-y-1/2">
-                  <svg className="w-5 h-5 text-slate-500" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 15v2m-6 4h12a2 2 0 002-2v-6a2 2 0 00-2-2H6a2 2 0 00-2 2v6a2 2 0 002 2zm10-10V7a4 4 0 00-8 0v4h8z" />
-                  </svg>
+                {/* Password */}
+                <div>
+                  <label className="block text-sm font-semibold text-gray-200 mb-2">
+                    Password
+                  </label>
+                  <div className="relative">
+                    <input
+                      type={showPassword ? 'text' : 'password'}
+                      value={password}
+                      onChange={(e) => setPassword(e.target.value)}
+                      autoComplete="current-password"
+                      disabled={isLocked}
+                      className="w-full px-4 pr-12 py-3 bg-white/5 border border-white/10 rounded-lg text-white placeholder-gray-400 focus:outline-none focus:ring-2 focus:ring-blue-500/50 focus:border-transparent disabled:opacity-50 transition-all"
+                      placeholder="Enter your password"
+                    />
+                    <button
+                      type="button"
+                      onClick={() => setShowPassword((prev) => !prev)}
+                      className="absolute right-3 top-1/2 -translate-y-1/2 text-gray-400 hover:text-white transition-colors"
+                      aria-label={showPassword ? 'Hide password' : 'Show password'}
+                    >
+                      {showPassword ? <EyeOff className="h-5 w-5" /> : <Eye className="h-5 w-5" />}
+                    </button>
+                  </div>
                 </div>
-              </div>
-            </div>
+              </>
+            )}
 
-            {/* Master Key */}
-            <div>
-              <label className="block text-sm font-medium text-slate-300 mb-2">
-                Master Security Key
-              </label>
-              <div className="relative">
-                <input
-                  type={showMasterKey ? 'text' : 'password'}
-                  value={masterKey}
-                  onChange={(e) => setMasterKey(e.target.value)}
-                  disabled={isLocked}
-                  className="w-full px-4 py-3 bg-slate-800/50 border border-slate-600/50 rounded-lg text-white placeholder-slate-500 focus:outline-none focus:ring-2 focus:ring-blue-500/50 focus:border-blue-500/50 disabled:opacity-50 transition-all font-mono text-sm"
-                  placeholder="Enter your 64-character security key"
-                />
-                <button
-                  type="button"
-                  onClick={() => setShowMasterKey(!showMasterKey)}
-                  className="absolute right-3 top-1/2 -translate-y-1/2 text-slate-500 hover:text-slate-300 transition-colors"
-                >
-                  {showMasterKey ? (
-                    <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M13.875 18.825A10.05 10.05 0 0112 19c-4.478 0-8.268-2.943-9.543-7a9.97 9.97 0 011.563-3.029m5.858.908a3 3 0 114.243 4.243M9.878 9.878l4.242 4.242M9.88 9.88l-3.29-3.29m7.532 7.532l3.29 3.29M3 3l3.59 3.59m0 0A9.953 9.953 0 0112 5c4.478 0 8.268 2.943 9.543 7a10.025 10.025 0 01-4.132 5.411m0 0L21 21" />
-                    </svg>
-                  ) : (
-                    <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 12a3 3 0 11-6 0 3 3 0 016 0z" />
-                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M2.458 12C3.732 7.943 7.523 5 12 5c4.478 0 8.268 2.943 9.542 7-1.274 4.057-5.064 7-9.542 7-4.477 0-8.268-2.943-9.542-7z" />
-                    </svg>
-                  )}
-                </button>
-              </div>
-              <p className="mt-1.5 text-xs text-slate-500">
-                Contact DASHMET security team if you've lost your master key.
-              </p>
-            </div>
+            {requiresMfa && (
+              <>
+                <div className="rounded-lg border border-white/10 bg-white/5 px-4 py-3">
+                  <div className="text-xs font-medium uppercase tracking-wide text-gray-300">
+                    Verification for
+                  </div>
+                  <div className="mt-1 text-sm font-semibold text-white break-all">{email}</div>
+                </div>
+
+                <div>
+                  <label className="block text-sm font-semibold text-gray-200 mb-2">
+                    {mfaMethod === 'totp' ? 'Authenticator Code' : 'Email Verification Code'}
+                  </label>
+                  <div className="relative">
+                    <input
+                      type="text"
+                      inputMode="numeric"
+                      pattern="[0-9]*"
+                      maxLength={6}
+                      value={mfaCode}
+                      onChange={(e) => setMfaCode(e.target.value.replace(/\D/g, '').slice(0, 6))}
+                      disabled={isLocked}
+                      className="w-full px-4 py-3 bg-white/5 border border-white/10 rounded-lg text-white placeholder-gray-400 focus:outline-none focus:ring-2 focus:ring-blue-500/50 focus:border-transparent disabled:opacity-50 transition-all tracking-[0.35em]"
+                      placeholder="000000"
+                    />
+                    <div className="absolute right-3 top-1/2 -translate-y-1/2">
+                      <KeyRound className="h-5 w-5 text-gray-400" />
+                    </div>
+                  </div>
+                  <p className="mt-1.5 text-xs text-gray-400">
+                    {mfaMethod === 'totp'
+                      ? 'Enter the 6-digit code from your authenticator app.'
+                      : 'Enter the 6-digit code sent to your email. Codes expire after 10 minutes.'}
+                  </p>
+                </div>
+              </>
+            )}
 
             {/* Submit Button */}
             <button
               type="submit"
               disabled={loading || isLocked}
-              className="w-full py-3 px-4 bg-gradient-to-r from-blue-600 to-indigo-600 hover:from-blue-500 hover:to-indigo-500 text-white font-medium rounded-lg shadow-lg shadow-blue-500/25 disabled:opacity-50 disabled:cursor-not-allowed transition-all duration-200 flex items-center justify-center gap-2"
+              className="w-full py-3 px-4 bg-gradient-to-r from-blue-600 to-blue-500 hover:from-blue-700 hover:to-blue-600 text-white font-medium rounded-lg shadow-lg disabled:opacity-50 disabled:cursor-not-allowed transition-all duration-200 flex items-center justify-center gap-2"
             >
               {loading ? (
                 <>
-                  <div className="animate-spin rounded-full h-5 w-5 border-t-2 border-b-2 border-white"></div>
-                  <span>Authenticating...</span>
+                  <Loader2 className="h-5 w-5 animate-spin" />
+                  <span>{requiresMfa ? 'Verifying...' : 'Checking credentials...'}</span>
                 </>
               ) : isLocked ? (
                 <>
-                  <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 15v2m-6 4h12a2 2 0 002-2v-6a2 2 0 00-2-2H6a2 2 0 00-2 2v6a2 2 0 002 2zm10-10V7a4 4 0 00-8 0v4h8z" />
-                  </svg>
+                  <LockKeyhole className="h-5 w-5" />
                   <span>Locked ({lockTimer}s)</span>
                 </>
               ) : (
                 <>
-                  <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 12l2 2 4-4m5.618-4.016A11.955 11.955 0 0112 2.944a11.955 11.955 0 01-8.618 3.04A12.02 12.02 0 003 9c0 5.591 3.824 10.29 9 11.622 5.176-1.332 9-6.03 9-11.622 0-1.042-.133-2.052-.382-3.016z" />
-                  </svg>
-                  <span>Secure Login</span>
+                  <ShieldCheck className="h-5 w-5" />
+                  <span>{requiresMfa ? 'Verify and continue' : 'Continue'}</span>
                 </>
               )}
             </button>
+
+            {requiresMfa ? (
+              <button
+                type="button"
+                onClick={handleBackToCredentials}
+                className="mx-auto flex items-center justify-center gap-1.5 text-xs font-medium text-gray-300 hover:text-white transition-colors"
+              >
+                <ArrowLeft className="h-3.5 w-3.5" />
+                Back to sign in
+              </button>
+            ) : (
+              <div className="text-center">
+                <Link
+                  href={`/forgot-password?from=system-admin${email ? `&email=${encodeURIComponent(email.trim())}` : ''}`}
+                  className="text-xs text-blue-300 hover:text-blue-200 transition-colors"
+                >
+                  Forgot password?
+                </Link>
+              </div>
+            )}
           </form>
 
           {/* Footer */}
-          <div className="px-6 py-4 bg-slate-800/30 border-t border-slate-700/50">
-            <p className="text-xs text-center text-slate-500">
-              Protected by DASHMET Security • Unauthorized access is prohibited
+          <div className="px-6 py-4 bg-white/5 border-t border-white/10">
+            <p className="text-xs text-center text-gray-400">
+              Unauthorized access is prohibited
             </p>
           </div>
         </div>
-
-        {/* Security info */}
-        <div className="mt-6 text-center">
-          <p className="text-xs text-slate-600">
-            🔒 256-bit SSL Encrypted Connection
-          </p>
         </div>
       </div>
 

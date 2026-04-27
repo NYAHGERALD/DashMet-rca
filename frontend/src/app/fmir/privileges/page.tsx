@@ -7,7 +7,6 @@ import ProtectedRoute from '@/components/auth/ProtectedRoute';
 import api from '@/lib/api';
 import { io, Socket } from 'socket.io-client';
 import { 
-  Shield, 
   Users, 
   Lock, 
   Unlock, 
@@ -195,13 +194,11 @@ function FMIRPrivilegesContent() {
     const setupSocket = async () => {
       const wsUrl = process.env.NEXT_PUBLIC_WS_URL || process.env.NEXT_PUBLIC_API_URL?.replace('/api', '') || 'http://localhost:5002';
 
-      const firebaseUser = (await import('@/lib/firebase')).auth.currentUser;
-      const firebaseToken = firebaseUser ? await firebaseUser.getIdToken() : null;
       if (cancelled) return;
       
       socketRef.current = io(wsUrl, {
+        withCredentials: true,
         auth: {
-          token: firebaseToken,
           userId: user.id,
           organizationId: user.organizationId,
         },
@@ -566,7 +563,22 @@ function FMIRPrivilegesContent() {
             </div>
             
             {/* View Mode Toggle */}
-            <div className="flex items-center gap-2">
+            <div className="flex flex-wrap items-center justify-end gap-2">
+              {viewMode === 'role' && selectedRole && (
+                <button
+                  onClick={() => setShowResetConfirm(true)}
+                  disabled={saving === 'reset'}
+                  className="flex items-center gap-2 px-3 py-1.5 text-sm font-medium text-amber-700 dark:text-amber-300 bg-amber-50 dark:bg-amber-900/30 hover:bg-amber-100 dark:hover:bg-amber-900/50 rounded-lg transition-colors disabled:opacity-50"
+                  title={`Reset ${ROLE_CONFIG[selectedRole]?.label || selectedRole} privileges to defaults`}
+                >
+                  {saving === 'reset' ? (
+                    <Loader2 className="w-4 h-4 animate-spin" />
+                  ) : (
+                    <RotateCcw className="w-4 h-4" />
+                  )}
+                  Reset to Defaults
+                </button>
+              )}
               <div className="flex bg-gray-100 dark:bg-gray-700 rounded-lg p-1">
                 <button
                   onClick={() => setViewMode('role')}
@@ -876,38 +888,6 @@ function FMIRPrivilegesContent() {
             <div className="lg:col-span-3">
               {selectedRole && (
                 <div className="space-y-4">
-                  {/* Role Header */}
-                  <div className="bg-white dark:bg-gray-800 rounded-xl shadow-sm border border-gray-200 dark:border-gray-700 p-4">
-                    <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4">
-                      <div className="flex items-center gap-3">
-                        <div className={`p-2 rounded-lg ${ROLE_CONFIG[selectedRole]?.bgColor}`}>
-                          <Shield className={`w-5 h-5 ${ROLE_CONFIG[selectedRole]?.color}`} />
-                        </div>
-                        <div>
-                          <h2 className={`text-lg font-semibold ${ROLE_CONFIG[selectedRole]?.color}`}>
-                            {ROLE_CONFIG[selectedRole]?.label}
-                          </h2>
-                          <p className="text-sm text-gray-500 dark:text-gray-400">
-                            {ROLE_CONFIG[selectedRole]?.description}
-                          </p>
-                        </div>
-                      </div>
-                      
-                      <button
-                        onClick={() => setShowResetConfirm(true)}
-                        disabled={saving === 'reset'}
-                        className="flex items-center gap-2 px-4 py-2 text-sm font-medium text-amber-700 dark:text-amber-300 bg-amber-50 dark:bg-amber-900/30 hover:bg-amber-100 dark:hover:bg-amber-900/50 rounded-lg transition-colors disabled:opacity-50"
-                      >
-                        {saving === 'reset' ? (
-                          <Loader2 className="w-4 h-4 animate-spin" />
-                        ) : (
-                          <RotateCcw className="w-4 h-4" />
-                        )}
-                        Reset to Defaults
-                      </button>
-                    </div>
-                  </div>
-
                   {/* Search & Filter */}
                   <div className="bg-white dark:bg-gray-800 rounded-xl shadow-sm border border-gray-200 dark:border-gray-700 p-4">
                     <div className="flex flex-wrap items-center gap-3">

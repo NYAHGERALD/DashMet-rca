@@ -94,6 +94,7 @@ export default function WorkplaceReportPage() {
       const response = await fetch(
         `${process.env.NEXT_PUBLIC_API_URL}/incidents?type=WORKPLACE_SAFETY`,
         {
+          credentials: 'include',
           headers: {
             Authorization: `Bearer ${token}`,
           },
@@ -150,6 +151,7 @@ export default function WorkplaceReportPage() {
       const response = await fetch(
         `${process.env.NEXT_PUBLIC_API_URL}/users/organization`,
         {
+          credentials: 'include',
           headers: {
             Authorization: `Bearer ${token}`,
           },
@@ -184,6 +186,7 @@ export default function WorkplaceReportPage() {
         `${process.env.NEXT_PUBLIC_API_URL}/incidents/${incidentId}`,
         {
           method: 'DELETE',
+          credentials: 'include',
           headers: {
             Authorization: `Bearer ${token}`,
           },
@@ -218,6 +221,7 @@ export default function WorkplaceReportPage() {
         `${process.env.NEXT_PUBLIC_API_URL}/incidents/${incidentId}/toggle-public`,
         {
           method: 'PATCH',
+          credentials: 'include',
           headers: {
             Authorization: `Bearer ${token}`,
             'Content-Type': 'application/json',
@@ -255,6 +259,7 @@ export default function WorkplaceReportPage() {
         `${process.env.NEXT_PUBLIC_API_URL}/incidents/${selectedIncident}/share`,
         {
           method: 'PATCH',
+          credentials: 'include',
           headers: {
             Authorization: `Bearer ${token}`,
             'Content-Type': 'application/json',
@@ -309,6 +314,7 @@ export default function WorkplaceReportPage() {
       
       const response = await fetch(endpoint, {
         method: 'POST',
+        credentials: 'include',
         headers: {
           Authorization: `Bearer ${token}`,
           'Content-Type': 'application/json',

@@ -105,6 +105,7 @@ function ReportsContent() {
           return;
         }
         const response = await fetch(`${process.env.NEXT_PUBLIC_API_URL || 'http://localhost:5002/api'}/facilities`, {
+          credentials: 'include',
           headers: {
             'Authorization': `Bearer ${token}`,
           },
@@ -166,6 +167,7 @@ function ReportsContent() {
       const response = await fetch(
         `${process.env.NEXT_PUBLIC_API_URL || 'http://localhost:5002/api'}/reports/executive?${params}`,
         {
+          credentials: 'include',
           headers: {
             'Authorization': `Bearer ${token}`,
           },
@@ -207,6 +209,7 @@ function ReportsContent() {
       const response = await fetch(
         `${process.env.NEXT_PUBLIC_API_URL || 'http://localhost:5002/api'}/reports/audit?${params}`,
         {
+          credentials: 'include',
           headers: {
             'Authorization': `Bearer ${token}`,
           },
@@ -249,6 +252,7 @@ function ReportsContent() {
       const response = await fetch(
         `${process.env.NEXT_PUBLIC_API_URL || 'http://localhost:5002/api'}/incidents?${params}`,
         {
+          credentials: 'include',
           headers: {
             'Authorization': `Bearer ${token}`,
           },
@@ -289,6 +293,7 @@ function ReportsContent() {
       const response = await fetch(
         `${process.env.NEXT_PUBLIC_API_URL || 'http://localhost:5002/api'}/reports/regulatory/${filters.regulatoryType}?${params}`,
         {
+          credentials: 'include',
           headers: {
             'Authorization': `Bearer ${token}`,
           },
@@ -328,6 +333,7 @@ function ReportsContent() {
       const response = await fetch(
         `${process.env.NEXT_PUBLIC_API_URL || 'http://localhost:5002/api'}/reports/rca/${rcaId}`,
         {
+          credentials: 'include',
           headers: {
             'Authorization': `Bearer ${token}`,
           },

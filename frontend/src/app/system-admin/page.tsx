@@ -2,7 +2,6 @@
 
 import { useState, useEffect } from 'react';
 import ProtectedRoute from '@/components/auth/ProtectedRoute';
-import { useAuth } from '@/components/providers/AuthProvider';
 import api from '@/lib/api';
 import { formatDate } from '@/lib/dateUtils';
 import {
@@ -11,18 +10,12 @@ import {
   Send,
   Mail,
   Shield,
-  Clock,
   CheckCircle2,
-  XCircle,
   AlertTriangle,
   RefreshCw,
   Search,
-  ChevronDown,
-  Ban,
-  MailOpen,
   Users,
   Factory,
-  FileWarning,
   Plus,
 } from 'lucide-react';
 
@@ -35,7 +28,6 @@ interface Organization {
   _count: {
     User: number;
     Facility: number;
-    Incident: number;
   };
 }
 
@@ -43,59 +35,73 @@ interface SystemStats {
   totalOrganizations: number;
   totalUsers: number;
   totalFacilities: number;
-  totalIncidents: number;
 }
 
-interface Invitation {
-  id: string;
-  email: string;
-  role: string;
-  status: 'PENDING' | 'ACCEPTED' | 'EXPIRED' | 'REVOKED';
-  expiresAt: string;
+interface OrganizationInvitationSummary {
+  organizationName: string;
+  region?: string | null;
   createdAt: string;
-  acceptedAt: string | null;
-  revokedAt: string | null;
-  Organization: { name: string };
-  InvitedBy: { id: string; firstName: string; lastName: string; email: string } | null;
-  AcceptedUser: { id: string; firstName: string; lastName: string; email: string } | null;
+  userCount: number;
+  facilityCount: number;
+  invitationCounts: {
+    total: number;
+    pending: number;
+    accepted: number;
+    expired: number;
+    revoked: number;
+  };
 }
 
-const INVITABLE_ROLES = [
-  { value: 'ADMIN', label: 'Admin (Organization Owner)' },
-  { value: 'SUPERVISOR', label: 'Supervisor' },
-  { value: 'QA_FOOD_SAFETY', label: 'QA / Food Safety' },
-  { value: 'QUALITY_CONTROL_MANAGER', label: 'Quality Control Manager' },
-  { value: 'MAINTENANCE_ENGINEERING', label: 'Maintenance / Engineering' },
-  { value: 'CI_MANAGER', label: 'CI / Manager' },
-  { value: 'SAFETY_SECURITY_MANAGER', label: 'Safety & Security Manager' },
-  { value: 'OPERATOR', label: 'Operator' },
-];
+function normalizeInvitationSummaries(rawData: any): OrganizationInvitationSummary[] {
+  if (rawData?.mode === 'ORGANIZATION_SUMMARY' && Array.isArray(rawData.organizations)) {
+    return rawData.organizations;
+  }
 
-const STATUS_CONFIG: Record<string, { label: string; color: string; icon: React.ReactNode }> = {
-  PENDING: { label: 'Pending', color: 'bg-amber-100 text-amber-800 dark:bg-amber-900/30 dark:text-amber-300', icon: <Clock size={14} /> },
-  ACCEPTED: { label: 'Accepted', color: 'bg-emerald-100 text-emerald-800 dark:bg-emerald-900/30 dark:text-emerald-300', icon: <CheckCircle2 size={14} /> },
-  EXPIRED: { label: 'Expired', color: 'bg-gray-100 text-gray-600 dark:bg-gray-800 dark:text-gray-400', icon: <AlertTriangle size={14} /> },
-  REVOKED: { label: 'Revoked', color: 'bg-red-100 text-red-800 dark:bg-red-900/30 dark:text-red-300', icon: <XCircle size={14} /> },
-};
+  // Backward compatibility: if old invite rows come back, aggregate client-side
+  if (Array.isArray(rawData)) {
+    const byOrganization = new Map<string, OrganizationInvitationSummary>();
+    for (const invitation of rawData) {
+      const orgName = invitation?.Organization?.name || 'Unknown Organization';
+      const orgId = invitation?.organizationId || invitation?.Organization?.id || orgName;
+      const existing = byOrganization.get(orgId) || {
+        organizationName: orgName,
+        region: null,
+        createdAt: invitation?.createdAt || new Date().toISOString(),
+        userCount: 0,
+        facilityCount: 0,
+        invitationCounts: {
+          total: 0,
+          pending: 0,
+          accepted: 0,
+          expired: 0,
+          revoked: 0,
+        },
+      };
 
-function formatRole(role: string): string {
-  return role.replace(/_/g, ' ').replace(/\b\w/g, (c) => c.toUpperCase());
+      existing.invitationCounts.total += 1;
+      if (invitation?.status === 'PENDING') existing.invitationCounts.pending += 1;
+      if (invitation?.status === 'ACCEPTED') existing.invitationCounts.accepted += 1;
+      if (invitation?.status === 'EXPIRED') existing.invitationCounts.expired += 1;
+      if (invitation?.status === 'REVOKED') existing.invitationCounts.revoked += 1;
+      byOrganization.set(orgId, existing);
+    }
+
+    return Array.from(byOrganization.values()).sort((a, b) =>
+      a.organizationName.localeCompare(b.organizationName)
+    );
+  }
+
+  return [];
 }
 
-function timeUntilExpiry(expiresAt: string): string {
-  const diff = new Date(expiresAt).getTime() - Date.now();
-  if (diff <= 0) return 'Expired';
-  const hours = Math.floor(diff / (1000 * 60 * 60));
-  const minutes = Math.floor((diff % (1000 * 60 * 60)) / (1000 * 60));
-  if (hours > 0) return `${hours}h ${minutes}m left`;
-  return `${minutes}m left`;
+function getOrganizationSummaryKey(summary: OrganizationInvitationSummary, index: number): string {
+  return `${summary.organizationName}::${summary.region || 'none'}::${summary.createdAt}::${index}`;
 }
 
 function SystemAdminContent() {
-  const { user } = useAuth();
   const [organizations, setOrganizations] = useState<Organization[]>([]);
   const [stats, setStats] = useState<SystemStats | null>(null);
-  const [invitations, setInvitations] = useState<Invitation[]>([]);
+  const [invitationSummaries, setInvitationSummaries] = useState<OrganizationInvitationSummary[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
   const [successMessage, setSuccessMessage] = useState('');
@@ -111,7 +117,6 @@ function SystemAdminContent() {
   // Invite Admin form
   const [showInviteAdmin, setShowInviteAdmin] = useState(false);
   const [inviteEmail, setInviteEmail] = useState('');
-  const [inviteRole, setInviteRole] = useState('ADMIN');
   const [inviteOrgId, setInviteOrgId] = useState('');
   const [sendingInvite, setSendingInvite] = useState(false);
   const [inviteError, setInviteError] = useState('');
@@ -120,13 +125,8 @@ function SystemAdminContent() {
   const [quickInviteOrgId, setQuickInviteOrgId] = useState<string | null>(null);
   const [quickInviteOrgName, setQuickInviteOrgName] = useState('');
 
-  // Revoke
-  const [showRevokeConfirm, setShowRevokeConfirm] = useState<Invitation | null>(null);
-  const [actionLoading, setActionLoading] = useState<string | null>(null);
-
   // Search
   const [searchQuery, setSearchQuery] = useState('');
-  const [statusFilter, setStatusFilter] = useState('');
 
   useEffect(() => {
     loadData();
@@ -142,7 +142,7 @@ function SystemAdminContent() {
       ]);
       setOrganizations(orgsRes.data.data.organizations || []);
       setStats(statsRes.data.data);
-      setInvitations(invRes.data.data || []);
+      setInvitationSummaries(normalizeInvitationSummaries(invRes.data.data));
     } catch (err: any) {
       setError(err.response?.data?.error || 'Failed to load data');
     } finally {
@@ -174,7 +174,6 @@ function SystemAdminContent() {
       setQuickInviteOrgId(newOrg.id);
       setQuickInviteOrgName(newOrg.name);
       setInviteOrgId(newOrg.id);
-      setInviteRole('ADMIN');
       setShowInviteAdmin(true);
       setTimeout(() => setSuccessMessage(''), 5000);
     } catch (err: any) {
@@ -188,15 +187,15 @@ function SystemAdminContent() {
   const handleSendInvite = async (e: React.FormEvent) => {
     e.preventDefault();
     setInviteError('');
-    if (!inviteEmail.trim() || !inviteRole || !inviteOrgId) {
-      setInviteError('Email, role, and organization are required');
+    if (!inviteEmail.trim() || !inviteOrgId) {
+      setInviteError('Email and organization are required');
       return;
     }
     try {
       setSendingInvite(true);
       const res = await api.post('/invitations', {
         email: inviteEmail.trim().toLowerCase(),
-        role: inviteRole,
+        role: 'ADMIN',
         organizationId: inviteOrgId,
       });
       const data = res.data.data;
@@ -206,7 +205,6 @@ function SystemAdminContent() {
           : `Invitation created for ${data.email} (email delivery pending)`
       );
       setInviteEmail('');
-      setInviteRole('ADMIN');
       setInviteOrgId('');
       setShowInviteAdmin(false);
       setQuickInviteOrgId(null);
@@ -220,67 +218,42 @@ function SystemAdminContent() {
     }
   };
 
-  // ── Revoke Invitation ──
-  const handleRevoke = async (inv: Invitation) => {
-    try {
-      setActionLoading(inv.id);
-      await api.patch(`/invitations/${inv.id}/revoke`);
-      setShowRevokeConfirm(null);
-      setSuccessMessage(`Invitation to ${inv.email} revoked`);
-      await loadData();
-      setTimeout(() => setSuccessMessage(''), 5000);
-    } catch (err: any) {
-      alert(err.response?.data?.error || 'Failed to revoke');
-    } finally {
-      setActionLoading(null);
-    }
-  };
-
-  // ── Resend Invitation ──
-  const handleResend = async (inv: Invitation) => {
-    try {
-      setActionLoading(inv.id);
-      await api.post(`/invitations/resend/${inv.id}`);
-      setSuccessMessage(`Invitation re-sent to ${inv.email}`);
-      await loadData();
-      setTimeout(() => setSuccessMessage(''), 5000);
-    } catch (err: any) {
-      alert(err.response?.data?.error || 'Failed to resend');
-    } finally {
-      setActionLoading(null);
-    }
-  };
-
   // ── Open invite modal for a specific org ──
   const openInviteForOrg = (org: Organization) => {
     setInviteOrgId(org.id);
     setQuickInviteOrgId(org.id);
     setQuickInviteOrgName(org.name);
-    setInviteRole('ADMIN');
     setInviteEmail('');
     setInviteError('');
     setShowInviteAdmin(true);
   };
 
-  // Filter invitations
-  const filteredInvitations = invitations.filter((inv) => {
-    if (statusFilter && inv.status !== statusFilter) return false;
-    if (searchQuery) {
-      const q = searchQuery.toLowerCase();
+  const normalizedSearchQuery = searchQuery.trim().toLowerCase();
+
+  // Filter organization-level invitation summaries
+  const filteredInvitationSummaries = invitationSummaries.filter((summary) => {
+    if (normalizedSearchQuery) {
       return (
-        inv.email.toLowerCase().includes(q) ||
-        formatRole(inv.role).toLowerCase().includes(q) ||
-        inv.Organization?.name?.toLowerCase().includes(q)
+        summary.organizationName.toLowerCase().includes(normalizedSearchQuery) ||
+        String(summary.region || '').toLowerCase().includes(normalizedSearchQuery)
       );
     }
     return true;
   });
 
-  const inviteStats = {
-    total: invitations.length,
-    pending: invitations.filter(i => i.status === 'PENDING').length,
-    accepted: invitations.filter(i => i.status === 'ACCEPTED').length,
-  };
+  const calculateInviteStats = (summaries: OrganizationInvitationSummary[]) => ({
+    total: summaries.reduce((sum, item) => sum + item.invitationCounts.total, 0),
+    pending: summaries.reduce((sum, item) => sum + item.invitationCounts.pending, 0),
+    accepted: summaries.reduce((sum, item) => sum + item.invitationCounts.accepted, 0),
+    expired: summaries.reduce((sum, item) => sum + item.invitationCounts.expired, 0),
+    revoked: summaries.reduce((sum, item) => sum + item.invitationCounts.revoked, 0),
+  });
+
+  const globalInviteStats = calculateInviteStats(invitationSummaries);
+  const hasInvitationFilter = normalizedSearchQuery.length > 0;
+  const visibleInviteStats = hasInvitationFilter
+    ? calculateInviteStats(filteredInvitationSummaries)
+    : globalInviteStats;
 
   if (loading) {
     return (
@@ -319,23 +292,9 @@ function SystemAdminContent() {
         </div>
       )}
 
-      {/* Security Notice */}
-      <div className="mb-6 p-4 bg-purple-50 dark:bg-purple-900/20 border border-purple-200 dark:border-purple-800 rounded-lg">
-        <div className="flex items-start gap-3">
-          <Shield className="text-purple-600 dark:text-purple-400 shrink-0 mt-0.5" size={20} />
-          <div>
-            <h3 className="text-sm font-medium text-purple-800 dark:text-purple-200">DashMet System Administration</h3>
-            <p className="text-sm text-purple-700 dark:text-purple-300 mt-1">
-              Create organizations and invite their first admin. Organization admins then invite their own employees.  
-              Self-registration is disabled — all users join through secure, role-assigned invitations.
-            </p>
-          </div>
-        </div>
-      </div>
-
       {/* Stats Cards */}
       {stats && (
-        <div className="grid grid-cols-2 md:grid-cols-4 gap-4 mb-6">
+        <div className="grid grid-cols-1 md:grid-cols-3 gap-4 mb-6">
           <div className="bg-white dark:bg-gray-800 p-5 rounded-lg shadow">
             <div className="flex items-center gap-3">
               <div className="p-2 bg-purple-100 dark:bg-purple-900/30 rounded-lg">
@@ -369,17 +328,6 @@ function SystemAdminContent() {
               </div>
             </div>
           </div>
-          <div className="bg-white dark:bg-gray-800 p-5 rounded-lg shadow">
-            <div className="flex items-center gap-3">
-              <div className="p-2 bg-amber-100 dark:bg-amber-900/30 rounded-lg">
-                <FileWarning className="text-amber-600 dark:text-amber-400" size={20} />
-              </div>
-              <div>
-                <p className="text-xs text-gray-500 dark:text-gray-400 uppercase tracking-wide">Incidents</p>
-                <p className="text-2xl font-bold text-gray-900 dark:text-white">{stats.totalIncidents}</p>
-              </div>
-            </div>
-          </div>
         </div>
       )}
 
@@ -405,10 +353,10 @@ function SystemAdminContent() {
           }`}
         >
           <Mail size={16} />
-          Invitations ({inviteStats.total})
-          {inviteStats.pending > 0 && (
+          Invitations ({globalInviteStats.total})
+          {globalInviteStats.pending > 0 && (
             <span className="ml-1 px-1.5 py-0.5 text-xs bg-amber-100 text-amber-800 dark:bg-amber-900/50 dark:text-amber-300 rounded-full">
-              {inviteStats.pending}
+              {globalInviteStats.pending}
             </span>
           )}
         </button>
@@ -423,9 +371,7 @@ function SystemAdminContent() {
             <div className="flex items-center justify-between">
               <div>
                 <h2 className="text-lg font-semibold text-gray-900 dark:text-white">Organizations</h2>
-                <p className="text-sm text-gray-500 dark:text-gray-400 mt-0.5">
-                  Create organizations and invite their first administrator
-                </p>
+                <p className="text-sm text-gray-500 dark:text-gray-400 mt-0.5">Manage organizations</p>
               </div>
               <button
                 onClick={() => { setShowCreateOrg(true); setCreateOrgError(''); }}
@@ -444,7 +390,6 @@ function SystemAdminContent() {
                   <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 dark:text-gray-400 uppercase tracking-wider">Organization</th>
                   <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 dark:text-gray-400 uppercase tracking-wider">Users</th>
                   <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 dark:text-gray-400 uppercase tracking-wider">Facilities</th>
-                  <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 dark:text-gray-400 uppercase tracking-wider">Incidents</th>
                   <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 dark:text-gray-400 uppercase tracking-wider hidden md:table-cell">Created</th>
                   <th className="px-6 py-3 text-right text-xs font-medium text-gray-500 dark:text-gray-400 uppercase tracking-wider">Actions</th>
                 </tr>
@@ -452,7 +397,7 @@ function SystemAdminContent() {
               <tbody className="divide-y divide-gray-200 dark:divide-gray-700">
                 {organizations.length === 0 ? (
                   <tr>
-                    <td colSpan={6} className="px-6 py-12 text-center">
+                    <td colSpan={5} className="px-6 py-12 text-center">
                       <Building2 className="mx-auto mb-3 text-gray-300 dark:text-gray-600" size={40} />
                       <p className="text-sm text-gray-500 dark:text-gray-400">No organizations yet</p>
                       <button
@@ -473,7 +418,6 @@ function SystemAdminContent() {
                           </div>
                           <div>
                             <p className="text-sm font-medium text-gray-900 dark:text-white">{org.name}</p>
-                            <p className="text-xs text-gray-400 dark:text-gray-500">ID: {org.id.substring(0, 8)}...</p>
                           </div>
                         </div>
                       </td>
@@ -484,7 +428,6 @@ function SystemAdminContent() {
                         )}
                       </td>
                       <td className="px-6 py-4 text-sm text-gray-900 dark:text-white">{org._count.Facility}</td>
-                      <td className="px-6 py-4 text-sm text-gray-900 dark:text-white">{org._count.Incident}</td>
                       <td className="px-6 py-4 text-sm text-gray-500 dark:text-gray-400 hidden md:table-cell">{formatDate(org.createdAt)}</td>
                       <td className="px-6 py-4 text-right">
                         <button
@@ -510,25 +453,33 @@ function SystemAdminContent() {
       {/* ═══════════════════════════════════════════════════════════════ */}
       {activeTab === 'invitations' && (
         <>
+          <p className="mb-3 text-xs text-gray-500 dark:text-gray-400">
+            {hasInvitationFilter
+              ? `Scope: ${filteredInvitationSummaries.length} of ${invitationSummaries.length} organizations (filtered)`
+              : 'Scope: All organizations'}
+          </p>
+
           {/* Invite Stats */}
-          <div className="grid grid-cols-3 gap-4 mb-4">
-            <button
-              onClick={() => setStatusFilter(statusFilter === 'PENDING' ? '' : 'PENDING')}
-              className={`bg-white dark:bg-gray-800 p-4 rounded-lg shadow text-left transition-all ${statusFilter === 'PENDING' ? 'ring-2 ring-amber-500' : 'hover:shadow-md'}`}
-            >
+          <div className="grid grid-cols-2 md:grid-cols-5 gap-4 mb-4">
+            <div className="bg-white dark:bg-gray-800 p-4 rounded-lg shadow">
               <p className="text-xs text-amber-600 dark:text-amber-400 uppercase tracking-wide font-medium">Pending</p>
-              <p className="text-2xl font-bold text-amber-600 dark:text-amber-400">{inviteStats.pending}</p>
-            </button>
-            <button
-              onClick={() => setStatusFilter(statusFilter === 'ACCEPTED' ? '' : 'ACCEPTED')}
-              className={`bg-white dark:bg-gray-800 p-4 rounded-lg shadow text-left transition-all ${statusFilter === 'ACCEPTED' ? 'ring-2 ring-emerald-500' : 'hover:shadow-md'}`}
-            >
+              <p className="text-2xl font-bold text-amber-600 dark:text-amber-400">{visibleInviteStats.pending}</p>
+            </div>
+            <div className="bg-white dark:bg-gray-800 p-4 rounded-lg shadow">
               <p className="text-xs text-emerald-600 dark:text-emerald-400 uppercase tracking-wide font-medium">Accepted</p>
-              <p className="text-2xl font-bold text-emerald-600 dark:text-emerald-400">{inviteStats.accepted}</p>
-            </button>
+              <p className="text-2xl font-bold text-emerald-600 dark:text-emerald-400">{visibleInviteStats.accepted}</p>
+            </div>
+            <div className="bg-white dark:bg-gray-800 p-4 rounded-lg shadow">
+              <p className="text-xs text-red-600 dark:text-red-400 uppercase tracking-wide font-medium">Revoked</p>
+              <p className="text-2xl font-bold text-red-600 dark:text-red-400">{visibleInviteStats.revoked}</p>
+            </div>
+            <div className="bg-white dark:bg-gray-800 p-4 rounded-lg shadow">
+              <p className="text-xs text-gray-500 dark:text-gray-400 uppercase tracking-wide font-medium">Expired</p>
+              <p className="text-2xl font-bold text-gray-700 dark:text-gray-300">{visibleInviteStats.expired}</p>
+            </div>
             <div className="bg-white dark:bg-gray-800 p-4 rounded-lg shadow">
               <p className="text-xs text-gray-500 dark:text-gray-400 uppercase tracking-wide font-medium">Total Sent</p>
-              <p className="text-2xl font-bold text-gray-900 dark:text-white">{inviteStats.total}</p>
+              <p className="text-2xl font-bold text-gray-900 dark:text-white">{visibleInviteStats.total}</p>
             </div>
           </div>
 
@@ -540,36 +491,28 @@ function SystemAdminContent() {
                 type="text"
                 value={searchQuery}
                 onChange={(e) => setSearchQuery(e.target.value)}
-                placeholder="Search by email, role, or organization..."
+                placeholder="Search by organization or region..."
                 className="w-full pl-10 pr-4 py-2.5 bg-white dark:bg-gray-800 border border-gray-300 dark:border-gray-600 rounded-lg text-sm focus:ring-2 focus:ring-purple-500 focus:border-purple-500 dark:text-white"
               />
             </div>
-            {statusFilter && (
-              <button
-                onClick={() => setStatusFilter('')}
-                className="flex items-center gap-2 px-3 py-2 text-sm bg-gray-200 dark:bg-gray-700 rounded-lg hover:bg-gray-300 dark:hover:bg-gray-600 dark:text-white"
-              >
-                <XCircle size={16} /> Clear: {statusFilter}
-              </button>
-            )}
             <button
-              onClick={() => { setInviteOrgId(''); setInviteEmail(''); setInviteRole('ADMIN'); setInviteError(''); setQuickInviteOrgId(null); setQuickInviteOrgName(''); setShowInviteAdmin(true); }}
+              onClick={() => { setInviteOrgId(''); setInviteEmail(''); setInviteError(''); setQuickInviteOrgId(null); setQuickInviteOrgName(''); setShowInviteAdmin(true); }}
               className="flex items-center gap-2 px-4 py-2 bg-purple-600 hover:bg-purple-700 text-white rounded-lg font-medium transition-colors shadow-sm"
             >
-              <UserPlus size={16} /> Send Invitation
+              <UserPlus size={16} /> Invite Organization Admin
             </button>
           </div>
 
-          {/* Invitations Table */}
+          {/* Organization Summary Table */}
           <div className="bg-white dark:bg-gray-800 rounded-lg shadow overflow-hidden">
-            {filteredInvitations.length === 0 ? (
+            {filteredInvitationSummaries.length === 0 ? (
               <div className="p-12 text-center">
                 <Mail className="mx-auto mb-4 text-gray-300 dark:text-gray-600" size={48} />
                 <h3 className="text-lg font-medium text-gray-900 dark:text-white mb-1">
-                  {invitations.length === 0 ? 'No invitations sent yet' : 'No matching invitations'}
+                  {invitationSummaries.length === 0 ? 'No organization invitation activity yet' : 'No matching organizations'}
                 </h3>
                 <p className="text-sm text-gray-500 dark:text-gray-400">
-                  {invitations.length === 0 ? 'Create an organization first, then invite its admin.' : 'Try adjusting your search.'}
+                  {invitationSummaries.length === 0 ? 'Create an organization first, then invite its admin.' : 'Try adjusting your search.'}
                 </p>
               </div>
             ) : (
@@ -577,92 +520,57 @@ function SystemAdminContent() {
                 <table className="min-w-full divide-y divide-gray-200 dark:divide-gray-700">
                   <thead className="bg-gray-50 dark:bg-gray-900/50">
                     <tr>
-                      <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 dark:text-gray-400 uppercase">Email</th>
                       <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 dark:text-gray-400 uppercase">Organization</th>
-                      <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 dark:text-gray-400 uppercase">Role</th>
-                      <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 dark:text-gray-400 uppercase">Status</th>
-                      <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 dark:text-gray-400 uppercase hidden lg:table-cell">Sent</th>
-                      <th className="px-4 py-3 text-right text-xs font-medium text-gray-500 dark:text-gray-400 uppercase">Actions</th>
+                      <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 dark:text-gray-400 uppercase">Region</th>
+                      <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 dark:text-gray-400 uppercase">Users</th>
+                      <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 dark:text-gray-400 uppercase">Pending</th>
+                      <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 dark:text-gray-400 uppercase">Accepted</th>
+                      <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 dark:text-gray-400 uppercase">Revoked</th>
+                      <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 dark:text-gray-400 uppercase">Expired</th>
+                      <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 dark:text-gray-400 uppercase">Total Invites</th>
+                      <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 dark:text-gray-400 uppercase hidden lg:table-cell">Created</th>
                     </tr>
                   </thead>
                   <tbody className="divide-y divide-gray-200 dark:divide-gray-700">
-                    {filteredInvitations.map((inv) => {
-                      const statusCfg = STATUS_CONFIG[inv.status] || STATUS_CONFIG.PENDING;
-                      const isPending = inv.status === 'PENDING';
-                      const isExpired = inv.status === 'EXPIRED';
-                      const isLoading = actionLoading === inv.id;
-
-                      return (
-                        <tr key={inv.id} className="hover:bg-gray-50 dark:hover:bg-gray-700/50 transition-colors">
-                          <td className="px-4 py-3">
-                            <p className="text-sm font-medium text-gray-900 dark:text-white truncate">{inv.email}</p>
-                            {inv.AcceptedUser && (
-                              <p className="text-xs text-gray-500 dark:text-gray-400">
-                                → {inv.AcceptedUser.firstName} {inv.AcceptedUser.lastName}
-                              </p>
-                            )}
-                          </td>
-                          <td className="px-4 py-3">
-                            <span className="text-sm text-gray-700 dark:text-gray-300">{inv.Organization?.name || '—'}</span>
-                          </td>
-                          <td className="px-4 py-3">
-                            <span className="inline-flex items-center gap-1 px-2 py-0.5 text-xs font-medium rounded-full bg-indigo-100 text-indigo-800 dark:bg-indigo-900/30 dark:text-indigo-300">
-                              <Shield size={12} />
-                              {formatRole(inv.role)}
-                            </span>
-                          </td>
-                          <td className="px-4 py-3">
-                            <span className={`inline-flex items-center gap-1 px-2 py-0.5 text-xs font-medium rounded-full ${statusCfg.color}`}>
-                              {statusCfg.icon} {statusCfg.label}
-                            </span>
-                            {isPending && (
-                              <p className="text-xs text-amber-600 dark:text-amber-400 mt-0.5">{timeUntilExpiry(inv.expiresAt)}</p>
-                            )}
-                          </td>
-                          <td className="px-4 py-3 hidden lg:table-cell text-xs text-gray-500 dark:text-gray-400">
-                            {formatDate(inv.createdAt)}
-                          </td>
-                          <td className="px-4 py-3 text-right">
-                            <div className="flex items-center justify-end gap-1">
-                              {isPending && (
-                                <>
-                                  <button onClick={() => handleResend(inv)} disabled={isLoading} title="Resend" className="p-2 text-blue-600 hover:bg-blue-50 dark:text-blue-400 dark:hover:bg-blue-900/20 rounded-lg disabled:opacity-50">
-                                    {isLoading ? <RefreshCw size={16} className="animate-spin" /> : <MailOpen size={16} />}
-                                  </button>
-                                  <button onClick={() => setShowRevokeConfirm(inv)} disabled={isLoading} title="Revoke" className="p-2 text-red-600 hover:bg-red-50 dark:text-red-400 dark:hover:bg-red-900/20 rounded-lg disabled:opacity-50">
-                                    <Ban size={16} />
-                                  </button>
-                                </>
-                              )}
-                              {isExpired && (
-                                <button onClick={() => handleResend(inv)} disabled={isLoading} title="Resend with new token" className="p-2 text-blue-600 hover:bg-blue-50 dark:text-blue-400 dark:hover:bg-blue-900/20 rounded-lg disabled:opacity-50">
-                                  {isLoading ? <RefreshCw size={16} className="animate-spin" /> : <RefreshCw size={16} />}
-                                </button>
-                              )}
-                            </div>
-                          </td>
-                        </tr>
-                      );
-                    })}
+                    {filteredInvitationSummaries.map((summary, index) => (
+                      <tr key={getOrganizationSummaryKey(summary, index)} className="hover:bg-gray-50 dark:hover:bg-gray-700/50 transition-colors">
+                        <td className="px-4 py-3">
+                          <p className="text-sm font-medium text-gray-900 dark:text-white">{summary.organizationName}</p>
+                        </td>
+                        <td className="px-4 py-3 text-sm text-gray-700 dark:text-gray-300">{summary.region || '—'}</td>
+                        <td className="px-4 py-3 text-sm font-medium text-gray-900 dark:text-white">{summary.userCount}</td>
+                        <td className="px-4 py-3">
+                          <span className="inline-flex items-center px-2 py-0.5 rounded-full text-xs font-medium bg-amber-100 text-amber-800 dark:bg-amber-900/30 dark:text-amber-300">
+                            {summary.invitationCounts.pending}
+                          </span>
+                        </td>
+                        <td className="px-4 py-3">
+                          <span className="inline-flex items-center px-2 py-0.5 rounded-full text-xs font-medium bg-emerald-100 text-emerald-800 dark:bg-emerald-900/30 dark:text-emerald-300">
+                            {summary.invitationCounts.accepted}
+                          </span>
+                        </td>
+                        <td className="px-4 py-3">
+                          <span className="inline-flex items-center px-2 py-0.5 rounded-full text-xs font-medium bg-red-100 text-red-800 dark:bg-red-900/30 dark:text-red-300">
+                            {summary.invitationCounts.revoked}
+                          </span>
+                        </td>
+                        <td className="px-4 py-3">
+                          <span className="inline-flex items-center px-2 py-0.5 rounded-full text-xs font-medium bg-gray-100 text-gray-700 dark:bg-gray-800 dark:text-gray-300">
+                            {summary.invitationCounts.expired}
+                          </span>
+                        </td>
+                        <td className="px-4 py-3 text-sm font-medium text-gray-900 dark:text-white">{summary.invitationCounts.total}</td>
+                        <td className="px-4 py-3 hidden lg:table-cell text-xs text-gray-500 dark:text-gray-400">{formatDate(summary.createdAt)}</td>
+                      </tr>
+                    ))}
                   </tbody>
                 </table>
               </div>
             )}
           </div>
+
         </>
       )}
-
-      {/* Restricted Actions Notice */}
-      <div className="mt-6 p-4 bg-gray-100 dark:bg-gray-800 rounded-lg">
-        <h3 className="text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">How It Works</h3>
-        <ul className="text-sm text-gray-600 dark:text-gray-400 space-y-1">
-          <li>1. Create an organization for your client company</li>
-          <li>2. Invite their first Admin — they receive a secure email link</li>
-          <li>3. The Admin registers and is automatically assigned to the organization</li>
-          <li>4. That Admin then invites their own employees with role-specific invitations</li>
-          <li>5. No access codes needed — everything flows through secure, time-limited tokens</li>
-        </ul>
-      </div>
 
       {/* ── Create Organization Modal ── */}
       {showCreateOrg && (
@@ -730,10 +638,10 @@ function SystemAdminContent() {
             <div className="px-6 py-4 bg-gradient-to-r from-blue-600 to-indigo-600">
               <h2 className="text-lg font-bold text-white flex items-center gap-2">
                 <UserPlus size={20} />
-                {quickInviteOrgName ? `Invite Admin for ${quickInviteOrgName}` : 'Send Invitation'}
+                {quickInviteOrgName ? `Invite Admin for ${quickInviteOrgName}` : 'Invite Organization Admin'}
               </h2>
               <p className="text-sm text-blue-100 mt-1">
-                Invite a user to join an organization with a specific role
+                Send onboarding invite for the tenant's first admin account
               </p>
             </div>
             <form onSubmit={handleSendInvite} className="p-6 space-y-5">
@@ -786,29 +694,8 @@ function SystemAdminContent() {
                     autoFocus
                   />
                 </div>
-              </div>
-
-              {/* Role */}
-              <div>
-                <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1.5">
-                  Role <span className="text-red-500">*</span>
-                </label>
-                <div className="relative">
-                  <Shield className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-400" size={18} />
-                  <select
-                    required
-                    value={inviteRole}
-                    onChange={(e) => setInviteRole(e.target.value)}
-                    className="w-full pl-10 pr-10 py-2.5 bg-gray-50 dark:bg-gray-700 border border-gray-300 dark:border-gray-600 rounded-lg text-sm focus:ring-2 focus:ring-blue-500 dark:text-white appearance-none cursor-pointer"
-                  >
-                    {INVITABLE_ROLES.map((role) => (
-                      <option key={role.value} value={role.value}>{role.label}</option>
-                    ))}
-                  </select>
-                  <ChevronDown className="absolute right-3 top-1/2 -translate-y-1/2 text-gray-400 pointer-events-none" size={18} />
-                </div>
                 <p className="mt-1 text-xs text-gray-400 dark:text-gray-500">
-                  For new organizations, invite an Admin first — they can then invite their own team
+                  This invitation creates an <span className="font-medium">ADMIN</span> account for the selected organization.
                 </p>
               </div>
 
@@ -817,34 +704,10 @@ function SystemAdminContent() {
                   Cancel
                 </button>
                 <button type="submit" disabled={sendingInvite} className="flex-1 flex items-center justify-center gap-2 px-4 py-2.5 text-sm font-medium text-white bg-blue-600 rounded-lg hover:bg-blue-700 disabled:opacity-50 transition-colors">
-                  {sendingInvite ? <><RefreshCw size={16} className="animate-spin" /> Sending...</> : <><Send size={16} /> Send Invitation</>}
+                  {sendingInvite ? <><RefreshCw size={16} className="animate-spin" /> Sending...</> : <><Send size={16} /> Send Admin Invite</>}
                 </button>
               </div>
             </form>
-          </div>
-        </div>
-      )}
-
-      {/* ── Revoke Confirmation Modal ── */}
-      {showRevokeConfirm && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
-          <div className="absolute inset-0 bg-black/50 backdrop-blur-sm" onClick={() => setShowRevokeConfirm(null)} />
-          <div className="relative bg-white dark:bg-gray-800 rounded-2xl shadow-2xl w-full max-w-sm overflow-hidden p-6">
-            <div className="flex items-center justify-center w-12 h-12 mx-auto mb-4 rounded-full bg-red-100 dark:bg-red-900/30">
-              <Ban className="text-red-600 dark:text-red-400" size={24} />
-            </div>
-            <h3 className="text-lg font-semibold text-gray-900 dark:text-white text-center mb-2">Revoke Invitation?</h3>
-            <p className="text-sm text-gray-500 dark:text-gray-400 text-center mb-6">
-              Revoke the invitation for <span className="font-medium text-gray-900 dark:text-white">{showRevokeConfirm.email}</span> ({showRevokeConfirm.Organization?.name})?
-            </p>
-            <div className="flex gap-3">
-              <button onClick={() => setShowRevokeConfirm(null)} className="flex-1 px-4 py-2.5 text-sm font-medium text-gray-700 dark:text-gray-300 bg-gray-100 dark:bg-gray-700 rounded-lg hover:bg-gray-200 dark:hover:bg-gray-600 transition-colors">
-                Cancel
-              </button>
-              <button onClick={() => handleRevoke(showRevokeConfirm)} disabled={actionLoading === showRevokeConfirm.id} className="flex-1 flex items-center justify-center gap-2 px-4 py-2.5 text-sm font-medium text-white bg-red-600 rounded-lg hover:bg-red-700 disabled:opacity-50 transition-colors">
-                {actionLoading === showRevokeConfirm.id ? <RefreshCw size={16} className="animate-spin" /> : <Ban size={16} />} Revoke
-              </button>
-            </div>
           </div>
         </div>
       )}

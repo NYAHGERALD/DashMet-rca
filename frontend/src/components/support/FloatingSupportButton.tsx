@@ -81,15 +81,18 @@ export default function FloatingSupportButton() {
     return () => window.removeEventListener('resize', updatePosition);
   }, [isOpen]);
 
+  const canSubmitSupport = user?.role !== 'SYSTEM_ADMIN';
+
   // Listen for external open events (e.g., from AccessDeniedModal's Contact Support button)
   useEffect(() => {
     const handleOpenEvent = () => {
+      if (!canSubmitSupport) return;
       setIsOpen(true);
       setIsMinimized(false);
     };
     window.addEventListener(OPEN_SUPPORT_MODAL_EVENT, handleOpenEvent);
     return () => window.removeEventListener(OPEN_SUPPORT_MODAL_EVENT, handleOpenEvent);
-  }, []);
+  }, [canSubmitSupport]);
 
   // Floating button drag handlers
   const handleButtonDragStart = useCallback((e: React.MouseEvent | React.TouchEvent) => {
@@ -165,9 +168,9 @@ export default function FloatingSupportButton() {
   const resizeStart = useRef({ x: 0, y: 0, width: 0, height: 0 });
   const fileInputRef = useRef<HTMLInputElement>(null);
 
-  // Determine if we should show the floating button (not for Admin or System Admin)
-  // But we still render the modal for all users so they can contact support via AccessDeniedModal
-  const showFloatingButton = user && user.role !== 'ADMIN' && user.role !== 'SYSTEM_ADMIN';
+  // Determine if we should show the floating button (not for Admin and not for System Admin)
+  // Admin users can still open the modal via explicit "Contact Support" actions.
+  const showFloatingButton = !!user && user.role !== 'ADMIN' && canSubmitSupport;
 
   // Handle paste for images - adds to attachments
   const handlePaste = useCallback((e: React.ClipboardEvent) => {
@@ -325,6 +328,11 @@ export default function FloatingSupportButton() {
 
   // Submit handler
   const handleSubmit = async () => {
+    if (!canSubmitSupport) {
+      alert('System Admin should use Support Request Management.');
+      return;
+    }
+
     const messageContent = (messageRef.current as HTMLTextAreaElement)?.value?.trim() || '';
     
     // Validate subject (min 5 characters)
@@ -366,6 +374,7 @@ export default function FloatingSupportButton() {
       }
       const response = await fetch(`${process.env.NEXT_PUBLIC_API_URL}/support`, {
         method: 'POST',
+        credentials: 'include',
         headers: { 'Authorization': `Bearer ${token}` },
         body: formData,
       });
@@ -411,6 +420,10 @@ export default function FloatingSupportButton() {
 
   // If no user at all, don't render anything
   if (!user) {
+    return null;
+  }
+
+  if (!canSubmitSupport) {
     return null;
   }
 

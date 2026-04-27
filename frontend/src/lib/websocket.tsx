@@ -2,7 +2,6 @@
 
 import React, { createContext, useContext, useEffect, useState, useCallback, useRef } from 'react';
 import { io, Socket } from 'socket.io-client';
-import { auth } from './firebase';
 
 interface ChatMessage {
   id: string;
@@ -443,16 +442,9 @@ export function WebSocketProvider({ children }: { children: React.ReactNode }) {
     
     console.log('🔌 Connecting WebSocket to:', backendUrl);
 
-    // Get Firebase ID token for WebSocket auth
-    const firebaseUser = auth.currentUser;
-    const firebaseToken = firebaseUser ? await firebaseUser.getIdToken() : null;
-    if (!firebaseToken) {
-      console.warn('🔌 No Firebase token available, skipping WebSocket connection');
-      return;
-    }
-    
     const newSocket = io(backendUrl, {
-      auth: { token: firebaseToken, userId, organizationId },
+      auth: { userId, organizationId },
+      withCredentials: true,
       transports: ['websocket', 'polling'],
       reconnection: true,
       reconnectionAttempts: 3,  // Reduced from 5

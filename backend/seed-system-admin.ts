@@ -8,18 +8,20 @@
  * 
  * Environment Variables Required:
  * - DATABASE_URL: PostgreSQL connection string
- * - SYSTEM_ADMIN_EMAIL: Email address for the System Admin (must match Firebase account)
+ * - SYSTEM_ADMIN_EMAIL: Email address for the System Admin
+ *
+ * Optional:
+ * - SYSTEM_ADMIN_BOOTSTRAP_PASSWORD: One-time bootstrap password for the admin.
+ *   If omitted, use the forgot-password flow to set/recover password securely.
  * 
  * The System Admin is a special role that:
- * - Does NOT require an access code
  * - Has access to the Dashmet Control Portal (/dashmet-control)
  * - Cannot be created through normal registration
- * - Requires master key authentication
  */
 
 import { PrismaClient } from '@prisma/client';
 import * as dotenv from 'dotenv';
-import * as crypto from 'crypto';
+import bcrypt from 'bcryptjs';
 
 dotenv.config();
 
@@ -39,17 +41,24 @@ async function seedSystemAdmin() {
     process.exit(1);
   }
 
-  // Check if master key is set
-  const masterKey = process.env.SYSTEM_ADMIN_MASTER_KEY;
-  if (!masterKey) {
-    // Generate a secure master key suggestion
-    const suggestedKey = crypto.randomBytes(32).toString('hex');
-    console.log('⚠️  SYSTEM_ADMIN_MASTER_KEY not set in environment');
-    console.log('\n📝 Add this to your .env file:');
-    console.log(`SYSTEM_ADMIN_MASTER_KEY=${suggestedKey}`);
-    console.log('\n🔒 IMPORTANT: Keep this key secure and never share it!\n');
+  const bootstrapPassword = String(process.env.SYSTEM_ADMIN_BOOTSTRAP_PASSWORD || '').trim();
+  if (bootstrapPassword) {
+    console.log('✅ SYSTEM_ADMIN_BOOTSTRAP_PASSWORD provided (password will be set/rotated)');
   } else {
-    console.log('✅ SYSTEM_ADMIN_MASTER_KEY is configured');
+    console.log('ℹ️  No bootstrap password provided. You can set/recover password via forgot-password flow.');
+  }
+
+  const allowlist = String(process.env.SYSTEM_ADMIN_EMAIL_ALLOWLIST || '')
+    .split(',')
+    .map((value) => value.trim().toLowerCase())
+    .filter(Boolean);
+
+  if (!allowlist.includes(systemAdminEmail.toLowerCase())) {
+    console.log('ℹ️  SYSTEM_ADMIN_EMAIL_ALLOWLIST does not explicitly include SYSTEM_ADMIN_EMAIL');
+    console.log('   The app still supports SYSTEM_ADMIN_EMAIL as a legacy fallback,');
+    console.log('   but add this email to SYSTEM_ADMIN_EMAIL_ALLOWLIST for enterprise posture.');
+  } else {
+    console.log('✅ SYSTEM_ADMIN_EMAIL is present in SYSTEM_ADMIN_EMAIL_ALLOWLIST');
   }
 
   try {
@@ -91,7 +100,6 @@ async function seedSystemAdmin() {
       }
     } else {
       // Create new System Admin
-      // Note: The firebaseUid will be set when they first log in
       console.log(`📝 Creating new System Admin: ${systemAdminEmail}`);
       
       const newAdmin = await prisma.user.create({
@@ -102,7 +110,6 @@ async function seedSystemAdmin() {
           role: 'SYSTEM_ADMIN',
           isActive: true,
           // No organizationId - System Admins are platform-level
-          // No firebaseUid yet - will be set on first login
         },
       });
 
@@ -111,12 +118,29 @@ async function seedSystemAdmin() {
       console.log(`   Email: ${newAdmin.email}`);
     }
 
+    if (bootstrapPassword) {
+      const hashedPassword = await bcrypt.hash(
+        bootstrapPassword,
+        parseInt(process.env.BCRYPT_ROUNDS || '12', 10)
+      );
+      await prisma.user.update({
+        where: { email: systemAdminEmail },
+        data: {
+          password: hashedPassword,
+          loginAttempts: 0,
+          lockedUntil: null,
+        },
+      });
+      console.log('✅ System Admin password has been bootstrapped/rotated');
+    }
+
     console.log('\n============================');
     console.log('📋 Next Steps:');
-    console.log('1. Ensure SYSTEM_ADMIN_MASTER_KEY is set in .env');
-    console.log(`2. Create a Firebase account with email: ${systemAdminEmail}`);
+    console.log('1. Ensure SYSTEM_ADMIN_EMAIL_ALLOWLIST includes your admin email');
+    console.log(`2. Ensure mailbox access for: ${systemAdminEmail}`);
     console.log('3. Access the portal at: /dashmet-control/login');
-    console.log('4. Sign in with Firebase and enter the master key');
+    console.log('4. Sign in with email/password and complete MFA code verification');
+    console.log('5. If password is unknown, use /forgot-password from the admin login page');
     console.log('============================\n');
 
   } catch (error) {

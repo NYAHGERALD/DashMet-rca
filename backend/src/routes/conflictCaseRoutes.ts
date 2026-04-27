@@ -27,14 +27,14 @@ import { Prisma } from '@prisma/client';
 import crypto from 'crypto';
 import { v4 as uuidv4 } from 'uuid';
 import { prisma } from '../utils/prisma';
-import { authenticateFirebaseOnly } from '../middleware/auth';
+import { authenticate } from '../middleware/auth';
 import { encrypt, decrypt } from '../utils/encryption';
 import { sendCaseReopenEmail } from '../services/emailService';
 
 const router = Router();
 
-// All conflict case routes require Firebase authentication
-router.use(authenticateFirebaseOnly);
+// All conflict case routes require backend session authentication
+router.use(authenticate);
 
 // Decrypt sensitive fields in case response
 function decryptCaseData(caseData: any): any {

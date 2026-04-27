@@ -3,6 +3,28 @@
  * All dates from the server are in UTC and need to be displayed in the user's local timezone
  */
 
+const DEFAULT_TIMEZONE = 'America/Chicago';
+
+function isValidTimezone(value: string | null | undefined): value is string {
+  if (!value) return false;
+  try {
+    Intl.DateTimeFormat('en-US', { timeZone: value });
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+function resolveUserTimezone(): string {
+  if (typeof window !== 'undefined') {
+    const stored = window.localStorage.getItem('userTimezone');
+    if (isValidTimezone(stored)) return stored;
+  }
+
+  const browserTimezone = Intl.DateTimeFormat().resolvedOptions().timeZone;
+  return isValidTimezone(browserTimezone) ? browserTimezone : DEFAULT_TIMEZONE;
+}
+
 /**
  * Format a date string to a localized date and time string
  * Uses the browser's timezone automatically
@@ -22,8 +44,7 @@ export function formatDateTime(dateString: string | Date, options?: Intl.DateTim
     hour: '2-digit',
     minute: '2-digit',
     hour12: true,
-    // This ensures the browser's timezone is used
-    timeZone: Intl.DateTimeFormat().resolvedOptions().timeZone,
+    timeZone: resolveUserTimezone(),
   };
   
   return date.toLocaleString(undefined, { ...defaultOptions, ...options });
@@ -45,8 +66,7 @@ export function formatDate(dateString: string | Date, options?: Intl.DateTimeFor
     year: 'numeric',
     month: 'short',
     day: 'numeric',
-    // This ensures the browser's timezone is used
-    timeZone: Intl.DateTimeFormat().resolvedOptions().timeZone,
+    timeZone: resolveUserTimezone(),
   };
   
   return date.toLocaleDateString(undefined, { ...defaultOptions, ...options });
@@ -68,8 +88,7 @@ export function formatTime(dateString: string | Date, options?: Intl.DateTimeFor
     hour: '2-digit',
     minute: '2-digit',
     hour12: true,
-    // This ensures the browser's timezone is used
-    timeZone: Intl.DateTimeFormat().resolvedOptions().timeZone,
+    timeZone: resolveUserTimezone(),
   };
   
   return date.toLocaleTimeString(undefined, { ...defaultOptions, ...options });
@@ -148,7 +167,7 @@ export function formatDateTimeForInput(dateString: string | Date): string {
  * Get the user's current timezone name
  */
 export function getUserTimezone(): string {
-  return Intl.DateTimeFormat().resolvedOptions().timeZone;
+  return resolveUserTimezone();
 }
 
 /**
@@ -170,7 +189,7 @@ export function formatDateTimeWithTimezone(dateString: string | Date): string {
     minute: '2-digit',
     hour12: true,
     timeZoneName: 'short',
-    timeZone: Intl.DateTimeFormat().resolvedOptions().timeZone,
+    timeZone: resolveUserTimezone(),
   };
   
   return date.toLocaleString(undefined, options);

@@ -1,6 +1,5 @@
 import { Router } from 'express';
 import authRoutes from './authRoutes';
-import firebaseAuthRoutes from './firebaseAuthRoutes';
 import userRoutes from './userRoutes';
 import preferencesRoutes from './preferencesRoutes';
 import organizationRoutes from './organizationRoutes';
@@ -51,7 +50,7 @@ import policyParsingRoutes from './policyParsingRoutes';
 import conflictCaseRoutes from './conflictCaseRoutes';
 import dashboardRoutes from './dashboardRoutes';
 import { authenticate } from '../middleware/auth';
-import { rateLimiter, enumerationRateLimiter, otpRateLimiter, authRateLimiter, aiRateLimiter, masterKeyRateLimiter, passwordResetRateLimiter } from '../middleware/rateLimiter';
+import { rateLimiter, enumerationRateLimiter, authRateLimiter, aiRateLimiter, systemAdminAuthRateLimiter } from '../middleware/rateLimiter';
 import { promptInjectionDetector } from '../middleware/promptInjectionDetector';
 import { getIncidentTranscripts } from '../controllers/transcriptController';
 
@@ -77,13 +76,14 @@ router.get('/version', (req, res) => {
   });
 });
 
-// Phase 1: Authentication routes
-// Phase 1.1: Firebase Authentication routes
-router.use('/firebase-auth/check-user', enumerationRateLimiter);
-router.use('/firebase-auth/validate-access-code', otpRateLimiter);
-router.use('/firebase-auth/create-profile', authRateLimiter);
-router.use('/firebase-auth/server-reset-password', passwordResetRateLimiter);
-router.use('/firebase-auth', firebaseAuthRoutes);
+// Retired web Firebase Authentication routes. Firebase Storage/Admin can still be
+// used elsewhere, but web identity now belongs to /auth and invitations.
+router.use('/firebase-auth', (_req, res) => {
+  res.status(410).json({
+    success: false,
+    error: 'Firebase Authentication endpoints have been retired. Use backend authentication.',
+  });
+});
 
 // Mobile App Authentication routes - rate limited
 router.use('/mobile/check-phone', enumerationRateLimiter);
@@ -127,7 +127,7 @@ router.use('/conflict-cases', rateLimiter, conflictCaseRoutes);
 // Aggregated dashboard statistics and activity feed
 router.use('/mobile/dashboard', rateLimiter, dashboardRoutes);
 
-// Phase 1: Legacy JWT Authentication routes (will be deprecated)
+// Backend-owned web authentication routes
 router.use('/auth', authRoutes);
 
 // Phase 1: User management routes
@@ -143,7 +143,7 @@ router.use('/grammar', aiRateLimiter, promptInjectionDetector, grammarRoutes);
 router.use('/policies', rateLimiter, policyRoutes);
 
 // System Admin Authentication - strict rate limiting
-router.use('/system-admin-auth', masterKeyRateLimiter, systemAdminAuthRoutes);
+router.use('/system-admin-auth', systemAdminAuthRateLimiter, systemAdminAuthRoutes);
 
 // Support request routes
 router.use('/support', supportRoutes);
@@ -157,6 +157,11 @@ router.use('/invitations', rateLimiter, invitationRoutes);
 // which use router.use(authenticate) and would intercept all paths
 import bakeryMetricsRoutes from './bakeryMetricsRoutes';
 router.use('/bakery-metrics', rateLimiter, promptInjectionDetector, bakeryMetricsRoutes);
+
+// System Admin Dashboard routes (SYSTEM_ADMIN only)
+// Defined before root-mounted facility/department routes so retired public
+// auth paths return 410 instead of being intercepted as authenticated routes.
+router.use('/system-admin', systemAdminRoutes);
 
 // Phase 2.1: Organization routes
 router.use('/organizations', organizationRoutes);
@@ -202,9 +207,6 @@ router.use('/admin', adminRoutes);
 
 // Access Code Management (SYSTEM_ADMIN only)
 router.use('/access-codes', accessCodeRoutes);
-
-// System Admin Dashboard routes (SYSTEM_ADMIN only)
-router.use('/system-admin', systemAdminRoutes);
 
 // Team Collaboration routes (participants and chat)
 router.use('/participants', participantRoutes);
