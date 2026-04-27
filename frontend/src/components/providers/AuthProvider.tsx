@@ -28,7 +28,7 @@ interface AuthContextType {
   loading: boolean;
   needsProfileSetup: boolean;
   logout: (redirectUrl?: string) => Promise<void>;
-  refreshUser: () => Promise<void>;
+  refreshUser: () => Promise<User | null>;
   getIdToken: () => Promise<string | null>;
 }
 
@@ -248,18 +248,20 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
 
   const refreshUser = useCallback(async () => {
     try {
-      await loadCurrentUser();
+      const userData = await loadCurrentUser();
       setSessionExpired(false);
       setShowIdleWarning(false);
       setIdleCountdownSeconds(0);
       lastActivityRef.current = Date.now();
       scheduleIdleTimers();
+      return userData;
     } catch (error) {
       console.error('Failed to refresh user profile:', error);
       setUser(null);
       setNeedsProfileSetup(false);
       setShowIdleWarning(false);
       setIdleCountdownSeconds(0);
+      return null;
     }
   }, [loadCurrentUser, scheduleIdleTimers]);
 

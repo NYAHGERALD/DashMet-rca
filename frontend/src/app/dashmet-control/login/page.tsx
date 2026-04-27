@@ -124,7 +124,14 @@ export default function SystemAdminLoginPage() {
         setIsRedirecting(true);
         setLoginSuccess(true);
         setError(''); // Clear any errors
-        await refreshUser();
+        const refreshedUser = await refreshUser();
+        if (!refreshedUser) {
+          setIsRedirecting(false);
+          setLoginSuccess(false);
+          throw new Error(
+            'Sign-in was verified, but the browser did not receive the secure session cookie. Check the deployed API proxy and cookie settings.'
+          );
+        }
         // Use window.location for a clean redirect without React state race conditions
         window.location.href = '/system-admin';
         return; // Exit early, keep loading state

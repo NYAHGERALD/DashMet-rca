@@ -1,6 +1,8 @@
 import axios, { AxiosRequestConfig, InternalAxiosRequestConfig } from 'axios';
 
-const API_BASE_URL = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:5001/api';
+const API_BASE_URL =
+  process.env.NEXT_PUBLIC_API_URL ||
+  (process.env.NODE_ENV === 'production' ? '/api' : 'http://localhost:5001/api');
 const CSRF_COOKIE_NAME = 'dashmet_csrf';
 export const SESSION_EXPIRED_EVENT = 'dashmet:session-expired';
 let sessionExpiredEventEmitted = false;

@@ -1,8 +1,17 @@
 /** @type {import('next').NextConfig} */
 
 // Derive backend origin from API URL for CSP connect-src
-const apiUrl = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:5001/api';
-const backendOrigin = new URL(apiUrl).origin; // e.g. http://localhost:5001
+const apiUrl =
+  process.env.NEXT_PUBLIC_API_URL ||
+  (process.env.NODE_ENV === 'production' ? '/api' : 'http://localhost:5001/api');
+const apiProxyTarget = (process.env.API_PROXY_TARGET || '')
+  .replace(/\/api\/?$/, '')
+  .replace(/\/+$/, '');
+const resolveOrigin = (url, fallback) => {
+  if (!url || url.startsWith('/')) return fallback;
+  return new URL(url).origin;
+};
+const backendOrigin = resolveOrigin(apiProxyTarget || apiUrl, 'http://localhost:5001');
 const wsOrigin = backendOrigin.replace(/^http/, 'ws'); // e.g. ws://localhost:5001
 
 const nextConfig = {
@@ -16,7 +25,7 @@ const nextConfig = {
     ignoreDuringBuilds: true,
   },
   env: {
-    NEXT_PUBLIC_API_URL: process.env.NEXT_PUBLIC_API_URL || 'http://localhost:5001/api',
+    NEXT_PUBLIC_API_URL: apiUrl,
   },
   images: {
     remotePatterns: [
@@ -76,6 +85,18 @@ const nextConfig = {
             ].join('; '),
           },
         ],
+      },
+    ];
+  },
+  async rewrites() {
+    if (!apiProxyTarget) {
+      return [];
+    }
+
+    return [
+      {
+        source: '/api/:path*',
+        destination: `${apiProxyTarget}/api/:path*`,
       },
     ];
   },

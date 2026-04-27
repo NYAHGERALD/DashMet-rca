@@ -1,8 +1,9 @@
 import ReactMarkdown from 'react-markdown';
 import { PolicyModalShell } from '../../components/policies/PolicyModalShell';
+import { getServerApiBaseUrl } from '@/lib/serverApi';
 
 async function getPolicy() {
-  const baseUrl = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:5002/api';
+  const baseUrl = getServerApiBaseUrl();
   const res = await fetch(`${baseUrl}/policies/terms-of-service`, { cache: 'no-store' });
   if (!res.ok) return null;
   const json = await res.json();

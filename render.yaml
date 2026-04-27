@@ -92,4 +92,6 @@ services:
       - key: NODE_ENV
         value: production
       - key: NEXT_PUBLIC_API_URL
-        sync: false # Set to your backend URL after deployment
+        value: /api
+      - key: API_PROXY_TARGET
+        sync: false # Set to your backend origin, for example https://dashmet-rca-api.onrender.com

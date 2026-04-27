@@ -80,7 +80,10 @@ app.use(requestId);
 // CORS configuration — strict origin allowlist
 const ALLOWED_ORIGINS: string[] = (() => {
   if (process.env.NODE_ENV === 'production') {
-    return (process.env.CORS_ORIGIN || '').split(',').filter(Boolean);
+    return (process.env.CORS_ORIGIN || '')
+      .split(',')
+      .map((origin) => origin.trim().replace(/\/+$/, ''))
+      .filter(Boolean);
   }
   return [
     'http://localhost:3000',

@@ -167,7 +167,12 @@ export default function LoginPage() {
         throw new Error(response.data?.error || 'Unable to sign in');
       }
 
-      await refreshUser();
+      const refreshedUser = await refreshUser();
+      if (!refreshedUser) {
+        throw new Error(
+          'Sign-in was verified, but the browser did not receive the secure session cookie. Check the deployed API proxy and cookie settings.'
+        );
+      }
       router.push('/dashboard');
     } catch (err: any) {
       const apiError = err.response?.data;
@@ -181,6 +186,8 @@ export default function LoginPage() {
 
       const errorMsg = typeof err.response?.data?.error === 'string'
         ? err.response.data.error
+        : typeof err.message === 'string'
+        ? err.message
         : 'Invalid email or password';
 
       setError(errorMsg);
