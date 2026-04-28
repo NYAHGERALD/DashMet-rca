@@ -2,6 +2,233 @@ import { PrismaClient } from '@prisma/client';
 
 const prisma = new PrismaClient();
 
+type KpiKey = 'oee' | 'pounds' | 'waste';
+type LineState = {
+  values: Record<KpiKey, number | null>;
+  didNotRun: boolean;
+  missing: Record<KpiKey, boolean>;
+};
+
+const LINE_LABELS = {
+  die_cut_1: 'Die Cut 1',
+  die_cut_2: 'Die Cut 2',
+} as const;
+
+const TABLE_MESSAGES = {
+  noProductionRun: 'No Production Run',
+  missingData: 'Missing Data?',
+} as const;
+
+const toNumberOrNull = (value: any): number | null => {
+  if (value === null || value === undefined) return null;
+  const n = Number(value);
+  return Number.isFinite(n) ? n : null;
+};
+
+const isMissingValue = (value: any): boolean => {
+  const n = toNumberOrNull(value);
+  return n === null || n === 0;
+};
+
+const normalizeMetricValue = (value: any): number | null => {
+  return isMissingValue(value) ? null : Number(value);
+};
+
+const getWastePct = (lbsValue: any, wasteLbValue: any, wastePctValue: any): number => {
+  const explicitPct = toNumberOrNull(wastePctValue);
+  if (explicitPct !== null) return explicitPct;
+
+  const lbs = toNumberOrNull(lbsValue) ?? 0;
+  const wasteLbs = toNumberOrNull(wasteLbValue) ?? 0;
+  return lbs > 0 ? (wasteLbs / lbs) * 100 : 0;
+};
+
+const getLineStateFromShift = (shift: any, line: 1 | 2): LineState => {
+  if (!shift) {
+    return {
+      values: { oee: null, pounds: null, waste: null },
+      didNotRun: true,
+      missing: { oee: false, pounds: false, waste: false },
+    };
+  }
+
+  const oee = line === 1 ? shift.dieCut1OeePct : shift.dieCut2OeePct;
+  const pounds = line === 1 ? shift.dieCut1Lbs : shift.dieCut2Lbs;
+  const wasteLbs = line === 1 ? shift.dieCut1WasteLb : shift.dieCut2WasteLb;
+  const wastePct = getWastePct(
+    pounds,
+    wasteLbs,
+    line === 1 ? shift.dieCut1WastePct : shift.dieCut2WastePct
+  );
+
+  const didNotRun = isMissingValue(oee) && isMissingValue(pounds) && isMissingValue(wastePct);
+  const missing = {
+    oee: !didNotRun && isMissingValue(oee),
+    pounds: !didNotRun && isMissingValue(pounds),
+    waste: !didNotRun && isMissingValue(wastePct),
+  };
+
+  return {
+    values: {
+      oee: normalizeMetricValue(oee),
+      pounds: normalizeMetricValue(pounds),
+      waste: normalizeMetricValue(wastePct),
+    },
+    didNotRun,
+    missing,
+  };
+};
+
+const combineTwoLines = (
+  kpi: KpiKey,
+  line1: LineState,
+  line2: LineState,
+  mode: 'avg' | 'sum'
+): number | null => {
+  const v1 = line1.values[kpi];
+  const v2 = line2.values[kpi];
+  const m1 = line1.missing[kpi];
+  const m2 = line2.missing[kpi];
+
+  if (line1.didNotRun && line2.didNotRun) return null;
+  if (line1.didNotRun && !line2.didNotRun) return m2 ? null : v2;
+  if (line2.didNotRun && !line1.didNotRun) return m1 ? null : v1;
+  if (m1 || m2 || v1 === null || v2 === null) return null;
+
+  return mode === 'sum' ? v1 + v2 : (v1 + v2) / 2;
+};
+
+const combineTwoShiftsByLine = (first: LineState, second: LineState, kpi: KpiKey): number | null => {
+  const v1 = first.values[kpi];
+  const v2 = second.values[kpi];
+  const m1 = first.missing[kpi];
+  const m2 = second.missing[kpi];
+
+  if (first.didNotRun && second.didNotRun) return null;
+  if (first.didNotRun && !second.didNotRun) return m2 ? null : v2;
+  if (second.didNotRun && !first.didNotRun) return m1 ? null : v1;
+  if (m1 || m2 || v1 === null || v2 === null) return null;
+
+  return kpi === 'pounds' ? v1 + v2 : (v1 + v2) / 2;
+};
+
+const getCombinedLineState = (line: Record<KpiKey, number | null>): LineState => {
+  const didNotRun = isMissingValue(line.oee) && isMissingValue(line.pounds) && isMissingValue(line.waste);
+  const missing = {
+    oee: !didNotRun && isMissingValue(line.oee),
+    pounds: !didNotRun && isMissingValue(line.pounds),
+    waste: !didNotRun && isMissingValue(line.waste),
+  };
+
+  return { values: line, didNotRun, missing };
+};
+
+const getTableCellMessage = (state: LineState, kpi: KpiKey, lineLabel: string): string | null => {
+  if (state.didNotRun) return `${TABLE_MESSAGES.noProductionRun} on ${lineLabel}`;
+  if (state.missing[kpi]) return TABLE_MESSAGES.missingData;
+  return null;
+};
+
+const getLineCellMessages = (state: LineState, lineLabel: string): Record<KpiKey, string | null> => ({
+  oee: getTableCellMessage(state, 'oee', lineLabel),
+  pounds: getTableCellMessage(state, 'pounds', lineLabel),
+  waste: getTableCellMessage(state, 'waste', lineLabel),
+});
+
+const buildCellMessages = (
+  firstLine1: LineState,
+  firstLine2: LineState,
+  secondLine1: LineState,
+  secondLine2: LineState,
+  bothLine1: LineState,
+  bothLine2: LineState
+) => ({
+  first_shift: {
+    die_cut_1: getLineCellMessages(firstLine1, LINE_LABELS.die_cut_1),
+    die_cut_2: getLineCellMessages(firstLine2, LINE_LABELS.die_cut_2),
+  },
+  second_shift: {
+    die_cut_1: getLineCellMessages(secondLine1, LINE_LABELS.die_cut_1),
+    die_cut_2: getLineCellMessages(secondLine2, LINE_LABELS.die_cut_2),
+  },
+  both_shifts: {
+    die_cut_1: getLineCellMessages(bothLine1, LINE_LABELS.die_cut_1),
+    die_cut_2: getLineCellMessages(bothLine2, LINE_LABELS.die_cut_2),
+  },
+});
+
+const buildBakeryMetricsRecord = (submission: any) => {
+  const fs = submission.firstShiftMetrics;
+  const ss = submission.secondShiftMetrics;
+
+  const fsLine1 = getLineStateFromShift(fs, 1);
+  const fsLine2 = getLineStateFromShift(fs, 2);
+  const ssLine1 = getLineStateFromShift(ss, 1);
+  const ssLine2 = getLineStateFromShift(ss, 2);
+
+  const firstShiftOee = combineTwoLines('oee', fsLine1, fsLine2, 'avg');
+  const firstShiftProduction = combineTwoLines('pounds', fsLine1, fsLine2, 'sum');
+  const firstShiftWaste = combineTwoLines('waste', fsLine1, fsLine2, 'avg');
+  const secondShiftOee = combineTwoLines('oee', ssLine1, ssLine2, 'avg');
+  const secondShiftProduction = combineTwoLines('pounds', ssLine1, ssLine2, 'sum');
+  const secondShiftWaste = combineTwoLines('waste', ssLine1, ssLine2, 'avg');
+
+  const bothLine1 = {
+    oee: combineTwoShiftsByLine(fsLine1, ssLine1, 'oee'),
+    pounds: combineTwoShiftsByLine(fsLine1, ssLine1, 'pounds'),
+    waste: combineTwoShiftsByLine(fsLine1, ssLine1, 'waste'),
+  };
+  const bothLine2 = {
+    oee: combineTwoShiftsByLine(fsLine2, ssLine2, 'oee'),
+    pounds: combineTwoShiftsByLine(fsLine2, ssLine2, 'pounds'),
+    waste: combineTwoShiftsByLine(fsLine2, ssLine2, 'waste'),
+  };
+  const bsLine1 = getCombinedLineState(bothLine1);
+  const bsLine2 = getCombinedLineState(bothLine2);
+
+  return {
+    id: submission.id,
+    submission_date: submission.createdAt,
+    week_name: submission.weekName,
+    day_of_week: submission.dayOfWeek,
+    submitted_by: submission.submittedBy,
+
+    first_shift_die_cut1_oee: fsLine1.values.oee,
+    first_shift_die_cut2_oee: fsLine2.values.oee,
+    first_shift_oee: firstShiftOee,
+    first_shift_die_cut1_lbs: fsLine1.values.pounds,
+    first_shift_die_cut2_lbs: fsLine2.values.pounds,
+    first_shift_production: firstShiftProduction,
+    first_shift_die_cut1_waste_pct: fsLine1.values.waste,
+    first_shift_die_cut2_waste_pct: fsLine2.values.waste,
+    first_shift_waste_percent: firstShiftWaste,
+
+    second_shift_die_cut1_oee: ssLine1.values.oee,
+    second_shift_die_cut2_oee: ssLine2.values.oee,
+    second_shift_oee: secondShiftOee,
+    second_shift_die_cut1_lbs: ssLine1.values.pounds,
+    second_shift_die_cut2_lbs: ssLine2.values.pounds,
+    second_shift_production: secondShiftProduction,
+    second_shift_die_cut1_waste_pct: ssLine1.values.waste,
+    second_shift_die_cut2_waste_pct: ssLine2.values.waste,
+    second_shift_waste_percent: secondShiftWaste,
+
+    both_shift_die_cut1_oee: bothLine1.oee,
+    both_shift_die_cut2_oee: bothLine2.oee,
+    total_oee: combineTwoLines('oee', bsLine1, bsLine2, 'avg'),
+    both_shift_die_cut1_lbs: bothLine1.pounds,
+    both_shift_die_cut2_lbs: bothLine2.pounds,
+    total_production: combineTwoLines('pounds', bsLine1, bsLine2, 'sum'),
+    both_shift_die_cut1_waste_pct: bothLine1.waste,
+    both_shift_die_cut2_waste_pct: bothLine2.waste,
+    total_waste_percent: combineTwoLines('waste', bsLine1, bsLine2, 'avg'),
+
+    has_first_shift: !!fs,
+    has_second_shift: !!ss,
+    cell_messages: buildCellMessages(fsLine1, fsLine2, ssLine1, ssLine2, bsLine1, bsLine2),
+  };
+};
+
 // ─── Types ──────────────────────────────────────────────────────────────────────
 interface ShiftMetricsInput {
   weekSubmissionId: string;
@@ -118,103 +345,7 @@ const bakeryMetricsService = {
       orderBy: { createdAt: 'desc' },
     });
 
-    // Helper: compute total waste % from lbs when wasteAvgPct is null
-    const computeWasteAvg = (shift: any): number | null => {
-      if (!shift) return null;
-      const avg = Number(shift.wasteAvgPct);
-      if (avg && avg !== 0) return avg;
-      // Derive from die-cut waste lbs / total lbs
-      const totalLbs = Number(shift.dieCut1Lbs || 0) + Number(shift.dieCut2Lbs || 0);
-      const totalWaste = Number(shift.dieCut1WasteLb || 0) + Number(shift.dieCut2WasteLb || 0);
-      if (totalLbs > 0) return (totalWaste / totalLbs) * 100;
-      return null;
-    };
-
-    // Flatten to the shape the frontend expects
-    return submissions.map(s => {
-      const fs = s.firstShiftMetrics;
-      const ss = s.secondShiftMetrics;
-      const bs = s.bothShiftsMetrics;
-
-      // --- First shift values ---
-      const fsOee1 = fs ? Number(fs.dieCut1OeePct) : null;
-      const fsOee2 = fs ? Number(fs.dieCut2OeePct) : null;
-      const fsOeeAvg = fs ? Number(fs.oeeAvgPct) : null;
-      const fsLbs1 = fs ? Number(fs.dieCut1Lbs) : null;
-      const fsLbs2 = fs ? Number(fs.dieCut2Lbs) : null;
-      const fsProd = fs ? Number(fs.poundsTotal) : null;
-      const fsWaste1 = fs ? Number(fs.dieCut1WastePct) : null;
-      const fsWaste2 = fs ? Number(fs.dieCut2WastePct) : null;
-      const fsWasteAvg = fs ? computeWasteAvg(fs) : null;
-
-      // --- Second shift values ---
-      const ssOee1 = ss ? Number(ss.dieCut1OeePct) : null;
-      const ssOee2 = ss ? Number(ss.dieCut2OeePct) : null;
-      const ssOeeAvg = ss ? Number(ss.oeeAvgPct) : null;
-      const ssLbs1 = ss ? Number(ss.dieCut1Lbs) : null;
-      const ssLbs2 = ss ? Number(ss.dieCut2Lbs) : null;
-      const ssProd = ss ? Number(ss.poundsTotal) : null;
-      const ssWaste1 = ss ? Number(ss.dieCut1WastePct) : null;
-      const ssWaste2 = ss ? Number(ss.dieCut2WastePct) : null;
-      const ssWasteAvg = ss ? computeWasteAvg(ss) : null;
-
-      // --- Both shifts: use actual record if present, else fallback to whichever shift exists ---
-      // When only one shift is submitted, show that shift's data in the "Both" column
-      const bsOee1 = bs ? Number(bs.dieCut1OeePct) : (fsOee1 ?? ssOee1);
-      const bsOee2 = bs ? Number(bs.dieCut2OeePct) : (fsOee2 ?? ssOee2);
-      const bsOeeAvg = bs ? Number(bs.oeeAvgPct) : (fsOeeAvg ?? ssOeeAvg);
-      const bsLbs1 = bs ? Number(bs.dieCut1Lbs) : (fsLbs1 ?? ssLbs1);
-      const bsLbs2 = bs ? Number(bs.dieCut2Lbs) : (fsLbs2 ?? ssLbs2);
-      const bsProd = bs ? Number(bs.poundsTotal) : (fsProd ?? ssProd);
-      const bsWaste1 = bs ? Number(bs.dieCut1WastePct) : (fsWaste1 ?? ssWaste1);
-      const bsWaste2 = bs ? Number(bs.dieCut2WastePct) : (fsWaste2 ?? ssWaste2);
-      const bsWasteAvg = bs ? computeWasteAvg(bs) : (fsWasteAvg ?? ssWasteAvg);
-
-      return {
-        id: s.id,
-        submission_date: s.createdAt,
-        week_name: s.weekName,
-        day_of_week: s.dayOfWeek,
-        submitted_by: s.submittedBy,
-
-        // First shift
-        first_shift_die_cut1_oee: fsOee1,
-        first_shift_die_cut2_oee: fsOee2,
-        first_shift_oee: fsOeeAvg,
-        first_shift_die_cut1_lbs: fsLbs1,
-        first_shift_die_cut2_lbs: fsLbs2,
-        first_shift_production: fsProd,
-        first_shift_die_cut1_waste_pct: fsWaste1,
-        first_shift_die_cut2_waste_pct: fsWaste2,
-        first_shift_waste_percent: fsWasteAvg,
-
-        // Second shift
-        second_shift_die_cut1_oee: ssOee1,
-        second_shift_die_cut2_oee: ssOee2,
-        second_shift_oee: ssOeeAvg,
-        second_shift_die_cut1_lbs: ssLbs1,
-        second_shift_die_cut2_lbs: ssLbs2,
-        second_shift_production: ssProd,
-        second_shift_die_cut1_waste_pct: ssWaste1,
-        second_shift_die_cut2_waste_pct: ssWaste2,
-        second_shift_waste_percent: ssWasteAvg,
-
-        // Both shifts (with fallback to available shift)
-        both_shift_die_cut1_oee: bsOee1,
-        both_shift_die_cut2_oee: bsOee2,
-        total_oee: bsOeeAvg,
-        both_shift_die_cut1_lbs: bsLbs1,
-        both_shift_die_cut2_lbs: bsLbs2,
-        total_production: bsProd,
-        both_shift_die_cut1_waste_pct: bsWaste1,
-        both_shift_die_cut2_waste_pct: bsWaste2,
-        total_waste_percent: bsWasteAvg,
-
-        // Flags so frontend knows which shifts have submitted data
-        has_first_shift: !!fs,
-        has_second_shift: !!ss,
-      };
-    });
+    return submissions.map(buildBakeryMetricsRecord);
   },
 
   // ═══════════════════════════════════════════════════════════════════════════
@@ -231,44 +362,7 @@ const bakeryMetricsService = {
     });
     if (!s) return null;
 
-    const fs = s.firstShiftMetrics;
-    const ss = s.secondShiftMetrics;
-    const bs = s.bothShiftsMetrics;
-
-    return {
-      id: s.id,
-      submission_date: s.createdAt,
-      week_name: s.weekName,
-      day_of_week: s.dayOfWeek,
-      submitted_by: s.submittedBy,
-      first_shift_die_cut1_oee: fs ? Number(fs.dieCut1OeePct) : null,
-      first_shift_die_cut2_oee: fs ? Number(fs.dieCut2OeePct) : null,
-      first_shift_oee: fs ? Number(fs.oeeAvgPct) : null,
-      first_shift_die_cut1_lbs: fs ? Number(fs.dieCut1Lbs) : null,
-      first_shift_die_cut2_lbs: fs ? Number(fs.dieCut2Lbs) : null,
-      first_shift_production: fs ? Number(fs.poundsTotal) : null,
-      first_shift_die_cut1_waste_pct: fs ? Number(fs.dieCut1WastePct) : null,
-      first_shift_die_cut2_waste_pct: fs ? Number(fs.dieCut2WastePct) : null,
-      first_shift_waste_percent: fs ? Number(fs.wasteAvgPct) : null,
-      second_shift_die_cut1_oee: ss ? Number(ss.dieCut1OeePct) : null,
-      second_shift_die_cut2_oee: ss ? Number(ss.dieCut2OeePct) : null,
-      second_shift_oee: ss ? Number(ss.oeeAvgPct) : null,
-      second_shift_die_cut1_lbs: ss ? Number(ss.dieCut1Lbs) : null,
-      second_shift_die_cut2_lbs: ss ? Number(ss.dieCut2Lbs) : null,
-      second_shift_production: ss ? Number(ss.poundsTotal) : null,
-      second_shift_die_cut1_waste_pct: ss ? Number(ss.dieCut1WastePct) : null,
-      second_shift_die_cut2_waste_pct: ss ? Number(ss.dieCut2WastePct) : null,
-      second_shift_waste_percent: ss ? Number(ss.wasteAvgPct) : null,
-      both_shift_die_cut1_oee: bs ? Number(bs.dieCut1OeePct) : null,
-      both_shift_die_cut2_oee: bs ? Number(bs.dieCut2OeePct) : null,
-      total_oee: bs ? Number(bs.oeeAvgPct) : null,
-      both_shift_die_cut1_lbs: bs ? Number(bs.dieCut1Lbs) : null,
-      both_shift_die_cut2_lbs: bs ? Number(bs.dieCut2Lbs) : null,
-      total_production: bs ? Number(bs.poundsTotal) : null,
-      both_shift_die_cut1_waste_pct: bs ? Number(bs.dieCut1WastePct) : null,
-      both_shift_die_cut2_waste_pct: bs ? Number(bs.dieCut2WastePct) : null,
-      total_waste_percent: bs ? Number(bs.wasteAvgPct) : null,
-    };
+    return buildBakeryMetricsRecord(s);
   },
 
   // ═══════════════════════════════════════════════════════════════════════════
@@ -365,60 +459,94 @@ const bakeryMetricsService = {
       return valid.reduce((a, b) => a + b, 0) / valid.length;
     };
 
+    const firstLine1 = getCombinedLineState({
+      oee: avg(records.map(r => r.first_shift_die_cut1_oee)),
+      pounds: avg(records.map(r => r.first_shift_die_cut1_lbs)),
+      waste: avg(records.map(r => r.first_shift_die_cut1_waste_pct)),
+    });
+    const firstLine2 = getCombinedLineState({
+      oee: avg(records.map(r => r.first_shift_die_cut2_oee)),
+      pounds: avg(records.map(r => r.first_shift_die_cut2_lbs)),
+      waste: avg(records.map(r => r.first_shift_die_cut2_waste_pct)),
+    });
+    const secondLine1 = getCombinedLineState({
+      oee: avg(records.map(r => r.second_shift_die_cut1_oee)),
+      pounds: avg(records.map(r => r.second_shift_die_cut1_lbs)),
+      waste: avg(records.map(r => r.second_shift_die_cut1_waste_pct)),
+    });
+    const secondLine2 = getCombinedLineState({
+      oee: avg(records.map(r => r.second_shift_die_cut2_oee)),
+      pounds: avg(records.map(r => r.second_shift_die_cut2_lbs)),
+      waste: avg(records.map(r => r.second_shift_die_cut2_waste_pct)),
+    });
+
+    const bothLine1 = getCombinedLineState({
+      oee: combineTwoShiftsByLine(firstLine1, secondLine1, 'oee'),
+      pounds: combineTwoShiftsByLine(firstLine1, secondLine1, 'pounds'),
+      waste: combineTwoShiftsByLine(firstLine1, secondLine1, 'waste'),
+    });
+    const bothLine2 = getCombinedLineState({
+      oee: combineTwoShiftsByLine(firstLine2, secondLine2, 'oee'),
+      pounds: combineTwoShiftsByLine(firstLine2, secondLine2, 'pounds'),
+      waste: combineTwoShiftsByLine(firstLine2, secondLine2, 'waste'),
+    });
+    const cellMessages = buildCellMessages(firstLine1, firstLine2, secondLine1, secondLine2, bothLine1, bothLine2);
+
     return {
       period: weekName,
       days_count: records.length,
       averages: {
+        cell_messages: cellMessages,
         oee: {
           die_cut_1: {
-            first_shift: avg(records.map(r => r.first_shift_die_cut1_oee)),
-            second_shift: avg(records.map(r => r.second_shift_die_cut1_oee)),
-            both_shifts: avg(records.map(r => r.both_shift_die_cut1_oee)),
+            first_shift: firstLine1.values.oee,
+            second_shift: secondLine1.values.oee,
+            both_shifts: bothLine1.values.oee,
           },
           die_cut_2: {
-            first_shift: avg(records.map(r => r.first_shift_die_cut2_oee)),
-            second_shift: avg(records.map(r => r.second_shift_die_cut2_oee)),
-            both_shifts: avg(records.map(r => r.both_shift_die_cut2_oee)),
+            first_shift: firstLine2.values.oee,
+            second_shift: secondLine2.values.oee,
+            both_shifts: bothLine2.values.oee,
           },
           total: {
-            first_shift: avg(records.map(r => r.first_shift_oee)),
-            second_shift: avg(records.map(r => r.second_shift_oee)),
-            both_shifts: avg(records.map(r => r.total_oee)),
+            first_shift: combineTwoLines('oee', firstLine1, firstLine2, 'avg'),
+            second_shift: combineTwoLines('oee', secondLine1, secondLine2, 'avg'),
+            both_shifts: combineTwoLines('oee', bothLine1, bothLine2, 'avg'),
           },
         },
         volume: {
           die_cut_1: {
-            first_shift: avg(records.map(r => r.first_shift_die_cut1_lbs)),
-            second_shift: avg(records.map(r => r.second_shift_die_cut1_lbs)),
-            both_shifts: avg(records.map(r => r.both_shift_die_cut1_lbs)),
+            first_shift: firstLine1.values.pounds,
+            second_shift: secondLine1.values.pounds,
+            both_shifts: bothLine1.values.pounds,
           },
           die_cut_2: {
-            first_shift: avg(records.map(r => r.first_shift_die_cut2_lbs)),
-            second_shift: avg(records.map(r => r.second_shift_die_cut2_lbs)),
-            both_shifts: avg(records.map(r => r.both_shift_die_cut2_lbs)),
+            first_shift: firstLine2.values.pounds,
+            second_shift: secondLine2.values.pounds,
+            both_shifts: bothLine2.values.pounds,
           },
           total: {
-            first_shift: avg(records.map(r => r.first_shift_production)),
-            second_shift: avg(records.map(r => r.second_shift_production)),
-            both_shifts: avg(records.map(r => r.total_production)),
+            first_shift: combineTwoLines('pounds', firstLine1, firstLine2, 'sum'),
+            second_shift: combineTwoLines('pounds', secondLine1, secondLine2, 'sum'),
+            both_shifts: combineTwoLines('pounds', bothLine1, bothLine2, 'sum'),
           },
         },
         waste: {
           percentage: {
             die_cut_1: {
-              first_shift: avg(records.map(r => r.first_shift_die_cut1_waste_pct)),
-              second_shift: avg(records.map(r => r.second_shift_die_cut1_waste_pct)),
-              both_shifts: avg(records.map(r => r.both_shift_die_cut1_waste_pct)),
+              first_shift: firstLine1.values.waste,
+              second_shift: secondLine1.values.waste,
+              both_shifts: bothLine1.values.waste,
             },
             die_cut_2: {
-              first_shift: avg(records.map(r => r.first_shift_die_cut2_waste_pct)),
-              second_shift: avg(records.map(r => r.second_shift_die_cut2_waste_pct)),
-              both_shifts: avg(records.map(r => r.both_shift_die_cut2_waste_pct)),
+              first_shift: firstLine2.values.waste,
+              second_shift: secondLine2.values.waste,
+              both_shifts: bothLine2.values.waste,
             },
             total: {
-              first_shift: avg(records.map(r => r.first_shift_waste_percent)),
-              second_shift: avg(records.map(r => r.second_shift_waste_percent)),
-              both_shifts: avg(records.map(r => r.total_waste_percent)),
+              first_shift: combineTwoLines('waste', firstLine1, firstLine2, 'avg'),
+              second_shift: combineTwoLines('waste', secondLine1, secondLine2, 'avg'),
+              both_shifts: combineTwoLines('waste', bothLine1, bothLine2, 'avg'),
             },
           },
         },

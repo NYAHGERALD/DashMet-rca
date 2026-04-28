@@ -147,7 +147,7 @@ function formatVal(value: number | undefined | null, suffix: string, isInteger =
 }
 
 // ─── Metric Value Cell ──────────────────────────────────────────────────────────
-function MetricCell({ value, suffix, target, isReverse = false, isInteger = false, missing = false, onResolve, didNotRun = false, lineName }: {
+function MetricCell({ value, suffix, target, isReverse = false, isInteger = false, missing = false, onResolve, didNotRun = false, lineName, displayMessage }: {
   value: number | undefined | null;
   suffix: string;
   target: number;
@@ -157,10 +157,12 @@ function MetricCell({ value, suffix, target, isReverse = false, isInteger = fals
   onResolve?: () => void;
   didNotRun?: boolean;
   lineName?: string;
+  displayMessage?: string | null;
 }) {
   const display = formatVal(value, suffix, isInteger);
   const color = getValueColor(value, target, isReverse);
   const [showHint, setShowHint] = useState(false);
+  const noProductionMessage = displayMessage || `No Production Run${lineName ? ` on ${lineName}` : ''}`;
   return (
     <div className="relative min-h-[38px] flex items-center">
       <span className={`inline-flex items-center px-2.5 py-1.5 rounded-full text-xs font-bold ${color}`}>
@@ -170,7 +172,7 @@ function MetricCell({ value, suffix, target, isReverse = false, isInteger = fals
         <div className="absolute inset-0 flex items-center justify-between gap-1.5 px-2 bg-slate-100/95 dark:bg-slate-800/90 border border-slate-300 dark:border-slate-600 rounded-lg shadow-sm">
           <div className="flex items-center gap-1.5 min-w-0">
             <span className="text-[10px] font-bold text-slate-700 dark:text-slate-200 truncate">
-              No Production Run{lineName ? ` on ${lineName}` : ''}
+              {noProductionMessage}
             </span>
             <button
               type="button"
@@ -202,7 +204,7 @@ function MetricCell({ value, suffix, target, isReverse = false, isInteger = fals
       )}
       {!didNotRun && missing && (
         <div className="absolute inset-0 flex items-center justify-between gap-2 px-2 bg-amber-100/90 dark:bg-amber-900/50 border border-amber-300 dark:border-amber-700 rounded-lg">
-          <span className="text-[10px] font-bold text-amber-700 dark:text-amber-300">Missing Data?</span>
+          <span className="text-[10px] font-bold text-amber-700 dark:text-amber-300">{displayMessage || 'Missing Data?'}</span>
           <button
             type="button"
             onClick={onResolve}
@@ -791,6 +793,7 @@ export default function BakeryMetricsReport({ onFilterInfo, triggerAction, onCon
           both_shift_die_cut1_waste_pct: avg.waste?.percentage?.die_cut_1?.both_shifts,
           both_shift_die_cut2_waste_pct: avg.waste?.percentage?.die_cut_2?.both_shifts,
           total_waste_percent: avg.waste?.percentage?.total?.both_shifts,
+          cell_messages: avg.cell_messages,
         });
         setIsWeekSummary(true);
         showNotification(`Week summary calculated for ${res.data.period}`, 'success');
@@ -1030,6 +1033,20 @@ export default function BakeryMetricsReport({ onFilterInfo, triggerAction, onCon
   const bothShiftTotalOee = combineTwoLines('oee', bsLine1, bsLine2, 'avg');
   const bothShiftTotalPounds = combineTwoLines('pounds', bsLine1, bsLine2, 'sum');
   const bothShiftTotalWaste = combineTwoLines('waste', bsLine1, bsLine2, 'avg');
+
+  const getCellDisplayMessage = (
+    shift: 'first_shift' | 'second_shift' | 'both_shifts',
+    line: 'die_cut_1' | 'die_cut_2',
+    kpi: KpiKey,
+    state: LineState,
+    lineName: string
+  ) => {
+    const tableMessage = d.cell_messages?.[shift]?.[line]?.[kpi];
+    if (tableMessage) return tableMessage as string;
+    if (state.didNotRun) return `No Production Run${lineName ? ` on ${lineName}` : ''}`;
+    if (state.missing[kpi]) return 'Missing Data?';
+    return null;
+  };
 
   // ─── Days ─────────────────────────────────────────────────────────────────
   const days = ['Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday'];
@@ -1285,6 +1302,7 @@ export default function BakeryMetricsReport({ onFilterInfo, triggerAction, onCon
                     missing={fsLine1.missing.oee}
                     didNotRun={fsLine1.didNotRun}
                     lineName="Die Cut 1"
+                    displayMessage={getCellDisplayMessage('first_shift', 'die_cut_1', 'oee', fsLine1, 'Die Cut 1')}
                     onResolve={() => openMissingKpiModal('first', 1, fsLine1.didNotRun ? ['oee', 'pounds', 'waste'] : (['oee', 'pounds', 'waste'].filter((k) => fsLine1.missing[k as KpiKey]) as Array<'oee' | 'pounds' | 'waste'>))}
                   />
                 </td>
@@ -1296,10 +1314,11 @@ export default function BakeryMetricsReport({ onFilterInfo, triggerAction, onCon
                     missing={ssLine1.missing.oee}
                     didNotRun={ssLine1.didNotRun}
                     lineName="Die Cut 1"
+                    displayMessage={getCellDisplayMessage('second_shift', 'die_cut_1', 'oee', ssLine1, 'Die Cut 1')}
                     onResolve={() => openMissingKpiModal('second', 1, ssLine1.didNotRun ? ['oee', 'pounds', 'waste'] : (['oee', 'pounds', 'waste'].filter((k) => ssLine1.missing[k as KpiKey]) as Array<'oee' | 'pounds' | 'waste'>))}
                   />
                 </td>
-                <td className="px-4 py-2 bg-purple-50/30 dark:bg-purple-900/10"><MetricCell value={bothShiftLine1.oee} suffix="%" target={t.oee.die_cut_1} didNotRun={bsLine1.didNotRun} lineName="Die Cut 1" /></td>
+                <td className="px-4 py-2 bg-purple-50/30 dark:bg-purple-900/10"><MetricCell value={bothShiftLine1.oee} suffix="%" target={t.oee.die_cut_1} didNotRun={bsLine1.didNotRun} lineName="Die Cut 1" displayMessage={getCellDisplayMessage('both_shifts', 'die_cut_1', 'oee', bsLine1, 'Die Cut 1')} /></td>
                 <td className="px-4 py-2"><StatusBadge value={bothShiftLine1.oee} target={t.oee.die_cut_1} type="oee" /></td>
               </tr>
               <tr className="hover:bg-blue-50/50 dark:hover:bg-blue-900/10">
@@ -1312,6 +1331,7 @@ export default function BakeryMetricsReport({ onFilterInfo, triggerAction, onCon
                     missing={fsLine2.missing.oee}
                     didNotRun={fsLine2.didNotRun}
                     lineName="Die Cut 2"
+                    displayMessage={getCellDisplayMessage('first_shift', 'die_cut_2', 'oee', fsLine2, 'Die Cut 2')}
                     onResolve={() => openMissingKpiModal('first', 2, fsLine2.didNotRun ? ['oee', 'pounds', 'waste'] : (['oee', 'pounds', 'waste'].filter((k) => fsLine2.missing[k as KpiKey]) as Array<'oee' | 'pounds' | 'waste'>))}
                   />
                 </td>
@@ -1323,10 +1343,11 @@ export default function BakeryMetricsReport({ onFilterInfo, triggerAction, onCon
                     missing={ssLine2.missing.oee}
                     didNotRun={ssLine2.didNotRun}
                     lineName="Die Cut 2"
+                    displayMessage={getCellDisplayMessage('second_shift', 'die_cut_2', 'oee', ssLine2, 'Die Cut 2')}
                     onResolve={() => openMissingKpiModal('second', 2, ssLine2.didNotRun ? ['oee', 'pounds', 'waste'] : (['oee', 'pounds', 'waste'].filter((k) => ssLine2.missing[k as KpiKey]) as Array<'oee' | 'pounds' | 'waste'>))}
                   />
                 </td>
-                <td className="px-4 py-2 bg-purple-50/30 dark:bg-purple-900/10"><MetricCell value={bothShiftLine2.oee} suffix="%" target={t.oee.die_cut_2} didNotRun={bsLine2.didNotRun} lineName="Die Cut 2" /></td>
+                <td className="px-4 py-2 bg-purple-50/30 dark:bg-purple-900/10"><MetricCell value={bothShiftLine2.oee} suffix="%" target={t.oee.die_cut_2} didNotRun={bsLine2.didNotRun} lineName="Die Cut 2" displayMessage={getCellDisplayMessage('both_shifts', 'die_cut_2', 'oee', bsLine2, 'Die Cut 2')} /></td>
                 <td className="px-4 py-2"><StatusBadge value={bothShiftLine2.oee} target={t.oee.die_cut_2} type="oee" /></td>
               </tr>
               <tr className="hover:bg-blue-50/50 dark:hover:bg-blue-900/10 border-b-4 border-gray-200 dark:border-gray-600">
@@ -1360,6 +1381,7 @@ export default function BakeryMetricsReport({ onFilterInfo, triggerAction, onCon
                     missing={fsLine1.missing.pounds}
                     didNotRun={fsLine1.didNotRun}
                     lineName="Die Cut 1"
+                    displayMessage={getCellDisplayMessage('first_shift', 'die_cut_1', 'pounds', fsLine1, 'Die Cut 1')}
                     onResolve={() => openMissingKpiModal('first', 1, fsLine1.didNotRun ? ['oee', 'pounds', 'waste'] : (['oee', 'pounds', 'waste'].filter((k) => fsLine1.missing[k as KpiKey]) as Array<'oee' | 'pounds' | 'waste'>))}
                   />
                 </td>
@@ -1372,10 +1394,11 @@ export default function BakeryMetricsReport({ onFilterInfo, triggerAction, onCon
                     missing={ssLine1.missing.pounds}
                     didNotRun={ssLine1.didNotRun}
                     lineName="Die Cut 1"
+                    displayMessage={getCellDisplayMessage('second_shift', 'die_cut_1', 'pounds', ssLine1, 'Die Cut 1')}
                     onResolve={() => openMissingKpiModal('second', 1, ssLine1.didNotRun ? ['oee', 'pounds', 'waste'] : (['oee', 'pounds', 'waste'].filter((k) => ssLine1.missing[k as KpiKey]) as Array<'oee' | 'pounds' | 'waste'>))}
                   />
                 </td>
-                <td className="px-4 py-2 bg-purple-50/30 dark:bg-purple-900/10"><MetricCell value={bothShiftLine1.pounds} suffix=" lbs" target={t.volume.die_cut_1} isInteger didNotRun={bsLine1.didNotRun} lineName="Die Cut 1" /></td>
+                <td className="px-4 py-2 bg-purple-50/30 dark:bg-purple-900/10"><MetricCell value={bothShiftLine1.pounds} suffix=" lbs" target={t.volume.die_cut_1} isInteger didNotRun={bsLine1.didNotRun} lineName="Die Cut 1" displayMessage={getCellDisplayMessage('both_shifts', 'die_cut_1', 'pounds', bsLine1, 'Die Cut 1')} /></td>
                 <td className="px-4 py-2"><StatusBadge value={bothShiftLine1.pounds} target={t.volume.die_cut_1} type="volume" /></td>
               </tr>
               <tr className="hover:bg-emerald-50/50 dark:hover:bg-emerald-900/10">
@@ -1389,6 +1412,7 @@ export default function BakeryMetricsReport({ onFilterInfo, triggerAction, onCon
                     missing={fsLine2.missing.pounds}
                     didNotRun={fsLine2.didNotRun}
                     lineName="Die Cut 2"
+                    displayMessage={getCellDisplayMessage('first_shift', 'die_cut_2', 'pounds', fsLine2, 'Die Cut 2')}
                     onResolve={() => openMissingKpiModal('first', 2, fsLine2.didNotRun ? ['oee', 'pounds', 'waste'] : (['oee', 'pounds', 'waste'].filter((k) => fsLine2.missing[k as KpiKey]) as Array<'oee' | 'pounds' | 'waste'>))}
                   />
                 </td>
@@ -1401,10 +1425,11 @@ export default function BakeryMetricsReport({ onFilterInfo, triggerAction, onCon
                     missing={ssLine2.missing.pounds}
                     didNotRun={ssLine2.didNotRun}
                     lineName="Die Cut 2"
+                    displayMessage={getCellDisplayMessage('second_shift', 'die_cut_2', 'pounds', ssLine2, 'Die Cut 2')}
                     onResolve={() => openMissingKpiModal('second', 2, ssLine2.didNotRun ? ['oee', 'pounds', 'waste'] : (['oee', 'pounds', 'waste'].filter((k) => ssLine2.missing[k as KpiKey]) as Array<'oee' | 'pounds' | 'waste'>))}
                   />
                 </td>
-                <td className="px-4 py-2 bg-purple-50/30 dark:bg-purple-900/10"><MetricCell value={bothShiftLine2.pounds} suffix=" lbs" target={t.volume.die_cut_2} isInteger didNotRun={bsLine2.didNotRun} lineName="Die Cut 2" /></td>
+                <td className="px-4 py-2 bg-purple-50/30 dark:bg-purple-900/10"><MetricCell value={bothShiftLine2.pounds} suffix=" lbs" target={t.volume.die_cut_2} isInteger didNotRun={bsLine2.didNotRun} lineName="Die Cut 2" displayMessage={getCellDisplayMessage('both_shifts', 'die_cut_2', 'pounds', bsLine2, 'Die Cut 2')} /></td>
                 <td className="px-4 py-2"><StatusBadge value={bothShiftLine2.pounds} target={t.volume.die_cut_2} type="volume" /></td>
               </tr>
               <tr className="hover:bg-emerald-50/50 dark:hover:bg-emerald-900/10 border-b-4 border-gray-200 dark:border-gray-600">
@@ -1438,6 +1463,7 @@ export default function BakeryMetricsReport({ onFilterInfo, triggerAction, onCon
                     missing={fsLine1.missing.waste}
                     didNotRun={fsLine1.didNotRun}
                     lineName="Die Cut 1"
+                    displayMessage={getCellDisplayMessage('first_shift', 'die_cut_1', 'waste', fsLine1, 'Die Cut 1')}
                     onResolve={() => openMissingKpiModal('first', 1, fsLine1.didNotRun ? ['oee', 'pounds', 'waste'] : (['oee', 'pounds', 'waste'].filter((k) => fsLine1.missing[k as KpiKey]) as Array<'oee' | 'pounds' | 'waste'>))}
                   />
                 </td>
@@ -1450,10 +1476,11 @@ export default function BakeryMetricsReport({ onFilterInfo, triggerAction, onCon
                     missing={ssLine1.missing.waste}
                     didNotRun={ssLine1.didNotRun}
                     lineName="Die Cut 1"
+                    displayMessage={getCellDisplayMessage('second_shift', 'die_cut_1', 'waste', ssLine1, 'Die Cut 1')}
                     onResolve={() => openMissingKpiModal('second', 1, ssLine1.didNotRun ? ['oee', 'pounds', 'waste'] : (['oee', 'pounds', 'waste'].filter((k) => ssLine1.missing[k as KpiKey]) as Array<'oee' | 'pounds' | 'waste'>))}
                   />
                 </td>
-                <td className="px-4 py-2 bg-purple-50/30 dark:bg-purple-900/10"><MetricCell value={bothShiftLine1.waste} suffix="%" target={t.waste.die_cut_1} isReverse didNotRun={bsLine1.didNotRun} lineName="Die Cut 1" /></td>
+                <td className="px-4 py-2 bg-purple-50/30 dark:bg-purple-900/10"><MetricCell value={bothShiftLine1.waste} suffix="%" target={t.waste.die_cut_1} isReverse didNotRun={bsLine1.didNotRun} lineName="Die Cut 1" displayMessage={getCellDisplayMessage('both_shifts', 'die_cut_1', 'waste', bsLine1, 'Die Cut 1')} /></td>
                 <td className="px-4 py-2"><StatusBadge value={bothShiftLine1.waste} target={t.waste.die_cut_1} type="waste" /></td>
               </tr>
               <tr className="hover:bg-red-50/50 dark:hover:bg-red-900/10">
@@ -1467,6 +1494,7 @@ export default function BakeryMetricsReport({ onFilterInfo, triggerAction, onCon
                     missing={fsLine2.missing.waste}
                     didNotRun={fsLine2.didNotRun}
                     lineName="Die Cut 2"
+                    displayMessage={getCellDisplayMessage('first_shift', 'die_cut_2', 'waste', fsLine2, 'Die Cut 2')}
                     onResolve={() => openMissingKpiModal('first', 2, fsLine2.didNotRun ? ['oee', 'pounds', 'waste'] : (['oee', 'pounds', 'waste'].filter((k) => fsLine2.missing[k as KpiKey]) as Array<'oee' | 'pounds' | 'waste'>))}
                   />
                 </td>
@@ -1479,10 +1507,11 @@ export default function BakeryMetricsReport({ onFilterInfo, triggerAction, onCon
                     missing={ssLine2.missing.waste}
                     didNotRun={ssLine2.didNotRun}
                     lineName="Die Cut 2"
+                    displayMessage={getCellDisplayMessage('second_shift', 'die_cut_2', 'waste', ssLine2, 'Die Cut 2')}
                     onResolve={() => openMissingKpiModal('second', 2, ssLine2.didNotRun ? ['oee', 'pounds', 'waste'] : (['oee', 'pounds', 'waste'].filter((k) => ssLine2.missing[k as KpiKey]) as Array<'oee' | 'pounds' | 'waste'>))}
                   />
                 </td>
-                <td className="px-4 py-2 bg-purple-50/30 dark:bg-purple-900/10"><MetricCell value={bothShiftLine2.waste} suffix="%" target={t.waste.die_cut_2} isReverse didNotRun={bsLine2.didNotRun} lineName="Die Cut 2" /></td>
+                <td className="px-4 py-2 bg-purple-50/30 dark:bg-purple-900/10"><MetricCell value={bothShiftLine2.waste} suffix="%" target={t.waste.die_cut_2} isReverse didNotRun={bsLine2.didNotRun} lineName="Die Cut 2" displayMessage={getCellDisplayMessage('both_shifts', 'die_cut_2', 'waste', bsLine2, 'Die Cut 2')} /></td>
                 <td className="px-4 py-2"><StatusBadge value={bothShiftLine2.waste} target={t.waste.die_cut_2} type="waste" /></td>
               </tr>
               <tr className="hover:bg-red-50/50 dark:hover:bg-red-900/10">

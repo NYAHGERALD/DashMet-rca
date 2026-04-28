@@ -366,6 +366,16 @@ router.get('/:token/validate', asyncHandler(async (req: Request, res: Response) 
     throw new ValidationError(`This invitation has already been ${invitation.status.toLowerCase()}`);
   }
 
+  const facility = invitation.facilityId
+    ? await prisma.facility.findFirst({
+        where: {
+          id: invitation.facilityId,
+          organizationId: invitation.organizationId,
+        },
+        select: { name: true },
+      })
+    : null;
+
   res.json({
     success: true,
     data: {
@@ -374,6 +384,7 @@ router.get('/:token/validate', asyncHandler(async (req: Request, res: Response) 
       organizationName: invitation.Organization.name,
       organizationId: invitation.organizationId,
       facilityId: invitation.facilityId,
+      facilityName: facility?.name || null,
       invitedBy: `${invitation.InvitedBy.firstName} ${invitation.InvitedBy.lastName}`,
       expiresAt: invitation.expiresAt,
     },
@@ -476,6 +487,7 @@ router.post('/:token/accept', authRateLimiter, asyncHandler(async (req: Request,
         lastName: String(lastName).trim(),
         role: invitation.role,
         organizationId: invitation.organizationId,
+        defaultSiteId: invitation.facilityId || null,
         emailVerified: true,
         ...phoneData,
       },
@@ -486,6 +498,7 @@ router.post('/:token/accept', authRateLimiter, asyncHandler(async (req: Request,
         lastName: true,
         role: true,
         organizationId: true,
+        defaultSiteId: true,
         theme: true,
         language: true,
         profilePicture: true,

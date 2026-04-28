@@ -59,21 +59,37 @@ interface BakeryReportData {
   weekAverages: WeekAverages | null;
 }
 
+type KpiKey = 'oee' | 'pounds' | 'waste';
+type LineCellMessages = Record<KpiKey, string | null | undefined>;
+type ShiftCellMessages = {
+  die_cut_1?: LineCellMessages;
+  die_cut_2?: LineCellMessages;
+};
+
 interface ShiftData {
-  dieCut1Oee: number;
-  dieCut2Oee: number;
-  totalOee: number;
-  dieCut1Lbs: number;
-  dieCut2Lbs: number;
-  totalLbs: number;
-  dieCut1WastePct: number;
-  dieCut2WastePct: number;
-  totalWastePct: number;
+  dieCut1Oee: number | null;
+  dieCut2Oee: number | null;
+  totalOee: number | null;
+  dieCut1Lbs: number | null;
+  dieCut2Lbs: number | null;
+  totalLbs: number | null;
+  dieCut1WastePct: number | null;
+  dieCut2WastePct: number | null;
+  totalWastePct: number | null;
+  messages?: {
+    dieCut1?: LineCellMessages;
+    dieCut2?: LineCellMessages;
+  };
 }
 
 interface WeekAverages {
   days_count: number;
   averages: {
+    cell_messages?: {
+      first_shift?: ShiftCellMessages;
+      second_shift?: ShiftCellMessages;
+      both_shifts?: ShiftCellMessages;
+    };
     oee: {
       die_cut_1: { first_shift: number | null; second_shift: number | null; both_shifts: number | null };
       die_cut_2: { first_shift: number | null; second_shift: number | null; both_shifts: number | null };
@@ -96,13 +112,47 @@ interface WeekAverages {
 
 // ─── Helpers ────────────────────────────────────────────────────────────────
 function fmtVal(val: number | null | undefined, suffix = '%', decimals = 1): string {
-  if (val === null || val === undefined) return '-';
+  if (val === null || val === undefined || val === 0) return '-';
   if (suffix === ' lbs') return `${Math.round(val).toLocaleString()} lbs`;
   return `${val.toFixed(decimals)}${suffix}`;
 }
 
 function isMetGood(val: number, target: number, isWaste = false): boolean {
   return isWaste ? val <= target : val >= target;
+}
+
+function cellGood(val: number | null | undefined, target: number, isWaste = false): boolean | undefined {
+  return val === null || val === undefined ? undefined : isMetGood(val, target, isWaste);
+}
+
+function statusFor(
+  val: number | null | undefined,
+  target: number,
+  goodLabel: string,
+  badLabel: string,
+  isWaste = false
+): { status: string; good: boolean } {
+  if (val === null || val === undefined) return { status: 'NO DATA', good: false };
+  const good = isMetGood(val, target, isWaste);
+  return { status: good ? goodLabel : badLabel, good };
+}
+
+function fmtCell(
+  val: number | null | undefined,
+  message: string | null | undefined,
+  suffix = '%',
+  decimals = 1
+): string {
+  return message || fmtVal(val, suffix, decimals);
+}
+
+function cellGoodFor(
+  val: number | null | undefined,
+  target: number,
+  message?: string | null,
+  isWaste = false
+): boolean | undefined {
+  return message ? undefined : cellGood(val, target, isWaste);
 }
 
 function formatWeekDisplay(weekName: string): string {
@@ -247,8 +297,9 @@ export async function generateBakeryReportPdf(data: BakeryReportData): Promise<B
 
             const drawVal = (val: string, ci: number, good?: boolean) => {
               const clr = good === undefined ? C.dark : good ? C.green : C.red;
-              doc.font('Helvetica-Bold').fontSize(7.5).fillColor(clr)
-                .text(val, cX[ci] + 6, ty, { width: cols[ci] - 12, align: 'center' });
+              const isMessage = good === undefined && val !== '-';
+              doc.font('Helvetica-Bold').fontSize(isMessage ? 5.8 : 7.5).fillColor(isMessage ? C.gray : clr)
+                .text(val, cX[ci] + 4, isMessage ? ty - 1 : ty, { width: cols[ci] - 8, align: 'center' });
             };
             drawVal(row.first, 2, row.fg);
             drawVal(row.second, 3, row.sg);
@@ -322,84 +373,96 @@ export async function generateBakeryReportPdf(data: BakeryReportData): Promise<B
       // ═════════════════════════════════════════════════════════════════
       let yPos = drawHeader(`Daily KPI Performance — ${data.dayOfWeek}`);
 
+      const dc1OeeStatus = statusFor(bsd?.dieCut1Oee, t.oee.die_cut_1, 'TARGET MET', 'BELOW TARGET');
+      const dc2OeeStatus = statusFor(bsd?.dieCut2Oee, t.oee.die_cut_2, 'TARGET MET', 'BELOW TARGET');
+      const totalOeeStatus = statusFor(bsd?.totalOee, t.oee.total, 'TARGET MET', 'BELOW TARGET');
+      const dc1VolumeStatus = statusFor(bsd?.dieCut1Lbs, t.volume.die_cut_1, 'ON TARGET', 'BELOW TARGET');
+      const dc2VolumeStatus = statusFor(bsd?.dieCut2Lbs, t.volume.die_cut_2, 'ON TARGET', 'BELOW TARGET');
+      const totalVolumeStatus = statusFor(bsd?.totalLbs, t.volume.total, 'ON TARGET', 'BELOW TARGET');
+      const dc1WasteStatus = statusFor(bsd?.dieCut1WastePct, t.waste.die_cut_1, 'BELOW TARGET', 'ABOVE TARGET', true);
+      const dc2WasteStatus = statusFor(bsd?.dieCut2WastePct, t.waste.die_cut_2, 'BELOW TARGET', 'ABOVE TARGET', true);
+      const totalWasteStatus = statusFor(bsd?.totalWastePct, t.waste.total, 'BELOW TARGET', 'ABOVE TARGET', true);
+      const shiftMessage = (shift: ShiftData | null | undefined, line: 'dieCut1' | 'dieCut2', kpi: KpiKey) =>
+        shift?.messages?.[line]?.[kpi] || null;
+
       const dailyRows: TableRow[] = [
         { kpi: 'OEE (Overall Equipment Effectiveness)', target: '', first: '', second: '', both: '', status: '', good: true, isHeader: true },
         {
           kpi: '   Die Cut 1', target: `>= ${t.oee.die_cut_1}%`,
-          first: fmtVal(fsd?.dieCut1Oee), second: fmtVal(ssd?.dieCut1Oee), both: fmtVal(bsd?.dieCut1Oee),
-          status: isMetGood(bsd?.dieCut1Oee ?? 0, t.oee.die_cut_1) ? 'TARGET MET' : 'BELOW TARGET',
-          good: isMetGood(bsd?.dieCut1Oee ?? 0, t.oee.die_cut_1),
-          fg: fsd ? isMetGood(fsd.dieCut1Oee, t.oee.die_cut_1) : undefined,
-          sg: ssd ? isMetGood(ssd.dieCut1Oee, t.oee.die_cut_1) : undefined,
-          bg: bsd ? isMetGood(bsd.dieCut1Oee, t.oee.die_cut_1) : undefined,
+          first: fmtCell(fsd?.dieCut1Oee, shiftMessage(fsd, 'dieCut1', 'oee')), second: fmtCell(ssd?.dieCut1Oee, shiftMessage(ssd, 'dieCut1', 'oee')), both: fmtCell(bsd?.dieCut1Oee, shiftMessage(bsd, 'dieCut1', 'oee')),
+          status: dc1OeeStatus.status,
+          good: dc1OeeStatus.good,
+          fg: cellGoodFor(fsd?.dieCut1Oee, t.oee.die_cut_1, shiftMessage(fsd, 'dieCut1', 'oee')),
+          sg: cellGoodFor(ssd?.dieCut1Oee, t.oee.die_cut_1, shiftMessage(ssd, 'dieCut1', 'oee')),
+          bg: cellGoodFor(bsd?.dieCut1Oee, t.oee.die_cut_1, shiftMessage(bsd, 'dieCut1', 'oee')),
         },
         {
           kpi: '   Die Cut 2', target: `>= ${t.oee.die_cut_2}%`,
-          first: fmtVal(fsd?.dieCut2Oee), second: fmtVal(ssd?.dieCut2Oee), both: fmtVal(bsd?.dieCut2Oee),
-          status: isMetGood(bsd?.dieCut2Oee ?? 0, t.oee.die_cut_2) ? 'TARGET MET' : 'BELOW TARGET',
-          good: isMetGood(bsd?.dieCut2Oee ?? 0, t.oee.die_cut_2),
-          fg: fsd ? isMetGood(fsd.dieCut2Oee, t.oee.die_cut_2) : undefined,
-          sg: ssd ? isMetGood(ssd.dieCut2Oee, t.oee.die_cut_2) : undefined,
-          bg: bsd ? isMetGood(bsd.dieCut2Oee, t.oee.die_cut_2) : undefined,
+          first: fmtCell(fsd?.dieCut2Oee, shiftMessage(fsd, 'dieCut2', 'oee')), second: fmtCell(ssd?.dieCut2Oee, shiftMessage(ssd, 'dieCut2', 'oee')), both: fmtCell(bsd?.dieCut2Oee, shiftMessage(bsd, 'dieCut2', 'oee')),
+          status: dc2OeeStatus.status,
+          good: dc2OeeStatus.good,
+          fg: cellGoodFor(fsd?.dieCut2Oee, t.oee.die_cut_2, shiftMessage(fsd, 'dieCut2', 'oee')),
+          sg: cellGoodFor(ssd?.dieCut2Oee, t.oee.die_cut_2, shiftMessage(ssd, 'dieCut2', 'oee')),
+          bg: cellGoodFor(bsd?.dieCut2Oee, t.oee.die_cut_2, shiftMessage(bsd, 'dieCut2', 'oee')),
         },
         {
           kpi: '   Total OEE', target: `>= ${t.oee.total}%`,
           first: fmtVal(fsd?.totalOee), second: fmtVal(ssd?.totalOee), both: fmtVal(bsd?.totalOee),
-          status: isMetGood(bsd?.totalOee ?? 0, t.oee.total) ? 'TARGET MET' : 'BELOW TARGET',
-          good: isMetGood(bsd?.totalOee ?? 0, t.oee.total),
-          fg: fsd ? isMetGood(fsd.totalOee, t.oee.total) : undefined,
-          sg: ssd ? isMetGood(ssd.totalOee, t.oee.total) : undefined,
-          bg: bsd ? isMetGood(bsd.totalOee, t.oee.total) : undefined,
+          status: totalOeeStatus.status,
+          good: totalOeeStatus.good,
+          fg: cellGood(fsd?.totalOee, t.oee.total),
+          sg: cellGood(ssd?.totalOee, t.oee.total),
+          bg: cellGood(bsd?.totalOee, t.oee.total),
         },
         { kpi: 'Production Volume (lbs)', target: '', first: '', second: '', both: '', status: '', good: true, isHeader: true },
         {
           kpi: '   Die Cut 1', target: `>= ${t.volume.die_cut_1.toLocaleString()}`,
-          first: fmtVal(fsd?.dieCut1Lbs, ' lbs'), second: fmtVal(ssd?.dieCut1Lbs, ' lbs'), both: fmtVal(bsd?.dieCut1Lbs, ' lbs'),
-          status: isMetGood(bsd?.dieCut1Lbs ?? 0, t.volume.die_cut_1) ? 'ON TARGET' : 'BELOW TARGET',
-          good: isMetGood(bsd?.dieCut1Lbs ?? 0, t.volume.die_cut_1),
-          bg: bsd ? isMetGood(bsd.dieCut1Lbs, t.volume.die_cut_1) : undefined,
+          first: fmtCell(fsd?.dieCut1Lbs, shiftMessage(fsd, 'dieCut1', 'pounds'), ' lbs'), second: fmtCell(ssd?.dieCut1Lbs, shiftMessage(ssd, 'dieCut1', 'pounds'), ' lbs'), both: fmtCell(bsd?.dieCut1Lbs, shiftMessage(bsd, 'dieCut1', 'pounds'), ' lbs'),
+          status: dc1VolumeStatus.status,
+          good: dc1VolumeStatus.good,
+          bg: cellGoodFor(bsd?.dieCut1Lbs, t.volume.die_cut_1, shiftMessage(bsd, 'dieCut1', 'pounds')),
         },
         {
           kpi: '   Die Cut 2', target: `>= ${t.volume.die_cut_2.toLocaleString()}`,
-          first: fmtVal(fsd?.dieCut2Lbs, ' lbs'), second: fmtVal(ssd?.dieCut2Lbs, ' lbs'), both: fmtVal(bsd?.dieCut2Lbs, ' lbs'),
-          status: isMetGood(bsd?.dieCut2Lbs ?? 0, t.volume.die_cut_2) ? 'ON TARGET' : 'BELOW TARGET',
-          good: isMetGood(bsd?.dieCut2Lbs ?? 0, t.volume.die_cut_2),
-          bg: bsd ? isMetGood(bsd.dieCut2Lbs, t.volume.die_cut_2) : undefined,
+          first: fmtCell(fsd?.dieCut2Lbs, shiftMessage(fsd, 'dieCut2', 'pounds'), ' lbs'), second: fmtCell(ssd?.dieCut2Lbs, shiftMessage(ssd, 'dieCut2', 'pounds'), ' lbs'), both: fmtCell(bsd?.dieCut2Lbs, shiftMessage(bsd, 'dieCut2', 'pounds'), ' lbs'),
+          status: dc2VolumeStatus.status,
+          good: dc2VolumeStatus.good,
+          bg: cellGoodFor(bsd?.dieCut2Lbs, t.volume.die_cut_2, shiftMessage(bsd, 'dieCut2', 'pounds')),
         },
         {
           kpi: '   Total Volume', target: `>= ${t.volume.total.toLocaleString()}`,
           first: fmtVal(fsd?.totalLbs, ' lbs'), second: fmtVal(ssd?.totalLbs, ' lbs'), both: fmtVal(bsd?.totalLbs, ' lbs'),
-          status: isMetGood(bsd?.totalLbs ?? 0, t.volume.total) ? 'ON TARGET' : 'BELOW TARGET',
-          good: isMetGood(bsd?.totalLbs ?? 0, t.volume.total),
-          bg: bsd ? isMetGood(bsd.totalLbs, t.volume.total) : undefined,
+          status: totalVolumeStatus.status,
+          good: totalVolumeStatus.good,
+          bg: cellGood(bsd?.totalLbs, t.volume.total),
         },
         { kpi: 'Waste Percentage', target: '', first: '', second: '', both: '', status: '', good: true, isHeader: true },
         {
           kpi: '   Die Cut 1', target: `<= ${t.waste.die_cut_1}%`,
-          first: fmtVal(fsd?.dieCut1WastePct), second: fmtVal(ssd?.dieCut1WastePct), both: fmtVal(bsd?.dieCut1WastePct),
-          status: isMetGood(bsd?.dieCut1WastePct ?? 0, t.waste.die_cut_1, true) ? 'BELOW TARGET' : 'ABOVE TARGET',
-          good: isMetGood(bsd?.dieCut1WastePct ?? 0, t.waste.die_cut_1, true),
-          fg: fsd ? isMetGood(fsd.dieCut1WastePct, t.waste.die_cut_1, true) : undefined,
-          sg: ssd ? isMetGood(ssd.dieCut1WastePct, t.waste.die_cut_1, true) : undefined,
-          bg: bsd ? isMetGood(bsd.dieCut1WastePct, t.waste.die_cut_1, true) : undefined,
+          first: fmtCell(fsd?.dieCut1WastePct, shiftMessage(fsd, 'dieCut1', 'waste')), second: fmtCell(ssd?.dieCut1WastePct, shiftMessage(ssd, 'dieCut1', 'waste')), both: fmtCell(bsd?.dieCut1WastePct, shiftMessage(bsd, 'dieCut1', 'waste')),
+          status: dc1WasteStatus.status,
+          good: dc1WasteStatus.good,
+          fg: cellGoodFor(fsd?.dieCut1WastePct, t.waste.die_cut_1, shiftMessage(fsd, 'dieCut1', 'waste'), true),
+          sg: cellGoodFor(ssd?.dieCut1WastePct, t.waste.die_cut_1, shiftMessage(ssd, 'dieCut1', 'waste'), true),
+          bg: cellGoodFor(bsd?.dieCut1WastePct, t.waste.die_cut_1, shiftMessage(bsd, 'dieCut1', 'waste'), true),
         },
         {
           kpi: '   Die Cut 2', target: `<= ${t.waste.die_cut_2}%`,
-          first: fmtVal(fsd?.dieCut2WastePct), second: fmtVal(ssd?.dieCut2WastePct), both: fmtVal(bsd?.dieCut2WastePct),
-          status: isMetGood(bsd?.dieCut2WastePct ?? 0, t.waste.die_cut_2, true) ? 'BELOW TARGET' : 'ABOVE TARGET',
-          good: isMetGood(bsd?.dieCut2WastePct ?? 0, t.waste.die_cut_2, true),
-          fg: fsd ? isMetGood(fsd.dieCut2WastePct, t.waste.die_cut_2, true) : undefined,
-          sg: ssd ? isMetGood(ssd.dieCut2WastePct, t.waste.die_cut_2, true) : undefined,
-          bg: bsd ? isMetGood(bsd.dieCut2WastePct, t.waste.die_cut_2, true) : undefined,
+          first: fmtCell(fsd?.dieCut2WastePct, shiftMessage(fsd, 'dieCut2', 'waste')), second: fmtCell(ssd?.dieCut2WastePct, shiftMessage(ssd, 'dieCut2', 'waste')), both: fmtCell(bsd?.dieCut2WastePct, shiftMessage(bsd, 'dieCut2', 'waste')),
+          status: dc2WasteStatus.status,
+          good: dc2WasteStatus.good,
+          fg: cellGoodFor(fsd?.dieCut2WastePct, t.waste.die_cut_2, shiftMessage(fsd, 'dieCut2', 'waste'), true),
+          sg: cellGoodFor(ssd?.dieCut2WastePct, t.waste.die_cut_2, shiftMessage(ssd, 'dieCut2', 'waste'), true),
+          bg: cellGoodFor(bsd?.dieCut2WastePct, t.waste.die_cut_2, shiftMessage(bsd, 'dieCut2', 'waste'), true),
         },
         {
           kpi: '   Total Waste', target: `<= ${t.waste.total}%`,
           first: fmtVal(fsd?.totalWastePct), second: fmtVal(ssd?.totalWastePct), both: fmtVal(bsd?.totalWastePct),
-          status: isMetGood(bsd?.totalWastePct ?? 0, t.waste.total, true) ? 'BELOW TARGET' : 'ABOVE TARGET',
-          good: isMetGood(bsd?.totalWastePct ?? 0, t.waste.total, true),
-          fg: fsd ? isMetGood(fsd.totalWastePct, t.waste.total, true) : undefined,
-          sg: ssd ? isMetGood(ssd.totalWastePct, t.waste.total, true) : undefined,
-          bg: bsd ? isMetGood(bsd.totalWastePct, t.waste.total, true) : undefined,
+          status: totalWasteStatus.status,
+          good: totalWasteStatus.good,
+          fg: cellGood(fsd?.totalWastePct, t.waste.total, true),
+          sg: cellGood(ssd?.totalWastePct, t.waste.total, true),
+          bg: cellGood(bsd?.totalWastePct, t.waste.total, true),
         },
       ];
 
@@ -416,6 +479,12 @@ export async function generateBakeryReportPdf(data: BakeryReportData): Promise<B
       const wa = data.weekAverages?.averages;
 
       if (wa) {
+        const weekMessage = (
+          shift: 'first_shift' | 'second_shift' | 'both_shifts',
+          line: 'die_cut_1' | 'die_cut_2',
+          kpi: KpiKey
+        ) => wa.cell_messages?.[shift]?.[line]?.[kpi] || null;
+
         doc.roundedRect(MG, yPos, PW, 22, 4).fill(C.blueBg);
         doc.font('Helvetica-Bold').fontSize(7.5).fillColor(C.accent)
           .text(`Week: ${weekDisplay}  |  Days with data: ${data.weekAverages?.days_count ?? 0}  |  Values shown are averages across all submitted days`, MG + 10, yPos + 6);
@@ -425,21 +494,21 @@ export async function generateBakeryReportPdf(data: BakeryReportData): Promise<B
           { kpi: 'OEE (Overall Equipment Effectiveness)', target: '', first: '', second: '', both: '', status: '', good: true, isHeader: true },
           {
             kpi: '   Die Cut 1', target: `>= ${t.oee.die_cut_1}%`,
-            first: fmtVal(wa.oee.die_cut_1.first_shift), second: fmtVal(wa.oee.die_cut_1.second_shift), both: fmtVal(wa.oee.die_cut_1.both_shifts),
+            first: fmtCell(wa.oee.die_cut_1.first_shift, weekMessage('first_shift', 'die_cut_1', 'oee')), second: fmtCell(wa.oee.die_cut_1.second_shift, weekMessage('second_shift', 'die_cut_1', 'oee')), both: fmtCell(wa.oee.die_cut_1.both_shifts, weekMessage('both_shifts', 'die_cut_1', 'oee')),
             status: isMetGood(wa.oee.die_cut_1.both_shifts ?? 0, t.oee.die_cut_1) ? 'TARGET MET' : 'BELOW TARGET',
             good: isMetGood(wa.oee.die_cut_1.both_shifts ?? 0, t.oee.die_cut_1),
-            fg: wa.oee.die_cut_1.first_shift != null ? isMetGood(wa.oee.die_cut_1.first_shift, t.oee.die_cut_1) : undefined,
-            sg: wa.oee.die_cut_1.second_shift != null ? isMetGood(wa.oee.die_cut_1.second_shift, t.oee.die_cut_1) : undefined,
-            bg: wa.oee.die_cut_1.both_shifts != null ? isMetGood(wa.oee.die_cut_1.both_shifts, t.oee.die_cut_1) : undefined,
+            fg: cellGoodFor(wa.oee.die_cut_1.first_shift, t.oee.die_cut_1, weekMessage('first_shift', 'die_cut_1', 'oee')),
+            sg: cellGoodFor(wa.oee.die_cut_1.second_shift, t.oee.die_cut_1, weekMessage('second_shift', 'die_cut_1', 'oee')),
+            bg: cellGoodFor(wa.oee.die_cut_1.both_shifts, t.oee.die_cut_1, weekMessage('both_shifts', 'die_cut_1', 'oee')),
           },
           {
             kpi: '   Die Cut 2', target: `>= ${t.oee.die_cut_2}%`,
-            first: fmtVal(wa.oee.die_cut_2.first_shift), second: fmtVal(wa.oee.die_cut_2.second_shift), both: fmtVal(wa.oee.die_cut_2.both_shifts),
+            first: fmtCell(wa.oee.die_cut_2.first_shift, weekMessage('first_shift', 'die_cut_2', 'oee')), second: fmtCell(wa.oee.die_cut_2.second_shift, weekMessage('second_shift', 'die_cut_2', 'oee')), both: fmtCell(wa.oee.die_cut_2.both_shifts, weekMessage('both_shifts', 'die_cut_2', 'oee')),
             status: isMetGood(wa.oee.die_cut_2.both_shifts ?? 0, t.oee.die_cut_2) ? 'TARGET MET' : 'BELOW TARGET',
             good: isMetGood(wa.oee.die_cut_2.both_shifts ?? 0, t.oee.die_cut_2),
-            fg: wa.oee.die_cut_2.first_shift != null ? isMetGood(wa.oee.die_cut_2.first_shift, t.oee.die_cut_2) : undefined,
-            sg: wa.oee.die_cut_2.second_shift != null ? isMetGood(wa.oee.die_cut_2.second_shift, t.oee.die_cut_2) : undefined,
-            bg: wa.oee.die_cut_2.both_shifts != null ? isMetGood(wa.oee.die_cut_2.both_shifts, t.oee.die_cut_2) : undefined,
+            fg: cellGoodFor(wa.oee.die_cut_2.first_shift, t.oee.die_cut_2, weekMessage('first_shift', 'die_cut_2', 'oee')),
+            sg: cellGoodFor(wa.oee.die_cut_2.second_shift, t.oee.die_cut_2, weekMessage('second_shift', 'die_cut_2', 'oee')),
+            bg: cellGoodFor(wa.oee.die_cut_2.both_shifts, t.oee.die_cut_2, weekMessage('both_shifts', 'die_cut_2', 'oee')),
           },
           {
             kpi: '   Total OEE (Avg)', target: `>= ${t.oee.total}%`,
@@ -453,17 +522,17 @@ export async function generateBakeryReportPdf(data: BakeryReportData): Promise<B
           { kpi: 'Production Volume (lbs)', target: '', first: '', second: '', both: '', status: '', good: true, isHeader: true },
           {
             kpi: '   Die Cut 1', target: `>= ${t.volume.die_cut_1.toLocaleString()}`,
-            first: fmtVal(wa.volume.die_cut_1.first_shift, ' lbs'), second: fmtVal(wa.volume.die_cut_1.second_shift, ' lbs'), both: fmtVal(wa.volume.die_cut_1.both_shifts, ' lbs'),
+            first: fmtCell(wa.volume.die_cut_1.first_shift, weekMessage('first_shift', 'die_cut_1', 'pounds'), ' lbs'), second: fmtCell(wa.volume.die_cut_1.second_shift, weekMessage('second_shift', 'die_cut_1', 'pounds'), ' lbs'), both: fmtCell(wa.volume.die_cut_1.both_shifts, weekMessage('both_shifts', 'die_cut_1', 'pounds'), ' lbs'),
             status: isMetGood(wa.volume.die_cut_1.both_shifts ?? 0, t.volume.die_cut_1) ? 'ON TARGET' : 'BELOW TARGET',
             good: isMetGood(wa.volume.die_cut_1.both_shifts ?? 0, t.volume.die_cut_1),
-            bg: wa.volume.die_cut_1.both_shifts != null ? isMetGood(wa.volume.die_cut_1.both_shifts, t.volume.die_cut_1) : undefined,
+            bg: cellGoodFor(wa.volume.die_cut_1.both_shifts, t.volume.die_cut_1, weekMessage('both_shifts', 'die_cut_1', 'pounds')),
           },
           {
             kpi: '   Die Cut 2', target: `>= ${t.volume.die_cut_2.toLocaleString()}`,
-            first: fmtVal(wa.volume.die_cut_2.first_shift, ' lbs'), second: fmtVal(wa.volume.die_cut_2.second_shift, ' lbs'), both: fmtVal(wa.volume.die_cut_2.both_shifts, ' lbs'),
+            first: fmtCell(wa.volume.die_cut_2.first_shift, weekMessage('first_shift', 'die_cut_2', 'pounds'), ' lbs'), second: fmtCell(wa.volume.die_cut_2.second_shift, weekMessage('second_shift', 'die_cut_2', 'pounds'), ' lbs'), both: fmtCell(wa.volume.die_cut_2.both_shifts, weekMessage('both_shifts', 'die_cut_2', 'pounds'), ' lbs'),
             status: isMetGood(wa.volume.die_cut_2.both_shifts ?? 0, t.volume.die_cut_2) ? 'ON TARGET' : 'BELOW TARGET',
             good: isMetGood(wa.volume.die_cut_2.both_shifts ?? 0, t.volume.die_cut_2),
-            bg: wa.volume.die_cut_2.both_shifts != null ? isMetGood(wa.volume.die_cut_2.both_shifts, t.volume.die_cut_2) : undefined,
+            bg: cellGoodFor(wa.volume.die_cut_2.both_shifts, t.volume.die_cut_2, weekMessage('both_shifts', 'die_cut_2', 'pounds')),
           },
           {
             kpi: '   Total Volume (Avg)', target: `>= ${t.volume.total.toLocaleString()}`,
@@ -475,21 +544,21 @@ export async function generateBakeryReportPdf(data: BakeryReportData): Promise<B
           { kpi: 'Waste Percentage', target: '', first: '', second: '', both: '', status: '', good: true, isHeader: true },
           {
             kpi: '   Die Cut 1', target: `<= ${t.waste.die_cut_1}%`,
-            first: fmtVal(wa.waste.percentage.die_cut_1.first_shift), second: fmtVal(wa.waste.percentage.die_cut_1.second_shift), both: fmtVal(wa.waste.percentage.die_cut_1.both_shifts),
+            first: fmtCell(wa.waste.percentage.die_cut_1.first_shift, weekMessage('first_shift', 'die_cut_1', 'waste')), second: fmtCell(wa.waste.percentage.die_cut_1.second_shift, weekMessage('second_shift', 'die_cut_1', 'waste')), both: fmtCell(wa.waste.percentage.die_cut_1.both_shifts, weekMessage('both_shifts', 'die_cut_1', 'waste')),
             status: isMetGood(wa.waste.percentage.die_cut_1.both_shifts ?? 0, t.waste.die_cut_1, true) ? 'BELOW TARGET' : 'ABOVE TARGET',
             good: isMetGood(wa.waste.percentage.die_cut_1.both_shifts ?? 0, t.waste.die_cut_1, true),
-            fg: wa.waste.percentage.die_cut_1.first_shift != null ? isMetGood(wa.waste.percentage.die_cut_1.first_shift, t.waste.die_cut_1, true) : undefined,
-            sg: wa.waste.percentage.die_cut_1.second_shift != null ? isMetGood(wa.waste.percentage.die_cut_1.second_shift, t.waste.die_cut_1, true) : undefined,
-            bg: wa.waste.percentage.die_cut_1.both_shifts != null ? isMetGood(wa.waste.percentage.die_cut_1.both_shifts, t.waste.die_cut_1, true) : undefined,
+            fg: cellGoodFor(wa.waste.percentage.die_cut_1.first_shift, t.waste.die_cut_1, weekMessage('first_shift', 'die_cut_1', 'waste'), true),
+            sg: cellGoodFor(wa.waste.percentage.die_cut_1.second_shift, t.waste.die_cut_1, weekMessage('second_shift', 'die_cut_1', 'waste'), true),
+            bg: cellGoodFor(wa.waste.percentage.die_cut_1.both_shifts, t.waste.die_cut_1, weekMessage('both_shifts', 'die_cut_1', 'waste'), true),
           },
           {
             kpi: '   Die Cut 2', target: `<= ${t.waste.die_cut_2}%`,
-            first: fmtVal(wa.waste.percentage.die_cut_2.first_shift), second: fmtVal(wa.waste.percentage.die_cut_2.second_shift), both: fmtVal(wa.waste.percentage.die_cut_2.both_shifts),
+            first: fmtCell(wa.waste.percentage.die_cut_2.first_shift, weekMessage('first_shift', 'die_cut_2', 'waste')), second: fmtCell(wa.waste.percentage.die_cut_2.second_shift, weekMessage('second_shift', 'die_cut_2', 'waste')), both: fmtCell(wa.waste.percentage.die_cut_2.both_shifts, weekMessage('both_shifts', 'die_cut_2', 'waste')),
             status: isMetGood(wa.waste.percentage.die_cut_2.both_shifts ?? 0, t.waste.die_cut_2, true) ? 'BELOW TARGET' : 'ABOVE TARGET',
             good: isMetGood(wa.waste.percentage.die_cut_2.both_shifts ?? 0, t.waste.die_cut_2, true),
-            fg: wa.waste.percentage.die_cut_2.first_shift != null ? isMetGood(wa.waste.percentage.die_cut_2.first_shift, t.waste.die_cut_2, true) : undefined,
-            sg: wa.waste.percentage.die_cut_2.second_shift != null ? isMetGood(wa.waste.percentage.die_cut_2.second_shift, t.waste.die_cut_2, true) : undefined,
-            bg: wa.waste.percentage.die_cut_2.both_shifts != null ? isMetGood(wa.waste.percentage.die_cut_2.both_shifts, t.waste.die_cut_2, true) : undefined,
+            fg: cellGoodFor(wa.waste.percentage.die_cut_2.first_shift, t.waste.die_cut_2, weekMessage('first_shift', 'die_cut_2', 'waste'), true),
+            sg: cellGoodFor(wa.waste.percentage.die_cut_2.second_shift, t.waste.die_cut_2, weekMessage('second_shift', 'die_cut_2', 'waste'), true),
+            bg: cellGoodFor(wa.waste.percentage.die_cut_2.both_shifts, t.waste.die_cut_2, weekMessage('both_shifts', 'die_cut_2', 'waste'), true),
           },
           {
             kpi: '   Total Waste (Avg)', target: `<= ${t.waste.total}%`,
@@ -536,12 +605,16 @@ export async function buildBakeryReportData(
 
   if (!submission) return null;
 
-  const [org, facility, targetRows, weekAvgResult] = await Promise.all([
+  const [org, facility, targetRows, weekAvgResult, reportRows] = await Promise.all([
     prisma.organization.findUnique({ where: { id: organizationId }, select: { name: true } }),
     prisma.facility.findFirst({ where: { organizationId }, select: { name: true } }),
     prisma.bakeryKpiTarget.findMany(),
     bakeryMetricsService.getWeekAverage(weekName),
+    bakeryMetricsService.getBothShiftsRecords({ week: weekName, day: dayOfWeek }),
   ]);
+
+  const reportRow = reportRows.find((row: any) => row.id === submission.id) || reportRows[0];
+  if (!reportRow) return null;
 
   const targets = {
     oee: { die_cut_1: 74.6, die_cut_2: 74.6, total: 74.6 },
@@ -556,27 +629,44 @@ export async function buildBakeryReportData(
     }
   }
 
-  const mapShift = (s: any): ShiftData | null => {
-    if (!s) return null;
-    const totalLbs = Number(s.dieCut1Lbs || 0) + Number(s.dieCut2Lbs || 0);
-    const totalWasteLb = Number(s.dieCut1WasteLb || 0) + Number(s.dieCut2WasteLb || 0);
+  const mapShift = (prefix: 'first_shift' | 'second_shift', hasShift: boolean): ShiftData | null => {
+    if (!hasShift) return null;
+    const messages = reportRow.cell_messages?.[prefix] || {};
     return {
-      dieCut1Oee: Number(s.dieCut1OeePct),
-      dieCut2Oee: Number(s.dieCut2OeePct),
-      totalOee: Number(s.oeeAvgPct) || (Number(s.dieCut1OeePct) + Number(s.dieCut2OeePct)) / 2,
-      dieCut1Lbs: Number(s.dieCut1Lbs),
-      dieCut2Lbs: Number(s.dieCut2Lbs),
-      totalLbs: Number(s.poundsTotal) || totalLbs,
-      dieCut1WastePct: Number(s.dieCut1WastePct) || (Number(s.dieCut1Lbs) > 0 ? (Number(s.dieCut1WasteLb) / Number(s.dieCut1Lbs)) * 100 : 0),
-      dieCut2WastePct: Number(s.dieCut2WastePct) || (Number(s.dieCut2Lbs) > 0 ? (Number(s.dieCut2WasteLb) / Number(s.dieCut2Lbs)) * 100 : 0),
-      totalWastePct: Number(s.wasteAvgPct) || (totalLbs > 0 ? (totalWasteLb / totalLbs) * 100 : 0),
+      dieCut1Oee: reportRow[`${prefix}_die_cut1_oee`],
+      dieCut2Oee: reportRow[`${prefix}_die_cut2_oee`],
+      totalOee: reportRow[`${prefix}_oee`],
+      dieCut1Lbs: reportRow[`${prefix}_die_cut1_lbs`],
+      dieCut2Lbs: reportRow[`${prefix}_die_cut2_lbs`],
+      totalLbs: reportRow[`${prefix}_production`],
+      dieCut1WastePct: reportRow[`${prefix}_die_cut1_waste_pct`],
+      dieCut2WastePct: reportRow[`${prefix}_die_cut2_waste_pct`],
+      totalWastePct: reportRow[`${prefix}_waste_percent`],
+      messages: {
+        dieCut1: messages.die_cut_1,
+        dieCut2: messages.die_cut_2,
+      },
     };
   };
 
-  const fsData = mapShift(submission.firstShiftMetrics);
-  const ssData = mapShift(submission.secondShiftMetrics);
-  let bsData = mapShift(submission.bothShiftsMetrics);
-  if (!bsData) bsData = fsData || ssData;
+  const bothMessages = reportRow.cell_messages?.both_shifts || {};
+  const fsData = mapShift('first_shift', !!reportRow.has_first_shift);
+  const ssData = mapShift('second_shift', !!reportRow.has_second_shift);
+  const bsData: ShiftData | null = (reportRow.has_first_shift || reportRow.has_second_shift) ? {
+    dieCut1Oee: reportRow.both_shift_die_cut1_oee,
+    dieCut2Oee: reportRow.both_shift_die_cut2_oee,
+    totalOee: reportRow.total_oee,
+    dieCut1Lbs: reportRow.both_shift_die_cut1_lbs,
+    dieCut2Lbs: reportRow.both_shift_die_cut2_lbs,
+    totalLbs: reportRow.total_production,
+    dieCut1WastePct: reportRow.both_shift_die_cut1_waste_pct,
+    dieCut2WastePct: reportRow.both_shift_die_cut2_waste_pct,
+    totalWastePct: reportRow.total_waste_percent,
+    messages: {
+      dieCut1: bothMessages.die_cut_1,
+      dieCut2: bothMessages.die_cut_2,
+    },
+  } : null;
 
   const oeeVal = bsData?.totalOee ?? 0;
   const wasteVal = bsData?.totalWastePct ?? 0;
@@ -590,7 +680,7 @@ export async function buildBakeryReportData(
   return {
     weekName,
     dayOfWeek,
-    submittedBy: submission.submittedBy,
+    submittedBy: reportRow.submitted_by || submission.submittedBy,
     submittedAt: submission.createdAt.toISOString(),
     organizationName: org?.name || 'Organization',
     facilityName: facility?.name || 'Bakery Production Facility',

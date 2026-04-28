@@ -31,6 +31,12 @@ interface Organization {
   };
 }
 
+interface Facility {
+  id: string;
+  name: string;
+  organizationId: string;
+}
+
 interface SystemStats {
   totalOrganizations: number;
   totalUsers: number;
@@ -98,8 +104,22 @@ function getOrganizationSummaryKey(summary: OrganizationInvitationSummary, index
   return `${summary.organizationName}::${summary.region || 'none'}::${summary.createdAt}::${index}`;
 }
 
+function normalizeFacilities(rawData: any): Facility[] {
+  const rawFacilities = rawData?.Facility || rawData?.facilities || rawData;
+  if (!Array.isArray(rawFacilities)) return [];
+
+  return rawFacilities
+    .map((facility: any) => ({
+      id: facility.id,
+      name: facility.name,
+      organizationId: facility.organizationId || facility.Organization?.id,
+    }))
+    .filter((facility: Facility) => facility.id && facility.name && facility.organizationId);
+}
+
 function SystemAdminContent() {
   const [organizations, setOrganizations] = useState<Organization[]>([]);
+  const [facilities, setFacilities] = useState<Facility[]>([]);
   const [stats, setStats] = useState<SystemStats | null>(null);
   const [invitationSummaries, setInvitationSummaries] = useState<OrganizationInvitationSummary[]>([]);
   const [loading, setLoading] = useState(true);
@@ -118,6 +138,7 @@ function SystemAdminContent() {
   const [showInviteAdmin, setShowInviteAdmin] = useState(false);
   const [inviteEmail, setInviteEmail] = useState('');
   const [inviteOrgId, setInviteOrgId] = useState('');
+  const [inviteFacilityId, setInviteFacilityId] = useState('');
   const [sendingInvite, setSendingInvite] = useState(false);
   const [inviteError, setInviteError] = useState('');
 
@@ -132,17 +153,23 @@ function SystemAdminContent() {
     loadData();
   }, []);
 
+  useEffect(() => {
+    setInviteFacilityId('');
+  }, [inviteOrgId]);
+
   const loadData = async () => {
     try {
       setLoading(true);
-      const [orgsRes, statsRes, invRes] = await Promise.all([
+      const [orgsRes, statsRes, invRes, facRes] = await Promise.all([
         api.get('/organizations'),
         api.get('/organizations/stats'),
         api.get('/invitations'),
+        api.get('/facilities'),
       ]);
       setOrganizations(orgsRes.data.data.organizations || []);
       setStats(statsRes.data.data);
       setInvitationSummaries(normalizeInvitationSummaries(invRes.data.data));
+      setFacilities(normalizeFacilities(facRes.data.data));
     } catch (err: any) {
       setError(err.response?.data?.error || 'Failed to load data');
     } finally {
@@ -197,6 +224,7 @@ function SystemAdminContent() {
         email: inviteEmail.trim().toLowerCase(),
         role: 'ADMIN',
         organizationId: inviteOrgId,
+        ...(inviteFacilityId ? { facilityId: inviteFacilityId } : {}),
       });
       const data = res.data.data;
       setSuccessMessage(
@@ -206,6 +234,7 @@ function SystemAdminContent() {
       );
       setInviteEmail('');
       setInviteOrgId('');
+      setInviteFacilityId('');
       setShowInviteAdmin(false);
       setQuickInviteOrgId(null);
       setQuickInviteOrgName('');
@@ -223,6 +252,7 @@ function SystemAdminContent() {
     setInviteOrgId(org.id);
     setQuickInviteOrgId(org.id);
     setQuickInviteOrgName(org.name);
+    setInviteFacilityId('');
     setInviteEmail('');
     setInviteError('');
     setShowInviteAdmin(true);
@@ -254,6 +284,9 @@ function SystemAdminContent() {
   const visibleInviteStats = hasInvitationFilter
     ? calculateInviteStats(filteredInvitationSummaries)
     : globalInviteStats;
+  const selectedInviteFacilities = inviteOrgId
+    ? facilities.filter((facility) => facility.organizationId === inviteOrgId)
+    : [];
 
   if (loading) {
     return (
@@ -496,7 +529,7 @@ function SystemAdminContent() {
               />
             </div>
             <button
-              onClick={() => { setInviteOrgId(''); setInviteEmail(''); setInviteError(''); setQuickInviteOrgId(null); setQuickInviteOrgName(''); setShowInviteAdmin(true); }}
+              onClick={() => { setInviteOrgId(''); setInviteFacilityId(''); setInviteEmail(''); setInviteError(''); setQuickInviteOrgId(null); setQuickInviteOrgName(''); setShowInviteAdmin(true); }}
               className="flex items-center gap-2 px-4 py-2 bg-purple-600 hover:bg-purple-700 text-white rounded-lg font-medium transition-colors shadow-sm"
             >
               <UserPlus size={16} /> Invite Organization Admin
@@ -576,7 +609,7 @@ function SystemAdminContent() {
       {showCreateOrg && (
         <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
           <div className="absolute inset-0 bg-black/50 backdrop-blur-sm" onClick={() => setShowCreateOrg(false)} />
-          <div className="relative bg-white dark:bg-gray-800 rounded-2xl shadow-2xl w-full max-w-md overflow-hidden">
+          <div className="relative bg-white dark:bg-gray-800 rounded-2xl shadow-2xl w-full max-w-md max-h-[90vh] overflow-y-auto">
             <div className="px-6 py-4 bg-gradient-to-r from-purple-600 to-indigo-600">
               <h2 className="text-lg font-bold text-white flex items-center gap-2">
                 <Building2 size={20} />
@@ -633,7 +666,7 @@ function SystemAdminContent() {
       {/* ── Send Invitation Modal ── */}
       {showInviteAdmin && (
         <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
-          <div className="absolute inset-0 bg-black/50 backdrop-blur-sm" onClick={() => { setShowInviteAdmin(false); setQuickInviteOrgId(null); }} />
+          <div className="absolute inset-0 bg-black/50 backdrop-blur-sm" onClick={() => { setShowInviteAdmin(false); setQuickInviteOrgId(null); setInviteFacilityId(''); }} />
           <div className="relative bg-white dark:bg-gray-800 rounded-2xl shadow-2xl w-full max-w-md overflow-hidden">
             <div className="px-6 py-4 bg-gradient-to-r from-blue-600 to-indigo-600">
               <h2 className="text-lg font-bold text-white flex items-center gap-2">
@@ -677,6 +710,38 @@ function SystemAdminContent() {
                 )}
               </div>
 
+              {/* Facility */}
+              <div>
+                <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1.5">
+                  Facility <span className="text-gray-400 font-normal">(optional)</span>
+                </label>
+                <div className="relative">
+                  <Factory className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-400" size={18} />
+                  <select
+                    value={inviteFacilityId}
+                    onChange={(e) => setInviteFacilityId(e.target.value)}
+                    disabled={!inviteOrgId || selectedInviteFacilities.length === 0}
+                    className="w-full pl-10 pr-4 py-2.5 bg-gray-50 dark:bg-gray-700 border border-gray-300 dark:border-gray-600 rounded-lg text-sm focus:ring-2 focus:ring-blue-500 dark:text-white appearance-none cursor-pointer disabled:opacity-60 disabled:cursor-not-allowed"
+                  >
+                    {!inviteOrgId ? (
+                      <option value="">Select an organization first</option>
+                    ) : selectedInviteFacilities.length === 0 ? (
+                      <option value="">No facilities configured for this organization</option>
+                    ) : (
+                      <>
+                        <option value="">All facilities / Not specified</option>
+                        {selectedInviteFacilities.map((facility) => (
+                          <option key={facility.id} value={facility.id}>{facility.name}</option>
+                        ))}
+                      </>
+                    )}
+                  </select>
+                </div>
+                <p className="mt-1 text-xs text-gray-400 dark:text-gray-500">
+                  When selected, this becomes the user&apos;s default facility after registration.
+                </p>
+              </div>
+
               {/* Email */}
               <div>
                 <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1.5">
@@ -700,7 +765,7 @@ function SystemAdminContent() {
               </div>
 
               <div className="flex gap-3 pt-2">
-                <button type="button" onClick={() => { setShowInviteAdmin(false); setQuickInviteOrgId(null); }} className="flex-1 px-4 py-2.5 text-sm font-medium text-gray-700 dark:text-gray-300 bg-gray-100 dark:bg-gray-700 rounded-lg hover:bg-gray-200 dark:hover:bg-gray-600 transition-colors">
+                <button type="button" onClick={() => { setShowInviteAdmin(false); setQuickInviteOrgId(null); setInviteFacilityId(''); }} className="flex-1 px-4 py-2.5 text-sm font-medium text-gray-700 dark:text-gray-300 bg-gray-100 dark:bg-gray-700 rounded-lg hover:bg-gray-200 dark:hover:bg-gray-600 transition-colors">
                   Cancel
                 </button>
                 <button type="submit" disabled={sendingInvite} className="flex-1 flex items-center justify-center gap-2 px-4 py-2.5 text-sm font-medium text-white bg-blue-600 rounded-lg hover:bg-blue-700 disabled:opacity-50 transition-colors">

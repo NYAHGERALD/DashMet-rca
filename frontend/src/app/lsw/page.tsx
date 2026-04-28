@@ -1858,25 +1858,22 @@ function LSWContent() {
             margin: 0.5in;
           }
         }
-        /* Compact sizing for entire LSW page */
+        /* Keep LSW spacing compact without shrinking text below normal UI sizes. */
         .lsw-compact {
-          font-size: 12px;
-          line-height: 1.3;
+          font-size: 16px;
+          line-height: 1.5;
         }
-        .lsw-compact table { font-size: 11.5px; }
         .lsw-compact table th,
         .lsw-compact table td {
           padding-top: 2px !important;
           padding-bottom: 2px !important;
         }
-        .lsw-compact table th { font-size: 10px; }
         .lsw-compact table input[type="text"],
         .lsw-compact table input[type="number"],
         .lsw-compact table input[type="time"],
         .lsw-compact table input[type="date"],
         .lsw-compact table textarea,
         .lsw-compact table select {
-          font-size: 11.5px !important;
           padding-top: 1px !important;
           padding-bottom: 1px !important;
         }
@@ -1884,11 +1881,6 @@ function LSWContent() {
           width: 16px !important;
           height: 16px !important;
         }
-        .lsw-compact h2 { font-size: 15px !important; }
-        .lsw-compact .text-sm { font-size: 11.5px !important; }
-        .lsw-compact .text-xs { font-size: 10px !important; }
-        .lsw-compact .text-lg { font-size: 14px !important; }
-        .lsw-compact .text-xl { font-size: 16px !important; }
       `}</style>
       {/* Header - Department & Week Selection */}
       <header className="sticky top-0 z-40 backdrop-blur-xl bg-white/80 dark:bg-gray-900/80 border-b border-gray-200/50 dark:border-gray-700/50 shadow-sm">

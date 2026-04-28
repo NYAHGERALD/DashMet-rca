@@ -7,7 +7,7 @@ import Link from 'next/link';
 import Image from 'next/image';
 import { useAuth } from '@/components/providers/AuthProvider';
 import api from '@/lib/api';
-import { Eye, EyeOff, Mail, Building2, Shield, CheckCircle2, AlertTriangle, Loader2, Phone, ChevronDown, Check, X } from 'lucide-react';
+import { Eye, EyeOff, Mail, Building2, Shield, CheckCircle2, AlertTriangle, Loader2, Phone, ChevronDown, Check, X, Factory } from 'lucide-react';
 
 const COUNTRY_CODES = [
   { code: '1', country: 'US', label: 'US +1', flag: '🇺🇸', format: '(XXX) XXX-XXXX', maxDigits: 10 },
@@ -329,8 +329,8 @@ export default function AcceptInvitePage() {
                 {[
                   { icon: Mail, label: 'Email', value: invitation.email, truncate: true },
                   { icon: Building2, label: 'Organization', value: invitation.organizationName },
+                  ...(invitation.facilityName ? [{ icon: Factory, label: 'Facility', value: invitation.facilityName }] : []),
                   { icon: Shield, label: 'Role', value: formatRole(invitation.role) },
-                  ...(invitation.facilityName ? [{ icon: Building2, label: 'Facility', value: invitation.facilityName }] : []),
                 ].map((item, i) => (
                   <div
                     key={item.label}
@@ -382,6 +382,21 @@ export default function AcceptInvitePage() {
                   className="w-full px-3 py-2.5 bg-white/5 border border-white/10 rounded-lg text-gray-400 text-sm cursor-not-allowed"
                 />
               </div>
+
+              {invitation.facilityName && (
+                <div>
+                  <label className="block text-xs font-medium text-gray-200 mb-1">Facility</label>
+                  <div className="relative">
+                    <Factory className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-blue-300" />
+                    <input
+                      type="text"
+                      value={invitation.facilityName}
+                      disabled
+                      className="w-full pl-9 pr-3 py-2.5 bg-white/5 border border-white/10 rounded-lg text-gray-100 text-sm cursor-not-allowed"
+                    />
+                  </div>
+                </div>
+              )}
 
               {/* Name Fields */}
               <div className="grid grid-cols-2 gap-3">
@@ -590,7 +605,7 @@ export default function AcceptInvitePage() {
                     />
                   </div>
                 </div>
-                <p className="mt-1 text-[10px] text-gray-500">Used for mobile device login verification</p>
+                <p className="mt-1 text-[10px] text-gray-300">Used for mobile device login verification</p>
               </div>
 
               {/* Submit */}
@@ -611,9 +626,9 @@ export default function AcceptInvitePage() {
             </form>
 
             {/* Already have account link */}
-            <p className="text-center text-xs text-gray-400 mt-4">
+            <p className="text-center text-xs text-gray-200 mt-4 font-medium">
               Already have an account?{' '}
-              <Link href="/login" className="text-blue-400 hover:text-blue-300 transition-colors">
+              <Link href="/login" className="text-blue-300 hover:text-blue-200 underline underline-offset-2 transition-colors">
                 Sign in
               </Link>
             </p>

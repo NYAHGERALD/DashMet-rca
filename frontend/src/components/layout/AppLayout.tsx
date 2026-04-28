@@ -53,11 +53,22 @@ import {
   FileKey,
   LayoutDashboard,
   UserPlus,
+  Menu,
+  X,
 } from 'lucide-react';
 
 interface AppLayoutProps {
   children: React.ReactNode;
 }
+
+type AppNavLink = {
+  href?: string;
+  icon: React.ReactNode;
+  label: string;
+  show?: boolean;
+  onClick?: () => void;
+  group?: string;
+};
 
 // Map pathnames to their nav privilege keys for access revocation detection
 const PATH_TO_NAV_KEY: Record<string, string> = {
@@ -111,6 +122,7 @@ export default function AppLayout({ children }: AppLayoutProps) {
   const [showDropdown, setShowDropdown] = useState(false);
   const [sidebarOpen, setSidebarOpen] = useState(true);
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
+  const [mobileQuickNavOpen, setMobileQuickNavOpen] = useState(false);
   const [mobileMenuTab, setMobileMenuTab] = useState<'nav' | 'admin'>('nav');
   const [accessRevoked, setAccessRevoked] = useState(false);
   const dropdownRef = useRef<HTMLDivElement>(null);
@@ -149,21 +161,23 @@ export default function AppLayout({ children }: AppLayoutProps) {
   // Close mobile menu on route change
   useEffect(() => {
     setMobileMenuOpen(false);
+    setMobileQuickNavOpen(false);
   }, [pathname]);
 
-  // Prevent body scroll when mobile menu is open
+  // Prevent body scroll when a mobile drawer is open
   useEffect(() => {
-    if (mobileMenuOpen) {
+    if (mobileMenuOpen || mobileQuickNavOpen) {
       document.body.style.overflow = 'hidden';
     } else {
       document.body.style.overflow = '';
     }
     return () => { document.body.style.overflow = ''; };
-  }, [mobileMenuOpen]);
+  }, [mobileMenuOpen, mobileQuickNavOpen]);
 
   // Handle hamburger click: mobile overlay on small screens, sidebar toggle on desktop
   const handleHamburgerClick = useCallback(() => {
     if (window.innerWidth < 1024) {
+      setMobileQuickNavOpen(false);
       setMobileMenuOpen(prev => !prev);
     } else {
       setSidebarOpen(prev => !prev);
@@ -186,6 +200,8 @@ export default function AppLayout({ children }: AppLayoutProps) {
     function handleEscape(event: KeyboardEvent) {
       if (event.key === 'Escape') {
         setShowDropdown(false);
+        setMobileMenuOpen(false);
+        setMobileQuickNavOpen(false);
       }
     }
     document.addEventListener('keydown', handleEscape);
@@ -193,6 +209,41 @@ export default function AppLayout({ children }: AppLayoutProps) {
   }, []);
 
   if (!user) return <>{children}</>;
+
+  const organizationManagementLinks: AppNavLink[] = user.role === 'SYSTEM_ADMIN' ? [
+    { href: '/system-admin', icon: <Building2 size={18} strokeWidth={1.8} />, label: 'Organizations' },
+    { href: '/admin/policies', icon: <FileKey size={18} strokeWidth={1.8} />, label: t('nav.policies') },
+    { href: '/admin/support', icon: <MailOpen size={18} strokeWidth={1.8} />, label: 'Support Requests' },
+  ] : [
+    { href: '/admin/organizations', icon: <Building2 size={18} strokeWidth={1.8} />, label: t('nav.organizations'), show: hasNavAccess(NAV_PRIVILEGES.ADMIN_ORGANIZATIONS) },
+    { href: '/admin/facilities', icon: <Factory size={18} strokeWidth={1.8} />, label: t('nav.facilities'), show: hasNavAccess(NAV_PRIVILEGES.ADMIN_FACILITIES) },
+    { href: '/admin/departments', icon: <Landmark size={18} strokeWidth={1.8} />, label: t('nav.departments'), show: hasNavAccess(NAV_PRIVILEGES.ADMIN_DEPARTMENTS) },
+    { href: '/admin/areas', icon: <PackageOpen size={18} strokeWidth={1.8} />, label: t('nav.areas'), show: hasNavAccess(NAV_PRIVILEGES.ADMIN_AREAS) },
+    { href: '/admin/lines', icon: <RefreshCw size={18} strokeWidth={1.8} />, label: t('nav.lines'), show: hasNavAccess(NAV_PRIVILEGES.ADMIN_LINES) },
+    { href: '/admin/equipment-registry', icon: <Cog size={18} strokeWidth={1.8} />, label: 'Machine Registry', show: hasNavAccess(NAV_PRIVILEGES.ADMIN_EQUIPMENT) },
+    { href: '/admin/shifts', icon: <Clock size={18} strokeWidth={1.8} />, label: t('nav.shifts'), show: hasNavAccess(NAV_PRIVILEGES.ADMIN_SHIFTS) },
+    { href: '/admin/categories', icon: <Tag size={18} strokeWidth={1.8} />, label: t('nav.categories'), show: hasNavAccess(NAV_PRIVILEGES.ADMIN_CATEGORIES) },
+    { href: '/admin', icon: <UserCog size={18} strokeWidth={1.8} />, label: t('nav.userManagement'), show: hasNavAccess(NAV_PRIVILEGES.ADMIN_USERS) },
+    { href: '/admin/invitations', icon: <UserPlus size={18} strokeWidth={1.8} />, label: 'Invitations', show: hasNavAccess(NAV_PRIVILEGES.ADMIN_INVITATIONS) },
+    { href: '/admin/privileges', icon: <KeyRound size={18} strokeWidth={1.8} />, label: 'Priviledges', show: hasNavAccess(NAV_PRIVILEGES.ADMIN_PRIVILEGES) },
+    { href: '/admin/work-order-templates', icon: <ListTodo size={18} strokeWidth={1.8} />, label: 'Work Order Templates', show: hasNavAccess(NAV_PRIVILEGES.ADMIN_WORK_ORDERS) },
+    { href: '/admin/enterprise', icon: <Shield size={18} strokeWidth={1.8} />, label: t('nav.enterprise'), show: hasNavAccess(NAV_PRIVILEGES.ADMIN_ENTERPRISE) },
+    { href: '/admin/calendar-config', icon: <CalendarDays size={18} strokeWidth={1.8} />, label: 'Calendar Year Config', show: hasNavAccess(NAV_PRIVILEGES.ADMIN_CALENDAR) },
+    { href: '/admin/bakery-settings', icon: <Wheat size={18} strokeWidth={1.8} />, label: 'Bakery KPI Settings', show: hasNavAccess(NAV_PRIVILEGES.ADMIN_BAKERY_SETTINGS) },
+    { href: '/support-inbox', icon: <MailOpen size={18} strokeWidth={1.8} />, label: 'Support Inbox', show: hasNavAccess(NAV_PRIVILEGES.SUPPORT_INBOX) },
+  ];
+  const qcManagementLinks: AppNavLink[] = [
+    { href: '/support-inbox', icon: <MailOpen size={18} strokeWidth={1.8} />, label: 'Support Inbox' },
+    { href: '/fmir/privileges', icon: <KeyRound size={18} strokeWidth={1.8} />, label: 'FMIR Privileges' },
+  ];
+  const rightQuickNavTitle = user.role === 'QUALITY_CONTROL_MANAGER' ? 'QC Management' : t('common.organizationManagement');
+  const rightQuickNavLinks = user.role === 'QUALITY_CONTROL_MANAGER'
+    ? qcManagementLinks
+    : isAdmin
+      ? organizationManagementLinks
+      : [];
+  const visibleRightQuickNavLinks = rightQuickNavLinks.filter(link => !('show' in link) || link.show !== false);
+  const hasMobileQuickNav = visibleRightQuickNavLinks.length > 0;
 
   return (
     <div className="h-screen flex flex-col overflow-hidden bg-gradient-to-br from-slate-50 via-blue-50 to-indigo-100 dark:from-gray-950 dark:via-slate-900 dark:to-indigo-950">
@@ -266,6 +317,25 @@ export default function AppLayout({ children }: AppLayoutProps) {
               )}
             </div>
             <div className="flex items-center space-x-1 sm:space-x-2">
+              {hasMobileQuickNav && (
+                <button
+                  onClick={() => {
+                    setMobileMenuOpen(false);
+                    setMobileQuickNavOpen(prev => !prev);
+                  }}
+                  title={rightQuickNavTitle}
+                  aria-label={`${mobileQuickNavOpen ? 'Close' : 'Open'} ${rightQuickNavTitle}`}
+                  aria-expanded={mobileQuickNavOpen}
+                  className="lg:hidden group p-2.5 text-gray-600 dark:text-gray-300 hover:text-gray-900 dark:hover:text-white backdrop-blur-md bg-white/50 dark:bg-gray-800/50 hover:bg-white/80 dark:hover:bg-gray-700/80 border border-gray-200/50 dark:border-gray-600/50 rounded-xl transition-all duration-200 hover:shadow-lg hover:shadow-black/5 hover:scale-105"
+                >
+                  {mobileQuickNavOpen ? (
+                    <X className="w-5 h-5" strokeWidth={2.2} />
+                  ) : (
+                    <Menu className="w-5 h-5" strokeWidth={2.2} />
+                  )}
+                </button>
+              )}
+
               {/* Browser Notifications */}
               <NotificationCenter isSystemAdmin={isSystemAdmin} />
               
@@ -427,28 +497,7 @@ export default function AppLayout({ children }: AppLayoutProps) {
             <SlidingSidebar
             title={t('common.organizationManagement')}
             position="right"
-            links={user.role === 'SYSTEM_ADMIN' ? [
-              { href: '/system-admin', icon: <Building2 size={18} strokeWidth={1.8} />, label: 'Organizations' },
-              { href: '/admin/policies', icon: <FileKey size={18} strokeWidth={1.8} />, label: t('nav.policies') },
-              { href: '/admin/support', icon: <MailOpen size={18} strokeWidth={1.8} />, label: 'Support Requests' },
-            ] : [
-              { href: '/admin/organizations', icon: <Building2 size={18} strokeWidth={1.8} />, label: t('nav.organizations'), show: hasNavAccess(NAV_PRIVILEGES.ADMIN_ORGANIZATIONS) },
-              { href: '/admin/facilities', icon: <Factory size={18} strokeWidth={1.8} />, label: t('nav.facilities'), show: hasNavAccess(NAV_PRIVILEGES.ADMIN_FACILITIES) },
-              { href: '/admin/departments', icon: <Landmark size={18} strokeWidth={1.8} />, label: t('nav.departments'), show: hasNavAccess(NAV_PRIVILEGES.ADMIN_DEPARTMENTS) },
-              { href: '/admin/areas', icon: <PackageOpen size={18} strokeWidth={1.8} />, label: t('nav.areas'), show: hasNavAccess(NAV_PRIVILEGES.ADMIN_AREAS) },
-              { href: '/admin/lines', icon: <RefreshCw size={18} strokeWidth={1.8} />, label: t('nav.lines'), show: hasNavAccess(NAV_PRIVILEGES.ADMIN_LINES) },
-              { href: '/admin/equipment-registry', icon: <Cog size={18} strokeWidth={1.8} />, label: 'Machine Registry', show: hasNavAccess(NAV_PRIVILEGES.ADMIN_EQUIPMENT) },
-              { href: '/admin/shifts', icon: <Clock size={18} strokeWidth={1.8} />, label: t('nav.shifts'), show: hasNavAccess(NAV_PRIVILEGES.ADMIN_SHIFTS) },
-              { href: '/admin/categories', icon: <Tag size={18} strokeWidth={1.8} />, label: t('nav.categories'), show: hasNavAccess(NAV_PRIVILEGES.ADMIN_CATEGORIES) },
-              { href: '/admin', icon: <UserCog size={18} strokeWidth={1.8} />, label: t('nav.userManagement'), show: hasNavAccess(NAV_PRIVILEGES.ADMIN_USERS) },
-              { href: '/admin/invitations', icon: <UserPlus size={18} strokeWidth={1.8} />, label: 'Invitations', show: hasNavAccess(NAV_PRIVILEGES.ADMIN_INVITATIONS) },
-              { href: '/admin/privileges', icon: <KeyRound size={18} strokeWidth={1.8} />, label: 'Priviledges', show: hasNavAccess(NAV_PRIVILEGES.ADMIN_PRIVILEGES) },
-              { href: '/admin/work-order-templates', icon: <ListTodo size={18} strokeWidth={1.8} />, label: 'Work Order Templates', show: hasNavAccess(NAV_PRIVILEGES.ADMIN_WORK_ORDERS) },
-              { href: '/admin/enterprise', icon: <Shield size={18} strokeWidth={1.8} />, label: t('nav.enterprise'), show: hasNavAccess(NAV_PRIVILEGES.ADMIN_ENTERPRISE) },
-              { href: '/admin/calendar-config', icon: <CalendarDays size={18} strokeWidth={1.8} />, label: 'Calendar Year Config', show: hasNavAccess(NAV_PRIVILEGES.ADMIN_CALENDAR) },
-              { href: '/admin/bakery-settings', icon: <Wheat size={18} strokeWidth={1.8} />, label: 'Bakery KPI Settings', show: hasNavAccess(NAV_PRIVILEGES.ADMIN_BAKERY_SETTINGS) },
-              { href: '/support-inbox', icon: <MailOpen size={18} strokeWidth={1.8} />, label: 'Support Inbox', show: hasNavAccess(NAV_PRIVILEGES.SUPPORT_INBOX) },
-            ]}
+            links={organizationManagementLinks}
           />
           </div>
         )}
@@ -459,10 +508,7 @@ export default function AppLayout({ children }: AppLayoutProps) {
             <SlidingSidebar
               title="QC Management"
               position="right"
-              links={[
-                { href: '/support-inbox', icon: <MailOpen size={18} strokeWidth={1.8} />, label: 'Support Inbox' },
-                { href: '/fmir/privileges', icon: <KeyRound size={18} strokeWidth={1.8} />, label: 'FMIR Privileges' },
-              ]}
+              links={qcManagementLinks}
             />
           </div>
         )}
@@ -566,34 +612,10 @@ export default function AppLayout({ children }: AppLayoutProps) {
 
               {mobileMenuTab === 'admin' && (
                 <div className="space-y-0.5">
-                  {(user?.role === 'QUALITY_CONTROL_MANAGER' ? [
-                    { href: '/support-inbox', icon: <MailOpen size={18} strokeWidth={1.8} />, label: 'Support Inbox' },
-                    { href: '/fmir/privileges', icon: <KeyRound size={18} strokeWidth={1.8} />, label: 'FMIR Privileges' },
-                  ] : user?.role === 'SYSTEM_ADMIN' ? [
-                    { href: '/system-admin', icon: <Building2 size={18} strokeWidth={1.8} />, label: 'Organizations' },
-                    { href: '/admin/policies', icon: <FileKey size={18} strokeWidth={1.8} />, label: t('nav.policies') },
-                    { href: '/admin/support', icon: <MailOpen size={18} strokeWidth={1.8} />, label: 'Support Requests' },
-                  ] : [
-                    { href: '/admin/organizations', icon: <Building2 size={18} strokeWidth={1.8} />, label: t('nav.organizations'), show: hasNavAccess(NAV_PRIVILEGES.ADMIN_ORGANIZATIONS) },
-                    { href: '/admin/facilities', icon: <Factory size={18} strokeWidth={1.8} />, label: t('nav.facilities'), show: hasNavAccess(NAV_PRIVILEGES.ADMIN_FACILITIES) },
-                    { href: '/admin/departments', icon: <Landmark size={18} strokeWidth={1.8} />, label: t('nav.departments'), show: hasNavAccess(NAV_PRIVILEGES.ADMIN_DEPARTMENTS) },
-                    { href: '/admin/areas', icon: <PackageOpen size={18} strokeWidth={1.8} />, label: t('nav.areas'), show: hasNavAccess(NAV_PRIVILEGES.ADMIN_AREAS) },
-                    { href: '/admin/lines', icon: <RefreshCw size={18} strokeWidth={1.8} />, label: t('nav.lines'), show: hasNavAccess(NAV_PRIVILEGES.ADMIN_LINES) },
-                    { href: '/admin/equipment-registry', icon: <Cog size={18} strokeWidth={1.8} />, label: 'Machine Registry', show: hasNavAccess(NAV_PRIVILEGES.ADMIN_EQUIPMENT) },
-                    { href: '/admin/shifts', icon: <Clock size={18} strokeWidth={1.8} />, label: t('nav.shifts'), show: hasNavAccess(NAV_PRIVILEGES.ADMIN_SHIFTS) },
-                    { href: '/admin/categories', icon: <Tag size={18} strokeWidth={1.8} />, label: t('nav.categories'), show: hasNavAccess(NAV_PRIVILEGES.ADMIN_CATEGORIES) },
-                    { href: '/admin', icon: <UserCog size={18} strokeWidth={1.8} />, label: t('nav.userManagement'), show: hasNavAccess(NAV_PRIVILEGES.ADMIN_USERS) },
-                    { href: '/admin/invitations', icon: <UserPlus size={18} strokeWidth={1.8} />, label: 'Invitations', show: hasNavAccess(NAV_PRIVILEGES.ADMIN_INVITATIONS) },
-                    { href: '/admin/privileges', icon: <KeyRound size={18} strokeWidth={1.8} />, label: 'Priviledges', show: hasNavAccess(NAV_PRIVILEGES.ADMIN_PRIVILEGES) },
-                    { href: '/admin/work-order-templates', icon: <ListTodo size={18} strokeWidth={1.8} />, label: 'Work Order Templates', show: hasNavAccess(NAV_PRIVILEGES.ADMIN_WORK_ORDERS) },
-                    { href: '/admin/enterprise', icon: <Shield size={18} strokeWidth={1.8} />, label: t('nav.enterprise'), show: hasNavAccess(NAV_PRIVILEGES.ADMIN_ENTERPRISE) },
-                    { href: '/admin/calendar-config', icon: <CalendarDays size={18} strokeWidth={1.8} />, label: 'Calendar Year Config', show: hasNavAccess(NAV_PRIVILEGES.ADMIN_CALENDAR) },
-                    { href: '/admin/bakery-settings', icon: <Wheat size={18} strokeWidth={1.8} />, label: 'Bakery KPI Settings', show: hasNavAccess(NAV_PRIVILEGES.ADMIN_BAKERY_SETTINGS) },
-                    { href: '/support-inbox', icon: <MailOpen size={18} strokeWidth={1.8} />, label: 'Support Inbox', show: hasNavAccess(NAV_PRIVILEGES.SUPPORT_INBOX) },
-                  ]).filter(link => !('show' in link) || link.show !== false).map((link, idx) => (
+                  {visibleRightQuickNavLinks.map((link, idx) => (
                     <Link
                       key={idx}
-                      href={link.href}
+                      href={link.href || '#'}
                       onClick={() => setMobileMenuOpen(false)}
                       className={`flex items-center gap-3 px-3 py-2.5 rounded-lg text-sm font-medium transition-colors ${
                         pathname === link.href
@@ -607,6 +629,69 @@ export default function AppLayout({ children }: AppLayoutProps) {
                   ))}
                 </div>
               )}
+            </nav>
+          </div>
+        </div>
+      )}
+
+      {/* ===== MOBILE RIGHT QUICK NAV DRAWER (lg:hidden) ===== */}
+      {mobileQuickNavOpen && hasMobileQuickNav && (
+        <div className="fixed inset-0 z-40 lg:hidden">
+          <div
+            className="absolute inset-0 bg-black/40 backdrop-blur-sm"
+            onClick={() => setMobileQuickNavOpen(false)}
+          />
+          <div className="absolute inset-y-0 right-0 w-[300px] max-w-[86vw] bg-sky-100/95 dark:bg-gray-900/95 backdrop-blur-xl shadow-2xl flex flex-col animate-slide-in-right" style={{ top: '4rem' }}>
+            <div className="flex items-center justify-between px-4 py-3 border-b border-gray-200/50 dark:border-gray-700/50">
+              <div>
+                <p className="text-[11px] font-bold uppercase tracking-wider text-sky-700 dark:text-sky-300">
+                  Quick Nav
+                </p>
+                <h2 className="text-sm font-semibold text-gray-900 dark:text-white">
+                  {rightQuickNavTitle}
+                </h2>
+              </div>
+              <button
+                onClick={() => setMobileQuickNavOpen(false)}
+                aria-label="Close quick navigation"
+                className="p-2 rounded-lg text-gray-500 hover:text-gray-900 hover:bg-sky-200/70 dark:text-gray-400 dark:hover:text-white dark:hover:bg-gray-800 transition-colors"
+              >
+                <X className="w-5 h-5" strokeWidth={2.2} />
+              </button>
+            </div>
+
+            <nav className="flex-1 overflow-y-auto py-3 px-3 scrollbar-hide">
+              <div className="space-y-1">
+                {visibleRightQuickNavLinks.map((link, idx) => (
+                  link.onClick ? (
+                    <button
+                      key={idx}
+                      onClick={() => {
+                        link.onClick?.();
+                        setMobileQuickNavOpen(false);
+                      }}
+                      className="w-full flex items-center gap-3 px-3 py-2.5 rounded-lg text-sm font-medium text-gray-700 dark:text-gray-300 hover:bg-sky-200/60 dark:hover:bg-primary-900/30 hover:text-sky-800 dark:hover:text-primary-300 transition-colors"
+                    >
+                      {link.icon}
+                      <span>{link.label}</span>
+                    </button>
+                  ) : (
+                    <Link
+                      key={idx}
+                      href={link.href || '#'}
+                      onClick={() => setMobileQuickNavOpen(false)}
+                      className={`flex items-center gap-3 px-3 py-2.5 rounded-lg text-sm font-medium transition-colors ${
+                        pathname === link.href
+                          ? 'bg-primary-100 dark:bg-primary-900/40 text-primary-700 dark:text-primary-300'
+                          : 'text-gray-700 dark:text-gray-300 hover:bg-sky-200/60 dark:hover:bg-primary-900/30 hover:text-sky-800 dark:hover:text-primary-300'
+                      }`}
+                    >
+                      {link.icon}
+                      <span>{link.label}</span>
+                    </Link>
+                  )
+                ))}
+              </div>
             </nav>
           </div>
         </div>

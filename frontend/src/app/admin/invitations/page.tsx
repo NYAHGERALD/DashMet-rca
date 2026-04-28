@@ -44,6 +44,18 @@ interface Facility {
   name: string;
 }
 
+function normalizeFacilities(rawData: any): Facility[] {
+  const rawFacilities = rawData?.Facility || rawData?.facilities || rawData;
+  if (!Array.isArray(rawFacilities)) return [];
+
+  return rawFacilities
+    .map((facility: any) => ({
+      id: facility.id,
+      name: facility.name,
+    }))
+    .filter((facility: Facility) => facility.id && facility.name);
+}
+
 const INVITABLE_ROLES = [
   { value: 'OPERATOR', label: 'Operator' },
   { value: 'SUPERVISOR', label: 'Supervisor' },
@@ -144,7 +156,7 @@ function InvitationsContent() {
         api.get('/facilities'),
       ]);
       setInvitations(invRes.data.data || []);
-      setFacilities(facRes.data.data?.facilities || facRes.data.data || []);
+      setFacilities(normalizeFacilities(facRes.data.data));
     } catch (err: any) {
       setError(err.response?.data?.error || 'Failed to load invitations');
     } finally {

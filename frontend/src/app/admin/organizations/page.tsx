@@ -30,6 +30,12 @@ interface Invitation {
   expiresAt: string;
 }
 
+interface Facility {
+  id: string;
+  name: string;
+  organizationId: string;
+}
+
 // Role options for invitations
 const INVITE_ROLES = [
   { value: 'SUPERVISOR', label: 'Supervisor' },
@@ -40,9 +46,23 @@ const INVITE_ROLES = [
   { value: 'SAFETY_SECURITY_MANAGER', label: 'Safety & Security Manager' },
 ];
 
+function normalizeFacilities(rawData: any): Facility[] {
+  const rawFacilities = rawData?.Facility || rawData?.facilities || rawData;
+  if (!Array.isArray(rawFacilities)) return [];
+
+  return rawFacilities
+    .map((facility: any) => ({
+      id: facility.id,
+      name: facility.name,
+      organizationId: facility.organizationId || facility.Organization?.id,
+    }))
+    .filter((facility: Facility) => facility.id && facility.name && facility.organizationId);
+}
+
 function AdminOrganizationsContent() {
   const { user } = useAuth();
   const [organizations, setOrganizations] = useState<Organization[]>([]);
+  const [facilities, setFacilities] = useState<Facility[]>([]);
   const [loading, setLoading] = useState(true);
   const [showForm, setShowForm] = useState(false);
   const [formData, setFormData] = useState({
@@ -60,7 +80,9 @@ function AdminOrganizationsContent() {
   const [showInviteModal, setShowInviteModal] = useState(false);
   const [inviteEmail, setInviteEmail] = useState('');
   const [inviteRole, setInviteRole] = useState('SUPERVISOR');
+  const [inviteFacilityId, setInviteFacilityId] = useState('');
   const [inviteSending, setInviteSending] = useState(false);
+  const [inviteError, setInviteError] = useState('');
 
   // Recent invitations for the org being edited
   const [orgInvitations, setOrgInvitations] = useState<Invitation[]>([]);
@@ -88,6 +110,13 @@ function AdminOrganizationsContent() {
         },
       }));
       setOrganizations(normalizedOrgs);
+      try {
+        const facilitiesResponse = await api.get('/facilities');
+        setFacilities(normalizeFacilities(facilitiesResponse.data.data));
+      } catch (facilityErr) {
+        console.error('Failed to load facilities:', facilityErr);
+        setFacilities([]);
+      }
     } catch (err: any) {
       setError('Failed to load organizations');
     } finally {
@@ -112,22 +141,30 @@ function AdminOrganizationsContent() {
 
   const handleSendInvite = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!inviteEmail.trim()) return;
+    setInviteError('');
+    setError('');
+    setMessage('');
+
+    if (!inviteEmail.trim()) {
+      setInviteError('Email address is required');
+      return;
+    }
 
     setInviteSending(true);
-    setError('');
 
     try {
       await api.post('/invitations', {
-        email: inviteEmail.trim(),
+        email: inviteEmail.trim().toLowerCase(),
         role: inviteRole,
+        ...(inviteFacilityId ? { facilityId: inviteFacilityId } : {}),
       });
       setMessage(`Invitation sent to ${inviteEmail}`);
       setInviteEmail('');
+      setInviteFacilityId('');
       setShowInviteModal(false);
       loadOrgInvitations();
     } catch (err: any) {
-      setError(err.response?.data?.error || 'Failed to send invitation');
+      setInviteError(err.response?.data?.error || 'Failed to send invitation');
     } finally {
       setInviteSending(false);
     }
@@ -216,6 +253,8 @@ function AdminOrganizationsContent() {
     setError('');
     setMessage('');
     setShowInviteModal(false);
+    setInviteFacilityId('');
+    setInviteError('');
     loadOrgInvitations();
   };
 
@@ -233,6 +272,9 @@ function AdminOrganizationsContent() {
 
   const canCreateOrg = user?.role === UserRole.SYSTEM_ADMIN;
   const canEditOrg = user?.role === UserRole.ADMIN || user?.role === UserRole.SYSTEM_ADMIN;
+  const inviteFacilityOptions = editingId
+    ? facilities.filter((facility) => facility.organizationId === editingId)
+    : [];
 
   if (loading) {
     return (
@@ -326,7 +368,7 @@ function AdminOrganizationsContent() {
       {/* Invite User Modal */}
       {showInviteModal && (
         <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50">
-          <div className="bg-white dark:bg-gray-800 rounded-xl shadow-2xl p-6 w-full max-w-md mx-4">
+          <div className="bg-white dark:bg-gray-800 rounded-xl shadow-2xl p-6 w-full max-w-md max-h-[90vh] overflow-y-auto mx-4">
             <div className="text-center mb-6">
               <div className="w-16 h-16 bg-primary-100 dark:bg-primary-900/30 rounded-full flex items-center justify-center mx-auto mb-4">
                 <svg className="w-8 h-8 text-primary-600 dark:text-primary-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
@@ -342,6 +384,12 @@ function AdminOrganizationsContent() {
             </div>
 
             <form onSubmit={handleSendInvite} className="space-y-4">
+              {inviteError && (
+                <div className="p-3 bg-red-50 dark:bg-red-900/20 border border-red-200 dark:border-red-800 rounded-lg">
+                  <p className="text-sm text-red-700 dark:text-red-300">{inviteError}</p>
+                </div>
+              )}
+
               <div>
                 <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">
                   Email Address *
@@ -350,7 +398,10 @@ function AdminOrganizationsContent() {
                   type="email"
                   required
                   value={inviteEmail}
-                  onChange={(e) => setInviteEmail(e.target.value)}
+                  onChange={(e) => {
+                    setInviteEmail(e.target.value);
+                    setInviteError('');
+                  }}
                   className="w-full px-4 py-3 rounded-lg border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-700 text-gray-900 dark:text-white focus:ring-2 focus:ring-primary-500 focus:border-transparent"
                   placeholder="colleague@company.com"
                   autoFocus
@@ -363,13 +414,45 @@ function AdminOrganizationsContent() {
                 </label>
                 <select
                   value={inviteRole}
-                  onChange={(e) => setInviteRole(e.target.value)}
+                  onChange={(e) => {
+                    setInviteRole(e.target.value);
+                    setInviteError('');
+                  }}
                   className="w-full px-4 py-3 rounded-lg border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-700 text-gray-900 dark:text-white focus:ring-2 focus:ring-primary-500 focus:border-transparent"
                 >
                   {INVITE_ROLES.map((r) => (
                     <option key={r.value} value={r.value}>{r.label}</option>
                   ))}
                 </select>
+              </div>
+
+              <div>
+                <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">
+                  Facility <span className="text-gray-400 font-normal">(optional)</span>
+                </label>
+                <select
+                  value={inviteFacilityId}
+                  onChange={(e) => {
+                    setInviteFacilityId(e.target.value);
+                    setInviteError('');
+                  }}
+                  disabled={inviteFacilityOptions.length === 0}
+                  className="w-full px-4 py-3 rounded-lg border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-700 text-gray-900 dark:text-white focus:ring-2 focus:ring-primary-500 focus:border-transparent disabled:opacity-60 disabled:cursor-not-allowed"
+                >
+                  {inviteFacilityOptions.length === 0 ? (
+                    <option value="">No facilities configured yet</option>
+                  ) : (
+                    <>
+                      <option value="">All facilities / Not specified</option>
+                      {inviteFacilityOptions.map((facility) => (
+                        <option key={facility.id} value={facility.id}>{facility.name}</option>
+                      ))}
+                    </>
+                  )}
+                </select>
+                <p className="mt-1 text-xs text-gray-500 dark:text-gray-400">
+                  When selected, this becomes the user&apos;s default facility after registration.
+                </p>
               </div>
 
               <div className="bg-blue-50 dark:bg-blue-900/20 border border-blue-200 dark:border-blue-800 rounded-lg p-3">
@@ -384,6 +467,8 @@ function AdminOrganizationsContent() {
                   onClick={() => {
                     setShowInviteModal(false);
                     setInviteEmail('');
+                    setInviteFacilityId('');
+                    setInviteError('');
                   }}
                   className="flex-1 px-4 py-3 bg-gray-200 dark:bg-gray-700 text-gray-800 dark:text-gray-200 rounded-lg hover:bg-gray-300 dark:hover:bg-gray-600 font-medium"
                 >
@@ -524,7 +609,11 @@ function AdminOrganizationsContent() {
                     </div>
                     <button
                       type="button"
-                      onClick={() => setShowInviteModal(true)}
+                      onClick={() => {
+                        setInviteFacilityId('');
+                        setInviteError('');
+                        setShowInviteModal(true);
+                      }}
                       className="px-3 py-1.5 bg-primary-600 text-white text-sm rounded-lg hover:bg-primary-700 flex items-center gap-1.5"
                     >
                       <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">

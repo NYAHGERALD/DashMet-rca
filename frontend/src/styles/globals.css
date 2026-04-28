@@ -1248,6 +1248,22 @@ audio::-webkit-media-controls-volume-slider {
   animation: slideInFadeLeft 0.5s ease-out forwards;
 }
 
+/* Slide in from right with fade */
+@keyframes slideInFadeRight {
+  from {
+    opacity: 0;
+    transform: translateX(20px);
+  }
+  to {
+    opacity: 1;
+    transform: translateX(0);
+  }
+}
+
+.animate-slide-in-right {
+  animation: slideInFadeRight 0.5s ease-out forwards;
+}
+
 /* Slide in from bottom with fade */
 @keyframes slideInFadeUp {
   from {
