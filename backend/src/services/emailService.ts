@@ -4,10 +4,45 @@
  */
 
 import { Resend } from 'resend';
+import { readPlatformBrandingConfig } from './platformBrandingService';
 
 const resend = new Resend(process.env.RESEND_API_KEY);
 
-const FROM_EMAIL = process.env.FROM_EMAIL || 'DashMet <noreply@dashmet.com>';
+const FROM_EMAIL =
+  process.env.EMAIL_FROM ||
+  process.env.FROM_EMAIL ||
+  'DashMet <noreply@dashmet.com>';
+const getFallbackEmailLogoUrl = (): string | null => {
+  const configured = String(process.env.EMAIL_LOGO_URL || '').trim();
+  return configured || null;
+};
+
+const getPlatformEmailLogoUrl = async (): Promise<string | null> => {
+  const branding = await readPlatformBrandingConfig();
+  return branding.emailLogoUrl || getFallbackEmailLogoUrl();
+};
+
+const renderEmailBrandHeader = (
+  title: string,
+  subtitle: string,
+  logoUrl: string | null
+): string => {
+  const logoMarkup = logoUrl
+    ? `
+      <div style="width: 64px; height: 64px; margin: 0 auto 12px; border-radius: 9999px; overflow: hidden; border: 1px solid #E5E7EB; background: #FFFFFF;">
+        <img src="${logoUrl}" alt="DashMet logo" width="64" height="64" style="width:64px;height:64px;object-fit:cover;display:block;" />
+      </div>
+    `
+    : '';
+
+  return `
+    <div style="text-align: center; margin-bottom: 32px;">
+      ${logoMarkup}
+      <h1 style="font-size: 24px; font-weight: 700; color: #111827; margin: 0;">${title}</h1>
+      <p style="font-size: 14px; color: #6B7280; margin: 4px 0 0;">${subtitle}</p>
+    </div>
+  `;
+};
 
 /**
  * Send a 6-digit OTP verification email for mobile login
@@ -18,16 +53,14 @@ export async function sendVerificationEmail(
   firstName: string
 ): Promise<boolean> {
   try {
+    const logoUrl = await getPlatformEmailLogoUrl();
     const { error } = await resend.emails.send({
       from: FROM_EMAIL,
       to,
       subject: `${code} — Your DashMet Verification Code`,
       html: `
         <div style="font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; max-width: 480px; margin: 0 auto; padding: 32px 24px;">
-          <div style="text-align: center; margin-bottom: 32px;">
-            <h1 style="font-size: 24px; font-weight: 700; color: #111827; margin: 0;">DashMet</h1>
-            <p style="font-size: 14px; color: #6B7280; margin: 4px 0 0;">Account Verification</p>
-          </div>
+          ${renderEmailBrandHeader('DashMet', 'Account Verification', logoUrl)}
 
           <p style="font-size: 16px; color: #374151; margin-bottom: 24px;">
             Hi ${firstName},
@@ -85,16 +118,14 @@ export async function sendCaseReopenEmail(
   caseNumber: string
 ): Promise<boolean> {
   try {
+    const logoUrl = await getPlatformEmailLogoUrl();
     const { error } = await resend.emails.send({
       from: FROM_EMAIL,
       to,
       subject: `${code} — Verify to Re-Open Case ${caseNumber}`,
       html: `
         <div style="font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; max-width: 480px; margin: 0 auto; padding: 32px 24px;">
-          <div style="text-align: center; margin-bottom: 32px;">
-            <h1 style="font-size: 24px; font-weight: 700; color: #111827; margin: 0;">DashMet</h1>
-            <p style="font-size: 14px; color: #6B7280; margin: 4px 0 0;">Case Re-Open Verification</p>
-          </div>
+          ${renderEmailBrandHeader('DashMet', 'Case Re-Open Verification', logoUrl)}
 
           <p style="font-size: 16px; color: #374151; margin-bottom: 24px;">
             Hi ${firstName},

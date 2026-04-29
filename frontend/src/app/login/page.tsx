@@ -8,8 +8,12 @@ import Image from 'next/image';
 import { useAuth } from '@/components/providers/AuthProvider';
 import api from '@/lib/api';
 import { Eye, EyeOff, KeyRound } from 'lucide-react';
+import { fetchPublicPlatformBranding, getEmailLogoUrl, getLoginBackgroundUrl } from '@/lib/platformBranding';
 
 type MfaMethod = 'email_otp';
+
+const normalizeEmailInput = (value: string) => value.replace(/\u00A0/g, ' ').trim().toLowerCase();
+const normalizePasswordInput = (value: string) => value.replace(/\u00A0/g, ' ').trim();
 
 export default function LoginPage() {
   const router = useRouter();
@@ -33,6 +37,8 @@ export default function LoginPage() {
   
   // Password visibility toggle state
   const [showPassword, setShowPassword] = useState(false);
+  const [backgroundImageUrl, setBackgroundImageUrl] = useState(getLoginBackgroundUrl());
+  const [logoImageUrl, setLogoImageUrl] = useState(getEmailLogoUrl());
   
   // Check if redirected here due to account lockout
   useEffect(() => {
@@ -63,6 +69,24 @@ export default function LoginPage() {
       }
     }
   }, [user, authLoading, authNeedsProfileSetup, router]);
+
+  useEffect(() => {
+    let mounted = true;
+
+    fetchPublicPlatformBranding()
+      .then((branding) => {
+        if (!mounted) return;
+        setBackgroundImageUrl(getLoginBackgroundUrl(branding));
+        setLogoImageUrl(getEmailLogoUrl(branding));
+      })
+      .catch(() => {
+        // Keep local fallback assets when branding fetch fails.
+      });
+
+    return () => {
+      mounted = false;
+    };
+  }, []);
 
   // Show loading spinner while checking auth state
   if (authLoading) {
@@ -122,7 +146,7 @@ export default function LoginPage() {
     setError('');
 
     try {
-      setEmail(email.toLowerCase().trim());
+      setEmail(normalizeEmailInput(email));
       setNeedsProfileSetup(false);
       setRequiresMfa(false);
       setMfaCode('');
@@ -146,9 +170,12 @@ export default function LoginPage() {
     setError('');
 
     try {
+      const normalizedEmail = normalizeEmailInput(email);
+      const normalizedPassword = normalizePasswordInput(password);
+
       const payload: { email: string; password: string; mfaCode?: string } = {
-        email,
-        password,
+        email: normalizedEmail,
+        password: normalizedPassword,
       };
       if (requiresMfa) {
         payload.mfaCode = mfaCode.trim();
@@ -202,7 +229,10 @@ export default function LoginPage() {
     setLoading(true);
     setError('');
     try {
-      const response = await api.post('/auth/login', { email, password });
+      const response = await api.post('/auth/login', {
+        email: normalizeEmailInput(email),
+        password: normalizePasswordInput(password),
+      });
       if (response.data?.requiresMfa) {
         setMfaNotice(response.data?.message || 'Enter the verification code sent to your email.');
         setMfaCode('');
@@ -232,15 +262,17 @@ export default function LoginPage() {
 
   const handleSendResetEmail = async (e: React.FormEvent) => {
     e.preventDefault();
-    
-    if (!resetEmail) {
+
+    const normalizedResetEmail = normalizeEmailInput(resetEmail);
+
+    if (!normalizedResetEmail) {
       setResetError('Please enter your email address');
       return;
     }
 
     // Validate email format
     const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
-    if (!emailRegex.test(resetEmail)) {
+    if (!emailRegex.test(normalizedResetEmail)) {
       setResetError('Please enter a valid email address');
       return;
     }
@@ -249,7 +281,7 @@ export default function LoginPage() {
     setResetError('');
 
     try {
-      await api.post('/auth/forgot-password', { email: resetEmail.toLowerCase().trim() });
+      await api.post('/auth/forgot-password', { email: normalizedResetEmail });
       setResetSuccess(true);
     } catch (err: any) {
       setResetError(err.response?.data?.error || 'Failed to send reset email. Please try again.');
@@ -269,7 +301,7 @@ export default function LoginPage() {
     <div className="relative min-h-screen flex items-center justify-center p-3 sm:p-4">
       {/* Background Image with Overlay */}
       <div className="absolute inset-0">
-        <div className="absolute inset-0 bg-[url('/images/landing-page-image.jpg')] bg-cover bg-center" />
+        <div className="absolute inset-0 bg-cover bg-center" style={{ backgroundImage: `url("${backgroundImageUrl}")` }} />
         <div className="absolute inset-0 bg-gradient-to-br from-slate-950/90 via-slate-900/85 to-blue-950/92" />
       </div>
 
@@ -296,10 +328,11 @@ export default function LoginPage() {
             <div className="flex justify-center mb-3">
               <div className="relative w-16 h-16">
                 <Image 
-                  src="/images/logo.png" 
+                  src={logoImageUrl} 
                   alt="DASHMET Logo" 
                   fill 
                   className="object-contain"
+                  onError={() => setLogoImageUrl('/images/logo.png')}
                 />
               </div>
             </div>
@@ -328,6 +361,7 @@ export default function LoginPage() {
                   type="email"
                   value={email}
                   onChange={(e) => setEmail(e.target.value)}
+                  autoComplete="username"
                   required
                   className="w-full px-4 py-2.5 bg-white/5 border border-white/10 rounded-lg text-white placeholder-gray-400 focus:outline-none focus:ring-2 focus:ring-blue-500/50 focus:border-transparent"
                   placeholder="you@company.com"
@@ -379,6 +413,7 @@ export default function LoginPage() {
                       type={showPassword ? 'text' : 'password'}
                       value={password}
                       onChange={(e) => setPassword(e.target.value)}
+                      autoComplete="current-password"
                       required
                       className="w-full px-4 py-2.5 pr-12 bg-white/5 border border-white/10 rounded-lg text-white placeholder-gray-400 focus:outline-none focus:ring-2 focus:ring-blue-500/50 focus:border-transparent"
                       placeholder="Enter your password"

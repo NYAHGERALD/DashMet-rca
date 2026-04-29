@@ -509,11 +509,6 @@ export default function SupportRequestsClient() {
             <div className="p-6 border-b border-gray-200 dark:border-gray-700">
               <div className="flex items-start justify-between">
                 <div className="flex-1">
-                  <div className="flex items-center gap-2 text-xs text-gray-500 dark:text-gray-400 mb-2">
-                    <span className="font-mono bg-gray-100 dark:bg-gray-700 px-2 py-0.5 rounded">
-                      ID: {selectedRequest.id}
-                    </span>
-                  </div>
                   <h3 className="text-xl font-bold text-gray-900 dark:text-white">
                     {selectedRequest.subject}
                   </h3>

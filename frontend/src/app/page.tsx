@@ -13,10 +13,21 @@ import {
   CheckCircle2,
   X,
   Eye,
-  EyeOff
+  EyeOff,
+  KeyRound
 } from 'lucide-react';
 import api from '@/lib/api';
 import SupportModal from '@/components/support/SupportModal';
+import {
+  fetchPublicPlatformBranding,
+  getEmailLogoUrl,
+  getLoginBackgroundUrl,
+  type PlatformBranding,
+} from '@/lib/platformBranding';
+
+type MfaMethod = 'email_otp';
+const normalizeEmailInput = (value: string) => value.replace(/\u00A0/g, ' ').trim().toLowerCase();
+const normalizePasswordInput = (value: string) => value.replace(/\u00A0/g, ' ').trim();
 
 export default function HomePage() {
   const router = useRouter();
@@ -26,10 +37,15 @@ export default function HomePage() {
   const [step, setStep] = useState<'email' | 'password' | 'register'>('email');
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
+  const [mfaCode, setMfaCode] = useState('');
+  const [mfaMethod, setMfaMethod] = useState<MfaMethod>('email_otp');
+  const [requiresMfa, setRequiresMfa] = useState(false);
+  const [mfaNotice, setMfaNotice] = useState('');
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
   const [needsProfileSetup, setNeedsProfileSetup] = useState(false);
   const [showSupportModal, setShowSupportModal] = useState(false);
+  const [branding, setBranding] = useState<PlatformBranding | null>(null);
   // Forgot password modal state
   const [showForgotPasswordModal, setShowForgotPasswordModal] = useState(false);
   const [resetEmail, setResetEmail] = useState('');
@@ -39,6 +55,8 @@ export default function HomePage() {
   
   // Password visibility toggle state
   const [showPassword, setShowPassword] = useState(false);
+  const [backgroundImageUrl, setBackgroundImageUrl] = useState(getLoginBackgroundUrl(branding));
+  const [logoImageUrl, setLogoImageUrl] = useState(getEmailLogoUrl(branding));
   
   // Check if redirected here due to account lockout
   useEffect(() => {
@@ -60,6 +78,25 @@ export default function HomePage() {
     }
   }, [user, authLoading, router]);
 
+  useEffect(() => {
+    let mounted = true;
+
+    fetchPublicPlatformBranding()
+      .then((nextBranding) => {
+        if (!mounted) return;
+        setBranding(nextBranding);
+        setBackgroundImageUrl(getLoginBackgroundUrl(nextBranding));
+        setLogoImageUrl(getEmailLogoUrl(nextBranding));
+      })
+      .catch(() => {
+        // Keep local fallback assets when branding fetch fails.
+      });
+
+    return () => {
+      mounted = false;
+    };
+  }, []);
+
   if (authLoading) {
     return (
       <div className="h-screen flex items-center justify-center bg-gradient-to-br from-slate-950 via-slate-900 to-blue-950 relative overflow-hidden">
@@ -71,12 +108,13 @@ export default function HomePage() {
         <div className="relative z-10 text-center">
           <div className="relative w-24 h-24 mx-auto mb-6">
             <Image
-              src="/images/logo.png"
+              src={logoImageUrl}
               alt="DASHMET Logo"
               width={96}
               height={96}
               className="animate-pulse"
               priority
+              onError={() => setLogoImageUrl('/images/logo.png')}
             />
           </div>
           <div className="flex items-center gap-2 justify-center">
@@ -96,8 +134,11 @@ export default function HomePage() {
     setError('');
 
     try {
-      setEmail(email.toLowerCase().trim());
+      setEmail(normalizeEmailInput(email));
       setNeedsProfileSetup(false);
+      setRequiresMfa(false);
+      setMfaCode('');
+      setMfaNotice('');
       setStep('password');
     } catch {
       setError('Unable to continue. Please try again.');
@@ -108,19 +149,85 @@ export default function HomePage() {
 
   const handlePasswordLogin = async (e: React.FormEvent) => {
     e.preventDefault();
+    if (requiresMfa && !mfaCode.trim()) {
+      setError('Enter the verification code sent to your email.');
+      return;
+    }
     setLoading(true);
     setError('');
 
     try {
-      await api.post('/auth/login', { email, password });
-      await refreshUser();
+      const payload: { email: string; password: string; mfaCode?: string } = {
+        email: normalizeEmailInput(email),
+        password: normalizePasswordInput(password),
+      };
+      if (requiresMfa) {
+        payload.mfaCode = mfaCode.trim();
+      }
+
+      const response = await api.post('/auth/login', payload);
+      if (response.data?.requiresMfa) {
+        setRequiresMfa(true);
+        setMfaMethod('email_otp');
+        setMfaNotice(response.data?.message || 'Enter the verification code sent to your email.');
+        setError('');
+        return;
+      }
+
+      if (!response.data?.success) {
+        throw new Error(response.data?.error || 'Unable to sign in');
+      }
+
+      const refreshedUser = await refreshUser();
+      if (!refreshedUser) {
+        throw new Error(
+          'Sign-in was verified, but the browser did not receive the secure session cookie. Check the deployed API proxy and cookie settings.'
+        );
+      }
       router.push('/dashboard');
     } catch (err: any) {
+      const apiError = err.response?.data;
+      if (apiError?.requiresMfa) {
+        setRequiresMfa(true);
+        setMfaMethod('email_otp');
+        setMfaNotice(apiError?.message || 'Enter the verification code sent to your email.');
+        setError(typeof apiError?.error === 'string' ? apiError.error : 'Invalid verification code');
+        return;
+      }
+
       const errorMsg = typeof err.response?.data?.error === 'string'
         ? err.response.data.error
+        : typeof err.message === 'string'
+        ? err.message
         : 'Invalid email or password';
 
       setError(errorMsg);
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const handleResendMfaCode = async () => {
+    if (!email || !password) return;
+
+    setLoading(true);
+    setError('');
+    try {
+      const response = await api.post('/auth/login', {
+        email: normalizeEmailInput(email),
+        password: normalizePasswordInput(password),
+      });
+      if (response.data?.requiresMfa) {
+        setMfaNotice(response.data?.message || 'Enter the verification code sent to your email.');
+        setMfaCode('');
+        return;
+      }
+      setError('Unable to send a new verification code. Please try again.');
+    } catch (err: any) {
+      const message = typeof err.response?.data?.error === 'string'
+        ? err.response.data.error
+        : 'Unable to send a new verification code. Please try again.';
+      setError(message);
     } finally {
       setLoading(false);
     }
@@ -142,14 +249,16 @@ export default function HomePage() {
 
   const handleSendResetEmail = async (e: React.FormEvent) => {
     e.preventDefault();
-    
-    if (!resetEmail) {
+
+    const normalizedResetEmail = normalizeEmailInput(resetEmail);
+
+    if (!normalizedResetEmail) {
       setResetError('Please enter your email address');
       return;
     }
 
     const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
-    if (!emailRegex.test(resetEmail)) {
+    if (!emailRegex.test(normalizedResetEmail)) {
       setResetError('Please enter a valid email address');
       return;
     }
@@ -158,7 +267,7 @@ export default function HomePage() {
     setResetError('');
 
     try {
-      await api.post('/auth/forgot-password', { email: resetEmail.toLowerCase().trim() });
+      await api.post('/auth/forgot-password', { email: normalizedResetEmail });
       setResetSuccess(true);
     } catch (err: any) {
       setResetError(err.response?.data?.error || 'Failed to send reset email. Please try again.');
@@ -180,13 +289,9 @@ export default function HomePage() {
 
       {/* Background Image with Overlay */}
       <div className="absolute inset-0">
-        <Image
-          src="/images/landing-page-image.jpg"
-          alt="Landing background"
-          fill
-          className="object-cover"
-          priority
-          quality={80}
+        <div
+          className="absolute inset-0 bg-cover bg-center"
+          style={{ backgroundImage: `url("${backgroundImageUrl}")` }}
         />
         <div className="absolute inset-0 bg-gradient-to-br from-slate-950/90 via-slate-900/85 to-blue-950/92" />
       </div>
@@ -208,11 +313,12 @@ export default function HomePage() {
               <div className="flex justify-center">
                 <div className="relative w-16 h-16 sm:w-20 sm:h-20 md:w-24 md:h-24 lg:w-28 lg:h-28">
                   <Image
-                    src="/images/logo.png"
+                    src={logoImageUrl}
                     alt="DASHMET RCA Logo"
                     fill
                     className="object-contain"
                     priority
+                    onError={() => setLogoImageUrl('/images/logo.png')}
                   />
                 </div>
               </div>
@@ -283,6 +389,7 @@ export default function HomePage() {
                           type="email"
                           value={email}
                           onChange={(e) => setEmail(e.target.value)}
+                          autoComplete="username"
                           className="w-full px-4 py-3 bg-white/5 border border-white/10 rounded-lg text-white placeholder-gray-400 focus:outline-none focus:ring-2 focus:ring-blue-500/50 focus:border-transparent"
                           placeholder="Enter your email"
                           required
@@ -307,52 +414,105 @@ export default function HomePage() {
                           Signing in as <span className="text-white font-medium">{email}</span>
                         </p>
                         <button
-                          onClick={() => setStep('email')}
+                          onClick={() => {
+                            setStep('email');
+                            setNeedsProfileSetup(false);
+                            setRequiresMfa(false);
+                            setMfaCode('');
+                            setMfaNotice('');
+                            setError('');
+                          }}
                           className="text-blue-400 hover:text-blue-300 text-sm underline"
                         >
                           Change email
                         </button>
                       </div>
                       <form onSubmit={handlePasswordLogin}>
-                        <div className="mb-4">
-                          <label htmlFor="password" className="block text-sm font-medium text-blue-200 mb-2">
-                            Password
-                          </label>
-                          <div className="relative">
-                            <input
-                              id="password"
-                              type={showPassword ? 'text' : 'password'}
-                              value={password}
-                              onChange={(e) => setPassword(e.target.value)}
-                              className="w-full px-4 py-3 pr-12 bg-white/5 border border-white/10 rounded-lg text-white placeholder-gray-400 focus:outline-none focus:ring-2 focus:ring-blue-500/50 focus:border-transparent"
-                              placeholder="Enter your password"
-                              required
-                              disabled={loading}
-                            />
+                        {!requiresMfa && (
+                          <div className="mb-4">
+                            <label htmlFor="password" className="block text-sm font-medium text-blue-200 mb-2">
+                              Password
+                            </label>
+                            <div className="relative">
+                              <input
+                                id="password"
+                                type={showPassword ? 'text' : 'password'}
+                                value={password}
+                                onChange={(e) => setPassword(e.target.value)}
+                                autoComplete="current-password"
+                                className="w-full px-4 py-3 pr-12 bg-white/5 border border-white/10 rounded-lg text-white placeholder-gray-400 focus:outline-none focus:ring-2 focus:ring-blue-500/50 focus:border-transparent"
+                                placeholder="Enter your password"
+                                required
+                                disabled={loading}
+                              />
+                              <button
+                                type="button"
+                                onClick={() => setShowPassword(!showPassword)}
+                                className="absolute right-3 top-1/2 -translate-y-1/2 text-gray-400 hover:text-white transition-colors"
+                              >
+                                {showPassword ? <EyeOff className="h-5 w-5" /> : <Eye className="h-5 w-5" />}
+                              </button>
+                            </div>
+                          </div>
+                        )}
+
+                        {requiresMfa && (
+                          <>
+                            <div className="p-3 mb-4 bg-blue-500/10 border border-blue-500/30 rounded-lg text-sm text-blue-100">
+                              {mfaNotice || 'Enter the verification code sent to your email.'}
+                            </div>
+                            <div className="mb-4">
+                              <label className="block text-sm font-medium text-blue-200 mb-2">
+                                {mfaMethod === 'email_otp' ? 'Email Verification Code' : 'Verification Code'}
+                              </label>
+                              <div className="relative">
+                                <input
+                                  type="text"
+                                  inputMode="numeric"
+                                  pattern="[0-9]*"
+                                  maxLength={6}
+                                  value={mfaCode}
+                                  onChange={(e) => setMfaCode(e.target.value.replace(/\D/g, '').slice(0, 6))}
+                                  required
+                                  className="w-full px-4 py-3 pr-12 bg-white/5 border border-white/10 rounded-lg text-white placeholder-gray-400 focus:outline-none focus:ring-2 focus:ring-blue-500/50 focus:border-transparent tracking-[0.35em]"
+                                  placeholder="000000"
+                                  disabled={loading}
+                                />
+                                <div className="absolute right-3 top-1/2 -translate-y-1/2">
+                                  <KeyRound className="h-5 w-5 text-gray-400" />
+                                </div>
+                              </div>
+                              <div className="mt-2 flex items-center justify-between text-xs text-gray-300">
+                                <span>Codes expire in 10 minutes.</span>
+                                <button
+                                  type="button"
+                                  onClick={handleResendMfaCode}
+                                  className="text-blue-300 hover:text-blue-200"
+                                >
+                                  Resend code
+                                </button>
+                              </div>
+                            </div>
+                          </>
+                        )}
+
+                        {!requiresMfa && (
+                          <div className="flex items-center justify-between mb-4">
                             <button
                               type="button"
-                              onClick={() => setShowPassword(!showPassword)}
-                              className="absolute right-3 top-1/2 -translate-y-1/2 text-gray-400 hover:text-white transition-colors"
+                              onClick={handleForgotPassword}
+                              className="text-blue-400 hover:text-blue-300 text-sm underline"
                             >
-                              {showPassword ? <EyeOff className="h-5 w-5" /> : <Eye className="h-5 w-5" />}
+                              Forgot password?
                             </button>
                           </div>
-                        </div>
-                        <div className="flex items-center justify-between mb-4">
-                          <button
-                            type="button"
-                            onClick={handleForgotPassword}
-                            className="text-blue-400 hover:text-blue-300 text-sm underline"
-                          >
-                            Forgot password?
-                          </button>
-                        </div>
+                        )}
                         <button
                           type="submit"
                           disabled={loading}
                           className="w-full px-6 py-3 bg-gradient-to-r from-blue-600 to-cyan-600 text-white rounded-lg hover:from-blue-700 hover:to-cyan-700 transition-all duration-200 disabled:opacity-50 disabled:cursor-not-allowed font-medium"
                         >
-                          {loading ? 'Signing in...' : 'Sign In'}
+                          {loading ? (requiresMfa ? 'Verifying...' : 'Signing in...') : (requiresMfa ? 'Verify & Sign In' : 'Sign In')}
                         </button>
                       </form>
                     </div>

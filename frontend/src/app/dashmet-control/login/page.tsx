@@ -22,17 +22,20 @@ import {
 import { useAuth } from '@/components/providers/AuthProvider';
 import api from '@/lib/api';
 import SystemAdminWarningModal from '@/components/modals/SystemAdminWarningModal';
+import { fetchPublicPlatformBranding, getEmailLogoUrl, getLoginBackgroundUrl } from '@/lib/platformBranding';
 
 type MfaMethod = 'email_otp' | 'totp';
 
 const INVALID_CREDENTIALS_MESSAGE = 'Invalid email or password. Please try again.';
+const normalizeEmailInput = (value: string) => value.replace(/\u00A0/g, ' ').trim().toLowerCase();
+const normalizePasswordInput = (value: string) => value.replace(/\u00A0/g, ' ').trim();
 
-const normalizeLoginError = (message?: string) => {
+const normalizeLoginError = (message?: string): string => {
   const normalized = message?.toLowerCase().trim();
   if (!normalized || normalized === 'authentication failed' || normalized.includes('account is not authorized')) {
     return INVALID_CREDENTIALS_MESSAGE;
   }
-  return message;
+  return message || INVALID_CREDENTIALS_MESSAGE;
 };
 
 export default function SystemAdminLoginPage() {
@@ -55,6 +58,8 @@ export default function SystemAdminLoginPage() {
   
   // Show warning modal if blocked=true query param is present
   const [showBlockedWarning, setShowBlockedWarning] = useState(false);
+  const [backgroundImageUrl, setBackgroundImageUrl] = useState(getLoginBackgroundUrl());
+  const [logoImageUrl, setLogoImageUrl] = useState(getEmailLogoUrl());
   
   useEffect(() => {
     if (searchParams.get('blocked') === 'true') {
@@ -63,6 +68,24 @@ export default function SystemAdminLoginPage() {
       router.replace('/dashmet-control/login');
     }
   }, [searchParams, router]);
+
+  useEffect(() => {
+    let mounted = true;
+
+    fetchPublicPlatformBranding()
+      .then((branding) => {
+        if (!mounted) return;
+        setBackgroundImageUrl(getLoginBackgroundUrl(branding));
+        setLogoImageUrl(getEmailLogoUrl(branding));
+      })
+      .catch(() => {
+        // Keep local fallback assets when branding fetch fails.
+      });
+
+    return () => {
+      mounted = false;
+    };
+  }, []);
 
   // Redirect if already logged in as System Admin
   useEffect(() => {
@@ -112,10 +135,13 @@ export default function SystemAdminLoginPage() {
     setNotice('');
 
     try {
+      const normalizedEmail = normalizeEmailInput(email);
+      const normalizedPassword = normalizePasswordInput(password);
+
       // Single secure authentication flow with optional MFA challenge.
       const authResponse = await api.post('/system-admin-auth/authenticate', {
-        email: email.toLowerCase().trim(),
-        password,
+        email: normalizedEmail,
+        password: normalizedPassword,
         mfaCode: mfaCode.trim(),
       });
 
@@ -193,7 +219,7 @@ export default function SystemAdminLoginPage() {
     return (
       <div className="relative min-h-screen flex items-center justify-center p-4">
         <div className="absolute inset-0">
-          <div className="absolute inset-0 bg-[url('/images/landing-page-image.jpg')] bg-cover bg-center" />
+          <div className="absolute inset-0 bg-cover bg-center" style={{ backgroundImage: `url("${backgroundImageUrl}")` }} />
           <div className="absolute inset-0 bg-gradient-to-br from-slate-950/90 via-slate-900/85 to-blue-950/92" />
         </div>
         <Loader2 className="relative z-10 h-8 w-8 animate-spin text-blue-400" />
@@ -206,7 +232,7 @@ export default function SystemAdminLoginPage() {
     return (
       <div className="relative min-h-screen flex items-center justify-center p-4">
         <div className="absolute inset-0">
-          <div className="absolute inset-0 bg-[url('/images/landing-page-image.jpg')] bg-cover bg-center" />
+          <div className="absolute inset-0 bg-cover bg-center" style={{ backgroundImage: `url("${backgroundImageUrl}")` }} />
           <div className="absolute inset-0 bg-gradient-to-br from-slate-950/90 via-slate-900/85 to-blue-950/92" />
         </div>
         <div className="relative z-10 flex flex-col items-center space-y-4 rounded-2xl border border-white/20 bg-white/10 px-8 py-9 backdrop-blur-xl">
@@ -224,7 +250,7 @@ export default function SystemAdminLoginPage() {
   return (
     <div className="relative min-h-screen flex items-center justify-center p-3 sm:p-4">
       <div className="absolute inset-0">
-        <div className="absolute inset-0 bg-[url('/images/landing-page-image.jpg')] bg-cover bg-center" />
+        <div className="absolute inset-0 bg-cover bg-center" style={{ backgroundImage: `url("${backgroundImageUrl}")` }} />
         <div className="absolute inset-0 bg-gradient-to-br from-slate-950/90 via-slate-900/85 to-blue-950/92" />
       </div>
       <div className="relative z-10 w-full max-w-md">
@@ -236,11 +262,12 @@ export default function SystemAdminLoginPage() {
               <div className="relative w-12 h-12 rounded-xl border border-white/20 bg-white/10 p-1 shadow-lg">
                 <div className="w-full h-full rounded-lg bg-white/10 flex items-center justify-center overflow-hidden">
                   <Image 
-                    src="/images/logo.png" 
+                    src={logoImageUrl} 
                     alt="DASHMET" 
                     width={40}
                     height={40}
                     className="object-contain"
+                    onError={() => setLogoImageUrl('/images/logo.png')}
                   />
                 </div>
               </div>

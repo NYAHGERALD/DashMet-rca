@@ -17,7 +17,11 @@ import {
   Users,
   Factory,
   Plus,
+  Image as ImageIcon,
+  Upload,
+  Save,
 } from 'lucide-react';
+import { clearPlatformBrandingCache } from '@/lib/platformBranding';
 
 interface Organization {
   id: string;
@@ -57,6 +61,16 @@ interface OrganizationInvitationSummary {
     revoked: number;
   };
 }
+
+interface PlatformBrandingSettings {
+  loginBackgroundUrl: string | null;
+  emailLogoUrl: string | null;
+  fallbackLoginBackgroundUrl: string;
+  fallbackEmailLogoUrl: string;
+  updatedAt: string | null;
+}
+
+type BrandingAssetType = 'loginBackground' | 'emailLogo';
 
 function normalizeInvitationSummaries(rawData: any): OrganizationInvitationSummary[] {
   if (rawData?.mode === 'ORGANIZATION_SUMMARY' && Array.isArray(rawData.organizations)) {
@@ -125,7 +139,15 @@ function SystemAdminContent() {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
   const [successMessage, setSuccessMessage] = useState('');
-  const [activeTab, setActiveTab] = useState<'organizations' | 'invitations'>('organizations');
+  const [activeTab, setActiveTab] = useState<'organizations' | 'invitations' | 'branding'>('organizations');
+  const [branding, setBranding] = useState<PlatformBrandingSettings | null>(null);
+  const [brandingDraft, setBrandingDraft] = useState({
+    loginBackgroundUrl: '',
+    emailLogoUrl: '',
+  });
+  const [brandingError, setBrandingError] = useState('');
+  const [brandingUploading, setBrandingUploading] = useState<BrandingAssetType | null>(null);
+  const [brandingSaving, setBrandingSaving] = useState(false);
 
   // Create Org form
   const [showCreateOrg, setShowCreateOrg] = useState(false);
@@ -160,16 +182,23 @@ function SystemAdminContent() {
   const loadData = async () => {
     try {
       setLoading(true);
-      const [orgsRes, statsRes, invRes, facRes] = await Promise.all([
+      const [orgsRes, statsRes, invRes, facRes, brandingRes] = await Promise.all([
         api.get('/organizations'),
         api.get('/organizations/stats'),
         api.get('/invitations'),
         api.get('/facilities'),
+        api.get('/system-admin/branding').catch(() => ({ data: { data: null } })),
       ]);
       setOrganizations(orgsRes.data.data.organizations || []);
       setStats(statsRes.data.data);
       setInvitationSummaries(normalizeInvitationSummaries(invRes.data.data));
       setFacilities(normalizeFacilities(facRes.data.data));
+      const brandingData: PlatformBrandingSettings | null = brandingRes.data?.data || null;
+      setBranding(brandingData);
+      setBrandingDraft({
+        loginBackgroundUrl: brandingData?.loginBackgroundUrl || '',
+        emailLogoUrl: brandingData?.emailLogoUrl || '',
+      });
     } catch (err: any) {
       setError(err.response?.data?.error || 'Failed to load data');
     } finally {
@@ -258,6 +287,76 @@ function SystemAdminContent() {
     setShowInviteAdmin(true);
   };
 
+  const handleBrandingFileUpload = async (assetType: BrandingAssetType, file: File | null) => {
+    if (!file) return;
+    if (!file.type.startsWith('image/')) {
+      setBrandingError('Please select a valid image file.');
+      return;
+    }
+
+    try {
+      setBrandingError('');
+      setBrandingUploading(assetType);
+
+      const formData = new FormData();
+      formData.append('assetType', assetType);
+      formData.append('file', file);
+
+      const response = await api.post('/system-admin/branding/upload', formData, {
+        headers: { 'Content-Type': 'multipart/form-data' },
+      });
+
+      const uploadedUrl = response.data?.data?.url;
+      if (typeof uploadedUrl !== 'string' || !uploadedUrl) {
+        throw new Error('Upload completed but no URL was returned.');
+      }
+
+      setBrandingDraft((prev) => ({
+        ...prev,
+        ...(assetType === 'loginBackground'
+          ? { loginBackgroundUrl: uploadedUrl }
+          : { emailLogoUrl: uploadedUrl }),
+      }));
+      setSuccessMessage(
+        assetType === 'loginBackground'
+          ? 'Background image uploaded. Click save to publish.'
+          : 'Email logo uploaded. Click save to publish.'
+      );
+      setTimeout(() => setSuccessMessage(''), 4000);
+    } catch (err: any) {
+      setBrandingError(err.response?.data?.error || err.message || 'Failed to upload branding image.');
+    } finally {
+      setBrandingUploading(null);
+    }
+  };
+
+  const handleSaveBranding = async () => {
+    try {
+      setBrandingSaving(true);
+      setBrandingError('');
+
+      const payload = {
+        loginBackgroundUrl: brandingDraft.loginBackgroundUrl.trim() || null,
+        emailLogoUrl: brandingDraft.emailLogoUrl.trim() || null,
+      };
+
+      const response = await api.put('/system-admin/branding', payload);
+      const updatedBranding: PlatformBrandingSettings = response.data?.data;
+      setBranding(updatedBranding);
+      setBrandingDraft({
+        loginBackgroundUrl: updatedBranding?.loginBackgroundUrl || '',
+        emailLogoUrl: updatedBranding?.emailLogoUrl || '',
+      });
+      clearPlatformBrandingCache();
+      setSuccessMessage('Platform branding updated successfully.');
+      setTimeout(() => setSuccessMessage(''), 5000);
+    } catch (err: any) {
+      setBrandingError(err.response?.data?.error || 'Failed to save branding settings.');
+    } finally {
+      setBrandingSaving(false);
+    }
+  };
+
   const normalizedSearchQuery = searchQuery.trim().toLowerCase();
 
   // Filter organization-level invitation summaries
@@ -287,6 +386,12 @@ function SystemAdminContent() {
   const selectedInviteFacilities = inviteOrgId
     ? facilities.filter((facility) => facility.organizationId === inviteOrgId)
     : [];
+  const previewBackgroundUrl = brandingDraft.loginBackgroundUrl.trim()
+    || branding?.fallbackLoginBackgroundUrl
+    || '/images/landing-page-image.jpg';
+  const previewEmailLogoUrl = brandingDraft.emailLogoUrl.trim()
+    || branding?.fallbackEmailLogoUrl
+    || '/images/logo.png';
 
   if (loading) {
     return (
@@ -392,6 +497,17 @@ function SystemAdminContent() {
               {globalInviteStats.pending}
             </span>
           )}
+        </button>
+        <button
+          onClick={() => setActiveTab('branding')}
+          className={`flex-1 flex items-center justify-center gap-2 px-4 py-2.5 rounded-md text-sm font-medium transition-all ${
+            activeTab === 'branding'
+              ? 'bg-purple-600 text-white shadow-sm'
+              : 'text-gray-600 dark:text-gray-400 hover:bg-gray-100 dark:hover:bg-gray-700'
+          }`}
+        >
+          <ImageIcon size={16} />
+          Branding
         </button>
       </div>
 
@@ -603,6 +719,129 @@ function SystemAdminContent() {
           </div>
 
         </>
+      )}
+
+      {/* ═══════════════════════════════════════════════════════════════ */}
+      {/* BRANDING TAB                                                   */}
+      {/* ═══════════════════════════════════════════════════════════════ */}
+      {activeTab === 'branding' && (
+        <div className="space-y-4">
+          <div className="bg-white dark:bg-gray-800 rounded-lg shadow p-5">
+            <h2 className="text-lg font-semibold text-gray-900 dark:text-white flex items-center gap-2">
+              <ImageIcon size={18} />
+              Platform Branding
+            </h2>
+            <p className="text-sm text-gray-500 dark:text-gray-400 mt-1">
+              Update the login background and email logo used across live authentication pages.
+            </p>
+          </div>
+
+          {brandingError && (
+            <div className="p-3 bg-red-50 dark:bg-red-900/20 border border-red-200 dark:border-red-800 rounded-lg flex items-center gap-2">
+              <AlertTriangle size={16} className="text-red-600 shrink-0" />
+              <p className="text-sm text-red-700 dark:text-red-300">{brandingError}</p>
+            </div>
+          )}
+
+          <div className="grid grid-cols-1 xl:grid-cols-2 gap-4">
+            <div className="bg-white dark:bg-gray-800 rounded-lg shadow p-5 space-y-4">
+              <div className="flex items-center justify-between gap-3">
+                <div>
+                  <h3 className="text-sm font-semibold text-gray-900 dark:text-white">Landing Background</h3>
+                  <p className="text-xs text-gray-500 dark:text-gray-400">Shown on public and login pages.</p>
+                </div>
+                <label className="inline-flex items-center gap-2 px-3 py-2 text-sm font-medium text-white bg-purple-600 hover:bg-purple-700 rounded-lg cursor-pointer transition-colors disabled:opacity-60">
+                  <Upload size={14} />
+                  {brandingUploading === 'loginBackground' ? 'Uploading...' : 'Upload'}
+                  <input
+                    type="file"
+                    accept="image/*"
+                    className="hidden"
+                    onChange={(event) => {
+                      const file = event.target.files?.[0] || null;
+                      void handleBrandingFileUpload('loginBackground', file);
+                      event.target.value = '';
+                    }}
+                    disabled={brandingUploading !== null}
+                  />
+                </label>
+              </div>
+
+              <div
+                className="w-full aspect-[16/9] rounded-lg border border-gray-200 dark:border-gray-700 bg-cover bg-center"
+                style={{ backgroundImage: `url("${previewBackgroundUrl}")` }}
+              />
+
+              <input
+                type="url"
+                value={brandingDraft.loginBackgroundUrl}
+                onChange={(event) =>
+                  setBrandingDraft((prev) => ({ ...prev, loginBackgroundUrl: event.target.value }))
+                }
+                placeholder="https://..."
+                className="w-full px-3 py-2.5 bg-gray-50 dark:bg-gray-700 border border-gray-300 dark:border-gray-600 rounded-lg text-sm focus:ring-2 focus:ring-purple-500 dark:text-white"
+              />
+            </div>
+
+            <div className="bg-white dark:bg-gray-800 rounded-lg shadow p-5 space-y-4">
+              <div className="flex items-center justify-between gap-3">
+                <div>
+                  <h3 className="text-sm font-semibold text-gray-900 dark:text-white">Email Logo</h3>
+                  <p className="text-xs text-gray-500 dark:text-gray-400">Used for in-email branding previews.</p>
+                </div>
+                <label className="inline-flex items-center gap-2 px-3 py-2 text-sm font-medium text-white bg-blue-600 hover:bg-blue-700 rounded-lg cursor-pointer transition-colors disabled:opacity-60">
+                  <Upload size={14} />
+                  {brandingUploading === 'emailLogo' ? 'Uploading...' : 'Upload'}
+                  <input
+                    type="file"
+                    accept="image/*"
+                    className="hidden"
+                    onChange={(event) => {
+                      const file = event.target.files?.[0] || null;
+                      void handleBrandingFileUpload('emailLogo', file);
+                      event.target.value = '';
+                    }}
+                    disabled={brandingUploading !== null}
+                  />
+                </label>
+              </div>
+
+              <div className="w-full min-h-[180px] rounded-lg border border-gray-200 dark:border-gray-700 bg-gray-50 dark:bg-gray-900 flex items-center justify-center">
+                <div className="w-28 h-28 rounded-full border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-800 overflow-hidden flex items-center justify-center">
+                  <img
+                    src={previewEmailLogoUrl}
+                    alt="Email logo preview"
+                    className="w-full h-full object-cover"
+                  />
+                </div>
+              </div>
+
+              <input
+                type="url"
+                value={brandingDraft.emailLogoUrl}
+                onChange={(event) =>
+                  setBrandingDraft((prev) => ({ ...prev, emailLogoUrl: event.target.value }))
+                }
+                placeholder="https://..."
+                className="w-full px-3 py-2.5 bg-gray-50 dark:bg-gray-700 border border-gray-300 dark:border-gray-600 rounded-lg text-sm focus:ring-2 focus:ring-blue-500 dark:text-white"
+              />
+            </div>
+          </div>
+
+          <div className="bg-white dark:bg-gray-800 rounded-lg shadow p-4 flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3">
+            <p className="text-xs text-gray-500 dark:text-gray-400">
+              Last updated: {branding?.updatedAt ? formatDate(branding.updatedAt) : 'Not set yet'}
+            </p>
+            <button
+              onClick={() => void handleSaveBranding()}
+              disabled={brandingSaving}
+              className="inline-flex items-center justify-center gap-2 px-4 py-2.5 text-sm font-medium text-white bg-emerald-600 hover:bg-emerald-700 rounded-lg transition-colors disabled:opacity-60"
+            >
+              <Save size={16} />
+              {brandingSaving ? 'Saving...' : 'Save Branding'}
+            </button>
+          </div>
+        </div>
       )}
 
       {/* ── Create Organization Modal ── */}

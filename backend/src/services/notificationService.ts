@@ -5,6 +5,7 @@ import { prisma } from '../utils/prisma';
 import { NotificationType } from '@prisma/client';
 import { Resend } from 'resend';
 import { v4 as uuidv4 } from 'uuid';
+import { readPlatformBrandingConfig } from './platformBrandingService';
 
 interface NotificationData {
   type: NotificationType;
@@ -27,6 +28,28 @@ const getResendClient = (): Resend | null => {
     return null;
   }
   return new Resend(process.env.RESEND_API_KEY);
+};
+
+const resolveEmailLogoUrl = async (): Promise<string | null> => {
+  const configured = String(process.env.EMAIL_LOGO_URL || '').trim();
+  const branding = await readPlatformBrandingConfig();
+  return branding.emailLogoUrl || configured || null;
+};
+
+const prependCircularLogo = (html: string, logoUrl: string): string => {
+  const logoBlock = `
+    <div style="text-align:center;margin:0 0 18px 0;">
+      <div style="width:56px;height:56px;margin:0 auto;border-radius:9999px;overflow:hidden;border:1px solid #E5E7EB;background:#FFFFFF;">
+        <img src="${logoUrl}" alt="DashMet logo" width="56" height="56" style="width:56px;height:56px;display:block;object-fit:cover;" />
+      </div>
+    </div>
+  `;
+
+  if (/<body[^>]*>/i.test(html)) {
+    return html.replace(/<body([^>]*)>/i, `<body$1>${logoBlock}`);
+  }
+
+  return `${logoBlock}${html}`;
 };
 
 /**
@@ -150,12 +173,15 @@ export async function sendEmailNotification(email: EmailNotification) {
   }
 
   try {
+    const logoUrl = await resolveEmailLogoUrl();
+    const brandedHtml = email.html && logoUrl ? prependCircularLogo(email.html, logoUrl) : email.html;
+
     const { data, error } = await resend.emails.send({
       from: process.env.EMAIL_FROM || 'DashMet RCA <noreply@dashmet.com>',
       to: email.to,
       subject: email.subject,
       text: email.body,
-      html: email.html,
+      html: brandedHtml,
     });
 
     if (error) {
