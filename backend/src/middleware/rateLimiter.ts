@@ -1,8 +1,38 @@
 import rateLimit from 'express-rate-limit';
 import { Request } from 'express';
 import crypto from 'crypto';
+import { ACCESS_COOKIE_NAME, REFRESH_COOKIE_NAME, getCookie } from '../utils/sessionCookies';
 
 const isProduction = process.env.NODE_ENV === 'production';
+const parsePositiveInt = (value: string | undefined, fallback: number): number => {
+  const parsed = Number.parseInt(String(value || ''), 10);
+  return Number.isFinite(parsed) && parsed > 0 ? parsed : fallback;
+};
+
+const GLOBAL_RATE_LIMIT_WINDOW_MS = parsePositiveInt(
+  process.env.API_RATE_LIMIT_WINDOW_MS,
+  15 * 60 * 1000
+);
+const GLOBAL_RATE_LIMIT_MAX = parsePositiveInt(
+  process.env.API_RATE_LIMIT_MAX,
+  isProduction ? 1200 : 10000
+);
+const LOGIN_IP_RATE_LIMIT_WINDOW_MS = parsePositiveInt(
+  process.env.LOGIN_IP_RATE_LIMIT_WINDOW_MS,
+  15 * 60 * 1000
+);
+const LOGIN_IP_RATE_LIMIT_MAX = parsePositiveInt(
+  process.env.LOGIN_IP_RATE_LIMIT_MAX,
+  isProduction ? 200 : 10000
+);
+const REFRESH_RATE_LIMIT_WINDOW_MS = parsePositiveInt(
+  process.env.REFRESH_RATE_LIMIT_WINDOW_MS,
+  15 * 60 * 1000
+);
+const REFRESH_RATE_LIMIT_MAX = parsePositiveInt(
+  process.env.REFRESH_RATE_LIMIT_MAX,
+  isProduction ? 120 : 10000
+);
 
 // ── Key generator: use X-Forwarded-For behind proxy, fallback to IP ──
 const getClientKey = (req: Request): string => {
@@ -17,6 +47,45 @@ const normalizeIdentifier = (value: unknown): string =>
 const hashIdentifier = (value: string): string =>
   crypto.createHash('sha256').update(value).digest('hex').slice(0, 24);
 
+const getSessionRateLimitKey = (req: Request): string | null => {
+  const accessToken = getCookie(req, ACCESS_COOKIE_NAME);
+  if (accessToken) {
+    return `session:${hashIdentifier(accessToken)}`;
+  }
+
+  const refreshToken = getCookie(req, REFRESH_COOKIE_NAME);
+  if (refreshToken) {
+    return `refresh:${hashIdentifier(refreshToken)}`;
+  }
+
+  return null;
+};
+
+const getRefreshRateLimitKey = (req: Request): string => {
+  const refreshToken = getCookie(req, REFRESH_COOKIE_NAME);
+  if (refreshToken) {
+    return `refresh-token:${hashIdentifier(refreshToken)}`;
+  }
+
+  return `refresh-ip:${getClientKey(req)}`;
+};
+
+const isGlobalRateLimitExempt = (req: Request): boolean => {
+  const path = String(req.path || req.originalUrl || req.url || '').toLowerCase();
+
+  // Health checks should always pass.
+  if (path === '/health' || path === '/api/health') {
+    return true;
+  }
+
+  // Auth session lifecycle routes have dedicated, stricter limiters.
+  if (path.startsWith('/auth/me') || path.startsWith('/auth/refresh') || path.startsWith('/auth/logout')) {
+    return true;
+  }
+
+  return false;
+};
+
 const getEmailOrPhoneIdentifier = (req: Request): string => {
   const email = normalizeIdentifier(req.body?.email);
   if (email) return `email:${email}`;
@@ -29,22 +98,17 @@ const getEmailOrPhoneIdentifier = (req: Request): string => {
 
 // ── Global API Rate Limiter ──
 export const rateLimiter = rateLimit({
-  windowMs: 15 * 60 * 1000,     // 15 minutes
-  max: isProduction ? 200 : 10000,
+  windowMs: GLOBAL_RATE_LIMIT_WINDOW_MS,
+  max: GLOBAL_RATE_LIMIT_MAX,
   standardHeaders: true,
   legacyHeaders: false,
-  keyGenerator: getClientKey,
+  keyGenerator: (req: Request) => getSessionRateLimitKey(req) || `ip:${getClientKey(req)}`,
+  skipFailedRequests: true,
   message: {
     success: false,
     error: 'Too many requests. Please try again later.',
   },
-  skip: (req) => {
-    if (process.env.NODE_ENV !== 'production') {
-      const skipPaths = ['/auth/me', '/health'];
-      return skipPaths.some(path => req.path.includes(path));
-    }
-    return false;
-  },
+  skip: isGlobalRateLimitExempt,
 });
 
 // ── Strict Auth Rate Limiter (Login/Register) ──
@@ -85,8 +149,9 @@ export const loginRateLimiter = rateLimit({
 
 // ── Login Burst Limiter (per-IP total attempts) ──
 export const loginIpRateLimiter = rateLimit({
-  windowMs: 15 * 60 * 1000, // 15 minutes
-  max: isProduction ? 20 : 10000,
+  windowMs: LOGIN_IP_RATE_LIMIT_WINDOW_MS,
+  max: LOGIN_IP_RATE_LIMIT_MAX,
+  skipSuccessfulRequests: true,
   standardHeaders: true,
   legacyHeaders: false,
   keyGenerator: (req: Request) => `login-ip:${getClientKey(req)}`,
@@ -201,11 +266,11 @@ export const passwordResetRateLimiter = rateLimit({
 
 // ── Refresh Token Rate Limiter ──
 export const refreshRateLimiter = rateLimit({
-  windowMs: 15 * 60 * 1000, // 15 minutes
-  max: isProduction ? 30 : 10000,
+  windowMs: REFRESH_RATE_LIMIT_WINDOW_MS,
+  max: REFRESH_RATE_LIMIT_MAX,
   standardHeaders: true,
   legacyHeaders: false,
-  keyGenerator: (req: Request) => `refresh:${getClientKey(req)}`,
+  keyGenerator: getRefreshRateLimitKey,
   message: {
     success: false,
     error: 'Too many token refresh attempts. Please try again later.',

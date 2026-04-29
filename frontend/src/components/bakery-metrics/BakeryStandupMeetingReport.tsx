@@ -29,8 +29,14 @@ interface TargetDay {
   weekName: string;
   dayOfWeek: string;
   targetDate: string;
+  targetDateLabel: string;
   weekStart: string;
   weekEnd: string;
+  currentDate: string;
+  currentDateLabel: string;
+  currentDayOfWeek: string;
+  timeZone: string;
+  serverNow: string;
   weekExists: boolean;
 }
 
@@ -83,6 +89,14 @@ interface StandupReport {
 const fmtNum = (n: number | null | undefined, suffix = '') =>
   n === null || n === undefined || Number.isNaN(n) ? '—' : `${Number(n).toLocaleString(undefined, { maximumFractionDigits: 1 })}${suffix}`;
 
+const parseDateLike = (value: string): Date => {
+  const trimmed = String(value || '').trim();
+  if (/^\d{4}-\d{2}-\d{2}$/.test(trimmed)) {
+    return new Date(`${trimmed}T00:00:00Z`);
+  }
+  return new Date(trimmed);
+};
+
 const toneToClasses = (tone?: string) => {
   switch (tone) {
     case 'strong':
@@ -116,6 +130,7 @@ export default function BakeryStandupMeetingReport() {
   const [report, setReport] = useState<StandupReport | null>(null);
   const [generating, setGenerating] = useState(false);
   const [errorMsg, setErrorMsg] = useState<string | null>(null);
+  const [clockNow, setClockNow] = useState<Date>(new Date());
 
   const [comments, setComments] = useState('');
   const [initialComments, setInitialComments] = useState('');
@@ -150,6 +165,11 @@ export default function BakeryStandupMeetingReport() {
   }, []);
 
   useEffect(() => {
+    const timer = setInterval(() => setClockNow(new Date()), 1000);
+    return () => clearInterval(timer);
+  }, []);
+
+  useEffect(() => {
     let active = true;
     (async () => {
       setLoadingTarget(true);
@@ -161,11 +181,23 @@ export default function BakeryStandupMeetingReport() {
             weekName: res.data.weekName,
             dayOfWeek: res.data.dayOfWeek,
             targetDate: res.data.targetDate,
+            targetDateLabel: res.data.targetDateLabel || '',
             weekStart: res.data.weekStart,
             weekEnd: res.data.weekEnd,
+            currentDate: res.data.currentDate || res.data.targetDate,
+            currentDateLabel: res.data.currentDateLabel || '',
+            currentDayOfWeek: res.data.currentDayOfWeek || '',
+            timeZone: res.data.timeZone || 'America/Chicago',
+            serverNow: res.data.serverNow || new Date().toISOString(),
             weekExists: res.data.weekExists,
           };
           setTarget(t);
+          if (t.serverNow) {
+            const serverNow = new Date(t.serverNow);
+            if (!Number.isNaN(serverNow.getTime())) {
+              setClockNow(serverNow);
+            }
+          }
           await loadExisting(t);
         }
       } catch (err: any) {
@@ -341,14 +373,38 @@ export default function BakeryStandupMeetingReport() {
     );
   }
 
-  const formattedTargetDate = target
-    ? new Date(target.targetDate).toLocaleDateString(undefined, {
-        weekday: 'long',
-        month: 'long',
-        day: 'numeric',
-        year: 'numeric',
-      })
-    : '';
+  const displayTimeZone = target?.timeZone || Intl.DateTimeFormat().resolvedOptions().timeZone || 'UTC';
+  const formattedTargetDate = target?.targetDateLabel
+    || (target
+      ? parseDateLike(target.targetDate).toLocaleDateString('en-US', {
+          weekday: 'long',
+          month: 'long',
+          day: 'numeric',
+          year: 'numeric',
+          timeZone: 'UTC',
+        })
+      : '');
+  const formattedCurrentDate = target?.currentDateLabel
+    || (target
+      ? parseDateLike(target.currentDate).toLocaleDateString('en-US', {
+          weekday: 'long',
+          month: 'long',
+          day: 'numeric',
+          year: 'numeric',
+          timeZone: 'UTC',
+        })
+      : '');
+  const liveSystemClock = clockNow.toLocaleString('en-US', {
+    weekday: 'short',
+    month: 'short',
+    day: 'numeric',
+    year: 'numeric',
+    hour: 'numeric',
+    minute: '2-digit',
+    second: '2-digit',
+    timeZone: displayTimeZone,
+    timeZoneName: 'short',
+  });
 
   return (
     <div className={`w-full px-2 sm:px-4 ${!report ? 'h-[calc(100vh-260px)] overflow-hidden flex flex-col items-center justify-center' : 'pb-12'}`}>
@@ -370,11 +426,11 @@ export default function BakeryStandupMeetingReport() {
             <div className="mt-5 inline-flex flex-wrap items-center justify-center gap-2 text-xs">
               <span className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-white/70 dark:bg-gray-800/70 border border-gray-200 dark:border-gray-700 shadow-sm">
                 <Calendar className="w-3.5 h-3.5 text-amber-500" />
-                <span className="font-semibold text-gray-800 dark:text-gray-200">{formattedTargetDate}</span>
+                <span className="font-semibold text-gray-800 dark:text-gray-200">Previous working day: {formattedTargetDate}</span>
               </span>
               <span className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-white/70 dark:bg-gray-800/70 border border-gray-200 dark:border-gray-700 shadow-sm">
                 <Clock className="w-3.5 h-3.5 text-blue-500" />
-                <span className="font-medium text-gray-700 dark:text-gray-300">{target.dayOfWeek}</span>
+                <span className="font-medium text-gray-700 dark:text-gray-300">Current day: {formattedCurrentDate}</span>
                 <span className="text-gray-400">·</span>
                 <span className="text-gray-600 dark:text-gray-400">{target.weekName}</span>
               </span>
@@ -386,6 +442,12 @@ export default function BakeryStandupMeetingReport() {
               )}
             </div>
           )}
+        </div>
+      )}
+
+      {target && (
+        <div className={`w-full text-center text-[12px] text-gray-600 dark:text-gray-300 ${report ? 'mb-2' : 'mb-4'}`}>
+          System clock ({displayTimeZone}): <span className="font-semibold text-gray-800 dark:text-gray-100">{liveSystemClock}</span>
         </div>
       )}
 

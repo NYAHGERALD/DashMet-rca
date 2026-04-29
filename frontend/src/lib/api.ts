@@ -7,6 +7,7 @@ const CSRF_COOKIE_NAME = 'dashmet_csrf';
 export const SESSION_EXPIRED_EVENT = 'dashmet:session-expired';
 let sessionExpiredEventEmitted = false;
 let csrfTokenFromHeader: string | null = null;
+let refreshInFlight: Promise<void> | null = null;
 
 const api = axios.create({
   baseURL: API_BASE_URL,
@@ -138,6 +139,21 @@ const emitSessionExpired = () => {
   window.dispatchEvent(new CustomEvent(SESSION_EXPIRED_EVENT));
 };
 
+const ensureSingleRefresh = async () => {
+  if (!refreshInFlight) {
+    refreshInFlight = refreshClient
+      .post('/auth/refresh')
+      .then(() => {
+        sessionExpiredEventEmitted = false;
+      })
+      .finally(() => {
+        refreshInFlight = null;
+      });
+  }
+
+  await refreshInFlight;
+};
+
 api.interceptors.response.use(
   (response) => {
     captureCsrfToken(response.headers);
@@ -156,8 +172,7 @@ api.interceptors.response.use(
       originalRequest._retry = true;
 
       try {
-        await refreshClient.post('/auth/refresh');
-        sessionExpiredEventEmitted = false;
+        await ensureSingleRefresh();
         return api(originalRequest);
       } catch {
         if (typeof window !== 'undefined' && !shouldStayOnAuthPage()) {

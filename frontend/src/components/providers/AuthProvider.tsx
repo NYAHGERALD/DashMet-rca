@@ -93,6 +93,19 @@ const getWarningWindowForRole = (role?: string, idleTimeoutMs?: number): number 
 const getLoginRedirectForRole = (role?: string): string =>
   role === 'SYSTEM_ADMIN' ? '/dashmet-control/login' : '/login';
 
+const isTransientAuthLookupError = (error: any): boolean => {
+  const status = error?.response?.status;
+  const code = String(error?.code || '');
+  return (
+    status === 429 ||
+    status === 502 ||
+    status === 503 ||
+    status === 504 ||
+    code === 'ECONNABORTED' ||
+    code === 'ERR_NETWORK'
+  );
+};
+
 export function AuthProvider({ children }: { children: React.ReactNode }) {
   const [user, setUser] = useState<User | null>(null);
   const [loading, setLoading] = useState(true);
@@ -256,6 +269,11 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       scheduleIdleTimers();
       return userData;
     } catch (error) {
+      if (isTransientAuthLookupError(error) && user) {
+        console.warn('Transient profile refresh error; preserving active session state.', error);
+        return user;
+      }
+
       console.error('Failed to refresh user profile:', error);
       setUser(null);
       setNeedsProfileSetup(false);
@@ -263,7 +281,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       setIdleCountdownSeconds(0);
       return null;
     }
-  }, [loadCurrentUser, scheduleIdleTimers]);
+  }, [loadCurrentUser, scheduleIdleTimers, user]);
 
   const handleStaySignedIn = useCallback(async () => {
     setExtendingSession(true);
@@ -276,6 +294,14 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       scheduleIdleTimers();
     } catch (error) {
       console.error('Session extension failed:', error);
+      if (isTransientAuthLookupError(error)) {
+        setSessionExpired(false);
+        setShowIdleWarning(false);
+        setIdleCountdownSeconds(0);
+        lastActivityRef.current = Date.now();
+        scheduleIdleTimers();
+        return;
+      }
       setShowIdleWarning(false);
       setIdleCountdownSeconds(0);
       setSessionExpired(true);

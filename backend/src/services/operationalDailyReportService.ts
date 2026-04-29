@@ -687,8 +687,12 @@ export async function generateOperationalDailyReport(
 }
 
 // ─── Get Saved Report from DB ───────────────────────────────────────────────
-export async function getSavedDailyReport(weekName: string, dayOfWeek: string) {
-  if (!validateWeekName(weekName) || !validateDayOfWeek(dayOfWeek)) {
+export async function getSavedDailyReport(
+  weekName: string,
+  dayOfWeek: string,
+  organizationId: string,
+) {
+  if (!validateWeekName(weekName) || !validateDayOfWeek(dayOfWeek) || !organizationId) {
     return null;
   }
 
@@ -717,6 +721,7 @@ export async function getSavedDailyReport(weekName: string, dayOfWeek: string) {
 export async function saveDailyReport(
   weekName: string,
   dayOfWeek: string,
+  organizationId: string,
   reportData: Record<string, unknown>,
   userId: string,
   userName: string,

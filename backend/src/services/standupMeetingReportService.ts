@@ -32,29 +32,99 @@ function getOpenAI(): OpenAI | null {
 // ─── Constants ──────────────────────────────────────────────────────────────
 const VALID_DAYS = ['Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday', 'Sunday'];
 const WEEK_NAME_PATTERN = /^[A-Za-z0-9\s\-_()]{1,100}$/;
+const DAY_NAME_TO_INDEX: Record<string, number> = {
+  Monday: 1,
+  Tuesday: 2,
+  Wednesday: 3,
+  Thursday: 4,
+  Friday: 5,
+  Saturday: 6,
+  Sunday: 7,
+};
+const DEFAULT_STANDUP_TIMEZONE = process.env.REPORT_TIMEZONE || 'America/Chicago';
 
 // ─── Date helpers ───────────────────────────────────────────────────────────
 function fmtDate(d: Date): string {
-  const m = String(d.getMonth() + 1).padStart(2, '0');
-  const day = String(d.getDate()).padStart(2, '0');
-  return `${m}-${day}-${d.getFullYear()}`;
+  const m = String(d.getUTCMonth() + 1).padStart(2, '0');
+  const day = String(d.getUTCDate()).padStart(2, '0');
+  return `${m}-${day}-${d.getUTCFullYear()}`;
+}
+
+function fmtIsoDate(d: Date): string {
+  const y = d.getUTCFullYear();
+  const m = String(d.getUTCMonth() + 1).padStart(2, '0');
+  const day = String(d.getUTCDate()).padStart(2, '0');
+  return `${y}-${m}-${day}`;
+}
+
+function fmtLongDate(d: Date): string {
+  return d.toLocaleDateString('en-US', {
+    weekday: 'long',
+    month: 'long',
+    day: 'numeric',
+    year: 'numeric',
+    timeZone: 'UTC',
+  });
+}
+
+function isValidIanaTimezone(value?: string | null): value is string {
+  if (!value) return false;
+  try {
+    Intl.DateTimeFormat('en-US', { timeZone: value });
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+function resolveTimezone(value?: string | null): string {
+  return isValidIanaTimezone(value) ? value : DEFAULT_STANDUP_TIMEZONE;
+}
+
+function getZonedCalendarParts(date: Date, timeZone: string): {
+  year: number;
+  month: number;
+  day: number;
+  dayOfWeek: string;
+  dayIndex: number;
+} {
+  const formatter = new Intl.DateTimeFormat('en-US', {
+    timeZone,
+    weekday: 'long',
+    year: 'numeric',
+    month: '2-digit',
+    day: '2-digit',
+  });
+  const parts = formatter.formatToParts(date);
+  const readPart = (type: Intl.DateTimeFormatPartTypes): string => parts.find((p) => p.type === type)?.value || '';
+
+  const dayOfWeek = readPart('weekday');
+  const year = Number(readPart('year'));
+  const month = Number(readPart('month'));
+  const day = Number(readPart('day'));
+  const dayIndex = DAY_NAME_TO_INDEX[dayOfWeek] ?? 1;
+
+  return { year, month, day, dayOfWeek, dayIndex };
+}
+
+function asUtcCalendarDate(year: number, month: number, day: number): Date {
+  return new Date(Date.UTC(year, month - 1, day));
+}
+
+function addUtcDays(date: Date, diff: number): Date {
+  const copy = new Date(date);
+  copy.setUTCDate(copy.getUTCDate() + diff);
+  return copy;
 }
 
 function getMonday(d: Date): Date {
-  const date = new Date(d);
-  const dow = date.getDay();
-  const diff = dow === 0 ? -6 : 1 - dow;
-  date.setDate(date.getDate() + diff);
-  date.setHours(0, 0, 0, 0);
-  return date;
+  const dow = d.getUTCDay(); // 0=Sun … 6=Sat
+  const monIndexed = dow === 0 ? 7 : dow; // Mon=1 … Sun=7
+  return addUtcDays(d, 1 - monIndexed);
 }
 
 function getFriday(d: Date): Date {
-  const monday = getMonday(d);
-  const friday = new Date(monday);
-  friday.setDate(monday.getDate() + 4);
-  friday.setHours(0, 0, 0, 0);
-  return friday;
+  return addUtcDays(getMonday(d), 4);
 }
 
 /**
@@ -66,40 +136,80 @@ function getFriday(d: Date): Date {
  */
 export function computeTargetDay(today: Date = new Date()): {
   targetDate: Date;
+  targetDateIso: string;
+  targetDateLabel: string;
   dayOfWeek: string;
   weekName: string;
   weekStart: Date;
+  weekStartIso: string;
   weekEnd: Date;
+  weekEndIso: string;
+  currentDate: Date;
+  currentDateIso: string;
+  currentDateLabel: string;
+  currentDayOfWeek: string;
+  timeZone: string;
 } {
-  const dow = today.getDay(); // 0=Sun … 6=Sat
-  const target = new Date(today);
-  target.setHours(0, 0, 0, 0);
+  return computeTargetDayWithTimezone(today, DEFAULT_STANDUP_TIMEZONE);
+}
+
+export function computeTargetDayWithTimezone(today: Date = new Date(), timeZone?: string | null): {
+  targetDate: Date;
+  targetDateIso: string;
+  targetDateLabel: string;
+  dayOfWeek: string;
+  weekName: string;
+  weekStart: Date;
+  weekStartIso: string;
+  weekEnd: Date;
+  weekEndIso: string;
+  currentDate: Date;
+  currentDateIso: string;
+  currentDateLabel: string;
+  currentDayOfWeek: string;
+  timeZone: string;
+} {
+  const resolvedTimeZone = resolveTimezone(timeZone);
+  const zonedToday = getZonedCalendarParts(today, resolvedTimeZone);
+  const current = asUtcCalendarDate(zonedToday.year, zonedToday.month, zonedToday.day);
+  const target = new Date(current);
+  const dow = zonedToday.dayIndex; // 1=Mon … 7=Sun
 
   if (dow === 1) {
     // Monday → previous Friday (3 days back)
-    target.setDate(target.getDate() - 3);
-  } else if (dow === 0) {
+    target.setUTCDate(target.getUTCDate() - 3);
+  } else if (dow === 7) {
     // Sunday → previous Friday (2 days back)
-    target.setDate(target.getDate() - 2);
+    target.setUTCDate(target.getUTCDate() - 2);
   } else if (dow === 6) {
     // Saturday → Friday (1 day back)
-    target.setDate(target.getDate() - 1);
+    target.setUTCDate(target.getUTCDate() - 1);
   } else {
     // Tue-Fri → previous day
-    target.setDate(target.getDate() - 1);
+    target.setUTCDate(target.getUTCDate() - 1);
   }
 
-  const dayOfWeek = VALID_DAYS[(target.getDay() + 6) % 7]; // Mon-index list
+  const dayOfWeek = VALID_DAYS[(target.getUTCDay() + 6) % 7]; // Mon-index list
   const monday = getMonday(target);
   const friday = getFriday(target);
   const weekName = `${fmtDate(monday)}_${fmtDate(friday)}`;
+  const currentDayOfWeek = zonedToday.dayOfWeek;
 
   return {
     targetDate: target,
+    targetDateIso: fmtIsoDate(target),
+    targetDateLabel: fmtLongDate(target),
     dayOfWeek,
     weekName,
     weekStart: monday,
+    weekStartIso: fmtIsoDate(monday),
     weekEnd: friday,
+    weekEndIso: fmtIsoDate(friday),
+    currentDate: current,
+    currentDateIso: fmtIsoDate(current),
+    currentDateLabel: fmtLongDate(current),
+    currentDayOfWeek,
+    timeZone: resolvedTimeZone,
   };
 }
 
@@ -127,7 +237,15 @@ function sanitizeText(text: string): string {
     .slice(0, 500);
 }
 
-async function collectStandupData(weekName: string, dayOfWeek: string, organizationId: string) {
+async function collectStandupData(
+  weekName: string,
+  dayOfWeek: string,
+  organizationId: string,
+  options?: {
+    timeZone?: string | null;
+    now?: Date;
+  },
+) {
   // Pull the exact flattened row the UI table renders
   const flattenedRows = await bakeryMetricsService.getBothShiftsRecords({ week: weekName, day: dayOfWeek });
   const row: any = flattenedRows?.[0] ?? null;
@@ -210,8 +328,7 @@ async function collectStandupData(weekName: string, dayOfWeek: string, organizat
   }
 
   // Resolve dayOfWeek id & week number for issue lookup
-  const dayMapping: Record<string, number> = { Monday: 1, Tuesday: 2, Wednesday: 3, Thursday: 4, Friday: 5, Saturday: 6, Sunday: 7 };
-  const dayOrder = dayMapping[dayOfWeek] || 0;
+  const dayOrder = DAY_NAME_TO_INDEX[dayOfWeek] || 0;
 
   const dayOfWeekRecords = await prisma.dayOfWeek.findMany({
     where: { organizationId, dayOrder, isActive: true },
@@ -265,9 +382,10 @@ async function collectStandupData(weekName: string, dayOfWeek: string, organizat
   // The standup runs TODAY (e.g. Tuesday) and reviews YESTERDAY's production
   // (e.g. Monday). "Today's Startup Indicators" MUST reflect issues filed for
   // today — not the production-review day.
-  const today = new Date();
-  const todayDowIndex = today.getDay() === 0 ? 7 : today.getDay(); // Sun=7, Mon=1…
-  const todayDayName = VALID_DAYS[(todayDowIndex - 1) % 7];
+  const currentContext = computeTargetDayWithTimezone(options?.now ?? new Date(), options?.timeZone);
+  const today = currentContext.currentDate;
+  const todayDowIndex = DAY_NAME_TO_INDEX[currentContext.currentDayOfWeek] || 1; // Mon=1…Sun=7
+  const todayDayName = currentContext.currentDayOfWeek;
   let todayIssues: any[] = [];
   if (todayDayName !== dayOfWeek) {
     const todayDowRecords = await prisma.dayOfWeek.findMany({
@@ -278,7 +396,6 @@ async function collectStandupData(weekName: string, dayOfWeek: string, organizat
 
     // Determine the week sheet that contains "today" (may differ from target week)
     const todayMidnight = new Date(today);
-    todayMidnight.setHours(0, 0, 0, 0);
     const todaySheet = await prisma.bakeryWeeklySheet.findFirst({
       where: { weekStart: { lte: todayMidnight }, weekEnd: { gte: todayMidnight } },
     });
@@ -525,6 +642,10 @@ export async function generateStandupReport(
   weekName: string,
   dayOfWeek: string,
   organizationId: string,
+  options?: {
+    timeZone?: string | null;
+    now?: Date;
+  },
 ) {
   if (!WEEK_NAME_PATTERN.test(weekName)) {
     return { success: false as const, error: 'Invalid week name format.' };
@@ -538,7 +659,7 @@ export async function generateStandupReport(
     return { success: false as const, error: 'AI service is not configured. Contact your administrator.' };
   }
 
-  const data = await collectStandupData(weekName, dayOfWeek, organizationId);
+  const data = await collectStandupData(weekName, dayOfWeek, organizationId, options);
 
   if (!data.hasData && data.issues.length === 0) {
     return {
@@ -643,8 +764,12 @@ export async function generateStandupReport(
 }
 
 // ─── Read saved ─────────────────────────────────────────────────────────────
-export async function getSavedStandupReport(weekName: string, dayOfWeek: string) {
-  if (!WEEK_NAME_PATTERN.test(weekName) || !VALID_DAYS.includes(dayOfWeek)) return null;
+export async function getSavedStandupReport(
+  weekName: string,
+  dayOfWeek: string,
+  organizationId: string,
+) {
+  if (!WEEK_NAME_PATTERN.test(weekName) || !VALID_DAYS.includes(dayOfWeek) || !organizationId) return null;
 
   const saved = await prisma.bakeryStandupReport.findUnique({
     where: { weekName_dayOfWeek: { weekName, dayOfWeek } },
@@ -763,6 +888,7 @@ export async function saveStandupReport(
   weekName: string,
   dayOfWeek: string,
   reportDate: Date,
+  organizationId: string,
   reportData: Record<string, unknown>,
   userId: string,
   userName: string,
@@ -803,10 +929,11 @@ export async function saveStandupReport(
 export async function updateStandupComments(
   weekName: string,
   dayOfWeek: string,
+  organizationId: string,
   comments: string,
   userName: string,
 ) {
-  if (!WEEK_NAME_PATTERN.test(weekName) || !VALID_DAYS.includes(dayOfWeek)) {
+  if (!WEEK_NAME_PATTERN.test(weekName) || !VALID_DAYS.includes(dayOfWeek) || !organizationId) {
     return { success: false as const, error: 'Invalid week or day.' };
   }
   const trimmed = (comments || '').slice(0, 5000);
@@ -836,8 +963,8 @@ export async function updateStandupComments(
 }
 
 // ─── Delete a saved standup report ──────────────────────────────────────────
-export async function deleteStandupReport(weekName: string, dayOfWeek: string) {
-  if (!WEEK_NAME_PATTERN.test(weekName) || !VALID_DAYS.includes(dayOfWeek)) {
+export async function deleteStandupReport(weekName: string, dayOfWeek: string, organizationId: string) {
+  if (!WEEK_NAME_PATTERN.test(weekName) || !VALID_DAYS.includes(dayOfWeek) || !organizationId) {
     return { success: false as const, error: 'Invalid week or day.' };
   }
   const existing = await prisma.bakeryStandupReport.findUnique({

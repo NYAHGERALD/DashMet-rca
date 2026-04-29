@@ -1037,7 +1037,7 @@ export const refreshToken = async (req: AuthRequest, res: Response) => {
   }
 
   if (session.expiresAt < now) {
-    await prisma.session.delete({
+    await prisma.session.deleteMany({
       where: { id: session.id },
     });
 
@@ -1059,7 +1059,7 @@ export const refreshToken = async (req: AuthRequest, res: Response) => {
   });
 
   if (!user || !user.isActive) {
-    await prisma.session.delete({
+    await prisma.session.deleteMany({
       where: { id: session.id },
     });
     clearAuthCookies(res);
@@ -1067,7 +1067,7 @@ export const refreshToken = async (req: AuthRequest, res: Response) => {
   }
 
   if (isSessionAbsoluteExpired(session.createdAt, user.role, now)) {
-    await prisma.session.delete({
+    await prisma.session.deleteMany({
       where: { id: session.id },
     });
     clearAuthCookies(res);

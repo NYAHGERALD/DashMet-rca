@@ -290,6 +290,7 @@ function FMIRListContent() {
   const [toastMessage, setToastMessage] = useState<string | null>(null);
   const [toastType, setToastType] = useState<'success' | 'error'>('success');
   const [searchQuery, setSearchQuery] = useState('');
+  const [debouncedSearchQuery, setDebouncedSearchQuery] = useState('');
   const [statusFilter, setStatusFilter] = useState<string>('');
   const [deleting, setDeleting] = useState<string | null>(null);
   
@@ -378,6 +379,14 @@ function FMIRListContent() {
   const canCreateFMIR = hasPrivilege(FMIR_PRIVILEGES.CREATE);
   const canDeleteVisible = hasPrivilege(FMIR_PRIVILEGES.DELETE_VISIBLE);
   const canToggleInvestigation = hasPrivilege(FMIR_PRIVILEGES.TOGGLE_INVESTIGATION);
+
+  useEffect(() => {
+    const timeoutId = setTimeout(() => {
+      setDebouncedSearchQuery(searchQuery.trim());
+    }, 350);
+
+    return () => clearTimeout(timeoutId);
+  }, [searchQuery]);
   const canCloseFMIR = hasPrivilege(FMIR_PRIVILEGES.CLOSE);
   const canAddComments = hasPrivilege(FMIR_PRIVILEGES.COMMENTS_ADD);
   const canExportPDF = hasPrivilege(FMIR_PRIVILEGES.EXPORT_PDF);
@@ -471,7 +480,7 @@ function FMIRListContent() {
 
       const params = new URLSearchParams();
       if (statusFilter) params.append('status', statusFilter);
-      if (searchQuery) params.append('search', searchQuery);
+      if (debouncedSearchQuery) params.append('search', debouncedSearchQuery);
 
       const response = await api.get(`/fmir?${params.toString()}`);
       const data = response.data;
@@ -487,7 +496,7 @@ function FMIRListContent() {
     } finally {
       setLoading(false);
     }
-  }, [getIdToken, statusFilter, searchQuery]);
+  }, [getIdToken, statusFilter, debouncedSearchQuery]);
 
   useEffect(() => {
     fetchReports();

@@ -65,11 +65,20 @@ function InvestigationReportContent() {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [searchQuery, setSearchQuery] = useState('');
+  const [debouncedSearchQuery, setDebouncedSearchQuery] = useState('');
   const [statusFilter, setStatusFilter] = useState('ALL');
   const [selectedIncident, setSelectedIncident] = useState<string | null>(null);
   const [generating, setGenerating] = useState(false);
   const [previewUrl, setPreviewUrl] = useState<string | null>(null);
   const [showFilters, setShowFilters] = useState(false);
+
+  useEffect(() => {
+    const timeoutId = setTimeout(() => {
+      setDebouncedSearchQuery(searchQuery.trim());
+    }, 350);
+
+    return () => clearTimeout(timeoutId);
+  }, [searchQuery]);
 
   const fetchIncidents = useCallback(async () => {
     setLoading(true);
@@ -85,7 +94,7 @@ function InvestigationReportContent() {
       // Build query params
       const params = new URLSearchParams();
       if (statusFilter !== 'ALL') params.append('status', statusFilter);
-      if (searchQuery) params.append('search', searchQuery);
+      if (debouncedSearchQuery) params.append('search', debouncedSearchQuery);
       
       const response = await fetch(
         `${process.env.NEXT_PUBLIC_API_URL}/investigation-report/incidents?${params.toString()}`,
@@ -109,7 +118,7 @@ function InvestigationReportContent() {
     } finally {
       setLoading(false);
     }
-  }, [getIdToken, statusFilter, searchQuery]);
+  }, [getIdToken, statusFilter, debouncedSearchQuery]);
 
   useEffect(() => {
     fetchIncidents();

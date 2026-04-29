@@ -41,6 +41,18 @@ services:
         value: None
       - key: BCRYPT_ROUNDS
         value: 12
+      - key: API_RATE_LIMIT_WINDOW_MS
+        value: 900000
+      - key: API_RATE_LIMIT_MAX
+        value: 1200
+      - key: LOGIN_IP_RATE_LIMIT_WINDOW_MS
+        value: 900000
+      - key: LOGIN_IP_RATE_LIMIT_MAX
+        value: 200
+      - key: REFRESH_RATE_LIMIT_WINDOW_MS
+        value: 900000
+      - key: REFRESH_RATE_LIMIT_MAX
+        value: 120
       - key: CORS_ORIGIN
         sync: false # Set manually after frontend is deployed
       - key: FRONTEND_URL

@@ -5,7 +5,7 @@ import bakeryAdminService from '../services/bakeryAdminService';
 import { generateAiInsights, getCachedInsight, saveInsight, logInsightAction, getInsightLogs } from '../services/bakeryAiInsightsService';
 import { generateOperationalDailyReport, getSavedDailyReport, saveDailyReport } from '../services/operationalDailyReportService';
 import {
-  computeTargetDay,
+  computeTargetDayWithTimezone,
   generateStandupReport,
   getSavedStandupReport,
   saveStandupReport,
@@ -993,6 +993,49 @@ router.get('/four-month-avg-ytd', async (req: Request, res: Response) => {
 // ─────────────────────────────────────────────────────────────────────────────
 const VALID_DAYS_ROUTE = ['Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday', 'Sunday'];
 const WEEK_NAME_ROUTE_PATTERN = /^[A-Za-z0-9\s\-_()]{1,100}$/;
+const DEFAULT_STANDUP_TIMEZONE = process.env.REPORT_TIMEZONE || 'America/Chicago';
+
+const isValidIanaTimezone = (value?: string | null): boolean => {
+  if (!value) return false;
+  try {
+    Intl.DateTimeFormat('en-US', { timeZone: value });
+    return true;
+  } catch {
+    return false;
+  }
+};
+
+const parseIsoDateStringAsUtc = (value: string): Date | null => {
+  const match = /^(\d{4})-(\d{2})-(\d{2})$/.exec(value.trim());
+  if (!match) return null;
+  const year = Number(match[1]);
+  const month = Number(match[2]);
+  const day = Number(match[3]);
+  const date = new Date(Date.UTC(year, month - 1, day));
+  if (Number.isNaN(date.getTime())) return null;
+  return date;
+};
+
+const parseReportDateInput = (value: unknown): Date | null => {
+  if (typeof value !== 'string') return null;
+  const trimmed = value.trim();
+  if (!trimmed) return null;
+
+  const dateOnly = parseIsoDateStringAsUtc(trimmed);
+  if (dateOnly) return dateOnly;
+
+  const parsed = new Date(trimmed);
+  if (Number.isNaN(parsed.getTime())) return null;
+  return parsed;
+};
+
+const resolveUserTimezone = async (userId: string): Promise<string> => {
+  const pref = await prisma.user.findUnique({
+    where: { id: userId },
+    select: { timezone: true },
+  });
+  return isValidIanaTimezone(pref?.timezone) ? (pref?.timezone as string) : DEFAULT_STANDUP_TIMEZONE;
+};
 
 router.get('/operational-daily-report', authenticate, async (req: AuthRequest, res: Response) => {
   try {
@@ -1011,7 +1054,12 @@ router.get('/operational-daily-report', authenticate, async (req: AuthRequest, r
       return res.status(400).json({ success: false, error: 'Valid dayOfWeek is required.' });
     }
 
-    const saved = await getSavedDailyReport(weekName, dayOfWeek);
+    const organizationId = user.organizationId;
+    if (!organizationId) {
+      return res.status(400).json({ success: false, error: 'User organization not found.' });
+    }
+
+    const saved = await getSavedDailyReport(weekName, dayOfWeek, organizationId);
 
     if (!saved) {
       return res.json({ success: true, exists: false });
@@ -1063,7 +1111,7 @@ router.post('/operational-daily-report', authenticate, async (req: AuthRequest, 
 
     // If not regenerating, check if a saved report exists
     if (!regenerate) {
-      const saved = await getSavedDailyReport(weekName, dayOfWeek);
+      const saved = await getSavedDailyReport(weekName, dayOfWeek, organizationId);
       if (saved) {
         console.log(`[OpsDailyReport] Returning saved report for ${dayOfWeek} (${weekName})`);
         return res.json({ ...saved, source: 'database' });
@@ -1104,6 +1152,7 @@ router.post('/operational-daily-report', authenticate, async (req: AuthRequest, 
       await saveDailyReport(
         weekName,
         dayOfWeek,
+        organizationId,
         result.data as Record<string, unknown>,
         user.id,
         userName,
@@ -1128,9 +1177,15 @@ router.post('/operational-daily-report', authenticate, async (req: AuthRequest, 
 
 // GET /api/bakery-metrics/standup-report/target-day
 // Returns { weekName, dayOfWeek, targetDate, weekExists } for "previous production day"
-router.get('/standup-report/target-day', authenticate, async (_req: AuthRequest, res: Response) => {
+router.get('/standup-report/target-day', authenticate, async (req: AuthRequest, res: Response) => {
   try {
-    const target = computeTargetDay(new Date());
+    const user = req.user;
+    if (!user) {
+      return res.status(401).json({ success: false, error: 'Authentication required.' });
+    }
+
+    const timeZone = await resolveUserTimezone(user.id);
+    const target = computeTargetDayWithTimezone(new Date(), timeZone);
     const weekSheet = await prisma.bakeryWeeklySheet.findFirst({
       where: { sheetName: target.weekName },
       select: { sheetName: true, isActive: true },
@@ -1139,9 +1194,15 @@ router.get('/standup-report/target-day', authenticate, async (_req: AuthRequest,
       success: true,
       weekName: target.weekName,
       dayOfWeek: target.dayOfWeek,
-      targetDate: target.targetDate.toISOString(),
-      weekStart: target.weekStart.toISOString(),
-      weekEnd: target.weekEnd.toISOString(),
+      targetDate: target.targetDateIso,
+      targetDateLabel: target.targetDateLabel,
+      currentDate: target.currentDateIso,
+      currentDateLabel: target.currentDateLabel,
+      currentDayOfWeek: target.currentDayOfWeek,
+      timeZone: target.timeZone,
+      serverNow: new Date().toISOString(),
+      weekStart: target.weekStartIso,
+      weekEnd: target.weekEndIso,
       weekExists: !!weekSheet,
     });
   } catch (error: any) {
@@ -1153,6 +1214,9 @@ router.get('/standup-report/target-day', authenticate, async (_req: AuthRequest,
 // GET /api/bakery-metrics/standup-report?weekName=&dayOfWeek=
 router.get('/standup-report', authenticate, async (req: AuthRequest, res: Response) => {
   try {
+    const user = req.user;
+    if (!user) return res.status(401).json({ success: false, error: 'Authentication required.' });
+
     const weekName = req.query.weekName as string;
     const dayOfWeek = req.query.dayOfWeek as string;
     if (!weekName || !WEEK_NAME_ROUTE_PATTERN.test(weekName)) {
@@ -1161,7 +1225,13 @@ router.get('/standup-report', authenticate, async (req: AuthRequest, res: Respon
     if (!dayOfWeek || !VALID_DAYS_ROUTE.includes(dayOfWeek)) {
       return res.status(400).json({ success: false, error: 'Valid dayOfWeek is required.' });
     }
-    const saved = await getSavedStandupReport(weekName, dayOfWeek);
+
+    const organizationId = user.organizationId;
+    if (!organizationId) {
+      return res.status(400).json({ success: false, error: 'User organization not found.' });
+    }
+
+    const saved = await getSavedStandupReport(weekName, dayOfWeek, organizationId);
     if (!saved) return res.json({ success: true, exists: false });
     res.json({ success: true, exists: true, ...saved });
   } catch (error: any) {
@@ -1189,26 +1259,37 @@ router.post('/standup-report', authenticate, async (req: AuthRequest, res: Respo
     if (!organizationId) {
       return res.status(400).json({ success: false, error: 'User organization not found.' });
     }
+    const timeZone = await resolveUserTimezone(user.id);
 
     const userName = `${user.firstName} ${user.lastName}`;
 
     if (!regenerate) {
-      const saved = await getSavedStandupReport(weekName, dayOfWeek);
+      const saved = await getSavedStandupReport(weekName, dayOfWeek, organizationId);
       if (saved) {
         return res.json({ ...saved, source: 'database' });
       }
     }
 
-    const result = await generateStandupReport(weekName, dayOfWeek, organizationId);
+    const result = await generateStandupReport(weekName, dayOfWeek, organizationId, { timeZone });
     if (!result.success) return res.status(422).json(result);
 
-    const resolvedDate = reportDate ? new Date(reportDate) : computeTargetDay(new Date()).targetDate;
+    let resolvedDate: Date;
+    if (reportDate !== undefined && reportDate !== null) {
+      const parsedReportDate = parseReportDateInput(reportDate);
+      if (!parsedReportDate) {
+        return res.status(400).json({ success: false, error: 'Invalid reportDate value.' });
+      }
+      resolvedDate = parsedReportDate;
+    } else {
+      resolvedDate = computeTargetDayWithTimezone(new Date(), timeZone).targetDate;
+    }
 
     try {
       const saved = await saveStandupReport(
         weekName,
         dayOfWeek,
         resolvedDate,
+        organizationId,
         result.data as Record<string, unknown>,
         user.id,
         userName,
@@ -1251,7 +1332,11 @@ router.patch('/standup-report/comments', authenticate, async (req: AuthRequest, 
     }
 
     const userName = `${user.firstName} ${user.lastName}`;
-    const result = await updateStandupComments(weekName, dayOfWeek, comments, userName);
+    const organizationId = user.organizationId;
+    if (!organizationId) {
+      return res.status(400).json({ success: false, error: 'User organization not found.' });
+    }
+    const result = await updateStandupComments(weekName, dayOfWeek, organizationId, comments, userName);
     if (!result.success) return res.status(404).json(result);
     res.json({ success: true, ...result });
   } catch (error: any) {
@@ -1277,7 +1362,12 @@ router.delete('/standup-report', authenticate, async (req: AuthRequest, res: Res
       return res.status(400).json({ success: false, error: 'Invalid day of week.' });
     }
 
-    const result = await deleteStandupReport(weekName, dayOfWeek);
+    const organizationId = user.organizationId;
+    if (!organizationId) {
+      return res.status(400).json({ success: false, error: 'User organization not found.' });
+    }
+
+    const result = await deleteStandupReport(weekName, dayOfWeek, organizationId);
     if (!result.success) return res.status(404).json(result);
     res.json(result);
   } catch (error: any) {
@@ -1304,7 +1394,12 @@ router.post('/standup-report/delete', authenticate, async (req: AuthRequest, res
       return res.status(400).json({ success: false, error: `Invalid day of week: ${dayOfWeek}` });
     }
 
-    const result = await deleteStandupReport(weekName, dayOfWeek);
+    const organizationId = user.organizationId;
+    if (!organizationId) {
+      return res.status(400).json({ success: false, error: 'User organization not found.' });
+    }
+
+    const result = await deleteStandupReport(weekName, dayOfWeek, organizationId);
     console.log('[StandupReport][DELETE] result:', result);
     if (!result.success) return res.status(404).json(result);
     res.json(result);
