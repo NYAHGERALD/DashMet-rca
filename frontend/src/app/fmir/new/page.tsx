@@ -1,6 +1,6 @@
 'use client';
 
-import React, { useState, useEffect, Suspense, useCallback, useRef, useMemo } from 'react';
+import React, { useState, useEffect, Suspense, useCallback, useRef, useMemo, useLayoutEffect } from 'react';
 import { useRouter, useSearchParams } from 'next/navigation';
 import Link from 'next/link';
 import { useAuth } from '@/components/providers/AuthProvider';
@@ -564,7 +564,7 @@ export default function FMIRNewPage() {
   return (
     <Suspense
       fallback={
-        <div className="min-h-screen bg-gray-50 dark:bg-gray-900 flex items-center justify-center">
+        <div className="min-h-full bg-gray-50 dark:bg-gray-900 flex items-center justify-center">
           <Loader2 className="w-8 h-8 animate-spin text-primary-500" />
         </div>
       }
@@ -597,10 +597,13 @@ function FMIRNewPageContent() {
   const { showAccessDenied, modal: accessDeniedModal } = useAccessDeniedModal();
   
   const [showSOPModal, setShowSOPModal] = useState(false);
+  const [sopModalPos, setSopModalPos] = useState<{ x: number; y: number } | null>(null);
   const [showSuccessModal, setShowSuccessModal] = useState(false);
   const [showEvidenceWarning, setShowEvidenceWarning] = useState(false);
   const [showAlreadySubmittedModal, setShowAlreadySubmittedModal] = useState(false);
   const [showResubmitWarningModal, setShowResubmitWarningModal] = useState(false);
+  const sopModalRef = useRef<HTMLDivElement>(null);
+  const sopDragRef = useRef<{ active: boolean; offsetX: number; offsetY: number }>({ active: false, offsetX: 0, offsetY: 0 });
   
   // Visibility off modal state
   const [showVisibilityOffModal, setShowVisibilityOffModal] = useState(false);
@@ -813,6 +816,42 @@ function FMIRNewPageContent() {
       }
     }
     return null;
+  }, []);
+
+  useLayoutEffect(() => {
+    if (!showSOPModal || !sopModalRef.current) return;
+    const rect = sopModalRef.current.getBoundingClientRect();
+    const margin = 12;
+    setSopModalPos({
+      x: Math.max(margin, Math.round((window.innerWidth - rect.width) / 2)),
+      y: Math.max(margin, Math.round((window.innerHeight - rect.height) / 2)),
+    });
+  }, [showSOPModal]);
+
+  useEffect(() => {
+    const onMouseMove = (e: MouseEvent) => {
+      if (!sopDragRef.current.active || !sopModalRef.current) return;
+      const rect = sopModalRef.current.getBoundingClientRect();
+      const margin = 8;
+      const maxX = Math.max(margin, window.innerWidth - rect.width - margin);
+      const maxY = Math.max(margin, window.innerHeight - rect.height - margin);
+      setSopModalPos({
+        x: Math.min(maxX, Math.max(margin, e.clientX - sopDragRef.current.offsetX)),
+        y: Math.min(maxY, Math.max(margin, e.clientY - sopDragRef.current.offsetY)),
+      });
+    };
+
+    const onMouseUp = () => {
+      sopDragRef.current.active = false;
+      document.body.style.userSelect = '';
+    };
+
+    window.addEventListener('mousemove', onMouseMove);
+    window.addEventListener('mouseup', onMouseUp);
+    return () => {
+      window.removeEventListener('mousemove', onMouseMove);
+      window.removeEventListener('mouseup', onMouseUp);
+    };
   }, []);
 
   // Toggle section expansion
@@ -2996,7 +3035,7 @@ function FMIRNewPageContent() {
   // Show loading state while privileges are still loading
   if (loading || privilegesLoading) {
     return (
-      <div className="min-h-screen bg-gradient-to-br from-gray-50 via-gray-100 to-gray-50 dark:from-gray-900 dark:via-gray-800 dark:to-gray-900 flex items-center justify-center">
+      <div className="min-h-full bg-gradient-to-br from-gray-50 via-gray-100 to-gray-50 dark:from-gray-900 dark:via-gray-800 dark:to-gray-900 flex items-center justify-center">
         {/* Animated background elements */}
         <div className="absolute inset-0 overflow-hidden pointer-events-none">
           <div className="absolute top-1/4 left-1/4 w-64 h-64 bg-primary-400/20 rounded-full blur-3xl animate-pulse" />
@@ -3047,7 +3086,7 @@ function FMIRNewPageContent() {
           requiredPrivilege={editId ? FMIR_PRIVILEGES.EDIT : FMIR_PRIVILEGES.CREATE}
         />
         {/* Empty background - modal is the only content */}
-        <div className="min-h-screen bg-gradient-to-br from-gray-50 via-gray-100 to-gray-50 dark:from-gray-900 dark:via-gray-800 dark:to-gray-900" />
+        <div className="min-h-full bg-gradient-to-br from-gray-50 via-gray-100 to-gray-50 dark:from-gray-900 dark:via-gray-800 dark:to-gray-900" />
       </ProtectedRoute>
     );
   }
@@ -3057,12 +3096,22 @@ function FMIRNewPageContent() {
       {/* Access Denied Modal for API privilege errors */}
       {accessDeniedModal}
       
-      <div className="min-h-screen bg-gradient-to-br from-gray-50 via-gray-100 to-gray-50 dark:from-gray-900 dark:via-gray-800 dark:to-gray-900">
+      <div className="min-h-full bg-gradient-to-br from-gray-50 via-gray-100 to-gray-50 dark:from-gray-900 dark:via-gray-800 dark:to-gray-900">
         <div className="w-full px-4 sm:px-6 lg:px-8 py-6 sm:py-8">
           {/* Header */}
           <div className="mb-6 sm:mb-8 lg:mb-10">
             <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3 sm:gap-4">
               <div className="flex items-center gap-3">
+                <button
+                  type="button"
+                  onClick={() => router.push('/fmir')}
+                  className="inline-flex items-center gap-1.5 px-3 py-2 bg-white dark:bg-gray-800 hover:bg-gray-50 dark:hover:bg-gray-700 text-gray-700 dark:text-gray-200 border border-gray-200 dark:border-gray-700 rounded-lg shadow-sm transition-colors"
+                  title="Back to Foreign Material Reports"
+                  aria-label="Back to Foreign Material Reports"
+                >
+                  <ArrowLeft className="w-4 h-4" />
+                  <span className="hidden sm:inline text-sm font-medium">Back</span>
+                </button>
                 <div className="p-2 sm:p-3 bg-gradient-to-br from-amber-400 via-orange-500 to-red-500 rounded-xl shadow-lg shadow-orange-500/20 flex-shrink-0">
                   <AlertTriangle className="w-6 h-6 sm:w-7 sm:h-7 text-white" />
                 </div>
@@ -4543,27 +4592,37 @@ function FMIRNewPageContent() {
 
       {/* SOP Modal */}
       {showSOPModal && (
-        <div className="fixed inset-0 z-50 overflow-y-auto">
-          <div className="flex min-h-full items-center justify-center p-4">
-            {/* Backdrop */}
-            <div
-              className="fixed inset-0 bg-black/60 backdrop-blur-sm"
-              onClick={() => setShowSOPModal(false)}
-            />
-
+        <div className="fixed inset-0 z-50 p-4" onClick={() => setShowSOPModal(false)}>
             {/* Modal */}
-            <div className="relative bg-white dark:bg-gray-900 rounded-2xl shadow-2xl w-full max-w-4xl max-h-[90vh] overflow-hidden">
+            <div
+              ref={sopModalRef}
+              className="fixed bg-white dark:bg-gray-900 rounded-2xl shadow-2xl w-full max-w-4xl max-h-[90vh] overflow-hidden"
+              style={{ left: sopModalPos?.x ?? 16, top: sopModalPos?.y ?? 16 }}
+              onClick={(e) => e.stopPropagation()}
+            >
               {/* Header */}
-              <div className="sticky top-0 bg-gradient-to-r from-amber-500 to-orange-500 px-6 py-4 flex items-center justify-between">
+              <div
+                className="sticky top-0 bg-gradient-to-r from-amber-500 to-orange-500 px-6 py-4 flex items-center justify-between cursor-move select-none"
+                onMouseDown={(e) => {
+                  if ((e.target as HTMLElement).closest('button')) return;
+                  if (!sopModalRef.current) return;
+                  sopDragRef.current.active = true;
+                  const rect = sopModalRef.current.getBoundingClientRect();
+                  sopDragRef.current.offsetX = e.clientX - rect.left;
+                  sopDragRef.current.offsetY = e.clientY - rect.top;
+                  document.body.style.userSelect = 'none';
+                  e.preventDefault();
+                }}
+              >
                 <div className="flex items-center gap-3">
                   <div className="p-2 bg-white/20 rounded-lg">
                     <BookOpen className="w-6 h-6 text-white" />
                   </div>
                   <div>
-                    <h2 className="text-xl font-bold text-white">
+                    <h2 className="text-lg font-bold text-white">
                       Foreign Material Incident Report
                     </h2>
-                    <p className="text-amber-100 text-sm">Standard Operating Procedure</p>
+                    <p className="text-amber-100 text-xs">Standard Operating Procedure</p>
                   </div>
                 </div>
                 <button
@@ -4575,7 +4634,7 @@ function FMIRNewPageContent() {
               </div>
 
               {/* Content */}
-              <div className="p-6 overflow-y-auto max-h-[calc(90vh-140px)] space-y-6">
+              <div className="p-5 sm:p-6 overflow-y-auto max-h-[calc(90vh-140px)] space-y-5 text-[13px] sm:text-sm leading-relaxed">
                 {/* Confidentiality Notice */}
                 <div className="p-4 bg-gray-100 dark:bg-gray-800 rounded-lg border-l-4 border-gray-400">
                   <p className="text-xs text-gray-600 dark:text-gray-400 italic leading-relaxed">
@@ -4585,10 +4644,10 @@ function FMIRNewPageContent() {
 
                 {/* Emergency Action */}
                 <div className="p-5 bg-red-50 dark:bg-red-900/20 rounded-xl border border-red-200 dark:border-red-800">
-                  <h3 className="text-lg font-bold text-red-700 dark:text-red-400 mb-3">
+                  <h3 className="text-base font-bold text-red-700 dark:text-red-400 mb-3">
                     ⚠️ If foreign material is found, or a FM quality check has failed:
                   </h3>
-                  <p className="text-2xl font-extrabold text-red-600 dark:text-red-400 mb-4">
+                  <p className="text-xl font-extrabold text-red-600 dark:text-red-400 mb-4">
                     STOP THE LINE IMMEDIATELY.
                   </p>
                   <ol className="space-y-2 text-gray-700 dark:text-gray-300">
@@ -4605,13 +4664,13 @@ function FMIRNewPageContent() {
 
                 {/* Main Report Sections */}
                 <div className="space-y-4">
-                  <h3 className="text-xl font-bold text-gray-900 dark:text-white border-b-2 border-amber-500 pb-2">
+                  <h3 className="text-lg font-bold text-gray-900 dark:text-white border-b-2 border-amber-500 pb-2">
                     FOREIGN MATERIAL INCIDENT REPORT
                   </h3>
 
                   {/* Section 1 */}
                   <div className="p-4 bg-blue-50 dark:bg-blue-900/20 rounded-xl border border-blue-200 dark:border-blue-800">
-                    <h4 className="text-lg font-bold text-blue-700 dark:text-blue-400 mb-2 flex items-center gap-2">
+                    <h4 className="text-base font-bold text-blue-700 dark:text-blue-400 mb-2 flex items-center gap-2">
                       <span className="w-7 h-7 rounded-full bg-blue-600 text-white flex items-center justify-center text-sm">1</span>
                       Header/General Information
                     </h4>
@@ -4625,7 +4684,7 @@ function FMIRNewPageContent() {
 
                   {/* Section 2 */}
                   <div className="p-4 bg-purple-50 dark:bg-purple-900/20 rounded-xl border border-purple-200 dark:border-purple-800">
-                    <h4 className="text-lg font-bold text-purple-700 dark:text-purple-400 mb-2 flex items-center gap-2">
+                    <h4 className="text-base font-bold text-purple-700 dark:text-purple-400 mb-2 flex items-center gap-2">
                       <span className="w-7 h-7 rounded-full bg-purple-600 text-white flex items-center justify-center text-sm">2</span>
                       Describe the foreign object in detail
                     </h4>
@@ -4644,7 +4703,7 @@ function FMIRNewPageContent() {
 
                   {/* Section 3 */}
                   <div className="p-4 bg-green-50 dark:bg-green-900/20 rounded-xl border border-green-200 dark:border-green-800">
-                    <h4 className="text-lg font-bold text-green-700 dark:text-green-400 mb-2 flex items-center gap-2">
+                    <h4 className="text-base font-bold text-green-700 dark:text-green-400 mb-2 flex items-center gap-2">
                       <span className="w-7 h-7 rounded-full bg-green-600 text-white flex items-center justify-center text-sm">3</span>
                       Identify the cause of this incident
                     </h4>
@@ -4667,7 +4726,7 @@ function FMIRNewPageContent() {
 
                   {/* Section 4 */}
                   <div className="p-4 bg-orange-50 dark:bg-orange-900/20 rounded-xl border border-orange-200 dark:border-orange-800">
-                    <h4 className="text-lg font-bold text-orange-700 dark:text-orange-400 mb-2 flex items-center gap-2">
+                    <h4 className="text-base font-bold text-orange-700 dark:text-orange-400 mb-2 flex items-center gap-2">
                       <span className="w-7 h-7 rounded-full bg-orange-600 text-white flex items-center justify-center text-sm">4</span>
                       What action was taken when the incident was noted?
                     </h4>
@@ -4701,7 +4760,7 @@ function FMIRNewPageContent() {
 
                   {/* Section 5 */}
                   <div className="p-4 bg-teal-50 dark:bg-teal-900/20 rounded-xl border border-teal-200 dark:border-teal-800">
-                    <h4 className="text-lg font-bold text-teal-700 dark:text-teal-400 mb-2 flex items-center gap-2">
+                    <h4 className="text-base font-bold text-teal-700 dark:text-teal-400 mb-2 flex items-center gap-2">
                       <span className="w-7 h-7 rounded-full bg-teal-600 text-white flex items-center justify-center text-sm">5</span>
                       Verify corrective actions were implemented (QC)
                     </h4>
@@ -4723,7 +4782,7 @@ function FMIRNewPageContent() {
 
                   {/* Section 6 */}
                   <div className="p-4 bg-indigo-50 dark:bg-indigo-900/20 rounded-xl border border-indigo-200 dark:border-indigo-800">
-                    <h4 className="text-lg font-bold text-indigo-700 dark:text-indigo-400 mb-2 flex items-center gap-2">
+                    <h4 className="text-base font-bold text-indigo-700 dark:text-indigo-400 mb-2 flex items-center gap-2">
                       <span className="w-7 h-7 rounded-full bg-indigo-600 text-white flex items-center justify-center text-sm">6</span>
                       Was product placed on hold?
                     </h4>
@@ -4761,7 +4820,7 @@ function FMIRNewPageContent() {
 
                   {/* Section 7 */}
                   <div className="p-4 bg-pink-50 dark:bg-pink-900/20 rounded-xl border border-pink-200 dark:border-pink-800">
-                    <h4 className="text-lg font-bold text-pink-700 dark:text-pink-400 mb-2 flex items-center gap-2">
+                    <h4 className="text-base font-bold text-pink-700 dark:text-pink-400 mb-2 flex items-center gap-2">
                       <span className="w-7 h-7 rounded-full bg-pink-600 text-white flex items-center justify-center text-sm">7</span>
                       If applicable, what screening process will be used?*
                     </h4>
@@ -4775,7 +4834,7 @@ function FMIRNewPageContent() {
 
                   {/* Section 8 */}
                   <div className="p-4 bg-cyan-50 dark:bg-cyan-900/20 rounded-xl border border-cyan-200 dark:border-cyan-800">
-                    <h4 className="text-lg font-bold text-cyan-700 dark:text-cyan-400 mb-2 flex items-center gap-2">
+                    <h4 className="text-base font-bold text-cyan-700 dark:text-cyan-400 mb-2 flex items-center gap-2">
                       <span className="w-7 h-7 rounded-full bg-cyan-600 text-white flex items-center justify-center text-sm">8</span>
                       Final disposition of product or materials affected/Volume*
                     </h4>
@@ -4790,7 +4849,7 @@ function FMIRNewPageContent() {
 
                   {/* Section 9 */}
                   <div className="p-4 bg-rose-50 dark:bg-rose-900/20 rounded-xl border border-rose-200 dark:border-rose-800">
-                    <h4 className="text-lg font-bold text-rose-700 dark:text-rose-400 mb-2 flex items-center gap-2">
+                    <h4 className="text-base font-bold text-rose-700 dark:text-rose-400 mb-2 flex items-center gap-2">
                       <span className="w-7 h-7 rounded-full bg-rose-600 text-white flex items-center justify-center text-sm">9</span>
                       What measures were taken to prevent the incident from re-occurring?*
                     </h4>
@@ -4813,7 +4872,7 @@ function FMIRNewPageContent() {
 
                 {/* Follow-up Procedures */}
                 <div className="space-y-4">
-                  <h3 className="text-xl font-bold text-gray-900 dark:text-white border-b-2 border-amber-500 pb-2">
+                  <h3 className="text-lg font-bold text-gray-900 dark:text-white border-b-2 border-amber-500 pb-2">
                     FOLLOW-UP PROCEDURES
                   </h3>
                   <div className="p-4 bg-gray-50 dark:bg-gray-800 rounded-xl border border-gray-200 dark:border-gray-700">
@@ -4845,7 +4904,6 @@ function FMIRNewPageContent() {
                 </button>
               </div>
             </div>
-          </div>
         </div>
       )}
 

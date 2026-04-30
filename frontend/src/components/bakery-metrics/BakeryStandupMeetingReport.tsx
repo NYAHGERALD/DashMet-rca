@@ -411,15 +411,11 @@ export default function BakeryStandupMeetingReport() {
       {/* Top description — only when no report has been generated yet */}
       {!report && (
         <div className="text-center px-4 pb-6 w-full">
-          <div className="inline-flex items-center gap-2 px-3 py-1 rounded-full bg-gradient-to-r from-amber-50 to-orange-50 dark:from-amber-900/30 dark:to-orange-900/30 border border-amber-200/60 dark:border-amber-800/60 text-[11px] font-semibold text-amber-700 dark:text-amber-300 mb-3 animate-fade-in">
-            <Sparkles className="w-3.5 h-3.5" />
-            AI-Generated · Supervisor Briefing
-          </div>
           <h2 className="text-2xl sm:text-3xl font-bold bg-gradient-to-r from-amber-600 via-orange-500 to-rose-500 bg-clip-text text-transparent animate-fade-in">
             Standup Meeting Report
           </h2>
           <p className="mt-3 max-w-2xl mx-auto text-sm text-gray-500/90 dark:text-gray-400/90 leading-relaxed animate-fade-in-delayed">
-            Generate a daily performance report for supervisor and management meetings based on the previous production day. Numbers and issues are pulled live from the floor, then framed into a natural, human briefing.
+            Generate a daily performance report based on the previous production day. Numbers and issues are pulled live from the floor.
           </p>
 
           {target && (

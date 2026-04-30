@@ -362,6 +362,9 @@ export default function BakeryMetricsReport({ onFilterInfo, triggerAction, onCon
   const [emailSending, setEmailSending] = useState(false);
   const [emailLoadingUsers, setEmailLoadingUsers] = useState(false);
   const [emailCustomMessage, setEmailCustomMessage] = useState('');
+  const [emailModalPos, setEmailModalPos] = useState<{ x: number; y: number } | null>(null);
+  const emailModalRef = useRef<HTMLDivElement>(null);
+  const emailDragRef = useRef<{ active: boolean; offsetX: number; offsetY: number }>({ active: false, offsetX: 0, offsetY: 0 });
 
   // ─── Overlay positioning refs ──────────────────────────────────────────
   const tableWrapperRef = useRef<HTMLDivElement>(null);
@@ -385,6 +388,12 @@ export default function BakeryMetricsReport({ onFilterInfo, triggerAction, onCon
   // ─── Load shift resolutions ──────────────────────────────────────────────
   // ─── Email Modal Handlers ──────────────────────────────────────────────
   const openEmailModal = useCallback(async () => {
+    const modalWidth = Math.min(512, window.innerWidth - 32);
+    const modalHeight = Math.min(680, window.innerHeight - 32);
+    setEmailModalPos({
+      x: Math.max(16, Math.round((window.innerWidth - modalWidth) / 2)),
+      y: Math.max(16, Math.round((window.innerHeight - modalHeight) / 2)),
+    });
     setShowEmailModal(true);
     setEmailWeek(weekFilter);
     setEmailDay(dayFilter);
@@ -620,6 +629,41 @@ export default function BakeryMetricsReport({ onFilterInfo, triggerAction, onCon
 
     const onMouseUp = () => {
       missingDragRef.current.active = false;
+    };
+
+    window.addEventListener('mousemove', onMouseMove);
+    window.addEventListener('mouseup', onMouseUp);
+    return () => {
+      window.removeEventListener('mousemove', onMouseMove);
+      window.removeEventListener('mouseup', onMouseUp);
+    };
+  }, []);
+
+  useLayoutEffect(() => {
+    if (!showEmailModal || !emailModalRef.current) return;
+    const rect = emailModalRef.current.getBoundingClientRect();
+    const margin = 12;
+    setEmailModalPos({
+      x: Math.max(margin, Math.round((window.innerWidth - rect.width) / 2)),
+      y: Math.max(margin, Math.round((window.innerHeight - rect.height) / 2)),
+    });
+  }, [showEmailModal]);
+
+  useEffect(() => {
+    const onMouseMove = (e: MouseEvent) => {
+      if (!emailDragRef.current.active || !emailModalRef.current) return;
+      const rect = emailModalRef.current.getBoundingClientRect();
+      const margin = 8;
+      const maxX = Math.max(margin, window.innerWidth - rect.width - margin);
+      const maxY = Math.max(margin, window.innerHeight - rect.height - margin);
+      setEmailModalPos({
+        x: Math.min(maxX, Math.max(margin, e.clientX - emailDragRef.current.offsetX)),
+        y: Math.min(maxY, Math.max(margin, e.clientY - emailDragRef.current.offsetY)),
+      });
+    };
+
+    const onMouseUp = () => {
+      emailDragRef.current.active = false;
     };
 
     window.addEventListener('mousemove', onMouseMove);
@@ -1950,10 +1994,26 @@ export default function BakeryMetricsReport({ onFilterInfo, triggerAction, onCon
 
       {/* ═══ EMAIL REPORT MODAL ═══ */}
       {showEmailModal && (
-        <div className="fixed inset-0 bg-black/50 backdrop-blur-sm z-50 flex items-center justify-center p-4" onClick={() => setShowEmailModal(false)}>
-          <div className="bg-white dark:bg-gray-800 rounded-2xl shadow-2xl w-full max-w-lg max-h-[85vh] overflow-hidden" onClick={e => e.stopPropagation()}>
+        <div className="fixed inset-0 z-50 p-4" onClick={() => setShowEmailModal(false)}>
+          <div
+            ref={emailModalRef}
+            className="fixed bg-white dark:bg-gray-800 rounded-2xl shadow-2xl w-full max-w-lg max-h-[85vh] overflow-hidden"
+            style={{ left: emailModalPos?.x ?? 16, top: emailModalPos?.y ?? 16 }}
+            onClick={e => e.stopPropagation()}
+          >
             {/* Modal Header */}
-            <div className="bg-gradient-to-r from-blue-600 to-indigo-600 px-6 py-4 flex items-center justify-between">
+            <div
+              className="bg-gradient-to-r from-blue-600 to-indigo-600 px-6 py-4 flex items-center justify-between cursor-move select-none"
+              onMouseDown={(e) => {
+                if ((e.target as HTMLElement).closest('button')) return;
+                if (!emailModalRef.current) return;
+                emailDragRef.current.active = true;
+                const rect = emailModalRef.current.getBoundingClientRect();
+                emailDragRef.current.offsetX = e.clientX - rect.left;
+                emailDragRef.current.offsetY = e.clientY - rect.top;
+                e.preventDefault();
+              }}
+            >
               <div>
                 <h3 className="text-lg font-bold text-white flex items-center gap-2">
                   <Send className="w-5 h-5" /> Email Report

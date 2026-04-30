@@ -675,7 +675,10 @@ router.post('/submit', async (req: Request, res: Response) => {
           });
 
           if (emailUserIds.length > 0) {
-            sendBakeryReportToUsers(emailUserIds, weekName, dayOfWeek, orgId, true)
+            const senderTimeZone = authReq.user?.id
+              ? await resolveUserTimezone(authReq.user.id)
+              : DEFAULT_STANDUP_TIMEZONE;
+            sendBakeryReportToUsers(emailUserIds, weekName, dayOfWeek, orgId, true, undefined, senderTimeZone)
               .then(result => console.log(`[BakeryAutoEmail] Sent=${result.sent}, Failed=${result.failed}`))
               .catch(err => console.error('[BakeryAutoEmail] Error:', err.message));
           }
@@ -1458,6 +1461,9 @@ router.post('/send-report-email', async (req: Request, res: Response) => {
     const safeMessage = typeof customMessage === 'string' && customMessage.trim()
       ? customMessage.trim().replace(/<[^>]*>/g, '').slice(0, 500)
       : undefined;
+    const senderTimeZone = authReq.user?.id
+      ? await resolveUserTimezone(authReq.user.id)
+      : DEFAULT_STANDUP_TIMEZONE;
 
     // Check if data exists for this day
     const reportData = await buildBakeryReportData(weekName, dayOfWeek, orgId);
@@ -1469,7 +1475,7 @@ router.post('/send-report-email', async (req: Request, res: Response) => {
       return;
     }
 
-    const result = await sendBakeryReportToUsers(userIds, weekName, dayOfWeek, orgId, false, safeMessage);
+    const result = await sendBakeryReportToUsers(userIds, weekName, dayOfWeek, orgId, false, safeMessage, senderTimeZone);
     res.json({
       success: true,
       message: `Report emailed to ${result.sent} user(s)${result.failed > 0 ? `, ${result.failed} failed` : ''}.`,

@@ -15,6 +15,7 @@ import fs from 'fs';
 
 // ─── Logo ───────────────────────────────────────────────────────────────────
 const LOGO_PATH = path.join(__dirname, '../assets/logo.png');
+const DEFAULT_REPORT_TIMEZONE = process.env.REPORT_TIMEZONE || 'America/Chicago';
 let logoBuffer: Buffer | null = null;
 let logoBase64 = '';
 try {
@@ -166,6 +167,16 @@ function formatWeekDisplay(weekName: string): string {
   return `${fmtDate(startStr)} - ${fmtDate(endStr)}`;
 }
 
+function resolveReportTimezone(timeZone?: string | null): string {
+  if (!timeZone) return DEFAULT_REPORT_TIMEZONE;
+  try {
+    Intl.DateTimeFormat('en-US', { timeZone });
+    return timeZone;
+  } catch {
+    return DEFAULT_REPORT_TIMEZONE;
+  }
+}
+
 // ─── PDF Colors ─────────────────────────────────────────────────────────────
 const C = {
   primary: '#1e3a5f',
@@ -188,7 +199,7 @@ const C = {
 // ═══════════════════════════════════════════════════════════════════════════
 // GENERATE 2-PAGE PDF
 // ═══════════════════════════════════════════════════════════════════════════
-export async function generateBakeryReportPdf(data: BakeryReportData): Promise<Buffer> {
+export async function generateBakeryReportPdf(data: BakeryReportData, timeZone?: string | null): Promise<Buffer> {
   return new Promise((resolve, reject) => {
     try {
       const doc = new PDFDocument({
@@ -211,9 +222,11 @@ export async function generateBakeryReportPdf(data: BakeryReportData): Promise<B
       const PW = 841.89 - MG * 2;
       const PH = 595.28 - MG * 2;
       const weekDisplay = formatWeekDisplay(data.weekName);
+      const resolvedTimeZone = resolveReportTimezone(timeZone);
       const generatedAt = new Date().toLocaleString('en-US', {
         year: 'numeric', month: 'long', day: 'numeric',
         hour: '2-digit', minute: '2-digit', timeZoneName: 'short',
+        timeZone: resolvedTimeZone,
       });
 
       const fsd = data.firstShift;
@@ -386,7 +399,7 @@ export async function generateBakeryReportPdf(data: BakeryReportData): Promise<B
         shift?.messages?.[line]?.[kpi] || null;
 
       const dailyRows: TableRow[] = [
-        { kpi: 'OEE (Overall Equipment Effectiveness)', target: '', first: '', second: '', both: '', status: '', good: true, isHeader: true },
+        { kpi: 'OEE (Overall Equipment Efficiency)', target: '', first: '', second: '', both: '', status: '', good: true, isHeader: true },
         {
           kpi: '   Die Cut 1', target: `>= ${t.oee.die_cut_1}%`,
           first: fmtCell(fsd?.dieCut1Oee, shiftMessage(fsd, 'dieCut1', 'oee')), second: fmtCell(ssd?.dieCut1Oee, shiftMessage(ssd, 'dieCut1', 'oee')), both: fmtCell(bsd?.dieCut1Oee, shiftMessage(bsd, 'dieCut1', 'oee')),
@@ -491,7 +504,7 @@ export async function generateBakeryReportPdf(data: BakeryReportData): Promise<B
         yPos += 28;
 
         const weekRows: TableRow[] = [
-          { kpi: 'OEE (Overall Equipment Effectiveness)', target: '', first: '', second: '', both: '', status: '', good: true, isHeader: true },
+          { kpi: 'OEE (Overall Equipment Efficiency)', target: '', first: '', second: '', both: '', status: '', good: true, isHeader: true },
           {
             kpi: '   Die Cut 1', target: `>= ${t.oee.die_cut_1}%`,
             first: fmtCell(wa.oee.die_cut_1.first_shift, weekMessage('first_shift', 'die_cut_1', 'oee')), second: fmtCell(wa.oee.die_cut_1.second_shift, weekMessage('second_shift', 'die_cut_1', 'oee')), both: fmtCell(wa.oee.die_cut_1.both_shifts, weekMessage('both_shifts', 'die_cut_1', 'oee')),
@@ -828,14 +841,15 @@ export async function sendBakeryReportToUsers(
   dayOfWeek: string,
   organizationId: string,
   isAutomatic: boolean = true,
-  customMessage?: string
+  customMessage?: string,
+  timeZone?: string
 ): Promise<{ sent: number; failed: number; errors: string[] }> {
   const reportData = await buildBakeryReportData(weekName, dayOfWeek, organizationId);
   if (!reportData) {
     return { sent: 0, failed: 0, errors: [`No record found for ${dayOfWeek} in week ${weekName}`] };
   }
 
-  const pdfBuffer = await generateBakeryReportPdf(reportData);
+  const pdfBuffer = await generateBakeryReportPdf(reportData, timeZone);
 
   const users = await prisma.user.findMany({
     where: { id: { in: userIds }, isActive: true },
