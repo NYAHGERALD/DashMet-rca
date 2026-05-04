@@ -4,9 +4,11 @@ import { NextFunction, Request, Response } from 'express';
 export const ACCESS_COOKIE_NAME = 'dashmet_access';
 export const REFRESH_COOKIE_NAME = 'dashmet_refresh';
 export const CSRF_COOKIE_NAME = 'dashmet_csrf';
+export const TRUSTED_DEVICE_COOKIE_NAME = 'dashmet_trusted_device';
 
 const ACCESS_COOKIE_MAX_AGE_SECONDS = 15 * 60;
 const REFRESH_COOKIE_MAX_AGE_SECONDS = 7 * 24 * 60 * 60;
+const TRUSTED_DEVICE_COOKIE_PATH = '/api/auth/login';
 const CSRF_HEADER_NAME = 'X-CSRF-Token';
 
 type CookieSameSite = 'Lax' | 'Strict' | 'None';
@@ -55,22 +57,35 @@ const buildCookie = (
   options?: {
     httpOnly?: boolean;
     sameSite?: 'Lax' | 'Strict' | 'None';
+    path?: string;
   }
 ): string => {
   const sameSite = options?.sameSite || getSessionCookieSameSite();
   const secure = shouldUseSecureCookies(sameSite) ? 'Secure' : '';
   const httpOnly = options?.httpOnly === false ? '' : 'HttpOnly';
+  const path = options?.path || '/';
 
   return [
     `${name}=${encodeURIComponent(value)}`,
     httpOnly,
-    'Path=/',
+    `Path=${path}`,
     `SameSite=${sameSite}`,
     `Max-Age=${maxAgeSeconds}`,
     secure,
   ]
     .filter(Boolean)
     .join('; ');
+};
+
+const appendSetCookieHeader = (res: Response, cookies: string[]) => {
+  const existing = res.getHeader('Set-Cookie');
+  const existingCookies = Array.isArray(existing)
+    ? existing.map(String)
+    : typeof existing === 'string'
+      ? [existing]
+      : [];
+
+  res.setHeader('Set-Cookie', [...existingCookies, ...cookies]);
 };
 
 export const attachCsrfTokenHeader = (res: Response, csrfToken?: string) => {
@@ -84,6 +99,17 @@ export const exposeRequestCsrfToken = (req: Request, res: Response, next: NextFu
   next();
 };
 
+export const setCsrfCookie = (res: Response): string => {
+  const csrfToken = generateCsrfToken();
+  attachCsrfTokenHeader(res, csrfToken);
+  appendSetCookieHeader(res, [
+    buildCookie(CSRF_COOKIE_NAME, csrfToken, REFRESH_COOKIE_MAX_AGE_SECONDS, {
+      httpOnly: false,
+    }),
+  ]);
+  return csrfToken;
+};
+
 export const setAuthCookies = (
   res: Response,
   accessToken: string,
@@ -91,7 +117,7 @@ export const setAuthCookies = (
 ) => {
   const csrfToken = generateCsrfToken();
   attachCsrfTokenHeader(res, csrfToken);
-  res.setHeader('Set-Cookie', [
+  appendSetCookieHeader(res, [
     buildCookie(ACCESS_COOKIE_NAME, accessToken, ACCESS_COOKIE_MAX_AGE_SECONDS),
     buildCookie(REFRESH_COOKIE_NAME, refreshToken, REFRESH_COOKIE_MAX_AGE_SECONDS),
     buildCookie(CSRF_COOKIE_NAME, csrfToken, REFRESH_COOKIE_MAX_AGE_SECONDS, {
@@ -101,11 +127,31 @@ export const setAuthCookies = (
 };
 
 export const clearAuthCookies = (res: Response) => {
-  res.setHeader('Set-Cookie', [
+  appendSetCookieHeader(res, [
     buildCookie(ACCESS_COOKIE_NAME, '', 0),
     buildCookie(REFRESH_COOKIE_NAME, '', 0),
     buildCookie(CSRF_COOKIE_NAME, '', 0, {
       httpOnly: false,
+    }),
+  ]);
+};
+
+export const setTrustedDeviceCookie = (
+  res: Response,
+  value: string,
+  maxAgeSeconds: number
+) => {
+  appendSetCookieHeader(res, [
+    buildCookie(TRUSTED_DEVICE_COOKIE_NAME, value, maxAgeSeconds, {
+      path: TRUSTED_DEVICE_COOKIE_PATH,
+    }),
+  ]);
+};
+
+export const clearTrustedDeviceCookie = (res: Response) => {
+  appendSetCookieHeader(res, [
+    buildCookie(TRUSTED_DEVICE_COOKIE_NAME, '', 0, {
+      path: TRUSTED_DEVICE_COOKIE_PATH,
     }),
   ]);
 };

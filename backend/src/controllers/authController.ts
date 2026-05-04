@@ -1,4 +1,5 @@
 import { Response } from 'express';
+import { Prisma } from '@prisma/client';
 import bcrypt from 'bcryptjs';
 import jwt from 'jsonwebtoken';
 import { v4 as uuidv4 } from 'uuid';
@@ -13,10 +14,14 @@ import { sendVerificationEmail } from '../services/emailService';
 import { decrypt, encryptPhone } from '../utils/encryption';
 import {
   clearAuthCookies,
+  clearTrustedDeviceCookie,
   getAccessTokenFromRequest,
+  getCookie,
   getRefreshTokenFromRequest,
   hashToken,
   setAuthCookies,
+  setTrustedDeviceCookie,
+  TRUSTED_DEVICE_COOKIE_NAME,
 } from '../utils/sessionCookies';
 import { assertPasswordPolicy } from '../utils/passwordPolicy';
 import {
@@ -70,6 +75,19 @@ const ORG_LOGIN_MFA_SCOPE: 'off' | 'admin_only' | 'all_users' =
     : ORG_LOGIN_MFA_SCOPE_RAW === 'admin_only'
       ? 'admin_only'
       : 'all_users';
+const ORG_LOGIN_TRUSTED_DEVICE_DAYS = parsePositiveInt(
+  process.env.ORG_LOGIN_TRUSTED_DEVICE_DAYS,
+  30
+);
+const ORG_LOGIN_TRUSTED_DEVICE_MAX_PER_USER = Math.max(
+  parsePositiveInt(process.env.ORG_LOGIN_TRUSTED_DEVICE_MAX_PER_USER, 10),
+  1
+);
+const TRUSTED_DEVICE_COOKIE_MAX_AGE_SECONDS = ORG_LOGIN_TRUSTED_DEVICE_DAYS * 24 * 60 * 60;
+const TRUSTED_DEVICE_TOKEN_BYTES = 32;
+const TRUSTED_DEVICE_ID_PATTERN =
+  /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
+const TRUSTED_DEVICE_TOKEN_PATTERN = /^[A-Za-z0-9_-]{32,}$/;
 
 // Generate JWT tokens
 const generateTokens = (userId: string) => {
@@ -93,6 +111,15 @@ type LockoutTier = 'standard' | 'elevated';
 type RefreshReuseContext = {
   userId: string;
   organizationId?: string | null;
+};
+type TrustedDeviceVerification = {
+  trusted: boolean;
+  deviceId?: string;
+};
+
+type RememberedTrustedDevice = {
+  deviceId: string;
+  trustedDeviceToken: string;
 };
 
 type FailedLoginAttemptState = {
@@ -143,6 +170,244 @@ const shouldRequireOrgLoginMfa = (user: { role: string }): boolean => {
     return user.role === 'ADMIN';
   }
   return true;
+};
+
+const parseBooleanBodyValue = (value: unknown): boolean => {
+  const normalized = String(value || '').trim().toLowerCase();
+  return value === true || normalized === 'true' || normalized === '1' || normalized === 'on';
+};
+
+const isMissingTrustedDeviceTableError = (error: unknown): boolean =>
+  error instanceof Prisma.PrismaClientKnownRequestError && error.code === 'P2021';
+
+const hashTrustedDeviceToken = (deviceId: string, token: string): string =>
+  hashToken(`${deviceId}:${token}`);
+
+const hashTrustedDeviceUserAgent = (userAgent?: string): string | null => {
+  const normalized = String(userAgent || '').trim();
+  return normalized ? hashToken(normalized) : null;
+};
+
+const getTrustedDeviceInfo = (req: AuthRequest): string | null => {
+  const userAgent = String(req.get('user-agent') || '').trim();
+  return userAgent ? userAgent.slice(0, 512) : null;
+};
+
+const parseTrustedDeviceCookie = (
+  cookieValue?: string
+): { deviceId: string; token: string } | null => {
+  if (!cookieValue) {
+    return null;
+  }
+
+  const [deviceId, token, extra] = cookieValue.split('.');
+  if (
+    extra !== undefined ||
+    !TRUSTED_DEVICE_ID_PATTERN.test(deviceId || '') ||
+    !TRUSTED_DEVICE_TOKEN_PATTERN.test(token || '')
+  ) {
+    return null;
+  }
+
+  return { deviceId, token };
+};
+
+const isMobileTrustedDeviceClient = (req: AuthRequest): boolean =>
+  String(req.get('x-dashmet-mobile-app') || '').trim().toLowerCase() === 'rca-mobile';
+
+const getMobileTrustedDeviceToken = (req: AuthRequest): string | undefined => {
+  const headerToken = String(req.get('x-dashmet-trusted-device') || '').trim();
+  const bodyToken = String(req.body?.trustedDeviceToken || '').trim();
+  return headerToken || bodyToken || undefined;
+};
+
+const parseTrustedDeviceCredential = (
+  value?: string
+): { deviceId: string; token: string } | null => {
+  if (!value) {
+    return null;
+  }
+
+  try {
+    const decoded = value.includes('%') ? decodeURIComponent(value) : value;
+    return parseTrustedDeviceCookie(decoded);
+  } catch {
+    return null;
+  }
+};
+
+const safeTokenHashEquals = (storedHash: string, candidateHash: string): boolean => {
+  const storedBuffer = Buffer.from(storedHash, 'hex');
+  const candidateBuffer = Buffer.from(candidateHash, 'hex');
+  return (
+    storedBuffer.length === candidateBuffer.length &&
+    crypto.timingSafeEqual(storedBuffer, candidateBuffer)
+  );
+};
+
+const verifyLoginTrustedDevice = async (
+  req: AuthRequest,
+  res: Response,
+  user: { id: string },
+  now: Date
+): Promise<TrustedDeviceVerification> => {
+  const rawTrustedCookie = getCookie(req, TRUSTED_DEVICE_COOKIE_NAME);
+  const parsedCookie = parseTrustedDeviceCookie(rawTrustedCookie);
+  const parsedMobileCredential = isMobileTrustedDeviceClient(req)
+    ? parseTrustedDeviceCredential(getMobileTrustedDeviceToken(req))
+    : null;
+  const parsedCredential = parsedCookie || parsedMobileCredential;
+
+  if (!parsedCredential) {
+    return { trusted: false };
+  }
+
+  try {
+    const trustedDevice = await prisma.loginTrustedDevice.findFirst({
+      where: {
+        id: parsedCredential.deviceId,
+        userId: user.id,
+        revokedAt: null,
+        expiresAt: { gt: now },
+      },
+    });
+
+    if (!trustedDevice) {
+      if (parsedCookie) {
+        clearTrustedDeviceCookie(res);
+      }
+      return { trusted: false };
+    }
+
+    const candidateHash = hashTrustedDeviceToken(parsedCredential.deviceId, parsedCredential.token);
+    const userAgentHash = hashTrustedDeviceUserAgent(req.get('user-agent'));
+    const tokenMatches = safeTokenHashEquals(trustedDevice.tokenHash, candidateHash);
+    const userAgentMatches =
+      !trustedDevice.userAgentHash || trustedDevice.userAgentHash === userAgentHash;
+
+    if (!tokenMatches || !userAgentMatches) {
+      await prisma.loginTrustedDevice.update({
+        where: { id: trustedDevice.id },
+        data: { revokedAt: now },
+      });
+      if (parsedCookie) {
+        clearTrustedDeviceCookie(res);
+      }
+      return { trusted: false };
+    }
+
+    await prisma.loginTrustedDevice.update({
+      where: { id: trustedDevice.id },
+      data: {
+        lastUsedAt: now,
+        ipAddress: req.ip,
+        deviceInfo: getTrustedDeviceInfo(req),
+      },
+    });
+
+    return { trusted: true, deviceId: trustedDevice.id };
+  } catch (error) {
+    if (isMissingTrustedDeviceTableError(error)) {
+      logger.warn('Trusted-device table unavailable; requiring email verification', {
+        userId: user.id,
+      });
+      return { trusted: false };
+    }
+
+    logger.warn('Trusted-device check failed; requiring email verification', {
+      userId: user.id,
+      error: error instanceof Error ? error.message : String(error),
+    });
+    return { trusted: false };
+  }
+};
+
+const rememberLoginTrustedDevice = async (
+  req: AuthRequest,
+  res: Response,
+  user: { id: string }
+): Promise<RememberedTrustedDevice | undefined> => {
+  const now = new Date();
+  const deviceId = uuidv4();
+  const token = crypto.randomBytes(TRUSTED_DEVICE_TOKEN_BYTES).toString('base64url');
+  const trustedDeviceToken = `${deviceId}.${token}`;
+  const expiresAt = new Date(now.getTime() + TRUSTED_DEVICE_COOKIE_MAX_AGE_SECONDS * 1000);
+  const isMobileClient = isMobileTrustedDeviceClient(req);
+
+  try {
+    await prisma.loginTrustedDevice.create({
+      data: {
+        id: deviceId,
+        userId: user.id,
+        tokenHash: hashTrustedDeviceToken(deviceId, token),
+        userAgentHash: isMobileClient ? null : hashTrustedDeviceUserAgent(req.get('user-agent')),
+        deviceInfo: getTrustedDeviceInfo(req),
+        ipAddress: req.ip,
+        lastUsedAt: now,
+        expiresAt,
+      },
+    });
+
+    const trustedDeviceCount = await prisma.loginTrustedDevice.count({
+      where: {
+        userId: user.id,
+        revokedAt: null,
+        expiresAt: { gt: now },
+      },
+    });
+
+    if (trustedDeviceCount > ORG_LOGIN_TRUSTED_DEVICE_MAX_PER_USER) {
+      const devicesToRevoke = await prisma.loginTrustedDevice.findMany({
+        where: {
+          userId: user.id,
+          revokedAt: null,
+          expiresAt: { gt: now },
+          id: { not: deviceId },
+        },
+        orderBy: [{ lastUsedAt: 'asc' }, { createdAt: 'asc' }],
+        take: trustedDeviceCount - ORG_LOGIN_TRUSTED_DEVICE_MAX_PER_USER,
+        select: { id: true },
+      });
+
+      if (devicesToRevoke.length > 0) {
+        await prisma.loginTrustedDevice.updateMany({
+          where: { id: { in: devicesToRevoke.map((device) => device.id) } },
+          data: { revokedAt: now },
+        });
+      }
+    }
+
+    setTrustedDeviceCookie(
+      res,
+      trustedDeviceToken,
+      TRUSTED_DEVICE_COOKIE_MAX_AGE_SECONDS
+    );
+
+    return { deviceId, trustedDeviceToken };
+  } catch (error) {
+    logger.warn('Unable to remember trusted device; login will continue without device trust', {
+      userId: user.id,
+      error: error instanceof Error ? error.message : String(error),
+    });
+    return undefined;
+  }
+};
+
+const revokeLoginTrustedDevices = async (userId: string, revokedAt = new Date()): Promise<void> => {
+  try {
+    await prisma.loginTrustedDevice.updateMany({
+      where: {
+        userId,
+        revokedAt: null,
+      },
+      data: { revokedAt },
+    });
+  } catch (error) {
+    logger.warn('Unable to revoke trusted devices', {
+      userId,
+      error: error instanceof Error ? error.message : String(error),
+    });
+  }
 };
 
 const issueFailedLoginAttempt = async (
@@ -320,7 +585,10 @@ async function handleSuspectedRefreshTokenReuse(
     where: { userId: context.userId },
   });
 
+  await revokeLoginTrustedDevices(context.userId);
+
   clearAuthCookies(res);
+  clearTrustedDeviceCookie(res);
 
   logger.warn('Refresh token reuse suspected: revoked all sessions for user', {
     userId: context.userId,
@@ -357,6 +625,8 @@ async function logLoginAuditEvent(
     lockoutTier?: LockoutTier | null;
     lockoutDurationMs?: number;
     remainingLockoutSeconds?: number;
+    mfaSatisfiedBy?: 'not_required' | 'email_otp' | 'trusted_device';
+    trustedDeviceId?: string;
   } = {}
 ) {
   if (!user.organizationId) {
@@ -381,6 +651,8 @@ async function logLoginAuditEvent(
       ...(typeof options.remainingLockoutSeconds === 'number'
         ? { remainingLockoutSeconds: options.remainingLockoutSeconds }
         : {}),
+      ...(options.mfaSatisfiedBy ? { mfaSatisfiedBy: options.mfaSatisfiedBy } : {}),
+      ...(options.trustedDeviceId ? { trustedDeviceId: options.trustedDeviceId } : {}),
     },
     ipAddress: getClientIp(req),
     userAgent: req.headers['user-agent'],
@@ -513,6 +785,7 @@ export const login = async (req: AuthRequest, res: Response) => {
   const email = String(req.body.email || '').toLowerCase().trim();
   const { password } = req.body;
   const mfaCode = String(req.body.mfaCode || '').trim();
+  const rememberDevice = parseBooleanBodyValue(req.body.rememberDevice);
   const now = new Date();
 
   // Find user
@@ -623,7 +896,12 @@ export const login = async (req: AuthRequest, res: Response) => {
     throw new AuthenticationError(INVALID_CREDENTIALS_MESSAGE);
   }
 
-  if (shouldRequireOrgLoginMfa(user)) {
+  const mfaRequired = shouldRequireOrgLoginMfa(user);
+  const trustedDevice: TrustedDeviceVerification = mfaRequired
+    ? await verifyLoginTrustedDevice(req, res, { id: user.id }, now)
+    : { trusted: false };
+
+  if (mfaRequired && !trustedDevice.trusted) {
     if (!mfaCode) {
       if (await isOrgLoginMfaChallengeRateLimited({ id: user.id, email: user.email })) {
         await logLoginAuditEvent(req, user, 'failed', {
@@ -743,13 +1021,32 @@ export const login = async (req: AuthRequest, res: Response) => {
 
   logger.info(`User logged in: ${email}`);
 
-  await logLoginAuditEvent(req, user, 'success');
-
   setAuthCookies(res, accessToken, refreshToken);
+
+  const rememberedDevice =
+    mfaRequired && !trustedDevice.trusted && rememberDevice
+      ? await rememberLoginTrustedDevice(req, res, { id: user.id })
+      : undefined;
+
+  await logLoginAuditEvent(req, user, 'success', {
+    mfaSatisfiedBy: !mfaRequired
+      ? 'not_required'
+      : trustedDevice.trusted
+        ? 'trusted_device'
+        : 'email_otp',
+    trustedDeviceId: trustedDevice.deviceId || rememberedDevice?.deviceId,
+  });
 
   res.json({
     success: true,
+    requiresMfa: false,
+    trustedDeviceUsed: trustedDevice.trusted,
+    trustedDeviceRemembered: Boolean(rememberedDevice?.deviceId),
     data: {
+      trustedDeviceToken:
+        rememberedDevice && isMobileTrustedDeviceClient(req)
+          ? rememberedDevice.trustedDeviceToken
+          : undefined,
       user: {
         id: user.id,
         email: user.email,
@@ -1222,6 +1519,10 @@ export const resetPassword = async (req: AuthRequest, res: Response) => {
     where: { userId: user.id },
   });
 
+  await revokeLoginTrustedDevices(user.id);
+
+  clearTrustedDeviceCookie(res);
+
   logger.info(`Password reset completed for: ${user.email}`);
 
   res.json({
@@ -1313,6 +1614,10 @@ export const changePassword = async (req: AuthRequest, res: Response) => {
       ...(currentTokenHash ? { token: { not: currentTokenHash } } : {}),
     },
   });
+
+  await revokeLoginTrustedDevices(userId);
+
+  clearTrustedDeviceCookie(res);
 
   logger.info(`Password changed for user: ${user.email}`);
 

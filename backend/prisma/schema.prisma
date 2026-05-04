@@ -1400,6 +1400,26 @@ model Session {
   @@index([userId])
 }
 
+model LoginTrustedDevice {
+  id            String    @id @default(uuid())
+  userId        String
+  tokenHash     String    @unique
+  userAgentHash String?
+  deviceInfo    String?
+  ipAddress     String?
+  lastUsedAt    DateTime?
+  expiresAt     DateTime
+  revokedAt     DateTime?
+  createdAt     DateTime  @default(now())
+  updatedAt     DateTime  @updatedAt
+  User          User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId])
+  @@index([expiresAt])
+  @@index([revokedAt])
+  @@map("login_trusted_devices")
+}
+
 model Shift {
   id         String      @id @default(uuid())
   name       String
@@ -1550,6 +1570,7 @@ model User {
   IncidentParticipant_IncidentParticipant_userIdToUser                IncidentParticipant[]                @relation("IncidentParticipant_userIdToUser")
   RecordingsCreated                                                   MeetingRecording[]                   @relation("RecordingRecordedBy")
   MobileVerification                                                 MobileVerification[]
+  LoginTrustedDevices                                                LoginTrustedDevice[]
   OrganizationAccessCode                                              OrganizationAccessCode[]
   InvitationsSent                                                     Invitation[]                         @relation("InvitationsSent")
   InvitationsAccepted                                                 Invitation[]                         @relation("InvitationsAccepted")

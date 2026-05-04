@@ -10,6 +10,21 @@ export const validateLogin: ValidationChain[] = [
   body('password')
     .isLength({ min: 8 })
     .withMessage('Password must be at least 8 characters'),
+  body('mfaCode')
+    .optional({ checkFalsy: true })
+    .trim()
+    .matches(/^\d{6}$/)
+    .withMessage('Verification code must be 6 digits'),
+  body('rememberDevice')
+    .optional()
+    .isBoolean()
+    .withMessage('Remember device must be true or false')
+    .toBoolean(),
+  body('trustedDeviceToken')
+    .optional({ checkFalsy: true })
+    .trim()
+    .matches(/^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}\.[A-Za-z0-9_-]{32,}$/i)
+    .withMessage('Trusted device token is invalid'),
 ];
 
 export const validateRegister: ValidationChain[] = [
