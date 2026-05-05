@@ -177,7 +177,7 @@ export async function sendEmailNotification(email: EmailNotification) {
     const brandedHtml = email.html && logoUrl ? prependCircularLogo(email.html, logoUrl) : email.html;
 
     const { data, error } = await resend.emails.send({
-      from: process.env.EMAIL_FROM || 'DashMet RCA <noreply@dashmet.com>',
+      from: process.env.EMAIL_FROM || 'DashMet Operations Intelligence <noreply@dashmet.com>',
       to: email.to,
       subject: email.subject,
       text: email.body,
@@ -248,7 +248,7 @@ ${incident.description.substring(0, 500)}${incident.description.length > 500 ? '
 Please log in to the RCA system to review and respond to this incident.
 
 Best regards,
-RCA Engine System
+DashMet Operations Intelligence System
       `.trim(),
       html: `
 <h2>New Incident Assigned</h2>

@@ -38,6 +38,7 @@ import transcriptRoutes from './transcriptRoutes';
 import spotlightRoutes from './spotlight';
 import recordingsRoutes from './recordings';
 import mobileAuthRoutes from './mobileAuthRoutes';
+import mobilePushRoutes from './mobilePushRoutes';
 import taskRoutes from './taskRoutes';
 import meetingRoutes from './meetingRoutes';
 import consentRoutes from './consentRoutes';
@@ -72,7 +73,7 @@ router.get('/version', (req, res) => {
   res.json({
     success: true,
     version: '1.0.0',
-    apiName: 'RCA Engine API',
+    apiName: 'DashMet Operations Intelligence API',
   });
 });
 
@@ -90,6 +91,7 @@ router.use('/mobile/check-phone', enumerationRateLimiter);
 router.use('/mobile/check-email', enumerationRateLimiter);
 router.use('/mobile/register', authRateLimiter);
 router.use('/mobile', mobileAuthRoutes);
+router.use('/mobile/push', rateLimiter, mobilePushRoutes);
 
 // Mobile App Task routes - Firebase auth required
 router.use('/mobile/tasks', authenticate, taskRoutes);

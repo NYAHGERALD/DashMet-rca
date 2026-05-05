@@ -12,6 +12,7 @@ import { prisma } from '../utils/prisma';
 import { Resend } from 'resend';
 import { v4 as uuidv4 } from 'uuid';
 import type { LswNotificationPreference, User } from '@prisma/client';
+import { sendPushNotificationToUser } from './pushNotificationService';
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Types
@@ -67,11 +68,13 @@ export async function updateNotificationPreferences(
   userId: string,
   data: Partial<Omit<LswNotificationPreference, 'id' | 'userId' | 'createdAt' | 'updatedAt'>>
 ) {
+  const preferenceData = data as Record<string, any>;
+
   // Upsert: create if not exists, update if exists
   return prisma.lswNotificationPreference.upsert({
     where: { userId },
-    create: { userId, ...data },
-    update: data,
+    create: { userId, ...preferenceData },
+    update: preferenceData,
   });
 }
 
@@ -255,9 +258,9 @@ async function findUpcomingItems(userId: string, prefs: LswNotificationPreferenc
     : null;
 
   // The farthest look-ahead window
-  const maxWindow = [minutesWindow, daysWindow, weeksWindow, monthsWindow, customMinutesWindow]
-    .filter(Boolean)
-    .reduce((max, d) => (d! > max ? d! : max), now);
+  const reminderWindows = [minutesWindow, daysWindow, weeksWindow, monthsWindow, customMinutesWindow]
+    .filter((date): date is Date => date instanceof Date);
+  const maxWindow = reminderWindows.reduce((max, date) => (date > max ? date : max), now);
 
   // ── Daily Tasks upcoming ──
   // Daily tasks use HH:MM + day-of-week columns, not a DateTime dueDate
@@ -474,6 +477,56 @@ async function filterAlreadySent(userId: string, alerts: LswAlertItem[]): Promis
   );
 }
 
+async function findEscalationAlerts(
+  userId: string,
+  prefs: LswNotificationPreference,
+  overdueAlerts: LswAlertItem[],
+  now: Date
+): Promise<LswAlertItem[]> {
+  if (!prefs.escalationEnabled || overdueAlerts.length === 0) return [];
+
+  const escalationMinutes = Math.max(5, prefs.escalationMinutes || 30);
+  const escalationType = `escalation_${escalationMinutes}min`;
+  const candidates = overdueAlerts.filter(
+    (alert) => now.getTime() - alert.dueAt.getTime() >= escalationMinutes * 60 * 1000,
+  );
+
+  if (!candidates.length) return [];
+
+  const existing = await prisma.lswNotificationLog.findMany({
+    where: {
+      userId,
+      notificationType: { in: ['overdue', escalationType] },
+      OR: candidates.map((alert) => ({
+        entityType: alert.entityType,
+        entityId: alert.entityId,
+      })),
+    },
+    select: { entityType: true, entityId: true, notificationType: true },
+  });
+
+  const initialOverdueSent = new Set(
+    existing
+      .filter((entry) => entry.notificationType === 'overdue')
+      .map((entry) => `${entry.entityType}:${entry.entityId}`),
+  );
+  const escalationSent = new Set(
+    existing
+      .filter((entry) => entry.notificationType === escalationType)
+      .map((entry) => `${entry.entityType}:${entry.entityId}`),
+  );
+
+  return candidates
+    .filter((alert) => {
+      const key = `${alert.entityType}:${alert.entityId}`;
+      return initialOverdueSent.has(key) && !escalationSent.has(key);
+    })
+    .map((alert) => ({
+      ...alert,
+      notificationType: escalationType,
+    }));
+}
+
 async function logSentNotifications(userId: string, alerts: LswAlertItem[], channel: string) {
   if (alerts.length === 0) return;
 
@@ -604,7 +657,7 @@ function buildOverdueEmailHtml(firstName: string, items: LswAlertItem[]): string
       <hr style="border: none; border-top: 1px solid #E5E7EB; margin: 24px 0;" />
       <p style="font-size: 12px; color: #9CA3AF; text-align: center;">
         You can manage notification preferences in Settings → Notifications.<br/>
-        DashMet RCA Engine — Food Safety & Quality Management
+        DashMet Operations Intelligence — Food Safety & Quality Management
       </p>
     </div>
   `;
@@ -667,7 +720,7 @@ function buildReminderEmailHtml(firstName: string, items: LswAlertItem[]): strin
       <hr style="border: none; border-top: 1px solid #E5E7EB; margin: 24px 0;" />
       <p style="font-size: 12px; color: #9CA3AF; text-align: center;">
         Manage notification preferences in Settings → Notifications.<br/>
-        DashMet RCA Engine — Food Safety & Quality Management
+        DashMet Operations Intelligence — Food Safety & Quality Management
       </p>
     </div>
   `;
@@ -706,6 +759,75 @@ function formatTime(date: Date): string {
   });
 }
 
+function getMobileScreenForAlert(item: LswAlertItem): string {
+  const map: Record<LswAlertItem['entityType'], string> = {
+    dailyTask: 'daily-standard-work',
+    todoItem: 'todos',
+    meetingRail: 'meeting-rails',
+    followUp: 'follow-ups',
+    frequencyTask: 'scheduled-tasks',
+  };
+
+  return map[item.entityType];
+}
+
+function getDeliveryChannelLabel(emailOk: boolean, browserOk: boolean, pushOk: boolean): string {
+  return [
+    emailOk ? 'email' : '',
+    browserOk ? 'browser' : '',
+    pushOk ? 'mobile_push' : '',
+  ].filter(Boolean).join('+') || 'none';
+}
+
+async function sendMobilePushAlerts(
+  userId: string,
+  prefs: LswNotificationPreference,
+  items: LswAlertItem[],
+  mode: 'overdue' | 'reminder' | 'escalation'
+): Promise<LswAlertItem[]> {
+  if (!prefs.mobilePushEnabled || items.length === 0) return [];
+
+  const delivered: LswAlertItem[] = [];
+
+  for (const item of items) {
+    try {
+      const entityLabel = formatEntityType(item.entityType);
+      const isOverdue = mode === 'overdue';
+      const isEscalation = mode === 'escalation';
+      const result = await sendPushNotificationToUser(userId, {
+        title: isEscalation
+          ? `Still overdue: ${item.taskName}`
+          : isOverdue
+            ? `Overdue: ${item.taskName}`
+            : `Upcoming: ${item.taskName}`,
+        body: isEscalation
+          ? `${entityLabel} is still open after its due time: ${formatTime(item.dueAt)}`
+          : isOverdue
+            ? `${entityLabel} was due at ${formatTime(item.dueAt)}`
+            : `${entityLabel} is due at ${formatTime(item.dueAt)}`,
+        sound: prefs.mobileSoundEnabled ? 'default' : null,
+        data: {
+          type: isEscalation ? 'LSW_ESCALATION' : isOverdue ? 'LSW_TASK_OVERDUE' : 'LSW_UPCOMING_REMINDER',
+          screen: getMobileScreenForAlert(item),
+          entityType: item.entityType,
+          entityId: item.entityId,
+          notificationType: item.notificationType,
+          dueAt: item.dueAt.toISOString(),
+          channelId: 'dashmet_alerts',
+        },
+      });
+
+      if (result.successCount > 0) {
+        delivered.push(item);
+      }
+    } catch (error) {
+      console.error(`[LSW MobilePush] Failed for ${item.entityType}:${item.entityId}:`, error);
+    }
+  }
+
+  return delivered;
+}
+
 // ─────────────────────────────────────────────────────────────────────────────
 // Main Notification Processing
 // ─────────────────────────────────────────────────────────────────────────────
@@ -734,7 +856,10 @@ export async function processUserLswNotifications(userId: string): Promise<numbe
 
   const prefs = user.LswNotificationPreference;
   if (!prefs) { console.log(`[LSW] User ${userId}: no prefs, skipping`); return 0; }
-  if (!prefs.emailEnabled && !prefs.browserEnabled) { console.log(`[LSW] User ${user.email}: email+browser disabled, skipping`); return 0; }
+  if (!prefs.emailEnabled && !prefs.browserEnabled && !prefs.mobilePushEnabled) {
+    console.log(`[LSW] User ${user.email}: email+browser+mobile push disabled, skipping`);
+    return 0;
+  }
 
   // Respect quiet hours
   if (isInQuietHours(prefs, now)) { console.log(`[LSW] User ${user.email}: in quiet hours, skipping`); return 0; }
@@ -756,12 +881,13 @@ export async function processUserLswNotifications(userId: string): Promise<numbe
   console.log(`[LSW] User ${user.email}: ${overdueAlerts.length} overdue, ${reminderAlerts.length} upcoming found`);
 
   // Filter already sent
-  const [newOverdue, newReminders] = await Promise.all([
+  const [newOverdue, newReminders, newEscalations] = await Promise.all([
     filterAlreadySent(userId, overdueAlerts),
     filterAlreadySent(userId, reminderAlerts),
+    findEscalationAlerts(userId, prefs, overdueAlerts, now),
   ]);
 
-  console.log(`[LSW] User ${user.email}: ${newOverdue.length} new overdue, ${newReminders.length} new reminders after dedup`);
+  console.log(`[LSW] User ${user.email}: ${newOverdue.length} new overdue, ${newReminders.length} new reminders, ${newEscalations.length} escalations after dedup`);
 
   let sentCount = 0;
 
@@ -771,6 +897,7 @@ export async function processUserLswNotifications(userId: string): Promise<numbe
     if (prefs.emailEnabled) {
       emailOk = await sendOverdueEmail(user, newOverdue);
     }
+    const mobileDelivered = await sendMobilePushAlerts(userId, prefs, newOverdue, 'overdue');
 
     // Create in-app notifications for each overdue item
     for (const item of newOverdue) {
@@ -788,12 +915,55 @@ export async function processUserLswNotifications(userId: string): Promise<numbe
     // Only record "sent" when at least one channel actually delivered.
     // This prevents a failed email / unconfigured Resend from permanently
     // blocking retries via the dedup log.
-    const delivered = emailOk || prefs.browserEnabled;
-    if (delivered) {
-      await logSentNotifications(userId, newOverdue, emailOk ? 'email' : 'browser');
-      sentCount += newOverdue.length;
+    const deliveredAlerts = emailOk || prefs.browserEnabled ? newOverdue : mobileDelivered;
+    if (deliveredAlerts.length > 0) {
+      await logSentNotifications(
+        userId,
+        deliveredAlerts,
+        getDeliveryChannelLabel(emailOk, prefs.browserEnabled, mobileDelivered.length > 0),
+      );
+      sentCount += deliveredAlerts.length;
     } else {
-      console.log('[LSW] Overdue: nothing delivered (email failed, browser disabled) — will retry next run');
+      console.log('[LSW] Overdue: nothing delivered (email failed, browser/mobile disabled or failed) — will retry next run');
+    }
+  }
+
+  // Send escalation notifications for items that stayed overdue after the configured grace period.
+  if (newEscalations.length > 0) {
+    const escalationAction = prefs.escalationAction || 'sound_repeat';
+    const shouldSendEmail = prefs.emailEnabled && ['email_resend', 'both'].includes(escalationAction);
+    const shouldSendPush = prefs.mobilePushEnabled && ['sound_repeat', 'both'].includes(escalationAction);
+
+    let emailOk = false;
+    if (shouldSendEmail) {
+      emailOk = await sendOverdueEmail(user, newEscalations);
+    }
+    const mobileDelivered = shouldSendPush
+      ? await sendMobilePushAlerts(userId, prefs, newEscalations, 'escalation')
+      : [];
+
+    for (const item of newEscalations) {
+      await prisma.notification.create({
+        data: {
+          id: uuidv4(),
+          type: 'LSW_TASK_OVERDUE',
+          title: `Still overdue: ${item.taskName}`,
+          message: `Your ${formatEntityType(item.entityType).toLowerCase()} "${item.taskName}" is still open after its due time: ${formatTime(item.dueAt)}`,
+          userId,
+        },
+      });
+    }
+
+    const deliveredAlerts = emailOk || prefs.browserEnabled ? newEscalations : mobileDelivered;
+    if (deliveredAlerts.length > 0) {
+      await logSentNotifications(
+        userId,
+        deliveredAlerts,
+        getDeliveryChannelLabel(emailOk, prefs.browserEnabled, mobileDelivered.length > 0),
+      );
+      sentCount += deliveredAlerts.length;
+    } else {
+      console.log('[LSW] Escalation: nothing delivered — will retry next run');
     }
   }
 
@@ -803,6 +973,7 @@ export async function processUserLswNotifications(userId: string): Promise<numbe
     if (prefs.emailEnabled) {
       emailOk = await sendReminderEmail(user, newReminders);
     }
+    const mobileDelivered = await sendMobilePushAlerts(userId, prefs, newReminders, 'reminder');
 
     for (const item of newReminders) {
       await prisma.notification.create({
@@ -816,12 +987,16 @@ export async function processUserLswNotifications(userId: string): Promise<numbe
       });
     }
 
-    const delivered = emailOk || prefs.browserEnabled;
-    if (delivered) {
-      await logSentNotifications(userId, newReminders, emailOk ? 'email' : 'browser');
-      sentCount += newReminders.length;
+    const deliveredAlerts = emailOk || prefs.browserEnabled ? newReminders : mobileDelivered;
+    if (deliveredAlerts.length > 0) {
+      await logSentNotifications(
+        userId,
+        deliveredAlerts,
+        getDeliveryChannelLabel(emailOk, prefs.browserEnabled, mobileDelivered.length > 0),
+      );
+      sentCount += deliveredAlerts.length;
     } else {
-      console.log('[LSW] Reminder: nothing delivered (email failed, browser disabled) — will retry next run');
+      console.log('[LSW] Reminder: nothing delivered (email failed, browser/mobile disabled or failed) — will retry next run');
     }
   }
 
@@ -846,7 +1021,7 @@ export async function processUserLswNotifications(userId: string): Promise<numbe
 export async function processAllLswNotifications(): Promise<{ usersProcessed: number; totalSent: number }> {
   const usersWithPrefs = await prisma.lswNotificationPreference.findMany({
     where: {
-      OR: [{ emailEnabled: true }, { browserEnabled: true }],
+      OR: [{ emailEnabled: true }, { browserEnabled: true }, { mobilePushEnabled: true }],
     },
     select: { userId: true },
   });

@@ -114,6 +114,8 @@ dev-output.log
 
 # SQL backup files  
 *.sql
+!backend/prisma/migrations/20260503212500_add_login_trusted_devices/migration.sql
+!backend/prisma/migrations/20260505090000_add_mobile_push_notifications/migration.sql
 render_backup.sql
 
 # Build outputs

@@ -1653,16 +1653,19 @@ model User {
   @@index([role])
 }
 
-// Device Token for Push Notifications (FCM/APNs)
+// Device Token for Push Notifications (Expo/FCM/APNs)
 model DeviceToken {
   id           String       @id @default(uuid())
   userId       String
-  token        String       // FCM device token
+  token        String       // Expo/FCM/APNs device token
+  provider     PushTokenProvider @default(EXPO)
   platform     DevicePlatform @default(IOS)
   deviceId     String?      // Unique device identifier
   appVersion   String?      // App version for debugging
   isActive     Boolean      @default(true)
   lastUsedAt   DateTime     @default(now())
+  lastFailureAt DateTime?
+  lastFailureReason String?
   createdAt    DateTime     @default(now())
   updatedAt    DateTime     @updatedAt
   user         User         @relation(fields: [userId], references: [id], onDelete: Cascade)
@@ -1677,6 +1680,30 @@ enum DevicePlatform {
   IOS
   ANDROID
   WEB
+}
+
+enum PushTokenProvider {
+  EXPO
+  FCM
+  APNS
+}
+
+model MobilePushTicket {
+  id            String   @id @default(uuid())
+  userId        String?
+  token         String
+  ticketId      String?
+  status        String
+  message       String?
+  details       Json?
+  checkedAt     DateTime?
+  createdAt     DateTime @default(now())
+  updatedAt     DateTime @updatedAt
+
+  @@index([ticketId])
+  @@index([checkedAt])
+  @@index([userId])
+  @@index([token])
 }
 
 model FiveWhysAnalysis {
@@ -4378,10 +4405,12 @@ model LswNotificationPreference {
   // ── Master Toggles ──
   emailEnabled          Boolean  @default(false)   // Global email on/off
   browserEnabled        Boolean  @default(false)   // Global browser notification on/off
+  mobilePushEnabled     Boolean  @default(true)    // Global mobile push notification on/off
 
   // ── Bakery Metrics Notification Toggles ──
   bakeryEmailEnabled    Boolean  @default(true)     // Email when bakery metrics submitted
   bakeryBrowserEnabled  Boolean  @default(true)     // Browser notification when bakery metrics submitted
+  bakeryMobilePushEnabled Boolean @default(true)    // Mobile push when bakery metrics submitted
 
   // ── Past-Due Notification Toggles ──
   notifyTaskOverdue     Boolean  @default(true)     // Daily tasks past their scheduled time
@@ -4409,6 +4438,7 @@ model LswNotificationPreference {
 
   // ── Force Alert Sound ──
   soundEnabled          Boolean  @default(true)       // Play alert sound on browser notifications
+  mobileSoundEnabled    Boolean  @default(true)       // Play sound on mobile push notifications
   soundVolume           Int      @default(80)         // 0–100
   soundType             String   @default("chime")    // chime, urgent, bell, ping, alarm
   repeatSoundForOverdue Boolean  @default(true)       // Repeat sound every interval for overdue items

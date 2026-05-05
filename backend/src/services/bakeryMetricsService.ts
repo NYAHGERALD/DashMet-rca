@@ -1205,53 +1205,41 @@ const bakeryMetricsService = {
 
       const fs = sub.firstShiftMetrics;
       const ss = sub.secondShiftMetrics;
-      const bs = sub.bothShiftsMetrics;
 
-      // Combined OEE
-      if (bs?.oeeAvgPct != null) {
-        oee[idx] = Number(bs.oeeAvgPct);
-      } else {
-        const fAvg = fs ? (Number(fs.dieCut1OeePct) + Number(fs.dieCut2OeePct)) / 2 : 0;
-        const sAvg = ss ? (Number(ss.dieCut1OeePct) + Number(ss.dieCut2OeePct)) / 2 : 0;
-        oee[idx] = fAvg && sAvg ? (fAvg + sAvg) / 2 : fAvg || sAvg;
-      }
+      const fsLine1 = getLineStateFromShift(fs, 1);
+      const fsLine2 = getLineStateFromShift(fs, 2);
+      const ssLine1 = getLineStateFromShift(ss, 1);
+      const ssLine2 = getLineStateFromShift(ss, 2);
 
-      // Combined Waste
-      if (bs?.wasteAvgPct != null) {
-        waste[idx] = Number(bs.wasteAvgPct);
-      } else {
-        const fPounds = fs ? Number(fs.dieCut1Lbs) + Number(fs.dieCut2Lbs) : 0;
-        const sPounds = ss ? Number(ss.dieCut1Lbs) + Number(ss.dieCut2Lbs) : 0;
-        const fWaste = fs ? Number(fs.dieCut1WasteLb) + Number(fs.dieCut2WasteLb) : 0;
-        const sWaste = ss ? Number(ss.dieCut1WasteLb) + Number(ss.dieCut2WasteLb) : 0;
-        const fPct = fPounds > 0 ? (fWaste / fPounds) * 100 : 0;
-        const sPct = sPounds > 0 ? (sWaste / sPounds) * 100 : 0;
-        waste[idx] = fPct && sPct ? (fPct + sPct) / 2 : fPct || sPct;
-      }
+      const firstShiftOee = combineTwoLines('oee', fsLine1, fsLine2, 'avg');
+      const firstShiftPounds = combineTwoLines('pounds', fsLine1, fsLine2, 'sum');
+      const firstShiftWaste = combineTwoLines('waste', fsLine1, fsLine2, 'avg');
+      const secondShiftOee = combineTwoLines('oee', ssLine1, ssLine2, 'avg');
+      const secondShiftPounds = combineTwoLines('pounds', ssLine1, ssLine2, 'sum');
+      const secondShiftWaste = combineTwoLines('waste', ssLine1, ssLine2, 'avg');
 
-      // First shift OEE
-      if (fs) {
-        const f1 = Number(fs.dieCut1OeePct) || 0;
-        const f2 = Number(fs.dieCut2OeePct) || 0;
-        oeeFirstShift[idx] = f1 && f2 ? (f1 + f2) / 2 : f1 || f2;
-        poundsFirstShift[idx] = Number(fs.dieCut1Lbs || 0) + Number(fs.dieCut2Lbs || 0);
-        // First shift waste %
-        const fp = poundsFirstShift[idx];
-        const fw = Number(fs.dieCut1WasteLb || 0) + Number(fs.dieCut2WasteLb || 0);
-        wasteFirstShift[idx] = fp > 0 ? (fw / fp) * 100 : 0;
-      }
+      const bothLine1 = getCombinedLineState({
+        oee: combineTwoShiftsByLine(fsLine1, ssLine1, 'oee'),
+        pounds: combineTwoShiftsByLine(fsLine1, ssLine1, 'pounds'),
+        waste: combineTwoShiftsByLine(fsLine1, ssLine1, 'waste'),
+      });
+      const bothLine2 = getCombinedLineState({
+        oee: combineTwoShiftsByLine(fsLine2, ssLine2, 'oee'),
+        pounds: combineTwoShiftsByLine(fsLine2, ssLine2, 'pounds'),
+        waste: combineTwoShiftsByLine(fsLine2, ssLine2, 'waste'),
+      });
 
-      // Second shift OEE
-      if (ss) {
-        const s1 = Number(ss.dieCut1OeePct) || 0;
-        const s2 = Number(ss.dieCut2OeePct) || 0;
-        oeeSecondShift[idx] = s1 && s2 ? (s1 + s2) / 2 : s1 || s2;
-        poundsSecondShift[idx] = Number(ss.dieCut1Lbs || 0) + Number(ss.dieCut2Lbs || 0);
-        // Second shift waste %
-        const sp = poundsSecondShift[idx];
-        const sw = Number(ss.dieCut1WasteLb || 0) + Number(ss.dieCut2WasteLb || 0);
-        wasteSecondShift[idx] = sp > 0 ? (sw / sp) * 100 : 0;
-      }
+      // Match the View Reports table: exclude lines marked as No Production Run
+      // instead of averaging their 0 values into the producing line.
+      oee[idx] = combineTwoLines('oee', bothLine1, bothLine2, 'avg') ?? 0;
+      waste[idx] = combineTwoLines('waste', bothLine1, bothLine2, 'avg') ?? 0;
+
+      oeeFirstShift[idx] = firstShiftOee ?? 0;
+      wasteFirstShift[idx] = firstShiftWaste ?? 0;
+      oeeSecondShift[idx] = secondShiftOee ?? 0;
+      wasteSecondShift[idx] = secondShiftWaste ?? 0;
+      poundsFirstShift[idx] = firstShiftPounds ?? 0;
+      poundsSecondShift[idx] = secondShiftPounds ?? 0;
     }
 
     // Averages excluding zero days

@@ -14,6 +14,7 @@ import {
 } from '../services/standupMeetingReportService';
 import { buildBakeryReportData, generateBakeryReportPdf, sendBakeryReportEmail, sendBakeryReportToUsers, getOrgUsersForBakeryReport } from '../services/bakeryReportEmailService';
 import { notifyBakeryMetricsSubmitted } from '../services/smsService';
+import { sendPushNotificationToUsers } from '../services/pushNotificationService';
 import { authenticate, AuthRequest } from '../middleware/auth';
 import { requireAdmin } from '../middleware/rbac';
 
@@ -702,6 +703,28 @@ router.post('/submit', async (req: Request, res: Response) => {
               .then(r => console.log(`[BakeryBrowserNotif] Created ${r.count} notifications`))
               .catch(err => console.error('[BakeryBrowserNotif] Error:', err.message));
           }
+
+          const mobilePushUserIds = userIds.filter(uid => {
+            const p = prefsMap.get(uid);
+            return !p || (p.mobilePushEnabled && p.bakeryMobilePushEnabled);
+          });
+
+          if (mobilePushUserIds.length > 0) {
+            sendPushNotificationToUsers(mobilePushUserIds, {
+              title: 'Bakery Metrics Submitted',
+              body: `New bakery production report submitted for ${dayOfWeek} (${weekName}) by ${submittedBy}.`,
+              sound: 'default',
+              data: {
+                type: 'BAKERY_METRICS_SUBMITTED',
+                screen: 'dashboard',
+                weekName,
+                dayOfWeek,
+                channelId: 'dashmet_alerts',
+              },
+            })
+              .then(result => console.log(`[BakeryMobilePush] Sent=${result.successCount}, Failed=${result.failureCount}`))
+              .catch(err => console.error('[BakeryMobilePush] Error:', err.message));
+          }
         }
 
         // ── SMS notification via Twilio (fire-and-forget) ──
@@ -1068,7 +1091,8 @@ router.get('/operational-daily-report', authenticate, async (req: AuthRequest, r
       return res.json({ success: true, exists: false });
     }
 
-    res.json({ success: true, exists: true, ...saved });
+    const { success: _savedSuccess, ...savedPayload } = saved as any;
+    res.json({ success: true, exists: true, ...savedPayload });
   } catch (error: any) {
     console.error('[OpsDailyReport] Error checking saved report:', error);
     res.status(500).json({ success: false, error: 'Failed to check for saved report.' });
@@ -1236,7 +1260,8 @@ router.get('/standup-report', authenticate, async (req: AuthRequest, res: Respon
 
     const saved = await getSavedStandupReport(weekName, dayOfWeek, organizationId);
     if (!saved) return res.json({ success: true, exists: false });
-    res.json({ success: true, exists: true, ...saved });
+    const { success: _savedSuccess, ...savedPayload } = saved as any;
+    res.json({ success: true, exists: true, ...savedPayload });
   } catch (error: any) {
     console.error('[StandupReport] GET error:', error);
     res.status(500).json({ success: false, error: 'Failed to fetch standup report.' });
@@ -1341,7 +1366,8 @@ router.patch('/standup-report/comments', authenticate, async (req: AuthRequest, 
     }
     const result = await updateStandupComments(weekName, dayOfWeek, organizationId, comments, userName);
     if (!result.success) return res.status(404).json(result);
-    res.json({ success: true, ...result });
+    const { success: _resultSuccess, ...resultPayload } = result as any;
+    res.json({ success: true, ...resultPayload });
   } catch (error: any) {
     console.error('[StandupReport] PATCH comments error:', error);
     res.status(500).json({ success: false, error: 'Failed to save comments.' });

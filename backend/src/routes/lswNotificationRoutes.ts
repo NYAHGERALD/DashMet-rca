@@ -48,8 +48,10 @@ router.put('/', async (req: AuthRequest, res: Response) => {
     const {
       emailEnabled,
       browserEnabled,
+      mobilePushEnabled,
       bakeryEmailEnabled,
       bakeryBrowserEnabled,
+      bakeryMobilePushEnabled,
       notifyTaskOverdue,
       notifyTodoOverdue,
       notifyMeetingOverdue,
@@ -70,6 +72,7 @@ router.put('/', async (req: AuthRequest, res: Response) => {
       timezone,
       // Force Alert Sound
       soundEnabled,
+      mobileSoundEnabled,
       soundVolume,
       soundType,
       repeatSoundForOverdue,
@@ -140,8 +143,10 @@ router.put('/', async (req: AuthRequest, res: Response) => {
     const updateData: Record<string, any> = {};
     if (emailEnabled !== undefined) updateData.emailEnabled = Boolean(emailEnabled);
     if (browserEnabled !== undefined) updateData.browserEnabled = Boolean(browserEnabled);
+    if (mobilePushEnabled !== undefined) updateData.mobilePushEnabled = Boolean(mobilePushEnabled);
     if (bakeryEmailEnabled !== undefined) updateData.bakeryEmailEnabled = Boolean(bakeryEmailEnabled);
     if (bakeryBrowserEnabled !== undefined) updateData.bakeryBrowserEnabled = Boolean(bakeryBrowserEnabled);
+    if (bakeryMobilePushEnabled !== undefined) updateData.bakeryMobilePushEnabled = Boolean(bakeryMobilePushEnabled);
     if (notifyTaskOverdue !== undefined) updateData.notifyTaskOverdue = Boolean(notifyTaskOverdue);
     if (notifyTodoOverdue !== undefined) updateData.notifyTodoOverdue = Boolean(notifyTodoOverdue);
     if (notifyMeetingOverdue !== undefined) updateData.notifyMeetingOverdue = Boolean(notifyMeetingOverdue);
@@ -163,6 +168,7 @@ router.put('/', async (req: AuthRequest, res: Response) => {
 
     // Force Alert Sound
     if (soundEnabled !== undefined) updateData.soundEnabled = Boolean(soundEnabled);
+    if (mobileSoundEnabled !== undefined) updateData.mobileSoundEnabled = Boolean(mobileSoundEnabled);
     if (soundVolume !== undefined) updateData.soundVolume = Math.min(100, Math.max(0, Number(soundVolume)));
     if (soundType !== undefined) {
       const validSounds = ['chime', 'urgent', 'bell', 'ping', 'alarm'];

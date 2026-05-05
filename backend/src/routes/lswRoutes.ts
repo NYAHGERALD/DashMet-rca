@@ -16,6 +16,8 @@ router.use(authenticate);
 // ─────────────────────────────────────────────────────────────────────────────
 router.get('/data', async (req: AuthRequest, res: Response) => {
   try {
+    res.set('Cache-Control', 'private, no-store, max-age=0');
+
     const userId = req.user!.id;
     const organizationId = req.user!.organizationId;
     const weekNumber = parseInt(req.query.weekNumber as string);

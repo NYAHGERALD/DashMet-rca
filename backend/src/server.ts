@@ -214,7 +214,7 @@ initializeYjsWebSocket(httpServer);
 // Start server - bind to 0.0.0.0 to allow network access
 const HOST = process.env.HOST || '0.0.0.0';
 const server = httpServer.listen(PORT, HOST, () => {
-  console.log(`🚀 RCA Engine API Server running on http://${HOST}:${PORT}`);
+  console.log(`🚀 DashMet Operations Intelligence API Server running on http://${HOST}:${PORT}`);
   console.log(`📡 Environment: ${process.env.NODE_ENV || 'development'}`);
   console.log(`🌍 CORS enabled for:`, corsOptions.origin);
   console.log(`🔌 WebSocket server ready`);

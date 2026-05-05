@@ -1,9 +1,10 @@
-// Push Notification Service - FCM (Firebase Cloud Messaging)
-// Handles push notifications to iOS/Android devices
+// Push Notification Service
+// Handles Expo push tokens for the current mobile app and preserves legacy FCM support.
 
 import { adminMessaging } from '../config/firebase-admin';
 import { prisma } from '../utils/prisma';
 import type { Message, MulticastMessage, BatchResponse } from 'firebase-admin/messaging';
+import { Expo, type ExpoPushMessage, type ExpoPushTicket } from 'expo-server-sdk';
 
 // ============================================================================
 // TYPES
@@ -14,9 +15,42 @@ export interface PushNotificationPayload {
   body: string;
   data?: Record<string, string>;
   badge?: number;
-  sound?: string;
+  sound?: string | null;
   imageUrl?: string;
 }
+
+type PushTokenRecord = {
+  token: string;
+  userId?: string | null;
+};
+
+const expo = new Expo({
+  accessToken: process.env.EXPO_ACCESS_TOKEN || undefined,
+  useFcmV1: true,
+});
+
+const isExpoToken = (token: string) => Expo.isExpoPushToken(token);
+
+const inferProvider = (token: string): 'EXPO' | 'FCM' => (isExpoToken(token) ? 'EXPO' : 'FCM');
+
+const toExpoData = (data?: Record<string, string>) =>
+  Object.fromEntries(
+    Object.entries(data || {}).map(([key, value]) => [key, String(value)]),
+  );
+
+const getNotificationSound = (payload: PushNotificationPayload) =>
+  payload.sound === null ? undefined : (payload.sound || 'default');
+
+const toExpoMessage = (token: string, payload: PushNotificationPayload): ExpoPushMessage => ({
+  to: token,
+  title: payload.title,
+  body: payload.body,
+  data: toExpoData(payload.data),
+  sound: getNotificationSound(payload) as ExpoPushMessage['sound'],
+  badge: payload.badge,
+  priority: 'high',
+  channelId: payload.data?.channelId || 'dashmet_alerts',
+});
 
 export interface TaskActivityNotification {
   taskId: string;
@@ -123,7 +157,8 @@ export async function registerDeviceToken(
   token: string,
   platform: 'IOS' | 'ANDROID' | 'WEB' = 'IOS',
   deviceId?: string,
-  appVersion?: string
+  appVersion?: string,
+  provider: 'EXPO' | 'FCM' | 'APNS' = inferProvider(token)
 ): Promise<boolean> {
   try {
     // Upsert the device token
@@ -135,15 +170,19 @@ export async function registerDeviceToken(
         },
       },
       update: {
+        provider,
         platform,
         deviceId,
         appVersion,
         isActive: true,
         lastUsedAt: new Date(),
+        lastFailureAt: null,
+        lastFailureReason: null,
       },
       create: {
         userId,
         token,
+        provider,
         platform,
         deviceId,
         appVersion,
@@ -217,6 +256,19 @@ export async function getActiveDeviceTokens(userId: string): Promise<string[]> {
   return tokens.map(t => t.token);
 }
 
+export async function getActiveDeviceTokenRecords(userId: string): Promise<PushTokenRecord[]> {
+  return prisma.deviceToken.findMany({
+    where: {
+      userId,
+      isActive: true,
+    },
+    select: {
+      token: true,
+      userId: true,
+    },
+  });
+}
+
 /**
  * Get all active device tokens for multiple users
  */
@@ -242,9 +294,189 @@ export async function getActiveDeviceTokensForUsers(userIds: string[]): Promise<
   return tokenMap;
 }
 
+export async function getActiveDeviceTokenRecordsForUsers(userIds: string[]): Promise<PushTokenRecord[]> {
+  if (!userIds.length) return [];
+
+  return prisma.deviceToken.findMany({
+    where: {
+      userId: { in: userIds },
+      isActive: true,
+    },
+    select: {
+      token: true,
+      userId: true,
+    },
+  });
+}
+
 // ============================================================================
 // PUSH NOTIFICATION SENDING
 // ============================================================================
+
+async function persistExpoTickets(messages: ExpoPushMessage[], tickets: ExpoPushTicket[]) {
+  const rows = tickets.map((ticket, index) => {
+    const message = messages[index];
+    const token = Array.isArray(message.to) ? String(message.to[0]) : String(message.to);
+    const userId = typeof message.data?.userId === 'string' ? message.data.userId : null;
+    const ticketId = ticket.status === 'ok' ? ticket.id : null;
+    const details = ticket.status === 'error' ? ticket.details : null;
+
+    return {
+      token,
+      userId,
+      ticketId,
+      status: ticket.status,
+      message: ticket.status === 'error' ? ticket.message : null,
+      details: details || undefined,
+    };
+  });
+
+  if (!rows.length) return;
+
+  await prisma.mobilePushTicket.createMany({
+    data: rows,
+  }).catch((error) => {
+    console.error('[MobilePush] Failed to persist Expo tickets:', error);
+  });
+}
+
+async function sendExpoPushNotifications(
+  records: PushTokenRecord[],
+  payload: PushNotificationPayload,
+): Promise<{ successCount: number; failureCount: number }> {
+  const validRecords = records.filter((record) => isExpoToken(record.token));
+  const invalidRecords = records.filter((record) => !isExpoToken(record.token));
+
+  if (invalidRecords.length) {
+    await markTokensAsInvalid(invalidRecords.map((record) => record.token), 'Invalid Expo push token');
+  }
+
+  if (!validRecords.length) {
+    return { successCount: 0, failureCount: invalidRecords.length };
+  }
+
+  let successCount = 0;
+  let failureCount = invalidRecords.length;
+  const messages = validRecords.map((record) =>
+    toExpoMessage(record.token, {
+      ...payload,
+      data: {
+        ...(payload.data || {}),
+        userId: record.userId || '',
+        sentAt: new Date().toISOString(),
+      },
+    }),
+  );
+
+  for (const chunk of expo.chunkPushNotifications(messages)) {
+    try {
+      const tickets = await expo.sendPushNotificationsAsync(chunk);
+      await persistExpoTickets(chunk, tickets);
+
+      tickets.forEach((ticket, index) => {
+        if (ticket.status === 'ok') {
+          successCount += 1;
+          return;
+        }
+
+        failureCount += 1;
+        const token = Array.isArray(chunk[index].to) ? String(chunk[index].to[0]) : String(chunk[index].to);
+        const errorCode = ticket.details?.error;
+        if (errorCode === 'DeviceNotRegistered') {
+          markTokenAsInvalid(token, 'DeviceNotRegistered').catch(() => undefined);
+        } else {
+          prisma.deviceToken.updateMany({
+            where: { token },
+            data: {
+              lastFailureAt: new Date(),
+              lastFailureReason: ticket.message || errorCode || 'Expo push ticket error',
+            },
+          }).catch(() => undefined);
+        }
+      });
+    } catch (error) {
+      console.error('[MobilePush] Expo push send failed:', error);
+      failureCount += chunk.length;
+    }
+  }
+
+  return { successCount, failureCount };
+}
+
+export async function checkPendingExpoPushReceipts(): Promise<{
+  checked: number;
+  invalidated: number;
+  failed: number;
+}> {
+  const readyForReceiptCheck = new Date(Date.now() - 15 * 60 * 1000);
+  const receiptRetentionWindow = new Date(Date.now() - 24 * 60 * 60 * 1000);
+
+  const tickets = await prisma.mobilePushTicket.findMany({
+    where: {
+      ticketId: { not: null },
+      checkedAt: null,
+      createdAt: {
+        gte: receiptRetentionWindow,
+        lte: readyForReceiptCheck,
+      },
+    },
+    select: {
+      id: true,
+      ticketId: true,
+      token: true,
+    },
+    take: 1000,
+  });
+
+  if (!tickets.length) {
+    return { checked: 0, invalidated: 0, failed: 0 };
+  }
+
+  let checked = 0;
+  let invalidated = 0;
+  let failed = 0;
+  const ticketsByReceiptId = new Map(tickets.map((ticket) => [ticket.ticketId!, ticket]));
+
+  for (const receiptIdChunk of expo.chunkPushNotificationReceiptIds(tickets.map((ticket) => ticket.ticketId!))) {
+    try {
+      const receipts = await expo.getPushNotificationReceiptsAsync(receiptIdChunk);
+
+      for (const receiptId of receiptIdChunk) {
+        const ticket = ticketsByReceiptId.get(receiptId);
+        if (!ticket) continue;
+
+        const receipt = receipts[receiptId];
+        if (!receipt) continue;
+
+        checked += 1;
+        const isError = receipt.status === 'error';
+        if (isError) {
+          failed += 1;
+        }
+
+        const errorCode = isError ? receipt.details?.error : undefined;
+        await prisma.mobilePushTicket.update({
+          where: { id: ticket.id },
+          data: {
+            checkedAt: new Date(),
+            status: isError ? 'receipt_error' : 'receipt_ok',
+            message: isError ? receipt.message : null,
+            details: isError ? (receipt.details as any) : undefined,
+          },
+        });
+
+        if (errorCode === 'DeviceNotRegistered') {
+          await markTokenAsInvalid(ticket.token, 'DeviceNotRegistered');
+          invalidated += 1;
+        }
+      }
+    } catch (error) {
+      console.error('[MobilePush] Expo receipt check failed:', error);
+    }
+  }
+
+  return { checked, invalidated, failed };
+}
 
 /**
  * Send a push notification to a single device
@@ -253,6 +485,11 @@ export async function sendPushNotification(
   token: string,
   payload: PushNotificationPayload
 ): Promise<boolean> {
+  if (isExpoToken(token)) {
+    const result = await sendExpoPushNotifications([{ token }], payload);
+    return result.successCount > 0;
+  }
+
   try {
     const message: Message = {
       token,
@@ -291,7 +528,7 @@ export async function sendPushNotification(
     // Handle invalid token - mark as inactive
     if (error.code === 'messaging/invalid-registration-token' ||
         error.code === 'messaging/registration-token-not-registered') {
-      await markTokenAsInvalid(token);
+      await markTokenAsInvalid(token, error.code);
     }
     
     return false;
@@ -309,6 +546,17 @@ export async function sendPushNotificationToMultiple(
     return { successCount: 0, failureCount: 0 };
   }
 
+  const expoRecords = tokens.filter(isExpoToken).map((token) => ({ token }));
+  const fcmTokens = tokens.filter((token) => !isExpoToken(token));
+
+  const expoResult = expoRecords.length
+    ? await sendExpoPushNotifications(expoRecords, payload)
+    : { successCount: 0, failureCount: 0 };
+
+  if (!fcmTokens.length) {
+    return expoResult;
+  }
+
   try {
     // FCM has a limit of 500 tokens per multicast
     const batchSize = 500;
@@ -316,8 +564,8 @@ export async function sendPushNotificationToMultiple(
     let totalFailure = 0;
     const invalidTokens: string[] = [];
 
-    for (let i = 0; i < tokens.length; i += batchSize) {
-      const batchTokens = tokens.slice(i, i + batchSize);
+    for (let i = 0; i < fcmTokens.length; i += batchSize) {
+      const batchTokens = fcmTokens.slice(i, i + batchSize);
       
       const message: MulticastMessage = {
         tokens: batchTokens,
@@ -331,7 +579,7 @@ export async function sendPushNotificationToMultiple(
           payload: {
             aps: {
               badge: payload.badge,
-              sound: payload.sound || 'default',
+              sound: getNotificationSound(payload),
               'mutable-content': 1,
               'content-available': 1,
             },
@@ -340,7 +588,7 @@ export async function sendPushNotificationToMultiple(
         android: {
           priority: 'high',
           notification: {
-            sound: payload.sound || 'default',
+            sound: getNotificationSound(payload),
             priority: 'high',
             channelId: 'action_items',
           },
@@ -365,25 +613,31 @@ export async function sendPushNotificationToMultiple(
 
     // Mark invalid tokens as inactive
     if (invalidTokens.length > 0) {
-      await markTokensAsInvalid(invalidTokens);
+      await markTokensAsInvalid(invalidTokens, 'FCM token is no longer registered');
     }
 
-    console.log(`✅ Multicast sent: ${totalSuccess} success, ${totalFailure} failure`);
-    return { successCount: totalSuccess, failureCount: totalFailure };
+    const successCount = expoResult.successCount + totalSuccess;
+    const failureCount = expoResult.failureCount + totalFailure;
+    console.log(`✅ Multicast sent: ${successCount} success, ${failureCount} failure`);
+    return { successCount, failureCount };
   } catch (error) {
     console.error('❌ Failed to send multicast push notification:', error);
-    return { successCount: 0, failureCount: tokens.length };
+    return { successCount: expoResult.successCount, failureCount: expoResult.failureCount + fcmTokens.length };
   }
 }
 
 /**
  * Mark a token as invalid/inactive
  */
-async function markTokenAsInvalid(token: string): Promise<void> {
+async function markTokenAsInvalid(token: string, reason = 'Invalid or unregistered push token'): Promise<void> {
   try {
     await prisma.deviceToken.updateMany({
       where: { token },
-      data: { isActive: false },
+      data: {
+        isActive: false,
+        lastFailureAt: new Date(),
+        lastFailureReason: reason,
+      },
     });
     console.log(`🔕 Marked invalid token as inactive: ${token.substring(0, 20)}...`);
   } catch (error) {
@@ -394,11 +648,15 @@ async function markTokenAsInvalid(token: string): Promise<void> {
 /**
  * Mark multiple tokens as invalid/inactive
  */
-async function markTokensAsInvalid(tokens: string[]): Promise<void> {
+async function markTokensAsInvalid(tokens: string[], reason = 'Invalid or unregistered push token'): Promise<void> {
   try {
     await prisma.deviceToken.updateMany({
       where: { token: { in: tokens } },
-      data: { isActive: false },
+      data: {
+        isActive: false,
+        lastFailureAt: new Date(),
+        lastFailureReason: reason,
+      },
     });
     console.log(`🔕 Marked ${tokens.length} invalid tokens as inactive`);
   } catch (error) {
@@ -511,12 +769,55 @@ export async function sendPushNotificationToUser(
   userId: string,
   payload: PushNotificationPayload
 ): Promise<{ successCount: number; failureCount: number }> {
-  const tokens = await getActiveDeviceTokens(userId);
+  const records = await getActiveDeviceTokenRecords(userId);
   
-  if (tokens.length === 0) {
+  if (records.length === 0) {
     console.log(`📭 No device tokens found for user: ${userId}`);
     return { successCount: 0, failureCount: 0 };
   }
 
-  return sendPushNotificationToMultiple(tokens, payload);
+  const expoRecords = records.filter((record) => isExpoToken(record.token));
+  const fcmTokens = records.filter((record) => !isExpoToken(record.token)).map((record) => record.token);
+
+  const [expoResult, fcmResult] = await Promise.all([
+    expoRecords.length ? sendExpoPushNotifications(expoRecords, payload) : Promise.resolve({ successCount: 0, failureCount: 0 }),
+    fcmTokens.length ? sendPushNotificationToMultiple(fcmTokens, payload) : Promise.resolve({ successCount: 0, failureCount: 0 }),
+  ]);
+
+  return {
+    successCount: expoResult.successCount + fcmResult.successCount,
+    failureCount: expoResult.failureCount + fcmResult.failureCount,
+  };
+}
+
+/**
+ * Send a direct push notification to multiple users.
+ */
+export async function sendPushNotificationToUsers(
+  userIds: string[],
+  payload: PushNotificationPayload
+): Promise<{ successCount: number; failureCount: number }> {
+  const uniqueUserIds = Array.from(new Set(userIds.filter(Boolean)));
+  if (!uniqueUserIds.length) {
+    return { successCount: 0, failureCount: 0 };
+  }
+
+  const records = await getActiveDeviceTokenRecordsForUsers(uniqueUserIds);
+  if (!records.length) {
+    console.log(`📭 No device tokens found for users: ${uniqueUserIds.join(', ')}`);
+    return { successCount: 0, failureCount: 0 };
+  }
+
+  const expoRecords = records.filter((record) => isExpoToken(record.token));
+  const fcmTokens = records.filter((record) => !isExpoToken(record.token)).map((record) => record.token);
+
+  const [expoResult, fcmResult] = await Promise.all([
+    expoRecords.length ? sendExpoPushNotifications(expoRecords, payload) : Promise.resolve({ successCount: 0, failureCount: 0 }),
+    fcmTokens.length ? sendPushNotificationToMultiple(fcmTokens, payload) : Promise.resolve({ successCount: 0, failureCount: 0 }),
+  ]);
+
+  return {
+    successCount: expoResult.successCount + fcmResult.successCount,
+    failureCount: expoResult.failureCount + fcmResult.failureCount,
+  };
 }

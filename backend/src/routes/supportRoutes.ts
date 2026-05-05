@@ -9,6 +9,7 @@ import { upload, handleMulterError } from '../middleware/upload';
 import { adminStorage } from '../config/firebase-admin';
 import { v4 as uuidv4 } from 'uuid';
 import { websocketService } from '../services/websocketService';
+import { getAccessTokenFromRequest } from '../utils/sessionCookies';
 
 const router = Router();
 
@@ -19,7 +20,7 @@ const getInboxRecipientRoleForUser = (role?: string): SupportRecipientRole | nul
 };
 
 const optionalAuthenticate = (req: AuthRequest, res: Response, next: NextFunction) => {
-  if (req.headers.authorization) {
+  if (getAccessTokenFromRequest(req)) {
     authenticate(req, res, next);
   } else {
     next();

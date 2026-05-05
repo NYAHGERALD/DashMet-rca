@@ -12,6 +12,7 @@ import {
   processAllLswNotifications,
   cleanupOldNotificationLogs,
 } from './lswNotificationService';
+import { checkPendingExpoPushReceipts } from './pushNotificationService';
 
 let isRunning = false;
 
@@ -53,5 +54,20 @@ export function startLswNotificationCron() {
     }
   });
 
-  console.log('✅ LSW notification cron started (every 5 min)');
+  // Expo push receipts are available after delivery attempts. Checking them
+  // lets us deactivate tokens from uninstalled apps or revoked permissions.
+  cron.schedule('*/15 * * * *', async () => {
+    try {
+      const result = await checkPendingExpoPushReceipts();
+      if (result.checked > 0 || result.invalidated > 0 || result.failed > 0) {
+        console.log(
+          `[MobilePush] Receipts checked=${result.checked}, failed=${result.failed}, invalidated=${result.invalidated}`,
+        );
+      }
+    } catch (err) {
+      console.error('[MobilePush] Receipt cron error:', err);
+    }
+  });
+
+  console.log('✅ LSW notification cron started (every 5 min); mobile push receipts checked every 15 min');
 }

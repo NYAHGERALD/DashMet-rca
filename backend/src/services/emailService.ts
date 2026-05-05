@@ -89,7 +89,7 @@ export async function sendVerificationEmail(
           <hr style="border: none; border-top: 1px solid #E5E7EB; margin: 24px 0;" />
 
           <p style="font-size: 12px; color: #9CA3AF; text-align: center;">
-            DashMet RCA Engine — Food Safety & Quality Management
+            DashMet Operations Intelligence — Food Safety & Quality Management
           </p>
         </div>
       `,
@@ -154,7 +154,7 @@ export async function sendCaseReopenEmail(
           <hr style="border: none; border-top: 1px solid #E5E7EB; margin: 24px 0;" />
 
           <p style="font-size: 12px; color: #9CA3AF; text-align: center;">
-            DashMet RCA Engine — Food Safety & Quality Management
+            DashMet Operations Intelligence — Food Safety & Quality Management
           </p>
         </div>
       `,
