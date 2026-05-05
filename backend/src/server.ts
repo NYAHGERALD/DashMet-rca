@@ -31,6 +31,9 @@ console.log('✅ Middleware loaded');
 import routes from './routes';
 console.log('✅ Routes loaded');
 
+import mobilePushRoutes from './routes/mobilePushRoutes';
+console.log('✅ Mobile push compatibility routes loaded');
+
 import { websocketService } from './services/websocketService';
 console.log('✅ WebSocket service loaded');
 
@@ -196,6 +199,10 @@ app.get('/api/health', (req, res) => {
 });
 
 // ==================== PHASE 0.1: BASE ROUTING ====================
+// Compatibility route for installed mobile builds that were configured without
+// the /api prefix. Keep the canonical route mounted under /api/mobile/push.
+app.use('/mobile/push', rateLimiter, mobilePushRoutes);
+
 app.use('/api', routes);
 
 // Error handling middleware (must be last)
