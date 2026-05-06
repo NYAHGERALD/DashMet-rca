@@ -3,6 +3,7 @@ import { Expo } from 'expo-server-sdk';
 import { authenticate, AuthRequest } from '../middleware/auth';
 import {
   registerDeviceToken,
+  sendPushNotificationToDeviceToken,
   sendPushNotificationToUser,
   unregisterDeviceToken,
 } from '../services/pushNotificationService';
@@ -102,7 +103,12 @@ router.post('/test', async (req: AuthRequest, res: Response) => {
   try {
     const user = req.user!;
     const firstName = user.firstName?.trim() || user.email.split('@')[0] || 'there';
-    const result = await sendPushNotificationToUser(user.id, {
+    const token = String(req.body?.token || '').trim();
+    if (token && !Expo.isExpoPushToken(token)) {
+      return res.status(400).json({ success: false, error: 'Invalid Expo push token' });
+    }
+
+    const payload = {
       title: 'DashMet alert test',
       body: `Hi, ${firstName}. DashMet alerts are ready on this phone. Tap to open your notification settings.`,
       sound: 'default',
@@ -114,9 +120,13 @@ router.post('/test', async (req: AuthRequest, res: Response) => {
         screen: 'notification-settings',
         channelId: 'dashmet_alerts',
       },
-    });
+    };
 
-    return res.json({ success: true, data: result });
+    const result = token
+      ? await sendPushNotificationToDeviceToken(user.id, token, payload)
+      : await sendPushNotificationToUser(user.id, payload);
+
+    return res.json({ success: true, data: { ...result, target: token ? 'current_device' : 'all_devices' } });
   } catch (error) {
     console.error('[MobilePush] Test push error:', error);
     return res.status(500).json({ success: false, error: 'Failed to send test notification' });

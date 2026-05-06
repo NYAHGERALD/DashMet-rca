@@ -165,6 +165,24 @@ export async function registerDeviceToken(
   provider: 'EXPO' | 'FCM' | 'APNS' = inferProvider(token)
 ): Promise<boolean> {
   try {
+    if (deviceId) {
+      await prisma.deviceToken.updateMany({
+        where: {
+          userId,
+          provider,
+          platform,
+          deviceId,
+          token: { not: token },
+          isActive: true,
+        },
+        data: {
+          isActive: false,
+          lastFailureAt: new Date(),
+          lastFailureReason: 'Replaced by a newer push token for this device',
+        },
+      });
+    }
+
     // Upsert the device token
     await prisma.deviceToken.upsert({
       where: {
@@ -792,6 +810,41 @@ export async function sendPushNotificationToUser(
     successCount: expoResult.successCount + fcmResult.successCount,
     failureCount: expoResult.failureCount + fcmResult.failureCount,
   };
+}
+
+/**
+ * Send a direct push notification to one registered device token for a user.
+ * This is used by the mobile "send test" flow so the result proves the
+ * current phone token works instead of succeeding because another stale token
+ * still exists for the account.
+ */
+export async function sendPushNotificationToDeviceToken(
+  userId: string,
+  token: string,
+  payload: PushNotificationPayload,
+): Promise<{ successCount: number; failureCount: number }> {
+  const record = await prisma.deviceToken.findFirst({
+    where: {
+      userId,
+      token,
+      isActive: true,
+    },
+    select: {
+      token: true,
+      userId: true,
+    },
+  });
+
+  if (!record) {
+    console.log(`📭 Requested device token is not active for user: ${userId}`);
+    return { successCount: 0, failureCount: 0 };
+  }
+
+  if (isExpoToken(record.token)) {
+    return sendExpoPushNotifications([record], payload);
+  }
+
+  return sendPushNotificationToMultiple([record.token], payload);
 }
 
 /**
