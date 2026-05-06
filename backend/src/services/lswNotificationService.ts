@@ -776,10 +776,25 @@ async function filterAlreadySent(
 ): Promise<LswAlertItem[]> {
   if (alerts.length === 0) return [];
 
+  const channelFilter = channel
+    ? {
+        AND: [
+          {
+            OR: [
+              { channel },
+              // Backward compatibility for older rows stored as
+              // "email+browser+mobile_push" before channel-specific logging.
+              { channel: { contains: channel } },
+            ],
+          },
+        ],
+      }
+    : {};
+
   const existing = await prisma.lswNotificationLog.findMany({
     where: {
       userId,
-      ...(channel ? { channel } : {}),
+      ...channelFilter,
       OR: alerts.map((a) => ({
         entityType: a.entityType,
         entityId: a.entityId,
@@ -1163,7 +1178,6 @@ async function sendMobilePushAlerts(
         title: copy.title,
         body: copy.body,
         sound: prefs.mobileSoundEnabled ? 'default' : null,
-        interruptionLevel: 'time-sensitive',
         ttl: 3600,
         data: pushData,
       });

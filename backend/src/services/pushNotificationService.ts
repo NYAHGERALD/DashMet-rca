@@ -43,18 +43,25 @@ const toExpoData = (data?: Record<string, string>) =>
 const getNotificationSound = (payload: PushNotificationPayload) =>
   payload.sound === null ? undefined : (payload.sound || 'default');
 
-const toExpoMessage = (token: string, payload: PushNotificationPayload): ExpoPushMessage => ({
-  to: token,
-  title: payload.title,
-  body: payload.body,
-  data: toExpoData(payload.data),
-  sound: getNotificationSound(payload) as ExpoPushMessage['sound'],
-  badge: payload.badge,
-  priority: 'high',
-  interruptionLevel: payload.interruptionLevel || 'active',
-  ttl: payload.ttl,
-  channelId: payload.data?.channelId || 'dashmet_alerts',
-});
+const toExpoMessage = (token: string, payload: PushNotificationPayload): ExpoPushMessage => {
+  const message: ExpoPushMessage = {
+    to: token,
+    title: payload.title,
+    body: payload.body,
+    data: toExpoData(payload.data),
+    sound: getNotificationSound(payload) as ExpoPushMessage['sound'],
+    badge: payload.badge,
+    priority: 'high',
+    ttl: payload.ttl,
+    channelId: payload.data?.channelId || 'dashmet_alerts',
+  };
+
+  if (payload.interruptionLevel) {
+    message.interruptionLevel = payload.interruptionLevel;
+  }
+
+  return message;
+};
 
 export interface TaskActivityNotification {
   taskId: string;
