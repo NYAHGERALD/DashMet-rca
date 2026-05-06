@@ -4495,10 +4495,10 @@ model LswNotificationLog {
   entityType      String   // dailyTask, todoItem, meetingRail, followUp, frequencyTask
   entityId        String   // ID of the LSW item
   notificationType String  // overdue, reminder_15min, reminder_1day, etc.
-  channel         String   // email, browser, both
+  channel         String   // email, browser, mobile_push
   sentAt          DateTime @default(now())
 
-  @@unique([userId, entityType, entityId, notificationType])
+  @@unique([userId, entityType, entityId, notificationType, channel])
   @@index([userId])
   @@index([sentAt])
   @@map("lsw_notification_logs")

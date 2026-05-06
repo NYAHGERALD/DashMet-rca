@@ -717,8 +717,6 @@ router.post('/submit', async (req: Request, res: Response) => {
                   title: 'DashMet bakery report',
                   body: `Hi, ${firstName}. A bakery report for ${dayOfWeek} (${weekName}) was submitted by ${submittedBy}. Tap to open the dashboard.`,
                   sound: 'default',
-                  badge: 1,
-                  interruptionLevel: 'time-sensitive',
                   ttl: 3600,
                   data: {
                     type: 'BAKERY_METRICS_SUBMITTED',
