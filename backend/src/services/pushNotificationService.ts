@@ -17,6 +17,8 @@ export interface PushNotificationPayload {
   badge?: number;
   sound?: string | null;
   imageUrl?: string;
+  interruptionLevel?: ExpoPushMessage['interruptionLevel'];
+  ttl?: number;
 }
 
 type PushTokenRecord = {
@@ -49,6 +51,8 @@ const toExpoMessage = (token: string, payload: PushNotificationPayload): ExpoPus
   sound: getNotificationSound(payload) as ExpoPushMessage['sound'],
   badge: payload.badge,
   priority: 'high',
+  interruptionLevel: payload.interruptionLevel || 'active',
+  ttl: payload.ttl,
   channelId: payload.data?.channelId || 'dashmet_alerts',
 });
 

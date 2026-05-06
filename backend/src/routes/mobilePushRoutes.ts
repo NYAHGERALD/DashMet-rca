@@ -106,6 +106,9 @@ router.post('/test', async (req: AuthRequest, res: Response) => {
       title: 'DashMet alert test',
       body: `Hi, ${firstName}. DashMet alerts are ready on this phone. Tap to open your notification settings.`,
       sound: 'default',
+      badge: 1,
+      interruptionLevel: 'time-sensitive',
+      ttl: 3600,
       data: {
         type: 'MOBILE_PUSH_TEST',
         screen: 'notification-settings',

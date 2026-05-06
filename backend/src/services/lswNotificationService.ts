@@ -1171,6 +1171,9 @@ async function sendMobilePushAlerts(
         title: copy.title,
         body: copy.body,
         sound: prefs.mobileSoundEnabled ? 'default' : null,
+        badge: 1,
+        interruptionLevel: 'time-sensitive',
+        ttl: 3600,
         data: pushData,
       });
 
