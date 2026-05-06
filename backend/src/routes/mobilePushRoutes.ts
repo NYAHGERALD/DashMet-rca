@@ -101,9 +101,10 @@ router.delete('/device-token', async (req: AuthRequest, res: Response) => {
 router.post('/test', async (req: AuthRequest, res: Response) => {
   try {
     const user = req.user!;
+    const firstName = user.firstName?.trim() || user.email.split('@')[0] || 'there';
     const result = await sendPushNotificationToUser(user.id, {
-      title: 'DashMet notification test',
-      body: 'Mobile push is enabled for your device.',
+      title: 'DashMet alert test',
+      body: `Hi, ${firstName}. DashMet alerts are ready on this phone. Tap to open your notification settings.`,
       sound: 'default',
       data: {
         type: 'MOBILE_PUSH_TEST',

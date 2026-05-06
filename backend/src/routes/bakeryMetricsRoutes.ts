@@ -14,7 +14,7 @@ import {
 } from '../services/standupMeetingReportService';
 import { buildBakeryReportData, generateBakeryReportPdf, sendBakeryReportEmail, sendBakeryReportToUsers, getOrgUsersForBakeryReport } from '../services/bakeryReportEmailService';
 import { notifyBakeryMetricsSubmitted } from '../services/smsService';
-import { sendPushNotificationToUsers } from '../services/pushNotificationService';
+import { sendPushNotificationToUser } from '../services/pushNotificationService';
 import { authenticate, AuthRequest } from '../middleware/auth';
 import { requireAdmin } from '../middleware/rbac';
 
@@ -704,25 +704,40 @@ router.post('/submit', async (req: Request, res: Response) => {
               .catch(err => console.error('[BakeryBrowserNotif] Error:', err.message));
           }
 
-          const mobilePushUserIds = userIds.filter(uid => {
-            const p = prefsMap.get(uid);
+          const mobilePushUsers = orgUsers.filter(user => {
+            const p = prefsMap.get(user.id);
             return !p || (p.mobilePushEnabled && p.bakeryMobilePushEnabled);
           });
 
-          if (mobilePushUserIds.length > 0) {
-            sendPushNotificationToUsers(mobilePushUserIds, {
-              title: 'Bakery Metrics Submitted',
-              body: `New bakery production report submitted for ${dayOfWeek} (${weekName}) by ${submittedBy}.`,
-              sound: 'default',
-              data: {
-                type: 'BAKERY_METRICS_SUBMITTED',
-                screen: 'dashboard',
-                weekName,
-                dayOfWeek,
-                channelId: 'dashmet_alerts',
-              },
-            })
-              .then(result => console.log(`[BakeryMobilePush] Sent=${result.successCount}, Failed=${result.failureCount}`))
+          if (mobilePushUsers.length > 0) {
+            Promise.allSettled(
+              mobilePushUsers.map(user => {
+                const firstName = user.firstName?.trim() || user.email.split('@')[0] || 'there';
+                return sendPushNotificationToUser(user.id, {
+                  title: 'DashMet bakery report',
+                  body: `Hi, ${firstName}. A bakery report for ${dayOfWeek} (${weekName}) was submitted by ${submittedBy}. Tap to open the dashboard.`,
+                  sound: 'default',
+                  data: {
+                    type: 'BAKERY_METRICS_SUBMITTED',
+                    screen: 'dashboard',
+                    weekName,
+                    dayOfWeek,
+                    channelId: 'dashmet_alerts',
+                  },
+                });
+              }),
+            )
+              .then(results => {
+                const delivered = results.reduce((sum, result) => {
+                  if (result.status !== 'fulfilled') return sum;
+                  return sum + result.value.successCount;
+                }, 0);
+                const failed = results.reduce((sum, result) => {
+                  if (result.status === 'rejected') return sum + 1;
+                  return sum + result.value.failureCount;
+                }, 0);
+                console.log(`[BakeryMobilePush] Sent=${delivered}, Failed=${failed}`);
+              })
               .catch(err => console.error('[BakeryMobilePush] Error:', err.message));
           }
         }

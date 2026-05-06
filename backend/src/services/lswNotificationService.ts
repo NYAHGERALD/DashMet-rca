@@ -353,6 +353,18 @@ function formatDailyTaskDueLabel(ctx: DailyTaskScheduleContext, dueAt: Date, day
   })}`;
 }
 
+function getRecipientName(user: { firstName?: string | null; email?: string | null }): string {
+  const firstName = user.firstName?.trim();
+  if (firstName) return firstName;
+  return user.email?.split('@')[0] || 'there';
+}
+
+function compactForPush(value: string, maxLength = 82): string {
+  const compacted = value.replace(/\s+/g, ' ').trim();
+  if (compacted.length <= maxLength) return compacted;
+  return `${compacted.slice(0, maxLength - 1).trim()}…`;
+}
+
 /**
  * Find all overdue items for a specific user
  */
@@ -547,10 +559,15 @@ async function findUpcomingItems(userId: string, prefs: LswNotificationPreferenc
 
   // ── Daily Tasks upcoming ──
   // Daily tasks use HH:MM + the user's visible LSW days. Only today's unchecked
-  // tasks are eligible for "upcoming" alerts; future days are handled when that
-  // day arrives so reminders stay precise.
+  // tasks are eligible for "upcoming" alerts. Day/week/month reminder buckets
+  // are for dated LSW items; daily tasks use the minutes-before setting so they
+  // do not all fire as generic same-day reminders.
   const ctx = await getDailyTaskScheduleContext(userId, prefs, now);
-  if (ctx && ctx.visibleDays.includes(ctx.todayDayColumn)) {
+  const customReminderMinutes = (prefs as any).customReminderMinutes || 0;
+  const dailyReminderMinutes = Math.max(prefs.reminderMinutesBefore || 0, customReminderMinutes);
+  const dailyMaxWindow = new Date(now.getTime() + dailyReminderMinutes * 60 * 1000);
+
+  if (ctx && dailyReminderMinutes > 0 && ctx.visibleDays.includes(ctx.todayDayColumn)) {
     const upcomingDailyTasks = await prisma.lswDailyTask.findMany({
       where: {
         userId,
@@ -573,10 +590,10 @@ async function findUpcomingItems(userId: string, prefs: LswNotificationPreferenc
       if (completion?.[ctx.todayDayColumn]) continue;
 
       const dueAt = buildDailyTaskDueAt(ctx, ctx.todayDayColumn, task.time);
-      if (!dueAt || dueAt <= now || dueAt > maxWindow) continue;
+      if (!dueAt || dueAt <= now || dueAt > dailyMaxWindow) continue;
 
       const timeUntil = dueAt.getTime() - now.getTime();
-      const reminderType = getReminderType(timeUntil, prefs);
+      const reminderType = getMinuteReminderType(timeUntil, prefs);
       if (reminderType) {
         alerts.push({
           entityType: 'dailyTask',
@@ -710,11 +727,8 @@ async function findUpcomingItems(userId: string, prefs: LswNotificationPreferenc
 /**
  * Determine which reminder bucket an upcoming event falls into
  */
-function getReminderType(timeUntilMs: number, prefs: LswNotificationPreference): string | null {
+function getMinuteReminderType(timeUntilMs: number, prefs: LswNotificationPreference): string | null {
   const mins = timeUntilMs / (60 * 1000);
-  const days = timeUntilMs / (24 * 60 * 60 * 1000);
-  const weeks = days / 7;
-  const months = days / 30;
 
   // Check custom minutes first (most specific user-defined window)
   const customMins = (prefs as any).customReminderMinutes;
@@ -726,6 +740,18 @@ function getReminderType(timeUntilMs: number, prefs: LswNotificationPreference):
   if (prefs.reminderMinutesBefore > 0 && mins <= prefs.reminderMinutesBefore && mins > 0) {
     return `reminder_${prefs.reminderMinutesBefore}min`;
   }
+
+  return null;
+}
+
+function getReminderType(timeUntilMs: number, prefs: LswNotificationPreference): string | null {
+  const minuteReminder = getMinuteReminderType(timeUntilMs, prefs);
+  if (minuteReminder) return minuteReminder;
+
+  const days = timeUntilMs / (24 * 60 * 60 * 1000);
+  const weeks = days / 7;
+  const months = days / 30;
+
   if (prefs.reminderDaysBefore > 0 && days <= prefs.reminderDaysBefore && days > 0) {
     return `reminder_${prefs.reminderDaysBefore}day`;
   }
@@ -1062,6 +1088,48 @@ function getMobileScreenForAlert(item: LswAlertItem): string {
   return map[item.entityType];
 }
 
+function getMobileSectionName(item: LswAlertItem): string {
+  const map: Record<LswAlertItem['entityType'], string> = {
+    dailyTask: 'Daily Tasks',
+    todoItem: 'To-Dos',
+    meetingRail: 'Meeting Rails',
+    followUp: 'Follow Ups',
+    frequencyTask: 'Scheduled Tasks',
+  };
+
+  return map[item.entityType];
+}
+
+function buildMobilePushCopy(
+  user: { firstName?: string | null; email?: string | null },
+  item: LswAlertItem,
+  mode: 'overdue' | 'reminder' | 'escalation',
+) {
+  const name = getRecipientName(user);
+  const dueText = formatAlertTime(item);
+  const taskName = compactForPush(item.taskName);
+  const sectionName = getMobileSectionName(item);
+
+  if (mode === 'escalation') {
+    return {
+      title: 'DashMet reminder',
+      body: `Hi, ${name}. This still needs attention: ${taskName} was due at ${dueText}. Tap to open ${sectionName}.`,
+    };
+  }
+
+  if (mode === 'overdue') {
+    return {
+      title: 'DashMet task alert',
+      body: `Hi, ${name}. Quick reminder: ${taskName} was due at ${dueText}. Tap to open ${sectionName}.`,
+    };
+  }
+
+  return {
+    title: 'DashMet upcoming reminder',
+    body: `Hi, ${name}. ${taskName} is coming up at ${dueText}. Tap to open ${sectionName}.`,
+  };
+}
+
 function getDeliveryChannelLabel(emailOk: boolean, browserOk: boolean, pushOk: boolean): string {
   return [
     emailOk ? 'email' : '',
@@ -1071,7 +1139,7 @@ function getDeliveryChannelLabel(emailOk: boolean, browserOk: boolean, pushOk: b
 }
 
 async function sendMobilePushAlerts(
-  userId: string,
+  user: { id: string; firstName?: string | null; email?: string | null },
   prefs: LswNotificationPreference,
   items: LswAlertItem[],
   mode: 'overdue' | 'reminder' | 'escalation'
@@ -1082,10 +1150,9 @@ async function sendMobilePushAlerts(
 
   for (const item of items) {
     try {
-      const entityLabel = formatEntityType(item.entityType);
       const isOverdue = mode === 'overdue';
       const isEscalation = mode === 'escalation';
-      const dueText = formatAlertTime(item);
+      const copy = buildMobilePushCopy(user, item, mode);
       const pushData: Record<string, string> = {
         type: isEscalation ? 'LSW_ESCALATION' : isOverdue ? 'LSW_TASK_OVERDUE' : 'LSW_UPCOMING_REMINDER',
         screen: getMobileScreenForAlert(item),
@@ -1100,17 +1167,9 @@ async function sendMobilePushAlerts(
       if (item.year) pushData.year = String(item.year);
       if (item.dayKey) pushData.dayKey = item.dayKey;
 
-      const result = await sendPushNotificationToUser(userId, {
-        title: isEscalation
-          ? `Still overdue: ${item.taskName}`
-          : isOverdue
-            ? `Overdue: ${item.taskName}`
-            : `Upcoming: ${item.taskName}`,
-        body: isEscalation
-          ? `${entityLabel} is still open after its due time: ${dueText}`
-          : isOverdue
-            ? `${entityLabel} was due at ${dueText}`
-            : `${entityLabel} is due at ${dueText}`,
+      const result = await sendPushNotificationToUser(user.id, {
+        title: copy.title,
+        body: copy.body,
         sound: prefs.mobileSoundEnabled ? 'default' : null,
         data: pushData,
       });
@@ -1195,7 +1254,7 @@ export async function processUserLswNotifications(userId: string): Promise<numbe
     if (prefs.emailEnabled) {
       emailOk = await sendOverdueEmail(user, newOverdue);
     }
-    const mobileDelivered = await sendMobilePushAlerts(userId, prefs, newOverdue, 'overdue');
+    const mobileDelivered = await sendMobilePushAlerts(user, prefs, newOverdue, 'overdue');
 
     // Create in-app notifications for each overdue item
     for (const item of newOverdue) {
@@ -1237,7 +1296,7 @@ export async function processUserLswNotifications(userId: string): Promise<numbe
       emailOk = await sendOverdueEmail(user, newEscalations);
     }
     const mobileDelivered = shouldSendPush
-      ? await sendMobilePushAlerts(userId, prefs, newEscalations, 'escalation')
+      ? await sendMobilePushAlerts(user, prefs, newEscalations, 'escalation')
       : [];
 
     for (const item of newEscalations) {
@@ -1271,7 +1330,7 @@ export async function processUserLswNotifications(userId: string): Promise<numbe
     if (prefs.emailEnabled) {
       emailOk = await sendReminderEmail(user, newReminders);
     }
-    const mobileDelivered = await sendMobilePushAlerts(userId, prefs, newReminders, 'reminder');
+    const mobileDelivered = await sendMobilePushAlerts(user, prefs, newReminders, 'reminder');
 
     for (const item of newReminders) {
       await prisma.notification.create({
