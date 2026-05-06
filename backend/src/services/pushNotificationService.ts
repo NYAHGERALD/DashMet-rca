@@ -166,12 +166,22 @@ export async function registerDeviceToken(
 ): Promise<boolean> {
   try {
     if (deviceId) {
+      const deviceFamily = deviceId.split('|')[0]?.trim();
+      const staleSameDeviceWhere = deviceFamily
+        ? {
+            OR: [
+              { deviceId },
+              { deviceId: { startsWith: deviceFamily } },
+            ],
+          }
+        : { deviceId };
+
       await prisma.deviceToken.updateMany({
         where: {
           userId,
           provider,
           platform,
-          deviceId,
+          ...staleSameDeviceWhere,
           token: { not: token },
           isActive: true,
         },
