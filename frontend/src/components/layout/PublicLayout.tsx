@@ -23,7 +23,7 @@ export default function PublicLayout({ children }: PublicLayoutProps) {
                 />
               </div>
               <div className="text-2xl font-bold text-primary-600">DashMet</div>
-              <div className="text-sm text-gray-600 dark:text-gray-400">RCA Engine</div>
+              <div className="text-sm text-gray-600 dark:text-gray-400">Operations Intelligence</div>
             </Link>
             
             <div className="flex items-center space-x-4">

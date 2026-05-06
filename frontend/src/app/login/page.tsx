@@ -25,6 +25,7 @@ export default function LoginPage() {
   const [mfaMethod, setMfaMethod] = useState<MfaMethod>('email_otp');
   const [requiresMfa, setRequiresMfa] = useState(false);
   const [mfaNotice, setMfaNotice] = useState('');
+  const [rememberDevice, setRememberDevice] = useState(false);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
   const [needsProfileSetup, setNeedsProfileSetup] = useState(false);
@@ -151,6 +152,7 @@ export default function LoginPage() {
       setRequiresMfa(false);
       setMfaCode('');
       setMfaNotice('');
+      setRememberDevice(false);
       setStep('password');
     } catch {
       setError('Unable to continue. Please try again.');
@@ -173,12 +175,13 @@ export default function LoginPage() {
       const normalizedEmail = normalizeEmailInput(email);
       const normalizedPassword = normalizePasswordInput(password);
 
-      const payload: { email: string; password: string; mfaCode?: string } = {
+      const payload: { email: string; password: string; mfaCode?: string; rememberDevice?: boolean } = {
         email: normalizedEmail,
         password: normalizedPassword,
       };
       if (requiresMfa) {
         payload.mfaCode = mfaCode.trim();
+        payload.rememberDevice = rememberDevice;
       }
 
       const response = await api.post('/auth/login', payload);
@@ -336,13 +339,13 @@ export default function LoginPage() {
                 />
               </div>
             </div>
-            <h1 className="text-2xl sm:text-3xl font-bold text-white mb-2">
-              Sign in to RCA Engine
+            <h1 className="text-2xl sm:text-3xl font-bold text-white mb-1">
+              Sign in to DashMet
             </h1>
-            <p className="text-sm sm:text-base text-gray-300">
-              Enterprise Root Cause Analysis Platform
+            <p className="text-sm sm:text-base text-gray-300 mb-2">
+              Operations Intelligence
             </p>
-            <p className="text-xs text-gray-400 mt-2">Sign in with your email. New users must be invited by their organization admin.</p>
+            <p className="text-xs text-gray-400">Sign in with your email. New users must be invited by their organization admin.</p>
           </div>
 
           {error && (
@@ -390,6 +393,7 @@ export default function LoginPage() {
                       setRequiresMfa(false);
                       setMfaCode('');
                       setMfaNotice('');
+                      setRememberDevice(false);
                       setError('');
                     }}
                     className="text-sm text-blue-400 hover:text-blue-300"
@@ -463,6 +467,19 @@ export default function LoginPage() {
                         Resend code
                       </button>
                     </div>
+                    <label className="mt-3 flex items-center gap-3 rounded-lg border border-white/10 bg-white/5 px-3 py-2.5 text-sm text-blue-100">
+                      <input
+                        type="checkbox"
+                        checked={rememberDevice}
+                        onChange={(e) => setRememberDevice(e.target.checked)}
+                        disabled={loading}
+                        className="h-4 w-4 rounded border-white/20 bg-slate-900 text-blue-600 focus:ring-2 focus:ring-blue-500/50"
+                      />
+                      <span className="leading-5">
+                        Remember this device
+                        <span className="block text-xs text-blue-200/70">Use only on a private device.</span>
+                      </span>
+                    </label>
                   </div>
                 </>
               )}
@@ -492,7 +509,7 @@ export default function LoginPage() {
               </div>
               <div className="p-4 bg-amber-500/10 border border-amber-500/30 rounded-lg text-sm">
                 <p className="text-amber-200 font-medium mb-1">Invitation Required</p>
-                <p className="text-amber-300/80">This email is not registered. To join DashMet RCA, you need an invitation from your organization administrator.</p>
+                <p className="text-amber-300/80">This email is not registered. To join DashMet Operations Intelligence, you need an invitation from your organization administrator.</p>
               </div>
               <div className="p-4 bg-blue-500/10 border border-blue-500/30 rounded-lg text-sm">
                 <p className="text-blue-200 font-medium mb-2">How to get started:</p>

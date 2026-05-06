@@ -2209,7 +2209,7 @@ function WorkplaceSafetyContent() {
             
             <div class="footer">
               <div class="footer-left">${viewReportData.Facility?.name || viewReportData.Organization?.name || '-'}</div>
-              <div class="footer-center">Generated ${format(new Date(), 'MMM d, yyyy h:mm a')} • DashMet RCA Engine</div>
+              <div class="footer-center">Generated ${format(new Date(), 'MMM d, yyyy h:mm a')} • DashMet Operations Intelligence</div>
               <div class="footer-right">${viewReportData.assessmentNumber}</div>
             </div>
           </body>
@@ -4263,7 +4263,7 @@ function WorkplaceSafetyContent() {
 
                     {/* Footer */}
                     <div className="mt-8 pt-4 border-t border-gray-200 dark:border-gray-700 text-center text-xs text-gray-500 dark:text-gray-400">
-                      Generated on {format(new Date(), 'MMMM d, yyyy \'at\' h:mm a')} • DashMet RCA Engine
+                      Generated on {format(new Date(), 'MMMM d, yyyy \'at\' h:mm a')} • DashMet Operations Intelligence
                     </div>
                   </div>
                 </div>

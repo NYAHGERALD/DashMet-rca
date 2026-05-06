@@ -177,7 +177,9 @@ export interface LswFullData {
 
 /** Bulk fetch all LSW data for a given week */
 export async function fetchLswData(weekNumber: number, year: number): Promise<LswFullData> {
-  const res = await api.get('/lsw/data', { params: { weekNumber, year } });
+  const res = await api.get('/lsw/data', {
+    params: { weekNumber, year, _: Date.now() },
+  });
   return res.data.data;
 }
 

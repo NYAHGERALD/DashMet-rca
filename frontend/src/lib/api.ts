@@ -109,6 +109,7 @@ export async function apiWithExtendedTimeout<T = any>(
 const isAuthRoute = (url = '') =>
   url.includes('/auth/login') ||
   url.includes('/auth/logout') ||
+  url.includes('/auth/csrf') ||
   url.includes('/auth/refresh') ||
   url.includes('/auth/forgot-password') ||
   url.includes('/auth/reset-password');
@@ -139,10 +140,41 @@ const emitSessionExpired = () => {
   window.dispatchEvent(new CustomEvent(SESSION_EXPIRED_EVENT));
 };
 
+const ensureFreshCsrfToken = async (force = false) => {
+  if (!force && (readCookieValue(CSRF_COOKIE_NAME) || csrfTokenFromHeader)) {
+    return;
+  }
+
+  if (force) {
+    csrfTokenFromHeader = null;
+  }
+
+  const response = await refreshClient.get('/auth/csrf', {
+    params: { _: Date.now() },
+  });
+  captureCsrfToken(response.headers);
+};
+
+const refreshSession = async () => {
+  await ensureFreshCsrfToken();
+
+  try {
+    await refreshClient.post('/auth/refresh');
+  } catch (error: any) {
+    if (error?.response?.status !== 403) {
+      throw error;
+    }
+
+    await ensureFreshCsrfToken(true);
+    await refreshClient.post('/auth/refresh');
+  }
+};
+
+export const refreshAuthSession = refreshSession;
+
 const ensureSingleRefresh = async () => {
   if (!refreshInFlight) {
-    refreshInFlight = refreshClient
-      .post('/auth/refresh')
+    refreshInFlight = refreshSession()
       .then(() => {
         sessionExpiredEventEmitted = false;
       })

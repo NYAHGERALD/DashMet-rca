@@ -41,6 +41,7 @@ export default function HomePage() {
   const [mfaMethod, setMfaMethod] = useState<MfaMethod>('email_otp');
   const [requiresMfa, setRequiresMfa] = useState(false);
   const [mfaNotice, setMfaNotice] = useState('');
+  const [rememberDevice, setRememberDevice] = useState(false);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
   const [needsProfileSetup, setNeedsProfileSetup] = useState(false);
@@ -139,6 +140,7 @@ export default function HomePage() {
       setRequiresMfa(false);
       setMfaCode('');
       setMfaNotice('');
+      setRememberDevice(false);
       setStep('password');
     } catch {
       setError('Unable to continue. Please try again.');
@@ -157,12 +159,13 @@ export default function HomePage() {
     setError('');
 
     try {
-      const payload: { email: string; password: string; mfaCode?: string } = {
+      const payload: { email: string; password: string; mfaCode?: string; rememberDevice?: boolean } = {
         email: normalizeEmailInput(email),
         password: normalizePasswordInput(password),
       };
       if (requiresMfa) {
         payload.mfaCode = mfaCode.trim();
+        payload.rememberDevice = rememberDevice;
       }
 
       const response = await api.post('/auth/login', payload);
@@ -314,7 +317,7 @@ export default function HomePage() {
                 <div className="relative w-16 h-16 sm:w-20 sm:h-20 md:w-24 md:h-24 lg:w-28 lg:h-28">
                   <Image
                     src={logoImageUrl}
-                    alt="DASHMET RCA Logo"
+                    alt="DashMet Operations Intelligence Logo"
                     fill
                     className="object-contain"
                     priority
@@ -326,10 +329,10 @@ export default function HomePage() {
               {/* Hero Content */}
               <div className="space-y-3 sm:space-y-4 lg:space-y-6">
                 <h1 className="text-2xl sm:text-3xl md:text-4xl lg:text-5xl xl:text-6xl font-bold bg-gradient-to-r from-white to-blue-200 bg-clip-text text-transparent">
-                  DASHMET RCA
+                  DashMet
                 </h1>
-                <p className="text-base sm:text-lg md:text-xl lg:text-2xl text-blue-200/80 font-medium">
-                  Intelligent Root Cause Analysis Engine
+                <p className="text-sm sm:text-base md:text-lg lg:text-xl text-blue-200/80 font-normal">
+                  Operations Intelligence
                 </p>
                 <p className="text-xs sm:text-sm md:text-base lg:text-lg text-slate-300 max-w-xl mx-auto px-1 sm:px-2">
                   Transform incident management with AI-powered analytics. Identify patterns, predict failures, and resolve issues faster than ever.
@@ -420,6 +423,7 @@ export default function HomePage() {
                             setRequiresMfa(false);
                             setMfaCode('');
                             setMfaNotice('');
+                            setRememberDevice(false);
                             setError('');
                           }}
                           className="text-blue-400 hover:text-blue-300 text-sm underline"
@@ -492,6 +496,19 @@ export default function HomePage() {
                                   Resend code
                                 </button>
                               </div>
+                              <label className="mt-3 flex items-center gap-3 rounded-lg border border-white/10 bg-white/5 px-3 py-2.5 text-sm text-blue-100">
+                                <input
+                                  type="checkbox"
+                                  checked={rememberDevice}
+                                  onChange={(e) => setRememberDevice(e.target.checked)}
+                                  disabled={loading}
+                                  className="h-4 w-4 rounded border-white/20 bg-slate-900 text-blue-600 focus:ring-2 focus:ring-blue-500/50"
+                                />
+                                <span className="leading-5">
+                                  Remember this device
+                                  <span className="block text-xs text-blue-200/70">Use only on a private device.</span>
+                                </span>
+                              </label>
                             </div>
                           </>
                         )}

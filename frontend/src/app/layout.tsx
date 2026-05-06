@@ -8,9 +8,9 @@ import { Providers } from '@/components/providers/Providers';
 const inter = Inter({ subsets: ['latin'] });
 
 export const metadata: Metadata = {
-  title: 'DashMet RCA Engine',
-  description: 'Enterprise AI-Powered Root Cause Analysis Platform for Food Safety & Machine Issues',
-  keywords: ['RCA', 'Root Cause Analysis', 'Food Safety', 'Manufacturing', 'AI'],
+  title: 'DashMet Operations Intelligence',
+  description: 'Enterprise operations management solution for food safety, manufacturing, and team execution',
+  keywords: ['Operations', 'Food Safety', 'Manufacturing', 'Leader Standard Work', 'AI'],
   manifest: '/site.webmanifest',
   icons: {
     icon: [
@@ -28,8 +28,8 @@ export const metadata: Metadata = {
     title: 'DashMet',
   },
   openGraph: {
-    title: 'DashMet RCA Engine',
-    description: 'Enterprise AI-Powered Root Cause Analysis Platform for Food Safety & Machine Issues',
+    title: 'DashMet Operations Intelligence',
+    description: 'Enterprise operations management solution for food safety, manufacturing, and team execution',
     url: 'https://www.dashmet.com',
     siteName: 'DashMet',
     images: [
@@ -45,11 +45,11 @@ export const metadata: Metadata = {
   },
   twitter: {
     card: 'summary',
-    title: 'DashMet RCA Engine',
-    description: 'Enterprise AI-Powered Root Cause Analysis Platform',
+    title: 'DashMet Operations Intelligence',
+    description: 'Enterprise operations management solution',
     images: ['/images/logo.png'],
   },
-  applicationName: 'DashMet',
+  applicationName: 'DashMet Operations Intelligence',
 };
 
 export const viewport = {
@@ -68,10 +68,10 @@ export default function RootLayout({
   return (
     <html lang="en" suppressHydrationWarning className="dark">
       <head>
-        <meta name="application-name" content="DashMet" />
+        <meta name="application-name" content="DashMet Operations Intelligence" />
         <meta name="apple-mobile-web-app-capable" content="yes" />
         <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
-        <meta name="apple-mobile-web-app-title" content="DashMet" />
+        <meta name="apple-mobile-web-app-title" content="DashMet Operations Intelligence" />
         <meta name="mobile-web-app-capable" content="yes" />
         <meta name="msapplication-TileColor" content="#10B981" />
         <meta name="msapplication-TileImage" content="/images/logo.png" />

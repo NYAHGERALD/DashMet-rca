@@ -5,7 +5,6 @@ import { motion, AnimatePresence } from 'framer-motion';
 import { useAuth } from '@/components/providers/AuthProvider';
 import { useWebSocket } from '@/lib/websocket';
 import ProtectedRoute from '@/components/auth/ProtectedRoute';
-import { useLswBrowserNotifications } from '@/hooks/useLswBrowserNotifications';
 import Link from 'next/link';
 import {
   fetchLswData, updateLswBoard,
@@ -322,9 +321,8 @@ function getWeekOffsetText(selectedWeek: number, selectedYear: number, config?: 
 // Departments loaded from the database (see useEffect below)
 
 function LSWContent() {
-  const { user } = useAuth();
+  const { user, loading: authLoading } = useAuth();
   const { connect, isConnected, onLswCompletionChanged, onLswProjectChanged, onLswFollowUpChanged, onLswTriggerChanged, onLswFreqTaskChanged, onLswGoalChanged, onLswRailChanged, onLswTodoChanged } = useWebSocket();
-  useLswBrowserNotifications();
   const [calendarConfig, setCalendarConfig] = useState<LswCalendarConfig>({ calendarYearStartMonth: 1, calendarYearStartDay: 1 });
   const [workDaysPerWeek, setWorkDaysPerWeek] = useState<number>(5);
   const [currentWeek, setCurrentWeek] = useState(getWeekNumber(new Date()));
@@ -980,12 +978,20 @@ function LSWContent() {
 
   // ─── Data Loading ──────────────────────────────────────────────────────────
   const initialLoad = useRef(true);
+  const loadRequestId = useRef(0);
   const loadLswData = useCallback(async () => {
+    const requestId = ++loadRequestId.current;
+    const requestedWeek = currentWeek;
+    const requestedYear = currentYear;
+
     setIsLoading(true);
     setLoadError(null);
     let needsRefetch = false;
     try {
-      const data = await fetchLswData(currentWeek, currentYear);
+      const data = await fetchLswData(requestedWeek, requestedYear);
+      if (requestId !== loadRequestId.current) {
+        return;
+      }
 
       // Apply calendar config from org
       if (data.calendarConfig) {
@@ -998,7 +1004,7 @@ function LSWContent() {
             const now = new Date();
             const orgWeek = getWeekNumber(now, cfg);
             const orgYear = getOrgYear(now, cfg);
-            if (orgWeek !== currentWeek || orgYear !== currentYear) {
+            if (orgWeek !== requestedWeek || orgYear !== requestedYear) {
               setCurrentWeek(orgWeek);
               setCurrentYear(orgYear);
               setConfigReady(true);
@@ -1035,25 +1041,36 @@ function LSWContent() {
       // Load ALL early completion logs (filtering is done in the UI)
       try {
         const logs = await getLswEarlyCompletionLogs();
-        setEarlyCompletionLogs(logs);
+        if (requestId === loadRequestId.current) {
+          setEarlyCompletionLogs(logs);
+        }
       } catch (logErr) {
         console.error('Failed to load early completion logs:', logErr);
       }
     } catch (err: any) {
+      if (requestId !== loadRequestId.current) {
+        return;
+      }
       console.error('Failed to load LSW data:', err);
       setLoadError(err.message || 'Failed to load data');
     } finally {
-      if (!needsRefetch) {
+      if (requestId === loadRequestId.current && !needsRefetch) {
         setIsLoading(false);
       }
     }
   }, [currentWeek, currentYear]);
 
   useEffect(() => {
+    if (authLoading) {
+      return;
+    }
+
     if (user) {
       loadLswData();
+    } else {
+      setIsLoading(false);
     }
-  }, [user, loadLswData]);
+  }, [user, authLoading, loadLswData]);
 
   // Real-time sync: apply checkbox changes instantly from WebSocket events
   useEffect(() => {
@@ -1320,7 +1337,7 @@ function LSWContent() {
 
   // Cross-platform sync: refetch only when tab becomes visible (no periodic polling)
   useEffect(() => {
-    if (!user || !configReady) return;
+    if (authLoading || !user || !configReady) return;
 
     // Refetch when user switches back to this tab (e.g. after editing on another device)
     const handleVisibility = () => {
@@ -1333,7 +1350,7 @@ function LSWContent() {
     return () => {
       document.removeEventListener('visibilitychange', handleVisibility);
     };
-  }, [user, configReady, loadLswData]);
+  }, [user, authLoading, configReady, loadLswData]);
 
   // Todo inline editing handlers
   const handleAddTodo = async () => {

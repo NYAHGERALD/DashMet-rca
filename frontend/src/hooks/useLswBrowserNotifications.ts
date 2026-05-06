@@ -1,7 +1,6 @@
 'use client';
 
 import { useEffect, useRef, useCallback } from 'react';
-import { useRouter } from 'next/navigation';
 import api from '@/lib/api';
 import { browserNotificationService } from '@/lib/browserNotifications';
 import { alertSoundService, type SoundType } from '@/lib/alertSounds';
@@ -12,14 +11,15 @@ const POLL_INTERVAL = 60_000; // Poll every 60 seconds
  * Hook that polls for pending LSW browser notifications
  * and displays them via the BrowserNotificationService.
  * Plays alert sounds based on user preferences.
- * Should be mounted in the LSW page or a global layout.
+ * Mount this from the global notification provider so it is not tied to /lsw.
  */
-export function useLswBrowserNotifications() {
-  const router = useRouter();
+export function useLswBrowserNotifications(enabled = true) {
   const intervalRef = useRef<ReturnType<typeof setInterval> | null>(null);
   const shownIdsRef = useRef<Set<string>>(new Set());
 
   const fetchAndShowNotifications = useCallback(async () => {
+    if (!enabled) return;
+
     try {
       // Don't poll if browser notifications aren't permitted
       if (browserNotificationService.getPermission() !== 'granted') return;
@@ -68,17 +68,13 @@ export function useLswBrowserNotifications() {
     } catch {
       // Silently fail — don't disrupt the user experience
     }
-  }, []);
+  }, [enabled]);
 
   useEffect(() => {
-    // Set up click handler to navigate to LSW page
-    browserNotificationService.setOnNotificationClick((notification) => {
-      if (notification.data?.url) {
-        router.push(notification.data.url);
-        // Stop repeating sound when user acknowledges
-        alertSoundService.stopRepeat();
-      }
-    });
+    if (!enabled) {
+      alertSoundService.stopRepeat();
+      return;
+    }
 
     // Initial fetch
     fetchAndShowNotifications();
@@ -93,5 +89,5 @@ export function useLswBrowserNotifications() {
       }
       alertSoundService.stopRepeat();
     };
-  }, [fetchAndShowNotifications, router]);
+  }, [enabled, fetchAndShowNotifications]);
 }

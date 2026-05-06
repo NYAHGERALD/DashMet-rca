@@ -1,7 +1,7 @@
 'use client';
 
 import { createContext, useContext, useState, useEffect, useCallback, useRef } from 'react';
-import api, { SESSION_EXPIRED_EVENT } from '@/lib/api';
+import api, { SESSION_EXPIRED_EVENT, refreshAuthSession } from '@/lib/api';
 import { useTheme } from '@/components/providers/ThemeProvider';
 
 interface User {
@@ -286,7 +286,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   const handleStaySignedIn = useCallback(async () => {
     setExtendingSession(true);
     try {
-      await api.post('/auth/refresh');
+      await refreshAuthSession();
       setSessionExpired(false);
       setShowIdleWarning(false);
       setIdleCountdownSeconds(0);

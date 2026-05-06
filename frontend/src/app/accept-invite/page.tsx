@@ -248,7 +248,8 @@ export default function AcceptInvitePage() {
             <div className="w-16 h-16 mx-auto mb-4 rounded-full bg-green-500/20 flex items-center justify-center">
               <CheckCircle2 className="w-8 h-8 text-green-400" />
             </div>
-            <h1 className="text-xl sm:text-2xl font-bold text-white mb-3">Welcome to DashMet RCA!</h1>
+            <h1 className="text-xl sm:text-2xl font-bold text-white mb-1">Welcome to DashMet!</h1>
+            <p className="text-sm text-gray-300 mb-3">Operations Intelligence</p>
             <p className="text-sm text-gray-300 mb-2">
               Your account has been created successfully.
             </p>
@@ -312,7 +313,7 @@ export default function AcceptInvitePage() {
                 </div>
                 <div>
                   <h2 className="text-lg font-bold text-white tracking-tight">DASHMET</h2>
-                  <p className="text-[10px] text-blue-300/70 uppercase tracking-widest">RCA Engine</p>
+                  <p className="text-[10px] text-blue-300/70 uppercase">Operations Intelligence</p>
                 </div>
               </div>
 

@@ -11,6 +11,7 @@ import {
 } from '@/lib/browserNotifications';
 import { Inbox, HelpCircle } from 'lucide-react';
 import Link from 'next/link';
+import { alertSoundService } from '@/lib/alertSounds';
 
 interface NotificationCenterProps {
   className?: string;
@@ -72,6 +73,7 @@ export default function NotificationCenter({ className = '', isSystemAdmin = fal
       if (notification.data?.url) {
         router.push(notification.data.url);
       }
+      alertSoundService.stopRepeat();
       refreshNotifications();
     });
 

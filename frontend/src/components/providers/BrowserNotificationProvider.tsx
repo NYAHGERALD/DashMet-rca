@@ -7,6 +7,8 @@ import { useWebSocket } from '@/lib/websocket';
 import { browserNotificationService, BrowserNotification } from '@/lib/browserNotifications';
 import { chatUnreadStore } from '@/lib/chatUnreadStore';
 import api from '@/lib/api';
+import { useLswBrowserNotifications } from '@/hooks/useLswBrowserNotifications';
+import { alertSoundService } from '@/lib/alertSounds';
 
 interface BrowserNotificationContextType {
   requestPermission: () => Promise<NotificationPermission>;
@@ -30,6 +32,7 @@ export function BrowserNotificationProvider({ children }: { children: React.Reac
   const [permission, setPermission] = useState<NotificationPermission>(() => 
     typeof window !== 'undefined' ? browserNotificationService.getPermission() : 'default'
   );
+  useLswBrowserNotifications(Boolean(user));
 
   // Auto-connect WebSocket when user is logged in
   useEffect(() => {
@@ -50,6 +53,7 @@ export function BrowserNotificationProvider({ children }: { children: React.Reac
       if (notification.data?.url) {
         router.push(notification.data.url);
       }
+      alertSoundService.stopRepeat();
     });
   }, [router]);
 

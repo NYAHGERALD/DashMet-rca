@@ -1,7 +1,7 @@
 {
-  "name": "DashMet RCA Engine",
-  "short_name": "DashMet",
-  "description": "Enterprise AI-Powered Root Cause Analysis Platform for Food Safety & Machine Issues",
+  "name": "DashMet Operations Intelligence",
+  "short_name": "DashMet OI",
+  "description": "Enterprise operations management solution for food safety, manufacturing, and team execution",
   "start_url": "/",
   "display": "standalone",
   "background_color": "#111827",
