@@ -52,6 +52,11 @@ router.put('/', async (req: AuthRequest, res: Response) => {
       bakeryEmailEnabled,
       bakeryBrowserEnabled,
       bakeryMobilePushEnabled,
+      issueMobilePushEnabled,
+      issueCreatedPushEnabled,
+      issueStatusPushEnabled,
+      issueEditedPushEnabled,
+      issueDeletedPushEnabled,
       notifyTaskOverdue,
       notifyTodoOverdue,
       notifyMeetingOverdue,
@@ -147,6 +152,11 @@ router.put('/', async (req: AuthRequest, res: Response) => {
     if (bakeryEmailEnabled !== undefined) updateData.bakeryEmailEnabled = Boolean(bakeryEmailEnabled);
     if (bakeryBrowserEnabled !== undefined) updateData.bakeryBrowserEnabled = Boolean(bakeryBrowserEnabled);
     if (bakeryMobilePushEnabled !== undefined) updateData.bakeryMobilePushEnabled = Boolean(bakeryMobilePushEnabled);
+    if (issueMobilePushEnabled !== undefined) updateData.issueMobilePushEnabled = Boolean(issueMobilePushEnabled);
+    if (issueCreatedPushEnabled !== undefined) updateData.issueCreatedPushEnabled = Boolean(issueCreatedPushEnabled);
+    if (issueStatusPushEnabled !== undefined) updateData.issueStatusPushEnabled = Boolean(issueStatusPushEnabled);
+    if (issueEditedPushEnabled !== undefined) updateData.issueEditedPushEnabled = Boolean(issueEditedPushEnabled);
+    if (issueDeletedPushEnabled !== undefined) updateData.issueDeletedPushEnabled = Boolean(issueDeletedPushEnabled);
     if (notifyTaskOverdue !== undefined) updateData.notifyTaskOverdue = Boolean(notifyTaskOverdue);
     if (notifyTodoOverdue !== undefined) updateData.notifyTodoOverdue = Boolean(notifyTodoOverdue);
     if (notifyMeetingOverdue !== undefined) updateData.notifyMeetingOverdue = Boolean(notifyMeetingOverdue);

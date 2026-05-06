@@ -4412,6 +4412,13 @@ model LswNotificationPreference {
   bakeryBrowserEnabled  Boolean  @default(true)     // Browser notification when bakery metrics submitted
   bakeryMobilePushEnabled Boolean @default(true)    // Mobile push when bakery metrics submitted
 
+  // ── Operations Issue Notification Toggles ──
+  issueMobilePushEnabled Boolean @default(false)     // Mobile push for operations issue activity
+  issueCreatedPushEnabled Boolean @default(true)     // Mobile push when an issue is reported
+  issueStatusPushEnabled Boolean @default(true)      // Mobile push when an issue status changes
+  issueEditedPushEnabled Boolean @default(true)      // Mobile push when an issue is edited
+  issueDeletedPushEnabled Boolean @default(true)     // Mobile push when an issue is deleted
+
   // ── Past-Due Notification Toggles ──
   notifyTaskOverdue     Boolean  @default(true)     // Daily tasks past their scheduled time
   notifyTodoOverdue     Boolean  @default(true)     // To-do items past due date/time

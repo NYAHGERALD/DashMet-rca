@@ -1,16 +1,17 @@
 import { Router, Response, NextFunction } from 'express';
 import { authenticate } from '../middleware/auth';
-import { requireMinimumRole } from '../middleware/rbac';
+import { requireMinimumRole, requireNavAccess } from '../middleware/rbac';
 import { UserRole } from '@prisma/client';
 import { prisma } from '../utils/prisma';
 import { v4 as uuidv4 } from 'uuid';
 import { upload, handleMulterError } from '../middleware/upload';
 import { adminStorage } from '../config/firebase-admin';
 import { logAuditEvent } from '../services/auditService';
+import { notifyIssuePushSubscribers } from '../services/issuePushNotificationService';
 import path from 'path';
 
 const router = Router();
-router.use(authenticate);
+router.use(authenticate, requireNavAccess('nav.operations'));
 
 // ─── Helpers ────────────────────────────────────────────────────────────────────
 
@@ -116,8 +117,8 @@ router.get('/issues/audit-logs', async (req: any, res: Response, next: NextFunct
 
 router.get('/issues/:id', async (req: any, res: Response, next: NextFunction) => {
   try {
-    const issue = await prisma.machineIssue.findUnique({
-      where: { id: req.params.id },
+    const issue = await prisma.machineIssue.findFirst({
+      where: { id: req.params.id, ...getOrgFilter(req) },
       include: {
         Department: { select: { id: true, name: true } },
         Area: { select: { id: true, name: true } },
@@ -201,6 +202,12 @@ router.post('/issues', async (req: any, res: Response, next: NextFunction) => {
       ipAddress: (req.ip || req.headers['x-forwarded-for']) as string | undefined,
       userAgent: req.headers['user-agent'] as string | undefined,
     }).catch(() => {});
+
+    notifyIssuePushSubscribers({
+      event: 'created',
+      issue,
+      actor: req.user,
+    }).catch(() => {});
   } catch (err) {
     next(err);
   }
@@ -210,7 +217,7 @@ router.post('/issues', async (req: any, res: Response, next: NextFunction) => {
 
 router.patch('/issues/:id', async (req: any, res: Response, next: NextFunction) => {
   try {
-    const existing = await prisma.machineIssue.findUnique({ where: { id: req.params.id } });
+    const existing = await prisma.machineIssue.findFirst({ where: { id: req.params.id, ...getOrgFilter(req) } });
     if (!existing) return res.status(404).json({ success: false, error: 'Issue not found' });
 
     const { title, description, type, priority, status, departmentId, areaId, lineId, shiftId, equipmentId, componentId, resolution, weekNumber, dayOfWeekId, startTime, totalMinutesLost } = req.body;
@@ -278,6 +285,13 @@ router.patch('/issues/:id', async (req: any, res: Response, next: NextFunction) 
         ipAddress: (req.ip || req.headers['x-forwarded-for']) as string | undefined,
         userAgent: req.headers['user-agent'] as string | undefined,
       }).catch(() => {});
+
+      notifyIssuePushSubscribers({
+        event: diff.status ? 'status' : 'edited',
+        issue: updated,
+        actor: req.user,
+        previousStatus: existing.status,
+      }).catch(() => {});
     }
   } catch (err) {
     next(err);
@@ -288,7 +302,14 @@ router.patch('/issues/:id', async (req: any, res: Response, next: NextFunction) 
 
 router.delete('/issues/:id', requireMinimumRole(UserRole.ADMIN), async (req: any, res: Response, next: NextFunction) => {
   try {
-    const existing = await prisma.machineIssue.findUnique({ where: { id: req.params.id } });
+    const existing = await prisma.machineIssue.findFirst({
+      where: { id: req.params.id, ...getOrgFilter(req) },
+      include: {
+        Department: { select: { name: true } },
+        Area: { select: { name: true } },
+        Line: { select: { name: true, lineNumber: true } },
+      },
+    });
     if (!existing) return res.status(404).json({ success: false, error: 'Issue not found' });
 
     // Delete photos from Firebase
@@ -322,6 +343,12 @@ router.delete('/issues/:id', requireMinimumRole(UserRole.ADMIN), async (req: any
       ipAddress: (req.ip || req.headers['x-forwarded-for']) as string | undefined,
       userAgent: req.headers['user-agent'] as string | undefined,
     }).catch(() => {});
+
+    notifyIssuePushSubscribers({
+      event: 'deleted',
+      issue: existing,
+      actor: req.user,
+    }).catch(() => {});
   } catch (err) {
     next(err);
   }
@@ -335,7 +362,7 @@ router.post(
   handleMulterError,
   async (req: any, res: Response, next: NextFunction) => {
     try {
-      const issue = await prisma.machineIssue.findUnique({ where: { id: req.params.id } });
+      const issue = await prisma.machineIssue.findFirst({ where: { id: req.params.id, ...getOrgFilter(req) } });
       if (!issue) return res.status(404).json({ success: false, error: 'Issue not found' });
 
       const files = req.files as Express.Multer.File[];
@@ -381,7 +408,7 @@ router.post(
 
 router.delete('/issues/:id/photos', async (req: any, res: Response, next: NextFunction) => {
   try {
-    const issue = await prisma.machineIssue.findUnique({ where: { id: req.params.id } });
+    const issue = await prisma.machineIssue.findFirst({ where: { id: req.params.id, ...getOrgFilter(req) } });
     if (!issue) return res.status(404).json({ success: false, error: 'Issue not found' });
 
     const { photoUrl, photoUrls } = req.body;
@@ -413,7 +440,7 @@ router.delete('/issues/:id/photos', async (req: any, res: Response, next: NextFu
 // ─── PATCH /operations/issues/:id/photos/rename — Rename a photo ────────────────
 router.patch('/issues/:id/photos/rename', async (req, res, next) => {
   try {
-    const issue = await prisma.machineIssue.findUnique({ where: { id: req.params.id } });
+    const issue = await prisma.machineIssue.findFirst({ where: { id: req.params.id, ...getOrgFilter(req) } });
     if (!issue) return res.status(404).json({ success: false, error: 'Issue not found' });
 
     const { photoUrl, newName } = req.body;
