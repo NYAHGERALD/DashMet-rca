@@ -215,6 +215,18 @@ const parseTrustedDeviceCookie = (
 const isMobileTrustedDeviceClient = (req: AuthRequest): boolean =>
   String(req.get('x-dashmet-mobile-app') || '').trim().toLowerCase() === 'rca-mobile';
 
+const buildMobileSessionPayload = (
+  req: AuthRequest,
+  accessToken: string,
+  refreshToken: string
+) =>
+  isMobileTrustedDeviceClient(req)
+    ? {
+        accessToken,
+        refreshToken,
+      }
+    : {};
+
 const getMobileTrustedDeviceToken = (req: AuthRequest): string | undefined => {
   const headerToken = String(req.get('x-dashmet-trusted-device') || '').trim();
   const bodyToken = String(req.body?.trustedDeviceToken || '').trim();
@@ -1043,6 +1055,7 @@ export const login = async (req: AuthRequest, res: Response) => {
     trustedDeviceUsed: trustedDevice.trusted,
     trustedDeviceRemembered: Boolean(rememberedDevice?.deviceId),
     data: {
+      ...buildMobileSessionPayload(req, accessToken, refreshToken),
       trustedDeviceToken:
         rememberedDevice && isMobileTrustedDeviceClient(req)
           ? rememberedDevice.trustedDeviceToken
@@ -1393,7 +1406,7 @@ export const refreshToken = async (req: AuthRequest, res: Response) => {
 
   res.json({
     success: true,
-    data: {},
+    data: buildMobileSessionPayload(req, accessToken, newRefreshToken),
   });
 };
 

@@ -10,6 +10,13 @@ const normalizeHeaderValue = (value: string | string[] | undefined): string => {
   return Array.isArray(value) ? value[0] || '' : value;
 };
 
+const isNativeMobileRequest = (req: Request): boolean =>
+  normalizeHeaderValue(req.headers['x-dashmet-mobile-app']).toLowerCase() === 'rca-mobile';
+
+const hasNativeMobileCredential = (req: Request): boolean =>
+  normalizeHeaderValue(req.headers.authorization).startsWith('Bearer ') ||
+  typeof req.body?.refreshToken === 'string';
+
 const constantTimeEquals = (a: string, b: string): boolean => {
   const aBuffer = Buffer.from(a);
   const bBuffer = Buffer.from(b);
@@ -20,6 +27,14 @@ const constantTimeEquals = (a: string, b: string): boolean => {
 
 export const requireCsrf = (req: Request, _res: Response, next: NextFunction) => {
   if (SAFE_METHODS.has(req.method.toUpperCase())) {
+    return next();
+  }
+
+  // Native mobile clients authenticate with bearer/refresh tokens stored in the
+  // device secure enclave/keystore rather than browser cookies. CSRF protects
+  // cookie-backed browser sessions, so it is not required for this credential
+  // mode and would make token refresh unreliable in React Native.
+  if (isNativeMobileRequest(req) && hasNativeMobileCredential(req)) {
     return next();
   }
 
