@@ -20,10 +20,15 @@ import { sendPushNotificationToUser } from './pushNotificationService';
 
 interface LswAlertItem {
   entityType: 'dailyTask' | 'todoItem' | 'meetingRail' | 'followUp' | 'frequencyTask';
-  entityId: string;
+  entityId: string;     // Notification identity. Daily tasks include week/day to avoid false dedupe.
+  sourceEntityId?: string;
   taskName: string;
   dueAt: Date;          // When it was/is due
   notificationType: string; // overdue, reminder_15min, reminder_1day, etc.
+  displayDueAt?: string;
+  weekNumber?: number;
+  year?: number;
+  dayKey?: string;
 }
 
 interface UserWithPrefs {
@@ -33,6 +38,65 @@ interface UserWithPrefs {
   lastName: string;
   prefs: LswNotificationPreference;
 }
+
+type DayColumn = 'monday' | 'tuesday' | 'wednesday' | 'thursday' | 'friday' | 'saturday' | 'sunday';
+
+interface LswCalendarConfig {
+  calendarYearStartMonth: number;
+  calendarYearStartDay: number;
+}
+
+interface ZonedDateParts {
+  year: number;
+  month: number;
+  day: number;
+  hour: number;
+  minute: number;
+  second: number;
+  weekdayIndex: number; // 0=Sunday, 1=Monday, ...
+}
+
+interface DailyTaskScheduleContext {
+  timeZone: string;
+  localNow: ZonedDateParts;
+  localToday: Date;
+  todayDayColumn: DayColumn;
+  currentWeek: number;
+  orgYear: number;
+  weekStartLocal: Date;
+  visibleDays: DayColumn[];
+}
+
+const DEFAULT_TIME_ZONE = 'America/Chicago';
+const DAY_COLUMNS_SUNDAY_FIRST: DayColumn[] = ['sunday', 'monday', 'tuesday', 'wednesday', 'thursday', 'friday', 'saturday'];
+const LSW_VISIBLE_DAY_COLUMNS: DayColumn[] = ['monday', 'tuesday', 'wednesday', 'thursday', 'friday', 'saturday', 'sunday'];
+const DAY_LABELS: Record<DayColumn, string> = {
+  monday: 'Monday',
+  tuesday: 'Tuesday',
+  wednesday: 'Wednesday',
+  thursday: 'Thursday',
+  friday: 'Friday',
+  saturday: 'Saturday',
+  sunday: 'Sunday',
+};
+const DAY_SHORT_LABELS: Record<DayColumn, string> = {
+  monday: 'Mon',
+  tuesday: 'Tue',
+  wednesday: 'Wed',
+  thursday: 'Thu',
+  friday: 'Fri',
+  saturday: 'Sat',
+  sunday: 'Sun',
+};
+const DAY_UI_KEYS: Record<DayColumn, string> = {
+  monday: 'M',
+  tuesday: 'T',
+  wednesday: 'W',
+  thursday: 'H',
+  friday: 'F',
+  saturday: 'S1',
+  sunday: 'S2',
+};
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Resend Client
@@ -82,12 +146,211 @@ export async function updateNotificationPreferences(
 // Overdue Detection
 // ─────────────────────────────────────────────────────────────────────────────
 
-/**
- * Get the current day-of-week key matching the Prisma LswDailyTask columns
- */
-function getDayColumn(date: Date): string {
-  const days = ['sunday', 'monday', 'tuesday', 'wednesday', 'thursday', 'friday', 'saturday'];
-  return days[date.getDay()];
+function getSafeTimeZone(timeZone?: string | null): string {
+  if (!timeZone) return DEFAULT_TIME_ZONE;
+  try {
+    new Intl.DateTimeFormat('en-US', { timeZone }).format(new Date());
+    return timeZone;
+  } catch {
+    return DEFAULT_TIME_ZONE;
+  }
+}
+
+function getZonedParts(date: Date, timeZone: string): ZonedDateParts {
+  const parts = new Intl.DateTimeFormat('en-US', {
+    timeZone,
+    year: 'numeric',
+    month: '2-digit',
+    day: '2-digit',
+    hour: '2-digit',
+    minute: '2-digit',
+    second: '2-digit',
+    weekday: 'short',
+    hourCycle: 'h23',
+  }).formatToParts(date);
+
+  const value = (type: string) => parts.find((part) => part.type === type)?.value || '';
+  const weekdayIndex = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'].indexOf(value('weekday'));
+
+  return {
+    year: Number(value('year')),
+    month: Number(value('month')),
+    day: Number(value('day')),
+    hour: Number(value('hour')),
+    minute: Number(value('minute')),
+    second: Number(value('second')),
+    weekdayIndex: weekdayIndex >= 0 ? weekdayIndex : 0,
+  };
+}
+
+function getTimeZoneOffsetMs(date: Date, timeZone: string): number {
+  const parts = getZonedParts(date, timeZone);
+  const utcFromParts = Date.UTC(
+    parts.year,
+    parts.month - 1,
+    parts.day,
+    parts.hour,
+    parts.minute,
+    parts.second,
+  );
+  return utcFromParts - date.getTime();
+}
+
+function zonedDateTimeToUtc(
+  local: { year: number; month: number; day: number; hour: number; minute: number },
+  timeZone: string,
+): Date {
+  let utcMs = Date.UTC(local.year, local.month - 1, local.day, local.hour, local.minute, 0, 0);
+
+  // Iterate once or twice to handle DST offsets without adding a date library.
+  for (let i = 0; i < 3; i += 1) {
+    const offsetMs = getTimeZoneOffsetMs(new Date(utcMs), timeZone);
+    const nextUtcMs = Date.UTC(local.year, local.month - 1, local.day, local.hour, local.minute, 0, 0) - offsetMs;
+    if (Math.abs(nextUtcMs - utcMs) < 1000) break;
+    utcMs = nextUtcMs;
+  }
+
+  return new Date(utcMs);
+}
+
+function addDays(date: Date, days: number): Date {
+  const next = new Date(date);
+  next.setDate(next.getDate() + days);
+  return next;
+}
+
+function isDefaultCalendarConfig(config: LswCalendarConfig): boolean {
+  return config.calendarYearStartMonth === 1 && config.calendarYearStartDay === 1;
+}
+
+function getOrgYearStart(config: LswCalendarConfig, refDate: Date): Date {
+  let yearCandidate = refDate.getFullYear();
+  const candidate = new Date(yearCandidate, config.calendarYearStartMonth - 1, config.calendarYearStartDay);
+  if (refDate < candidate) {
+    yearCandidate -= 1;
+  }
+  return new Date(yearCandidate, config.calendarYearStartMonth - 1, config.calendarYearStartDay);
+}
+
+function getOrgWeekNumber(date: Date, config: LswCalendarConfig): number {
+  if (isDefaultCalendarConfig(config)) {
+    const d = new Date(Date.UTC(date.getFullYear(), date.getMonth(), date.getDate()));
+    const dayNum = d.getUTCDay() || 7;
+    d.setUTCDate(d.getUTCDate() + 4 - dayNum);
+    const yearStart = new Date(Date.UTC(d.getUTCFullYear(), 0, 1));
+    return Math.ceil((((d.getTime() - yearStart.getTime()) / 86400000) + 1) / 7);
+  }
+
+  const start = getOrgYearStart(config, date);
+  const diffDays = Math.floor((date.getTime() - start.getTime()) / 86400000);
+  return Math.floor(diffDays / 7) + 1;
+}
+
+function getOrgYear(date: Date, config: LswCalendarConfig): number {
+  if (isDefaultCalendarConfig(config)) {
+    return date.getFullYear();
+  }
+  return getOrgYearStart(config, date).getFullYear();
+}
+
+function getWeekStartDate(weekNumber: number, year: number, config: LswCalendarConfig): Date {
+  if (isDefaultCalendarConfig(config)) {
+    const simple = new Date(year, 0, 1 + (weekNumber - 1) * 7);
+    const dow = simple.getDay();
+    const start = new Date(simple);
+    if (dow <= 4) {
+      start.setDate(simple.getDate() - simple.getDay() + 1);
+    } else {
+      start.setDate(simple.getDate() + 8 - simple.getDay());
+    }
+    return start;
+  }
+
+  return addDays(new Date(year, config.calendarYearStartMonth - 1, config.calendarYearStartDay), (weekNumber - 1) * 7);
+}
+
+function buildDailyTaskNotificationEntityId(
+  taskId: string,
+  weekNumber: number,
+  year: number,
+  dayColumn: DayColumn,
+): string {
+  return `${taskId}:${year}:W${weekNumber}:${dayColumn}`;
+}
+
+async function getDailyTaskScheduleContext(
+  userId: string,
+  prefs: LswNotificationPreference,
+  now: Date,
+): Promise<DailyTaskScheduleContext | null> {
+  const user = await prisma.user.findUnique({
+    where: { id: userId },
+    select: {
+      timezone: true,
+      lswWorkDaysPerWeek: true,
+      Organization: {
+        select: {
+          calendarYearStartMonth: true,
+          calendarYearStartDay: true,
+        },
+      },
+    },
+  });
+
+  if (!user) return null;
+
+  const timeZone = getSafeTimeZone(prefs.timezone || user.timezone);
+  const localNow = getZonedParts(now, timeZone);
+  const localToday = new Date(localNow.year, localNow.month - 1, localNow.day);
+  const calendarConfig = user.Organization ?? { calendarYearStartMonth: 1, calendarYearStartDay: 1 };
+  const currentWeek = getOrgWeekNumber(localToday, calendarConfig);
+  const orgYear = getOrgYear(localToday, calendarConfig);
+  const weekStartLocal = getWeekStartDate(currentWeek, orgYear, calendarConfig);
+  const workDaysPerWeek = Math.max(5, Math.min(7, user.lswWorkDaysPerWeek || 5));
+  const todayDayColumn = DAY_COLUMNS_SUNDAY_FIRST[localNow.weekdayIndex];
+
+  return {
+    timeZone,
+    localNow,
+    localToday,
+    todayDayColumn,
+    currentWeek,
+    orgYear,
+    weekStartLocal,
+    visibleDays: LSW_VISIBLE_DAY_COLUMNS.slice(0, workDaysPerWeek),
+  };
+}
+
+function buildDailyTaskDueAt(ctx: DailyTaskScheduleContext, dayColumn: DayColumn, timeHHMM: string): Date | null {
+  const [hour, minute] = timeHHMM.split(':').map(Number);
+  if (!Number.isFinite(hour) || !Number.isFinite(minute)) return null;
+
+  const dayIndex = LSW_VISIBLE_DAY_COLUMNS.indexOf(dayColumn);
+  if (dayIndex < 0) return null;
+
+  const localDueDate = addDays(ctx.weekStartLocal, dayIndex);
+  return zonedDateTimeToUtc({
+    year: localDueDate.getFullYear(),
+    month: localDueDate.getMonth() + 1,
+    day: localDueDate.getDate(),
+    hour,
+    minute,
+  }, ctx.timeZone);
+}
+
+function formatAlertTime(item: LswAlertItem): string {
+  return item.displayDueAt || formatTime(item.dueAt);
+}
+
+function formatDailyTaskDueLabel(ctx: DailyTaskScheduleContext, dueAt: Date, dayColumn: DayColumn): string {
+  return `${DAY_SHORT_LABELS[dayColumn]}, ${dueAt.toLocaleString('en-US', {
+    timeZone: ctx.timeZone,
+    month: 'short',
+    day: 'numeric',
+    hour: 'numeric',
+    minute: '2-digit',
+    hour12: true,
+  })}`;
 }
 
 /**
@@ -95,33 +358,53 @@ function getDayColumn(date: Date): string {
  */
 async function findOverdueItems(userId: string, prefs: LswNotificationPreference, now: Date): Promise<LswAlertItem[]> {
   const alerts: LswAlertItem[] = [];
-  const dayCol = getDayColumn(now);
-  const currentTimeHHMM = `${String(now.getHours()).padStart(2, '0')}:${String(now.getMinutes()).padStart(2, '0')}`;
 
-  // 1. Daily Tasks — check if task is scheduled for today and time has passed
+  // 1. Daily Tasks — these are scheduled by the user's visible LSW days.
+  // Completion is stored per task/week/year in LswDailyTaskCompletion, not in
+  // the legacy weekday booleans on LswDailyTask.
   if (prefs.notifyTaskOverdue) {
+    const ctx = await getDailyTaskScheduleContext(userId, prefs, now);
+    if (!ctx) return alerts;
+
     const dailyTasks = await prisma.lswDailyTask.findMany({
       where: {
         userId,
         isActive: true,
-        [dayCol]: true,  // Scheduled for today
-        time: { lt: currentTimeHHMM }, // Past due time
       },
-      select: { id: true, task: true, time: true },
+      include: {
+        completions: {
+          where: {
+            weekNumber: ctx.currentWeek,
+            year: ctx.orgYear,
+          },
+          take: 1,
+        },
+      },
+      orderBy: [{ sortOrder: 'asc' }, { time: 'asc' }],
     });
 
     for (const task of dailyTasks) {
-      const [h, m] = task.time.split(':').map(Number);
-      const dueAt = new Date(now);
-      dueAt.setHours(h, m, 0, 0);
+      const completion = task.completions[0] as Record<DayColumn, boolean> | undefined;
 
-      alerts.push({
-        entityType: 'dailyTask',
-        entityId: task.id,
-        taskName: task.task,
-        dueAt,
-        notificationType: 'overdue',
-      });
+      for (const dayColumn of ctx.visibleDays) {
+        if (completion?.[dayColumn]) continue;
+
+        const dueAt = buildDailyTaskDueAt(ctx, dayColumn, task.time);
+        if (!dueAt || dueAt > now) continue;
+
+        alerts.push({
+          entityType: 'dailyTask',
+          entityId: buildDailyTaskNotificationEntityId(task.id, ctx.currentWeek, ctx.orgYear, dayColumn),
+          sourceEntityId: task.id,
+          taskName: `${task.task} (${DAY_LABELS[dayColumn]})`,
+          dueAt,
+          notificationType: 'overdue',
+          displayDueAt: formatDailyTaskDueLabel(ctx, dueAt, dayColumn),
+          weekNumber: ctx.currentWeek,
+          year: ctx.orgYear,
+          dayKey: DAY_UI_KEYS[dayColumn],
+        });
+      }
     }
   }
 
@@ -263,44 +546,51 @@ async function findUpcomingItems(userId: string, prefs: LswNotificationPreferenc
   const maxWindow = reminderWindows.reduce((max, date) => (date > max ? date : max), now);
 
   // ── Daily Tasks upcoming ──
-  // Daily tasks use HH:MM + day-of-week columns, not a DateTime dueDate
-  const dayCol = getDayColumn(now);
-  const currentTimeHHMM = `${String(now.getHours()).padStart(2, '0')}:${String(now.getMinutes()).padStart(2, '0')}`;
-  // Calculate the max look-ahead time for today in HH:MM
-  const maxMinutesAhead = Math.ceil((maxWindow.getTime() - now.getTime()) / (60 * 1000));
-  const maxLookAheadDate = new Date(now.getTime() + Math.min(maxMinutesAhead, 24 * 60) * 60 * 1000);
-  // Only look at same-day tasks (can't look ahead to tomorrow with HH:MM fields)
-  const maxTimeHHMM = maxLookAheadDate.getDate() === now.getDate()
-    ? `${String(maxLookAheadDate.getHours()).padStart(2, '0')}:${String(maxLookAheadDate.getMinutes()).padStart(2, '0')}`
-    : '23:59';
-
-  const upcomingDailyTasks = await prisma.lswDailyTask.findMany({
-    where: {
-      userId,
-      isActive: true,
-      [dayCol]: true,
-      time: {
-        gt: currentTimeHHMM, // Not yet due
-        lte: maxTimeHHMM,    // Within reminder window
+  // Daily tasks use HH:MM + the user's visible LSW days. Only today's unchecked
+  // tasks are eligible for "upcoming" alerts; future days are handled when that
+  // day arrives so reminders stay precise.
+  const ctx = await getDailyTaskScheduleContext(userId, prefs, now);
+  if (ctx && ctx.visibleDays.includes(ctx.todayDayColumn)) {
+    const upcomingDailyTasks = await prisma.lswDailyTask.findMany({
+      where: {
+        userId,
+        isActive: true,
       },
-    },
-    select: { id: true, task: true, time: true },
-  });
+      include: {
+        completions: {
+          where: {
+            weekNumber: ctx.currentWeek,
+            year: ctx.orgYear,
+          },
+          take: 1,
+        },
+      },
+      orderBy: [{ sortOrder: 'asc' }, { time: 'asc' }],
+    });
 
-  for (const task of upcomingDailyTasks) {
-    const [h, m] = task.time.split(':').map(Number);
-    const dueAt = new Date(now);
-    dueAt.setHours(h, m, 0, 0);
-    const timeUntil = dueAt.getTime() - now.getTime();
-    const reminderType = getReminderType(timeUntil, prefs);
-    if (reminderType) {
-      alerts.push({
-        entityType: 'dailyTask',
-        entityId: task.id,
-        taskName: task.task,
-        dueAt,
-        notificationType: reminderType,
-      });
+    for (const task of upcomingDailyTasks) {
+      const completion = task.completions[0] as Record<DayColumn, boolean> | undefined;
+      if (completion?.[ctx.todayDayColumn]) continue;
+
+      const dueAt = buildDailyTaskDueAt(ctx, ctx.todayDayColumn, task.time);
+      if (!dueAt || dueAt <= now || dueAt > maxWindow) continue;
+
+      const timeUntil = dueAt.getTime() - now.getTime();
+      const reminderType = getReminderType(timeUntil, prefs);
+      if (reminderType) {
+        alerts.push({
+          entityType: 'dailyTask',
+          entityId: buildDailyTaskNotificationEntityId(task.id, ctx.currentWeek, ctx.orgYear, ctx.todayDayColumn),
+          sourceEntityId: task.id,
+          taskName: `${task.task} (${DAY_LABELS[ctx.todayDayColumn]})`,
+          dueAt,
+          notificationType: reminderType,
+          displayDueAt: formatDailyTaskDueLabel(ctx, dueAt, ctx.todayDayColumn),
+          weekNumber: ctx.currentWeek,
+          year: ctx.orgYear,
+          dayKey: DAY_UI_KEYS[ctx.todayDayColumn],
+        });
+      }
     }
   }
 
@@ -547,13 +837,15 @@ async function logSentNotifications(userId: string, alerts: LswAlertItem[], chan
 // ─────────────────────────────────────────────────────────────────────────────
 
 function isInQuietHours(prefs: LswNotificationPreference, now: Date): boolean {
+  const localNow = getZonedParts(now, getSafeTimeZone(prefs.timezone));
+  const currentDay = DAY_COLUMNS_SUNDAY_FIRST[localNow.weekdayIndex];
+  const currentMinutes = localNow.hour * 60 + localNow.minute;
+
   // Check DND schedule first (more comprehensive)
   if ((prefs as any).dndEnabled) {
     const dndDays: string[] = typeof (prefs as any).dndDays === 'string'
       ? JSON.parse((prefs as any).dndDays)
       : ((prefs as any).dndDays || []);
-    const dayNames = ['sunday', 'monday', 'tuesday', 'wednesday', 'thursday', 'friday', 'saturday'];
-    const currentDay = dayNames[now.getDay()];
 
     if ((prefs as any).dndMode === 'custom' && (prefs as any).dndCustomSlots) {
       // Custom slots: check each { day, startTime, endTime }
@@ -562,7 +854,7 @@ function isInQuietHours(prefs: LswNotificationPreference, now: Date): boolean {
         : (prefs as any).dndCustomSlots;
       for (const slot of (slots || [])) {
         if (slot.day === currentDay) {
-          if (isTimeInWindow(now, slot.startTime, slot.endTime)) return true;
+          if (isTimeInWindow(currentMinutes, slot.startTime, slot.endTime)) return true;
         }
       }
     } else {
@@ -571,18 +863,17 @@ function isInQuietHours(prefs: LswNotificationPreference, now: Date): boolean {
         if ((prefs as any).dndAllDay) return true;
         const start = (prefs as any).dndStartTime;
         const end = (prefs as any).dndEndTime;
-        if (start && end && isTimeInWindow(now, start, end)) return true;
+        if (start && end && isTimeInWindow(currentMinutes, start, end)) return true;
       }
     }
   }
 
   // Legacy quiet hours check
   if (!prefs.quietHoursStart || !prefs.quietHoursEnd) return false;
-  return isTimeInWindow(now, prefs.quietHoursStart, prefs.quietHoursEnd);
+  return isTimeInWindow(currentMinutes, prefs.quietHoursStart, prefs.quietHoursEnd);
 }
 
-function isTimeInWindow(now: Date, startHHMM: string, endHHMM: string): boolean {
-  const currentMinutes = now.getHours() * 60 + now.getMinutes();
+function isTimeInWindow(currentMinutes: number, startHHMM: string, endHHMM: string): boolean {
   const [startH, startM] = startHHMM.split(':').map(Number);
   const [endH, endM] = endHHMM.split(':').map(Number);
   const startMinutes = startH * 60 + startM;
@@ -612,7 +903,7 @@ function buildOverdueEmailHtml(firstName: string, items: LswAlertItem[]): string
           ${formatEntityType(item.entityType)}
         </td>
         <td style="padding: 8px 12px; border-bottom: 1px solid #E5E7EB; font-size: 14px; color: #EF4444; font-weight: 600;">
-          ${formatTime(item.dueAt)}
+          ${formatAlertTime(item)}
         </td>
       </tr>
     `
@@ -675,7 +966,7 @@ function buildReminderEmailHtml(firstName: string, items: LswAlertItem[]): strin
           ${formatEntityType(item.entityType)}
         </td>
         <td style="padding: 8px 12px; border-bottom: 1px solid #E5E7EB; font-size: 14px; color: #F59E0B; font-weight: 600;">
-          ${formatTime(item.dueAt)}
+          ${formatAlertTime(item)}
         </td>
       </tr>
     `
@@ -794,6 +1085,21 @@ async function sendMobilePushAlerts(
       const entityLabel = formatEntityType(item.entityType);
       const isOverdue = mode === 'overdue';
       const isEscalation = mode === 'escalation';
+      const dueText = formatAlertTime(item);
+      const pushData: Record<string, string> = {
+        type: isEscalation ? 'LSW_ESCALATION' : isOverdue ? 'LSW_TASK_OVERDUE' : 'LSW_UPCOMING_REMINDER',
+        screen: getMobileScreenForAlert(item),
+        entityType: item.entityType,
+        entityId: item.sourceEntityId || item.entityId,
+        notificationEntityId: item.entityId,
+        notificationType: item.notificationType,
+        dueAt: item.dueAt.toISOString(),
+        channelId: 'dashmet_alerts',
+      };
+      if (item.weekNumber) pushData.weekNumber = String(item.weekNumber);
+      if (item.year) pushData.year = String(item.year);
+      if (item.dayKey) pushData.dayKey = item.dayKey;
+
       const result = await sendPushNotificationToUser(userId, {
         title: isEscalation
           ? `Still overdue: ${item.taskName}`
@@ -801,20 +1107,12 @@ async function sendMobilePushAlerts(
             ? `Overdue: ${item.taskName}`
             : `Upcoming: ${item.taskName}`,
         body: isEscalation
-          ? `${entityLabel} is still open after its due time: ${formatTime(item.dueAt)}`
+          ? `${entityLabel} is still open after its due time: ${dueText}`
           : isOverdue
-            ? `${entityLabel} was due at ${formatTime(item.dueAt)}`
-            : `${entityLabel} is due at ${formatTime(item.dueAt)}`,
+            ? `${entityLabel} was due at ${dueText}`
+            : `${entityLabel} is due at ${dueText}`,
         sound: prefs.mobileSoundEnabled ? 'default' : null,
-        data: {
-          type: isEscalation ? 'LSW_ESCALATION' : isOverdue ? 'LSW_TASK_OVERDUE' : 'LSW_UPCOMING_REMINDER',
-          screen: getMobileScreenForAlert(item),
-          entityType: item.entityType,
-          entityId: item.entityId,
-          notificationType: item.notificationType,
-          dueAt: item.dueAt.toISOString(),
-          channelId: 'dashmet_alerts',
-        },
+        data: pushData,
       });
 
       if (result.successCount > 0) {
@@ -906,7 +1204,7 @@ export async function processUserLswNotifications(userId: string): Promise<numbe
           id: uuidv4(),
           type: 'LSW_TASK_OVERDUE',
           title: `Overdue: ${item.taskName}`,
-          message: `Your ${formatEntityType(item.entityType).toLowerCase()} "${item.taskName}" was due at ${formatTime(item.dueAt)}`,
+          message: `Your ${formatEntityType(item.entityType).toLowerCase()} "${item.taskName}" was due at ${formatAlertTime(item)}`,
           userId,
         },
       });
@@ -948,7 +1246,7 @@ export async function processUserLswNotifications(userId: string): Promise<numbe
           id: uuidv4(),
           type: 'LSW_TASK_OVERDUE',
           title: `Still overdue: ${item.taskName}`,
-          message: `Your ${formatEntityType(item.entityType).toLowerCase()} "${item.taskName}" is still open after its due time: ${formatTime(item.dueAt)}`,
+          message: `Your ${formatEntityType(item.entityType).toLowerCase()} "${item.taskName}" is still open after its due time: ${formatAlertTime(item)}`,
           userId,
         },
       });
@@ -981,7 +1279,7 @@ export async function processUserLswNotifications(userId: string): Promise<numbe
           id: uuidv4(),
           type: 'LSW_UPCOMING_REMINDER',
           title: `Upcoming: ${item.taskName}`,
-          message: `Your ${formatEntityType(item.entityType).toLowerCase()} "${item.taskName}" is due at ${formatTime(item.dueAt)}`,
+          message: `Your ${formatEntityType(item.entityType).toLowerCase()} "${item.taskName}" is due at ${formatAlertTime(item)}`,
           userId,
         },
       });
