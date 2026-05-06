@@ -26,6 +26,12 @@ const normalizeProvider = (value: unknown, token: string): 'EXPO' | 'FCM' => {
   return Expo.isExpoPushToken(token) ? 'EXPO' : 'FCM';
 };
 
+const normalizeTestDelaySeconds = (value: unknown) => {
+  const parsed = Number(value);
+  if (!Number.isFinite(parsed)) return 0;
+  return Math.max(0, Math.min(15, Math.round(parsed)));
+};
+
 /**
  * POST /api/mobile/push/device-token
  * Registers the current signed-in mobile device for server push notifications.
@@ -107,6 +113,7 @@ router.post('/test', async (req: AuthRequest, res: Response) => {
     if (token && !Expo.isExpoPushToken(token)) {
       return res.status(400).json({ success: false, error: 'Invalid Expo push token' });
     }
+    const delaySeconds = normalizeTestDelaySeconds(req.body?.delaySeconds);
 
     const payload = {
       title: 'DashMet alert test',
@@ -121,6 +128,29 @@ router.post('/test', async (req: AuthRequest, res: Response) => {
         channelId: 'dashmet_alerts',
       },
     };
+
+    const sendTest = () => token
+      ? sendPushNotificationToDeviceToken(user.id, token, payload)
+      : sendPushNotificationToUser(user.id, payload);
+
+    if (delaySeconds > 0) {
+      setTimeout(() => {
+        sendTest().catch((error) => {
+          console.error('[MobilePush] Delayed test push error:', error);
+        });
+      }, delaySeconds * 1000);
+
+      return res.json({
+        success: true,
+        data: {
+          successCount: 0,
+          failureCount: 0,
+          queued: true,
+          delaySeconds,
+          target: token ? 'current_device' : 'all_devices',
+        },
+      });
+    }
 
     const result = token
       ? await sendPushNotificationToDeviceToken(user.id, token, payload)
