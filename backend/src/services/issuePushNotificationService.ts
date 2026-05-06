@@ -165,6 +165,7 @@ export async function notifyIssuePushSubscribers(options: IssuePushOptions) {
           title: message.title,
           body: message.body,
           sound: 'default',
+          interruptionLevel: 'time-sensitive',
           ttl: 3600,
           data: {
             type: EVENT_TO_PUSH_TYPE[options.event],
