@@ -1,4 +1,4 @@
-# 🚀 Quick Reference Guide - DashMet RCA Engine
+# 🚀 Quick Reference Guide - DashMet Operations Intelligence
 
 ## Instant Commands
 
@@ -310,7 +310,7 @@ BUILD_COMPLETE_PHASE_0.md     # Phase 0 completion report
 PROGRESS.md                    # Build progress tracker
 COPILOT_EXECUTION_CHECKLIST.md # Implementation checklist
 QUICK_REFERENCE.md            # This file
-dashmet-rca-engine-architecture.md # System architecture
+dashmet-operations-intelligence-architecture.md # System architecture
 ```
 
 ## Support

@@ -1,6 +1,6 @@
 # Adaptive MFA + VPN Blocking — Implementation Guide
 
-> **DASHMET RCA Engine — Security Enhancement**  
+> **DashMet Operations Intelligence — Security Enhancement**
 > Email OTP (location-based) + VPN/Proxy Detection + Trusted Device Memory  
 > Date: April 7, 2026 | Updated: April 8, 2026
 
@@ -651,7 +651,7 @@ function buildOtpEmailHtml(code: string, expiryMinutes: number): string {
       </div>
 
       <p style="color: #94a3b8; font-size: 12px; text-align: center; margin-top: 24px;">
-        This is an automated security email from DashMet RCA Engine.
+        This is an automated security email from DashMet Operations Intelligence.
       </p>
     </div>
   `;

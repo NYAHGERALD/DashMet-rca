@@ -14,6 +14,7 @@ import { validateLogin, validateRegister } from '../middleware/validators';
 import { validationResult } from 'express-validator';
 import { ValidationError } from '../middleware/errorHandler';
 import * as authController from '../controllers/authController';
+import { setCsrfCookie } from '../utils/sessionCookies';
 
 const router = Router();
 
@@ -51,6 +52,13 @@ router.post(
   validate,
   asyncHandler(authController.login)
 );
+
+// GET /api/auth/csrf - Issue a fresh CSRF token for same-session API retries
+router.get('/csrf', (_req, res) => {
+  const csrfToken = setCsrfCookie(res);
+  res.set('Cache-Control', 'no-store');
+  res.json({ success: true, data: { csrfToken } });
+});
 
 // GET /api/auth/me - Get current user
 router.get(

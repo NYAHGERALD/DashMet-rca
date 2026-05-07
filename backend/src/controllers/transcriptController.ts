@@ -35,6 +35,53 @@ interface RootCauseDiscussed {
   confidence?: number;
 }
 
+const TRANSCRIPTION_LANGUAGE_ALIASES: Record<string, string> = {
+  arabic: 'ar',
+  chinese: 'zh',
+  english: 'en',
+  en_us: 'en',
+  en_us_english: 'en',
+  filipino: 'tl',
+  french: 'fr',
+  german: 'de',
+  hindi: 'hi',
+  italian: 'it',
+  japanese: 'ja',
+  korean: 'ko',
+  mandarin: 'zh',
+  portuguese: 'pt',
+  russian: 'ru',
+  spanish: 'es',
+  tagalog: 'tl',
+  vietnamese: 'vi',
+};
+
+const SUPPORTED_TRANSCRIPTION_LANGUAGES = new Set([
+  'ar', 'de', 'en', 'es', 'fr', 'hi', 'it', 'ja', 'ko', 'pt', 'ru', 'tl', 'vi', 'zh',
+]);
+
+function normalizeTranscriptionLanguage(value: unknown): string | undefined {
+  const raw = Array.isArray(value) ? value[0] : value;
+  if (typeof raw !== 'string') return undefined;
+
+  const cleaned = raw.trim().toLowerCase().replace(/[-\s]+/g, '_');
+  if (!cleaned || ['auto', 'automatic', 'detect', 'auto_detect'].includes(cleaned)) {
+    return undefined;
+  }
+
+  if (/^[a-z]{2}(?:_[a-z]{2})?$/.test(cleaned)) {
+    const code = cleaned.slice(0, 2);
+    return SUPPORTED_TRANSCRIPTION_LANGUAGES.has(code) ? code : undefined;
+  }
+
+  return TRANSCRIPTION_LANGUAGE_ALIASES[cleaned];
+}
+
+function normalizeMeetingType(value: unknown): string {
+  const raw = Array.isArray(value) ? value[0] : value;
+  return typeof raw === 'string' && raw.trim() ? raw.trim() : 'general';
+}
+
 /**
  * Create a new meeting transcript record
  * POST /transcripts
@@ -704,6 +751,8 @@ export const transcribeAudio = async (req: AuthRequest, res: Response) => {
 
     // Get config from query params
     const { language, meetingType } = req.query;
+    const normalizedLanguage = normalizeTranscriptionLanguage(language);
+    const normalizedMeetingType = normalizeMeetingType(meetingType);
 
     const fileSizeMB = (file.size / 1024 / 1024).toFixed(2);
     const fileSizeBytes = file.size;
@@ -715,7 +764,7 @@ export const transcribeAudio = async (req: AuthRequest, res: Response) => {
     console.log(`[Whisper] File size: ${fileSizeMB}MB (${fileSizeBytes} bytes)`);
     console.log(`[Whisper] Buffer length: ${bufferLength} bytes`);
     console.log(`[Whisper] MIME type: ${file.mimetype}`);
-    console.log(`[Whisper] Language: ${language || 'en'}, Meeting type: ${meetingType || 'general'}`);
+    console.log(`[Whisper] Language: ${normalizedLanguage || 'auto-detect'}, Meeting type: ${normalizedMeetingType}`);
     
     // Verify buffer integrity
     if (bufferLength !== fileSizeBytes) {
@@ -723,14 +772,21 @@ export const transcribeAudio = async (req: AuthRequest, res: Response) => {
     }
 
     // Transcribe from buffer - handles chunking automatically for large files
-    const result = await whisperService.transcribeFromBuffer(
+    const transcribeWithLanguage = (languageHint?: string) => whisperService.transcribeFromBuffer(
       file.buffer,
       file.originalname,
       {
-        language: language as string || 'en',
-        meetingType: meetingType as string || 'general',
+        language: languageHint,
+        meetingType: normalizedMeetingType,
       }
     );
+
+    let result = await transcribeWithLanguage(normalizedLanguage);
+
+    if (result.success && normalizedLanguage && !result.text?.trim()) {
+      console.warn('[Whisper] Language-hinted transcription returned no text. Retrying with auto-detect.');
+      result = await transcribeWithLanguage(undefined);
+    }
 
     if (!result.success) {
       console.error('[Whisper] Transcription failed:', result.error);

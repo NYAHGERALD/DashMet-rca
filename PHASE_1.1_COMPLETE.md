@@ -227,7 +227,7 @@ Phase 1.3 - User Preferences:
 
 ### Start Development Servers
 ```bash
-cd /Users/geraldnyah/dashmet-rca-engine
+cd /Users/geraldnyah/dashmet-operations-intelligence
 npm run dev
 ```
 

@@ -1,7 +1,7 @@
 {
-  "name": "dashmet-rca-engine",
+  "name": "dashmet-operations-intelligence",
   "version": "1.0.0",
-  "description": "Enterprise RCA Web Application - AI-Powered Root Cause Analysis Platform",
+  "description": "Enterprise operations intelligence platform for food safety, manufacturing, and team execution",
   "private": true,
   "scripts": {
     "dev": "concurrently \"npm run dev:backend\" \"npm run dev:frontend\"",

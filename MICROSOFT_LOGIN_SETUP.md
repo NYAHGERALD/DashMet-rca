@@ -1,6 +1,6 @@
 # Microsoft Login Setup Guide
 
-This document provides step-by-step instructions for configuring Microsoft OAuth login for the DASHMET RCA Engine.
+This document provides step-by-step instructions for configuring Microsoft OAuth login for the DashMet Operations Intelligence.
 
 ## Overview
 
@@ -69,7 +69,7 @@ Fill in the registration form:
 
 | Field | Value |
 |-------|-------|
-| **Name** | `DASHMET RCA Engine` (or your preferred name) |
+| **Name** | `DashMet Operations Intelligence` (or your preferred name) |
 | **Supported account types** | **Accounts in any organizational directory and personal Microsoft accounts** |
 | **Redirect URI (optional)** | Leave empty for now (we'll add it next) |
 

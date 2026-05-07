@@ -1,5 +1,5 @@
-# ENTERPRISE RCA WEB APPLICATION
-## AI-Powered Root Cause Analysis Platform for Food Safety & Machine Issues
+# DASHMET OPERATIONS INTELLIGENCE
+## Enterprise Operations Management for Food Safety, Manufacturing, and Team Execution
 ## USA • Mexico • Canada | Multi-Language | Enterprise Scale
 
 ---

@@ -25,7 +25,7 @@
  */
 
 import { Router, Request, Response } from 'express';
-import { PrismaClient } from '@prisma/client';
+import { MeetingStatus, MeetingType, PrismaClient, TaskPriority } from '@prisma/client';
 import OpenAI from 'openai';
 import { sendTaskActivityNotification } from '../services/pushNotificationService';
 
@@ -356,7 +356,7 @@ router.post('/', async (req: Request, res: Response) => {
 // ============================================================================
 // POST /api/mobile/tasks/manual
 // Create a manual task (not from AI extraction)
-// Automatically creates/uses a "Manual" meeting group for the organization
+// Automatically creates/uses a "Standalone Items" container for the user
 // Expects: { title, description?, dueDate?, priority?, ownerId, organizationId, facilityId? }
 // ============================================================================
 router.post('/manual', async (req: Request, res: Response) => {
@@ -374,10 +374,10 @@ router.post('/manual', async (req: Request, res: Response) => {
     console.log('Creating manual task:', { title, ownerId, organizationId, facilityId });
 
     // Validate required fields
-    if (!title || !ownerId || !organizationId) {
+    if (!title || !ownerId) {
       return res.status(400).json({
         success: false,
-        error: 'Missing required fields: title, ownerId, organizationId',
+        error: 'Missing required fields: title and ownerId',
       });
     }
 
@@ -405,9 +405,30 @@ router.post('/manual', async (req: Request, res: Response) => {
 
     // Use the actual database owner ID (in case we looked up by firebaseUid)
     const actualOwnerId = owner.id;
+    const actualOrganizationId = owner.organizationId || organizationId;
 
-    // Find or create a "Manual" meeting for this organization
-    // We use a unique meeting per day for Manual tasks to keep them organized
+    if (!actualOrganizationId) {
+      return res.status(400).json({
+        success: false,
+        error: 'No organization is connected to this user. Please sign in again or contact an administrator.',
+      });
+    }
+
+    if (organizationId && owner.organizationId && organizationId !== owner.organizationId) {
+      console.warn('Manual task organization mismatch; using owner organization', {
+        providedOrganizationId: organizationId,
+        ownerOrganizationId: owner.organizationId,
+        ownerId: actualOwnerId,
+      });
+    }
+
+    const normalizedPriority =
+      typeof priority === 'string' && Object.values(TaskPriority).includes(priority.trim().toUpperCase() as TaskPriority)
+        ? (priority.trim().toUpperCase() as TaskPriority)
+        : TaskPriority.MEDIUM;
+
+    // Find or create a "Standalone Items" container for this user.
+    // We use one hidden MANUAL meeting per day to keep manual action items organized.
     const today = new Date();
     today.setHours(0, 0, 0, 0);
     const tomorrow = new Date(today);
@@ -415,8 +436,8 @@ router.post('/manual', async (req: Request, res: Response) => {
 
     let manualMeeting = await prisma.meeting.findFirst({
       where: {
-        organizationId,
-        meetingType: 'MANUAL',
+        organizationId: actualOrganizationId,
+        meetingType: MeetingType.MANUAL,
         creatorId: actualOwnerId,
         createdAt: {
           gte: today,
@@ -429,11 +450,11 @@ router.post('/manual', async (req: Request, res: Response) => {
     if (!manualMeeting) {
       manualMeeting = await prisma.meeting.create({
         data: {
-          title: 'Manual',
-          meetingType: 'MANUAL',
-          status: 'COMPLETED',
+          title: 'Standalone Items',
+          meetingType: MeetingType.MANUAL,
+          status: MeetingStatus.DRAFT,
           creatorId: actualOwnerId,
-          organizationId,
+          organizationId: actualOrganizationId,
           facilityId: facilityId || null,
         },
       });
@@ -445,9 +466,9 @@ router.post('/manual', async (req: Request, res: Response) => {
         title: title.trim(),
         description: description?.trim() || null,
         dueDate: dueDate ? new Date(dueDate) : null,
-        priority: priority || 'MEDIUM',
+        priority: normalizedPriority,
         ownerId: actualOwnerId,
-        organizationId,
+        organizationId: actualOrganizationId,
         facilityId: facilityId || null,
         meetingId: manualMeeting.id,
         sourceText: null,

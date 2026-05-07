@@ -78,7 +78,7 @@ function buildInvitationEmailHtml(inviterName: string, orgName: string, role: st
   const roleDisplay = role.replace(/_/g, ' ').replace(/\b\w/g, c => c.toUpperCase());
   return `
     <div style="font-family: Arial, sans-serif; max-width: 600px; margin: 0 auto; padding: 20px;">
-      <h2 style="color: #1a1a2e;">You've Been Invited to DashMet RCA</h2>
+      <h2 style="color: #1a1a2e;">You've Been Invited to DashMet Operations Intelligence</h2>
       <p><strong>${inviterName}</strong> has invited you to join <strong>${orgName}</strong> as a <strong>${roleDisplay}</strong>.</p>
       <p>Click the button below to accept the invitation and create your account:</p>
       <div style="text-align: center; margin: 30px 0;">
@@ -89,7 +89,7 @@ function buildInvitationEmailHtml(inviterName: string, orgName: string, role: st
       <p style="color: #666; font-size: 14px;">This invitation expires in ${expiryHours} hours.</p>
       <p style="color: #666; font-size: 14px;">If you didn't expect this invitation, you can safely ignore this email.</p>
       <hr style="border: none; border-top: 1px solid #eee; margin: 20px 0;">
-      <p style="color: #999; font-size: 12px;">DashMet RCA — Enterprise Food Safety & Root Cause Analysis</p>
+      <p style="color: #999; font-size: 12px;">DashMet Operations Intelligence — Enterprise Food Safety & Operations Management</p>
     </div>
   `;
 }
@@ -203,7 +203,7 @@ router.post('/', authenticate, requireMinimumRole(UserRole.ADMIN), asyncHandler(
 
   const emailResult = await sendEmailNotification({
     to: email.toLowerCase(),
-    subject: `You've been invited to join ${org.name} on DashMet RCA`,
+    subject: `You've been invited to join ${org.name} on DashMet Operations Intelligence`,
     body: `${inviterName} has invited you to join ${org.name} as a ${role.replace(/_/g, ' ')}. Accept your invitation here: ${invitationLink}`,
     html: buildInvitationEmailHtml(inviterName, org.name, role, invitationLink, INVITATION_EXPIRY_HOURS),
   });
@@ -650,7 +650,7 @@ router.post('/resend/:id', authenticate, requireMinimumRole(UserRole.ADMIN), asy
 
   const emailResult = await sendEmailNotification({
     to: invitation.email,
-    subject: `Reminder: You've been invited to join ${invitation.Organization.name} on DashMet RCA`,
+    subject: `Reminder: You've been invited to join ${invitation.Organization.name} on DashMet Operations Intelligence`,
     body: `${inviterName} is reminding you to accept your invitation to join ${invitation.Organization.name}. Accept here: ${invitationLink}`,
     html: buildInvitationEmailHtml(inviterName, invitation.Organization.name, invitation.role, invitationLink, INVITATION_EXPIRY_HOURS),
   });

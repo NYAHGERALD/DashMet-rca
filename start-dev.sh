@@ -2,7 +2,7 @@
 
 # Development startup script
 
-echo "🚀 Starting DashMet RCA Engine in development mode..."
+echo "🚀 Starting DashMet Operations Intelligence in development mode..."
 echo ""
 
 # Check if .env files exist

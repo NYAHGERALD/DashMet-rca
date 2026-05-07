@@ -1,11 +1,11 @@
 #!/bin/bash
 
-# Enterprise RCA Engine - Setup Script
+# DashMet Operations Intelligence - Setup Script
 # This script sets up the development environment
 
 set -e
 
-echo "🚀 Setting up DashMet RCA Engine..."
+echo "🚀 Setting up DashMet Operations Intelligence..."
 echo ""
 
 # Check Node.js version

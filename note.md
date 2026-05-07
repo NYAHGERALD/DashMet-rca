@@ -171,7 +171,7 @@ Enable Microsoft provider
 Note the callback URL shown (you'll need it for Azure)
 Step 2: Azure Portal
 Go to Azure Portal → App registrations → New registration
-Name: DASHMET RCA Engine
+Name: DashMet Operations Intelligence
 Account types: "Accounts in any organizational directory AND personal Microsoft accounts"
 Register the app
 Step 3: Configure Azure App

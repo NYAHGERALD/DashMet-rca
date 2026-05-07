@@ -1,10 +1,10 @@
-# Enterprise RCA Web Application
+# DashMet Operations Intelligence
 
-AI-Powered Root Cause Analysis Platform for Food Safety & Machine Issues
+Enterprise operations management solution for food safety, manufacturing, and team execution
 
 ## 🎯 Project Overview
 
-DashMet RCA Engine is an enterprise-grade, multi-tenant web application designed for:
+DashMet Operations Intelligence is an enterprise-grade, multi-tenant web application designed for:
 - Food Manufacturing
 - Warehousing & Logistics  
 - General Manufacturing
@@ -71,7 +71,7 @@ Supporting comprehensive Root Cause Analysis for Food Safety and Machine/Equipme
 
 1. **Clone the repository**
 ```bash
-cd dashmet-rca-engine
+cd dashmet-operations-intelligence
 ```
 
 2. **Install dependencies**
@@ -127,7 +127,7 @@ cd frontend && npm run dev
 ## 📁 Project Structure
 
 ```
-dashmet-rca-engine/
+dashmet-operations-intelligence/
 ├── backend/
 │   ├── src/
 │   │   ├── middleware/      # Auth, validation, error handling

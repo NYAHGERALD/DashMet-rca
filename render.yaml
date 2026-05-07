@@ -1,5 +1,5 @@
 # Render Blueprint - Infrastructure as Code
-# This file defines all services needed for DASHMET RCA Engine
+# This file defines all services needed for DashMet Operations Intelligence
 # Deploy by connecting your GitHub repo to Render and selecting this blueprint
 
 databases:

@@ -827,9 +827,9 @@ router.post('/send-password-reset', async (req, res) => {
     // });
     // 
     // await transporter.sendMail({
-    //   from: '"DashMet RCA" <noreply@dashmet.com>',
+    //   from: '"DashMet Operations Intelligence" <noreply@dashmet.com>',
     //   to: email,
-    //   subject: 'Reset Your Password - DashMet RCA',
+    //   subject: 'Reset Your Password - DashMet Operations Intelligence',
     //   html: `
     //     <h1>Reset Your Password</h1>
     //     <p>Click the link below to reset your password:</p>

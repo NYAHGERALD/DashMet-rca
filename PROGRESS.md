@@ -1,4 +1,4 @@
-# 🎯 DashMet RCA Engine - Build Progress Tracker
+# 🎯 DashMet Operations Intelligence - Build Progress Tracker
 
 ## Overall Progress: 100% (14/14 Phases Complete) 🎉
 
@@ -368,7 +368,7 @@ cd backend && npx prisma db push
 - **BUILD_COMPLETE_PHASE_0.md** - Phase 0 completion report
 - **PHASE_0_COMPLETE.md** - Phase 0 technical details
 - **COPILOT_EXECUTION_CHECKLIST.md** - Build checklist
-- **dashmet-rca-engine-architecture.md** - System architecture
+- **dashmet-operations-intelligence-architecture.md** - System architecture
 
 ---
 

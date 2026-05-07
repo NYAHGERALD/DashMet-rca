@@ -93,7 +93,7 @@ async function main() {
 
 **Effective Date:** ${now.toISOString().slice(0, 10)}
 
-This Privacy Policy explains how DASHMET RCA ("we", "us", or "our") collects, uses, discloses, and protects information when you access or use our web application and related services (the "Services").
+This Privacy Policy explains how DashMet Operations Intelligence ("we", "us", or "our") collects, uses, discloses, and protects information when you access or use our web application and related services (the "Services").
 
 ## 1. Information We Collect
 
@@ -149,7 +149,7 @@ If you have questions about this Privacy Policy, contact your organization admin
 
 **Effective Date:** ${now.toISOString().slice(0, 10)}
 
-These Terms of Service ("Terms") govern your access to and use of DASHMET RCA (the "Services"). By accessing or using the Services, you agree to these Terms.
+These Terms of Service ("Terms") govern your access to and use of DashMet Operations Intelligence (the "Services"). By accessing or using the Services, you agree to these Terms.
 
 ## 1. Eligibility and Accounts
 - You must be authorized by your organization to use the Services.
@@ -200,7 +200,7 @@ Questions about these Terms should be directed to your organization administrato
 
 **Effective Date:** ${now.toISOString().slice(0, 10)}
 
-This Cookie Policy explains how DASHMET RCA uses cookies and similar technologies.
+This Cookie Policy explains how DashMet Operations Intelligence uses cookies and similar technologies.
 
 ## 1. What Are Cookies?
 Cookies are small text files stored on your device when you visit a website. Similar technologies include local storage, pixels, and other identifiers.

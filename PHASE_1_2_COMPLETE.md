@@ -1,7 +1,7 @@
 # Phase 1.2: RBAC Implementation - COMPLETE ✅
 
 ## Overview
-Successfully implemented a comprehensive Role-Based Access Control (RBAC) system for the RCA Engine application.
+Successfully implemented a comprehensive Role-Based Access Control (RBAC) system for the DashMet Operations Intelligence application.
 
 ## Completed Components
 

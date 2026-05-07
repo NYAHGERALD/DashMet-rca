@@ -13,10 +13,46 @@
  */
 
 import { Router, Request, Response } from 'express';
-import { PrismaClient, MeetingStatus } from '@prisma/client';
+import { PrismaClient, MeetingStatus, MeetingType } from '@prisma/client';
 
 const router = Router();
 const prisma = new PrismaClient();
+
+const SUPPORTED_MEETING_TYPES = new Set<MeetingType>([
+  'GENERAL',
+  'STANDUP',
+  'ONE_ON_ONE',
+  'TEAM_SYNC',
+  'CLIENT_CALL',
+  'INTERVIEW',
+  'BRAINSTORM',
+  'REVIEW',
+  'OTHER',
+  'MANUAL',
+]);
+
+const MEETING_TYPE_ALIASES: Record<string, MeetingType> = {
+  CLIENT: 'CLIENT_CALL',
+  DAILY_STANDUP: 'STANDUP',
+  INCIDENT_REVIEW: 'REVIEW',
+  PLANNING: 'REVIEW',
+  PRODUCTION: 'REVIEW',
+  QUALITY: 'REVIEW',
+  RCA: 'REVIEW',
+  RETROSPECTIVE: 'REVIEW',
+  SAFETY: 'REVIEW',
+  SAFETY_BRIEFING: 'REVIEW',
+  TRAINING: 'REVIEW',
+};
+
+function normalizeMeetingType(value: unknown): MeetingType {
+  if (typeof value !== 'string') return 'GENERAL';
+
+  const normalized = value.trim().toUpperCase();
+  if (SUPPORTED_MEETING_TYPES.has(normalized as MeetingType)) return normalized as MeetingType;
+
+  return MEETING_TYPE_ALIASES[normalized] || 'GENERAL';
+}
 
 // ============================================================================
 // POST /api/mobile/meetings
@@ -84,7 +120,7 @@ router.post('/', async (req: Request, res: Response) => {
     const meeting = await prisma.meeting.create({
       data: {
         title: title?.trim() || null,
-        meetingType: meetingType || 'GENERAL',
+        meetingType: normalizeMeetingType(meetingType),
         status: 'DRAFT',
         location: location?.trim() || null,
         locationType: locationType || null,

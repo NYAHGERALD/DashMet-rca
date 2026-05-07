@@ -196,7 +196,7 @@ async function transcribeChunk(
     console.log(`[Whisper] ====== Transcribing Chunk ======`);
     console.log(`[Whisper] File: ${path.basename(filePath)}`);
     console.log(`[Whisper] File size: ${stats.size} bytes (${(stats.size / 1024 / 1024).toFixed(2)}MB)`);
-    console.log(`[Whisper] Language: ${config.language || 'en'}`);
+    console.log(`[Whisper] Language: ${config.language || 'auto-detect'}`);
     
     // Read file as buffer and create a File object for OpenAI
     const fileBuffer = fs.readFileSync(filePath);
@@ -209,14 +209,19 @@ async function transcribeChunk(
     
     console.log(`[Whisper] Sending to OpenAI Whisper API...`);
     
-    const response = await openai.audio.transcriptions.create({
+    const transcriptionRequest: any = {
       file: file,
       model: 'whisper-1',
-      language: config.language || 'en',
       prompt: prompt,
       temperature: config.temperature || 0,
       response_format: 'verbose_json',
-    });
+    };
+
+    if (config.language) {
+      transcriptionRequest.language = config.language;
+    }
+
+    const response = await openai.audio.transcriptions.create(transcriptionRequest) as any;
     
     console.log(`[Whisper] ====== Whisper API Response ======`);
     console.log(`[Whisper] Duration from API: ${response.duration}s`);
@@ -237,7 +242,7 @@ async function transcribeChunk(
       text: response.text,
       language: response.language,
       duration: response.duration,
-      segments: response.segments?.map(seg => ({
+      segments: response.segments?.map((seg: any) => ({
         start: seg.start,
         end: seg.end,
         text: seg.text,
