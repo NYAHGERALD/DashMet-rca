@@ -11,8 +11,64 @@
 import { Request, Response } from 'express';
 import { PrismaClient } from '@prisma/client';
 import crypto from 'crypto';
+import {
+  cleanupExpiredMeetingRecordings,
+  getOrCreateMeetingRecordingRetentionPolicy,
+  sanitizeRetentionPolicyInput,
+} from '../services/meetingRecordingStorageService';
 
 const prisma = new PrismaClient();
+
+function getAuthenticatedUser(req: Request) {
+  return (req as any).user as { id: string; role: string; organizationId?: string | null } | undefined;
+}
+
+function resolveAdminOrganizationId(req: Request) {
+  const user = getAuthenticatedUser(req);
+  if (!user) return null;
+  if (user.role !== 'SYSTEM_ADMIN') return user.organizationId || null;
+
+  const requestedOrgId = String(req.query.organizationId || req.body?.organizationId || '').trim();
+  return requestedOrgId || user.organizationId || null;
+}
+
+function nextPolicyVersion(currentVersion?: string | null) {
+  if (!currentVersion) return '1.0.0';
+  const parts = currentVersion.split('.').map((part) => Number.parseInt(part, 10));
+  if (parts.length >= 3 && parts.every((part) => Number.isFinite(part))) {
+    parts[2] += 1;
+    return parts.slice(0, 3).join('.');
+  }
+  return `${currentVersion}.${Date.now()}`;
+}
+
+function buildFullPolicyText(input: {
+  title: string;
+  purposeOfRecording: string;
+  dataRetentionPolicy: string;
+  dataSecurityPolicy: string;
+  dataSharingPolicy: string;
+  userRights: string;
+}) {
+  return [
+    input.title,
+    '',
+    'Purpose of Recording',
+    input.purposeOfRecording,
+    '',
+    'Data Retention',
+    input.dataRetentionPolicy,
+    '',
+    'Data Security',
+    input.dataSecurityPolicy,
+    '',
+    'Data Sharing',
+    input.dataSharingPolicy,
+    '',
+    'User Rights',
+    input.userRights,
+  ].join('\n');
+}
 
 // ===========================================
 // CONSENT POLICY OPERATIONS
@@ -110,6 +166,200 @@ export const createPolicy = async (req: Request, res: Response) => {
     res.status(500).json({
       success: false,
       error: 'Failed to create consent policy'
+    });
+  }
+};
+
+/**
+ * Get organization-managed meeting recording retention and active consent policy.
+ */
+export const getMeetingRecordingSettings = async (req: Request, res: Response) => {
+  try {
+    const organizationId = resolveAdminOrganizationId(req);
+    if (!organizationId) {
+      return res.status(400).json({
+        success: false,
+        error: 'An organization is required to manage meeting recording settings',
+      });
+    }
+
+    let policy = await prisma.consentPolicy.findFirst({
+      where: { isActive: true },
+      orderBy: { effectiveDate: 'desc' },
+    });
+
+    if (!policy) {
+      const defaultPolicy = getDefaultPolicy();
+      policy = await prisma.consentPolicy.create({
+        data: {
+          ...defaultPolicy,
+          createdById: getAuthenticatedUser(req)?.id,
+          isActive: true,
+          effectiveDate: new Date(),
+        },
+      });
+    }
+
+    const retentionPolicy = await getOrCreateMeetingRecordingRetentionPolicy(organizationId);
+    const [storedAudioCount, expiredAudioCount, deletedAudioCount] = await Promise.all([
+      prisma.meeting.count({
+        where: {
+          organizationId,
+          recordingDeletedAt: null,
+          OR: [
+            { recordingStoragePath: { not: null } },
+            { recordingUrl: { startsWith: 'gs://' } },
+          ],
+        },
+      }),
+      prisma.meeting.count({
+        where: {
+          organizationId,
+          recordingDeletedAt: null,
+          recordingRetentionExpiresAt: { lte: new Date() },
+        },
+      }),
+      prisma.meeting.count({
+        where: {
+          organizationId,
+          recordingDeletedAt: { not: null },
+        },
+      }),
+    ]);
+
+    return res.json({
+      success: true,
+      data: {
+        policy,
+        retentionPolicy,
+        stats: {
+          storedAudioCount,
+          expiredAudioCount,
+          deletedAudioCount,
+        },
+      },
+    });
+  } catch (error) {
+    console.error('Error fetching meeting recording settings:', error);
+    return res.status(500).json({
+      success: false,
+      error: 'Failed to fetch meeting recording settings',
+    });
+  }
+};
+
+/**
+ * Update meeting recording retention and publish a new active consent policy.
+ */
+export const updateMeetingRecordingSettings = async (req: Request, res: Response) => {
+  try {
+    const user = getAuthenticatedUser(req);
+    const organizationId = resolveAdminOrganizationId(req);
+    if (!organizationId || !user) {
+      return res.status(400).json({
+        success: false,
+        error: 'An organization is required to manage meeting recording settings',
+      });
+    }
+
+    const currentPolicy = await prisma.consentPolicy.findFirst({
+      where: { isActive: true },
+      orderBy: { effectiveDate: 'desc' },
+    });
+    const defaults = currentPolicy || getDefaultPolicy();
+    const incomingPolicy = req.body.policy || {};
+    const title = String(incomingPolicy.title || defaults.title || 'Meeting Recording Consent Policy').trim();
+    const purposeOfRecording = String(incomingPolicy.purposeOfRecording || defaults.purposeOfRecording || '').trim();
+    const dataRetentionPolicy = String(incomingPolicy.dataRetentionPolicy || defaults.dataRetentionPolicy || '').trim();
+    const dataSecurityPolicy = String(incomingPolicy.dataSecurityPolicy || defaults.dataSecurityPolicy || '').trim();
+    const dataSharingPolicy = String(incomingPolicy.dataSharingPolicy || defaults.dataSharingPolicy || '').trim();
+    const userRights = String(incomingPolicy.userRights || defaults.userRights || '').trim();
+
+    if (!title || !purposeOfRecording || !dataRetentionPolicy || !dataSecurityPolicy || !dataSharingPolicy || !userRights) {
+      return res.status(400).json({
+        success: false,
+        error: 'All consent policy sections are required',
+      });
+    }
+
+    const retentionInput = sanitizeRetentionPolicyInput(req.body.retentionPolicy || {});
+    const fullPolicyText = incomingPolicy.fullPolicyText || buildFullPolicyText({
+      title,
+      purposeOfRecording,
+      dataRetentionPolicy,
+      dataSecurityPolicy,
+      dataSharingPolicy,
+      userRights,
+    });
+
+    const result = await prisma.$transaction(async (tx) => {
+      await tx.consentPolicy.updateMany({
+        where: { isActive: true },
+        data: { isActive: false },
+      });
+
+      const policy = await tx.consentPolicy.create({
+        data: {
+          version: String(incomingPolicy.version || nextPolicyVersion(currentPolicy?.version)).trim(),
+          title,
+          purposeOfRecording,
+          dataRetentionPolicy,
+          dataSecurityPolicy,
+          dataSharingPolicy,
+          userRights,
+          fullPolicyText,
+          createdById: user.id,
+          isActive: true,
+          effectiveDate: new Date(),
+        },
+      });
+
+      const retentionPolicy = await tx.meetingRecordingRetentionPolicy.upsert({
+        where: { organizationId },
+        create: {
+          organizationId,
+          ...retentionInput,
+          updatedByUserId: user.id,
+        },
+        update: {
+          ...retentionInput,
+          updatedByUserId: user.id,
+        },
+      });
+
+      return { policy, retentionPolicy };
+    });
+
+    return res.json({
+      success: true,
+      data: result,
+      message: 'Meeting recording retention and consent policy settings saved.',
+    });
+  } catch (error: any) {
+    console.error('Error updating meeting recording settings:', error);
+    return res.status(500).json({
+      success: false,
+      error: error?.message || 'Failed to update meeting recording settings',
+    });
+  }
+};
+
+/**
+ * Admin-triggered cleanup for recordings whose retention date has passed.
+ */
+export const runMeetingRecordingRetentionCleanup = async (_req: Request, res: Response) => {
+  try {
+    const result = await cleanupExpiredMeetingRecordings(200);
+    return res.json({
+      success: true,
+      data: result,
+      message: `Deleted ${result.deleted} expired meeting recording${result.deleted === 1 ? '' : 's'}.`,
+    });
+  } catch (error: any) {
+    console.error('Error running meeting recording retention cleanup:', error);
+    return res.status(500).json({
+      success: false,
+      error: error?.message || 'Failed to run retention cleanup',
     });
   }
 };
@@ -595,9 +845,9 @@ function getDefaultPolicy() {
 The recording enables efficient meeting documentation without manual note-taking.`,
 
     dataRetentionPolicy: `**Audio Recording Retention:**
-- The original audio recording is automatically and permanently DELETED immediately after transcription is complete.
-- Audio files are NOT stored long-term.
-- Only the text transcript and AI-generated summaries are retained.
+- Original audio recordings are stored securely in DashMet-controlled cloud storage after the meeting is saved.
+- Audio retention is controlled by your organization's Meeting Recording Retention settings.
+- Administrators may configure audio to be deleted after transcription, retained for a defined number of days, or retained until manual deletion.
 
 **Transcript & Summary Retention:**
 - Text transcripts and AI summaries are retained for the duration specified by your organization's data retention policy.
@@ -672,5 +922,8 @@ export default {
   getConsentRecords,
   verifyConsent,
   revokeConsent,
-  getAuditLogs
+  getAuditLogs,
+  getMeetingRecordingSettings,
+  updateMeetingRecordingSettings,
+  runMeetingRecordingRetentionCleanup
 };

@@ -43,6 +43,9 @@ console.log('✅ AutoWeek cron loaded');
 import { startLswNotificationCron } from './services/lswNotificationCron';
 console.log('✅ LSW notification cron loaded');
 
+import { startMeetingRecordingRetentionCron } from './services/meetingRecordingRetentionCron';
+console.log('✅ Meeting recording retention cron loaded');
+
 // Add comprehensive error handling
 process.on('uncaughtException', (error) => {
   console.error('💥 Uncaught Exception:', error);
@@ -231,6 +234,9 @@ const server = httpServer.listen(PORT, HOST, () => {
 
   // Start LSW notification cron job
   startLswNotificationCron();
+
+  // Start meeting audio retention cleanup
+  startMeetingRecordingRetentionCron();
 });
 
 // Graceful shutdown

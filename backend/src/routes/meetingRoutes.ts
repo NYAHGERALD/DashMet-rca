@@ -13,10 +13,51 @@
  */
 
 import { Router, Request, Response } from 'express';
+import multer from 'multer';
 import { PrismaClient, MeetingStatus, MeetingType } from '@prisma/client';
+import {
+  createSignedMeetingAudioUrl,
+  deleteMeetingAudioObject,
+  downloadMeetingAudioBuffer,
+  getOrCreateMeetingRecordingRetentionPolicy,
+  uploadMeetingAudioToFirebase,
+} from '../services/meetingRecordingStorageService';
 
 const router = Router();
 const prisma = new PrismaClient();
+
+const audioUpload = multer({
+  storage: multer.memoryStorage(),
+  limits: {
+    fileSize: 500 * 1024 * 1024,
+  },
+  fileFilter: (_req, file, cb) => {
+    const allowedMimes = [
+      'audio/mpeg',
+      'audio/mp3',
+      'audio/mp4',
+      'audio/m4a',
+      'audio/wav',
+      'audio/webm',
+      'audio/ogg',
+      'audio/flac',
+      'audio/x-m4a',
+      'audio/aac',
+      'video/mp4',
+      'video/webm',
+    ];
+
+    if (
+      allowedMimes.includes(file.mimetype) ||
+      /\.(mp3|mp4|m4a|wav|webm|ogg|flac|mpeg|mpga|aac)$/i.test(file.originalname)
+    ) {
+      cb(null, true);
+      return;
+    }
+
+    cb(new Error('Invalid file type. Please upload an audio recording.'));
+  },
+});
 
 const SUPPORTED_MEETING_TYPES = new Set<MeetingType>([
   'GENERAL',
@@ -52,6 +93,48 @@ function normalizeMeetingType(value: unknown): MeetingType {
   if (SUPPORTED_MEETING_TYPES.has(normalized as MeetingType)) return normalized as MeetingType;
 
   return MEETING_TYPE_ALIASES[normalized] || 'GENERAL';
+}
+
+function currentUser(req: Request) {
+  return (req as any).user as { id: string; role: string; organizationId?: string | null } | undefined;
+}
+
+function canAccessMeeting(
+  user: ReturnType<typeof currentUser>,
+  meeting: { creatorId: string; organizationId: string },
+) {
+  if (!user) return false;
+  if (meeting.creatorId === user.id) return true;
+  if (user.role === 'SYSTEM_ADMIN') return true;
+  if (['ADMIN', 'CI_MANAGER'].includes(user.role) && user.organizationId === meeting.organizationId) return true;
+  return false;
+}
+
+function parseOptionalDate(value: unknown) {
+  if (!value) return null;
+  const parsed = new Date(String(value));
+  return Number.isNaN(parsed.getTime()) ? null : parsed;
+}
+
+function parseOptionalDuration(value: unknown) {
+  if (value === undefined || value === null || value === '') return null;
+  const parsed = Number.parseInt(String(value), 10);
+  return Number.isFinite(parsed) && parsed >= 0 ? parsed : null;
+}
+
+function normalizeTranscriptionLanguage(value: unknown) {
+  const raw = String(value || '').trim().toLowerCase();
+  if (!raw || raw === 'auto' || raw === 'english' || raw === 'en') return undefined;
+  if (/^[a-z]{2,3}(-[a-z]{2})?$/.test(raw)) return raw;
+  return undefined;
+}
+
+function normalizeMeetingTypeForTranscription(value: unknown) {
+  return String(value || 'general')
+    .trim()
+    .toLowerCase()
+    .replace(/_/g, '-')
+    .replace(/[^a-z0-9-]/g, '') || 'general';
 }
 
 // ============================================================================
@@ -381,6 +464,14 @@ router.patch('/:id', async (req: Request, res: Response) => {
       });
     }
 
+    const user = currentUser(req);
+    if (!canAccessMeeting(user, existingMeeting)) {
+      return res.status(403).json({
+        success: false,
+        error: 'You do not have access to this meeting',
+      });
+    }
+
     const updateData: any = {};
     
     if (title !== undefined) updateData.title = title?.trim() || null;
@@ -408,7 +499,7 @@ router.patch('/:id', async (req: Request, res: Response) => {
       }
     }
 
-    const meeting = await prisma.meeting.update({
+    let meeting = await prisma.meeting.update({
       where: { id },
       data: updateData,
       include: {
@@ -420,6 +511,33 @@ router.patch('/:id', async (req: Request, res: Response) => {
         _count: { select: { actionItems: true, transcript: true } },
       },
     });
+
+    if (
+      status === MeetingStatus.READY &&
+      meeting.recordingDeletedAt === null &&
+      (meeting.recordingStoragePath || meeting.recordingUrl?.startsWith('gs://'))
+    ) {
+      const retentionPolicy = await getOrCreateMeetingRecordingRetentionPolicy(meeting.organizationId);
+      if (retentionPolicy.audioRetentionMode === 'DELETE_AFTER_TRANSCRIPTION') {
+        await deleteMeetingAudioObject(meeting);
+        meeting = await prisma.meeting.update({
+          where: { id },
+          data: {
+            recordingUrl: null,
+            recordingDeletedAt: new Date(),
+            recordingDeletionReason: 'transcription_complete',
+          },
+          include: {
+            creator: {
+              select: { id: true, firstName: true, lastName: true, email: true },
+            },
+            participants: true,
+            bookmarks: { orderBy: { timestamp: 'asc' } },
+            _count: { select: { actionItems: true, transcript: true } },
+          },
+        });
+      }
+    }
 
     return res.json({ success: true, meeting });
   } catch (error: any) {
@@ -450,6 +568,17 @@ router.delete('/:id', async (req: Request, res: Response) => {
       });
     }
 
+    const user = currentUser(req);
+    if (!canAccessMeeting(user, existingMeeting)) {
+      return res.status(403).json({
+        success: false,
+        error: 'You do not have access to this meeting',
+      });
+    }
+
+    await deleteMeetingAudioObject(existingMeeting).catch((error) => {
+      console.warn(`[MeetingRoutes] Failed to delete audio for meeting ${id}:`, error?.message || error);
+    });
     await prisma.meeting.delete({ where: { id } });
 
     return res.json({
@@ -910,6 +1039,253 @@ router.get('/:id/ai-summary', async (req: Request, res: Response) => {
     return res.status(500).json({
       success: false,
       error: 'Failed to get AI summary',
+    });
+  }
+});
+
+// ============================================================================
+// POST /api/mobile/meetings/:id/recording
+// Upload meeting audio to private Firebase Storage and store the cloud object path
+// ============================================================================
+router.post('/:id/recording', audioUpload.single('audio'), async (req: Request, res: Response) => {
+  try {
+    const { id } = req.params;
+    const user = currentUser(req);
+    const file = req.file;
+
+    if (!user) {
+      return res.status(401).json({ success: false, error: 'Authentication required' });
+    }
+
+    if (!file) {
+      return res.status(400).json({ success: false, error: 'Audio file is required' });
+    }
+
+    const existingMeeting = await prisma.meeting.findUnique({ where: { id } });
+    if (!existingMeeting) {
+      return res.status(404).json({ success: false, error: 'Meeting not found' });
+    }
+
+    if (!canAccessMeeting(user, existingMeeting)) {
+      return res.status(403).json({ success: false, error: 'You do not have access to this meeting' });
+    }
+
+    const duration = parseOptionalDuration(req.body.duration);
+    const recordedAt = parseOptionalDate(req.body.recordedAt) || new Date();
+    const uploaded = await uploadMeetingAudioToFirebase({
+      meeting: existingMeeting,
+      user: { id: user.id, organizationId: user.organizationId || null },
+      file,
+      duration,
+      recordedAt,
+    });
+
+    const meeting = await prisma.meeting.update({
+      where: { id },
+      data: {
+        status: MeetingStatus.UPLOADED,
+        recordingUrl: uploaded.gsUri,
+        recordingStorageBucket: uploaded.bucketName,
+        recordingStoragePath: uploaded.storagePath,
+        recordingFileName: file.originalname,
+        recordingMimeType: file.mimetype || 'audio/m4a',
+        recordingFileSize: file.size || null,
+        recordingUploadedAt: uploaded.uploadedAt,
+        recordingRetentionExpiresAt: uploaded.retentionExpiresAt,
+        recordingDeletedAt: null,
+        recordingDeletionReason: null,
+        duration,
+        recordedAt,
+      },
+      include: {
+        creator: {
+          select: { id: true, firstName: true, lastName: true, email: true },
+        },
+        department: {
+          select: { id: true, name: true },
+        },
+        participants: true,
+        bookmarks: { orderBy: { timestamp: 'asc' } },
+        _count: { select: { actionItems: true, transcript: true } },
+      },
+    });
+
+    return res.status(201).json({
+      success: true,
+      meeting,
+      data: {
+        recordingUrl: uploaded.gsUri,
+        recordingStoragePath: uploaded.storagePath,
+        recordingRetentionExpiresAt: uploaded.retentionExpiresAt,
+      },
+      message: 'Meeting audio uploaded securely. It is ready for playback and transcript processing.',
+    });
+  } catch (error: any) {
+    console.error('Upload meeting recording error:', error);
+    return res.status(500).json({
+      success: false,
+      error: error?.message || 'Failed to upload meeting audio',
+    });
+  }
+});
+
+// ============================================================================
+// GET /api/mobile/meetings/:id/recording/playback
+// Return a short-lived signed URL for private Firebase audio playback
+// ============================================================================
+router.get('/:id/recording/playback', async (req: Request, res: Response) => {
+  try {
+    const { id } = req.params;
+    const user = currentUser(req);
+
+    if (!user) {
+      return res.status(401).json({ success: false, error: 'Authentication required' });
+    }
+
+    const meeting = await prisma.meeting.findUnique({ where: { id } });
+    if (!meeting) {
+      return res.status(404).json({ success: false, error: 'Meeting not found' });
+    }
+
+    if (!canAccessMeeting(user, meeting)) {
+      return res.status(403).json({ success: false, error: 'You do not have access to this meeting' });
+    }
+
+    const signed = await createSignedMeetingAudioUrl(meeting);
+    return res.json({
+      success: true,
+      data: {
+        playbackUrl: signed.url,
+        expiresAt: signed.expiresAt,
+      },
+    });
+  } catch (error: any) {
+    console.error('Create meeting recording playback URL error:', error);
+    return res.status(404).json({
+      success: false,
+      error: error?.message || 'Meeting audio is not available',
+    });
+  }
+});
+
+// ============================================================================
+// POST /api/mobile/meetings/:id/recording/transcribe
+// Transcribe a meeting directly from private Firebase Storage
+// ============================================================================
+router.post('/:id/recording/transcribe', async (req: Request, res: Response) => {
+  try {
+    const { id } = req.params;
+    const user = currentUser(req);
+
+    if (!user) {
+      return res.status(401).json({ success: false, error: 'Authentication required' });
+    }
+
+    const meeting = await prisma.meeting.findUnique({ where: { id } });
+    if (!meeting) {
+      return res.status(404).json({ success: false, error: 'Meeting not found' });
+    }
+
+    if (!canAccessMeeting(user, meeting)) {
+      return res.status(403).json({ success: false, error: 'You do not have access to this meeting' });
+    }
+
+    const whisperService = await import('../services/whisperService');
+    if (!whisperService.isConfigured()) {
+      return res.status(503).json({
+        success: false,
+        error: 'Transcription service is not configured. Please contact administrator.',
+      });
+    }
+
+    const audio = await downloadMeetingAudioBuffer(meeting);
+    const language = normalizeTranscriptionLanguage(req.body.language);
+    const meetingType = normalizeMeetingTypeForTranscription(req.body.meetingType || meeting.meetingType);
+
+    let result = await whisperService.transcribeFromBuffer(audio.buffer, audio.fileName, {
+      language,
+      meetingType,
+    });
+
+    if (result.success && language && !result.text?.trim()) {
+      result = await whisperService.transcribeFromBuffer(audio.buffer, audio.fileName, {
+        meetingType,
+      });
+    }
+
+    if (!result.success) {
+      return res.status(500).json({
+        success: false,
+        error: result.error || 'Transcription failed',
+      });
+    }
+
+    return res.json({
+      success: true,
+      transcript: result.text,
+      language: result.language,
+      duration: result.duration,
+      segments: result.segments,
+    });
+  } catch (error: any) {
+    console.error('Transcribe stored meeting recording error:', error);
+    return res.status(500).json({
+      success: false,
+      error: error?.message || 'Failed to transcribe stored meeting audio',
+    });
+  }
+});
+
+// ============================================================================
+// DELETE /api/mobile/meetings/:id/recording
+// Delete the Firebase audio object and clear active recording reference
+// ============================================================================
+router.delete('/:id/recording', async (req: Request, res: Response) => {
+  try {
+    const { id } = req.params;
+    const user = currentUser(req);
+
+    if (!user) {
+      return res.status(401).json({ success: false, error: 'Authentication required' });
+    }
+
+    const meeting = await prisma.meeting.findUnique({ where: { id } });
+    if (!meeting) {
+      return res.status(404).json({ success: false, error: 'Meeting not found' });
+    }
+
+    if (!canAccessMeeting(user, meeting)) {
+      return res.status(403).json({ success: false, error: 'You do not have access to this meeting' });
+    }
+
+    const retentionPolicy = await getOrCreateMeetingRecordingRetentionPolicy(meeting.organizationId);
+    const isAdmin = ['ADMIN', 'SYSTEM_ADMIN', 'CI_MANAGER'].includes(user.role);
+    if (!retentionPolicy.allowUsersToDeleteAudio && !isAdmin) {
+      return res.status(403).json({ success: false, error: 'Audio deletion is restricted by your organization policy' });
+    }
+
+    await deleteMeetingAudioObject(meeting);
+    const updated = await prisma.meeting.update({
+      where: { id },
+      data: {
+        recordingUrl: null,
+        recordingRetentionExpiresAt: null,
+        recordingDeletedAt: new Date(),
+        recordingDeletionReason: 'manual_delete',
+        status: meeting.status === MeetingStatus.UPLOADED ? MeetingStatus.DRAFT : meeting.status,
+      },
+    });
+
+    return res.json({
+      success: true,
+      meeting: updated,
+      message: 'Meeting audio deleted.',
+    });
+  } catch (error: any) {
+    console.error('Delete meeting recording error:', error);
+    return res.status(500).json({
+      success: false,
+      error: error?.message || 'Failed to delete meeting audio',
     });
   }
 });

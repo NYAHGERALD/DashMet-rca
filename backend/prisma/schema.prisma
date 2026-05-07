@@ -64,15 +64,15 @@ model ArchivedChatMessage {
 }
 
 model Area {
-  id           String      @id @default(uuid())
+  id           String         @id @default(uuid())
   name         String
   description  String?
   facilityId   String?
-  createdAt    DateTime    @default(now())
-  updatedAt    DateTime    @updatedAt
+  createdAt    DateTime       @default(now())
+  updatedAt    DateTime       @updatedAt
   departmentId String?
-  Department   Department? @relation(fields: [departmentId], references: [id], onDelete: Cascade)
-  Facility     Facility?   @relation(fields: [facilityId], references: [id], onDelete: Cascade)
+  Department   Department?    @relation(fields: [departmentId], references: [id], onDelete: Cascade)
+  Facility     Facility?      @relation(fields: [facilityId], references: [id], onDelete: Cascade)
   Incident     Incident[]
   Line         Line[]
   MachineIssue MachineIssue[]
@@ -335,11 +335,11 @@ model Department {
   Task                      Task[]
 
   // LSW Relations
-  DaysOfWeek                DayOfWeek[]
-  LswBoards                 LswBoard[]                  @relation("LswBoardDepartment")
-  LswDailyTasks             LswDailyTask[]              @relation("LswDailyTaskDepartment")
-  LswTodoItems              LswTodoItem[]               @relation("LswTodoItemDepartment")
-  MachineIssue              MachineIssue[]
+  DaysOfWeek    DayOfWeek[]
+  LswBoards     LswBoard[]     @relation("LswBoardDepartment")
+  LswDailyTasks LswDailyTask[] @relation("LswDailyTaskDepartment")
+  LswTodoItems  LswTodoItem[]  @relation("LswTodoItemDepartment")
+  MachineIssue  MachineIssue[]
 
   @@index([facilityId])
 }
@@ -495,23 +495,23 @@ model Facility {
   Task                      Task[]
   Meeting                   Meeting[]                   @relation("MeetingFacility")
   WorkplaceSafetyAssessment WorkplaceSafetyAssessment[]
-  
+
   // Conflict Resolution Relations
-  ConflictCases             ConflictCase[]
-  WorkplacePolicies         WorkplacePolicyDoc[]
+  ConflictCases     ConflictCase[]
+  WorkplacePolicies WorkplacePolicyDoc[]
 
   // LSW Relations
-  LswBoards                 LswBoard[]
-  DaysOfWeek                DayOfWeek[]
-  LswDailyTasks             LswDailyTask[]             @relation("LswDailyTaskFacility")
-  LswFrequencyTasks         LswFrequencyTask[]         @relation("LswFrequencyTaskFacility")
-  LswProjects               LswProject[]               @relation("LswProjectFacility")
-  LswMeetingRails           LswMeetingRail[]            @relation("LswMeetingRailFacility")
-  LswFollowUps              LswFollowUp[]               @relation("LswFollowUpFacility")
-  LswKeyResultSets          LswKeyResultSet[]           @relation("LswKeyResultSetFacility")
-  LswPersonalGoals          LswPersonalGoal[]           @relation("LswPersonalGoalFacility")
-  LswRcaTriggers            LswRcaTrigger[]             @relation("LswRcaTriggerFacility")
-  LswDepartments            LswDepartment[]             @relation("LswDepartmentFacility")
+  LswBoards         LswBoard[]
+  DaysOfWeek        DayOfWeek[]
+  LswDailyTasks     LswDailyTask[]     @relation("LswDailyTaskFacility")
+  LswFrequencyTasks LswFrequencyTask[] @relation("LswFrequencyTaskFacility")
+  LswProjects       LswProject[]       @relation("LswProjectFacility")
+  LswMeetingRails   LswMeetingRail[]   @relation("LswMeetingRailFacility")
+  LswFollowUps      LswFollowUp[]      @relation("LswFollowUpFacility")
+  LswKeyResultSets  LswKeyResultSet[]  @relation("LswKeyResultSetFacility")
+  LswPersonalGoals  LswPersonalGoal[]  @relation("LswPersonalGoalFacility")
+  LswRcaTriggers    LswRcaTrigger[]    @relation("LswRcaTriggerFacility")
+  LswDepartments    LswDepartment[]    @relation("LswDepartmentFacility")
 
   @@index([organizationId])
 }
@@ -871,18 +871,18 @@ model KnowledgeArticle {
 }
 
 model Line {
-  id          String      @id @default(uuid())
-  name        String
-  description String?
-  machineIds  String[]
-  areaId      String
-  createdAt   DateTime    @default(now())
-  updatedAt   DateTime    @updatedAt
-  lineNumber  String?
-  Incident    Incident[]
-  Area        Area        @relation(fields: [areaId], references: [id], onDelete: Cascade)
-  ShiftLine   ShiftLine[]
-  Equipment   Equipment[]
+  id           String         @id @default(uuid())
+  name         String
+  description  String?
+  machineIds   String[]
+  areaId       String
+  createdAt    DateTime       @default(now())
+  updatedAt    DateTime       @updatedAt
+  lineNumber   String?
+  Incident     Incident[]
+  Area         Area           @relation(fields: [areaId], references: [id], onDelete: Cascade)
+  ShiftLine    ShiftLine[]
+  Equipment    Equipment[]
   MachineIssue MachineIssue[]
 
   @@index([areaId])
@@ -891,23 +891,23 @@ model Line {
 // ─── Equipment Registry ─────────────────────────────────────────────────────────
 
 model Equipment {
-  id              String               @id @default(uuid())
-  name            String
-  description     String?
-  assetTag        String?
-  manufacturer    String?
-  model           String?
-  serialNumber    String?
-  photos          Json                 @default("[]")
-  status          EquipmentStatus      @default(ACTIVE)
-  lineId          String
-  createdAt       DateTime             @default(now())
-  updatedAt       DateTime             @updatedAt
-  createdBy       String?
+  id           String          @id @default(uuid())
+  name         String
+  description  String?
+  assetTag     String?
+  manufacturer String?
+  model        String?
+  serialNumber String?
+  photos       Json            @default("[]")
+  status       EquipmentStatus @default(ACTIVE)
+  lineId       String
+  createdAt    DateTime        @default(now())
+  updatedAt    DateTime        @updatedAt
+  createdBy    String?
 
-  Line            Line                 @relation(fields: [lineId], references: [id], onDelete: Cascade)
-  Components      EquipmentComponent[]
-  MachineIssue    MachineIssue[]
+  Line         Line                 @relation(fields: [lineId], references: [id], onDelete: Cascade)
+  Components   EquipmentComponent[]
+  MachineIssue MachineIssue[]
 
   @@index([lineId])
   @@index([status])
@@ -915,20 +915,20 @@ model Equipment {
 }
 
 model EquipmentComponent {
-  id              String               @id @default(uuid())
-  name            String
-  description     String?
-  partNumber      String?
-  manufacturer    String?
-  photos          Json                 @default("[]")
-  isCritical      Boolean              @default(false)
-  status          EquipmentStatus      @default(ACTIVE)
-  equipmentId     String
-  createdAt       DateTime             @default(now())
-  updatedAt       DateTime             @updatedAt
+  id           String          @id @default(uuid())
+  name         String
+  description  String?
+  partNumber   String?
+  manufacturer String?
+  photos       Json            @default("[]")
+  isCritical   Boolean         @default(false)
+  status       EquipmentStatus @default(ACTIVE)
+  equipmentId  String
+  createdAt    DateTime        @default(now())
+  updatedAt    DateTime        @updatedAt
 
-  Equipment       Equipment            @relation(fields: [equipmentId], references: [id], onDelete: Cascade)
-  MachineIssues   MachineIssue[]
+  Equipment     Equipment      @relation(fields: [equipmentId], references: [id], onDelete: Cascade)
+  MachineIssues MachineIssue[]
 
   @@index([equipmentId])
 }
@@ -962,42 +962,42 @@ enum IssueStatus {
 }
 
 model MachineIssue {
-  id            String        @id @default(uuid())
-  issueNumber   String        @unique
-  type          IssueType
-  title         String
-  description   String
-  priority      IssuePriority @default(MEDIUM)
-  status        IssueStatus   @default(OPEN)
-  photos        Json          @default("[]")
-  departmentId  String
-  areaId        String?
-  lineId        String?
-  shiftId       String?
-  equipmentId   String?
-  componentId     String?
-  weekNumber      Int?
-  dayOfWeekId     String?
-  startTime       String?
+  id               String        @id @default(uuid())
+  issueNumber      String        @unique
+  type             IssueType
+  title            String
+  description      String
+  priority         IssuePriority @default(MEDIUM)
+  status           IssueStatus   @default(OPEN)
+  photos           Json          @default("[]")
+  departmentId     String
+  areaId           String?
+  lineId           String?
+  shiftId          String?
+  equipmentId      String?
+  componentId      String?
+  weekNumber       Int?
+  dayOfWeekId      String?
+  startTime        String?
   totalMinutesLost Int?
-  resolution      String?
-  resolvedAt      DateTime?
-  resolvedById    String?
-  reportedById    String
-  organizationId  String
-  createdAt     DateTime      @default(now())
-  updatedAt     DateTime      @updatedAt
+  resolution       String?
+  resolvedAt       DateTime?
+  resolvedById     String?
+  reportedById     String
+  organizationId   String
+  createdAt        DateTime      @default(now())
+  updatedAt        DateTime      @updatedAt
 
-  Department    Department    @relation(fields: [departmentId], references: [id])
-  Area          Area?         @relation(fields: [areaId], references: [id])
-  Line          Line?         @relation(fields: [lineId], references: [id])
-  Shift         Shift?        @relation(fields: [shiftId], references: [id])
-  Equipment     Equipment?    @relation(fields: [equipmentId], references: [id])
-  Component     EquipmentComponent? @relation(fields: [componentId], references: [id])
-  DayOfWeek     DayOfWeek?    @relation(fields: [dayOfWeekId], references: [id])
-  ReportedBy    User          @relation("IssueReportedBy", fields: [reportedById], references: [id])
-  ResolvedBy    User?         @relation("IssueResolvedBy", fields: [resolvedById], references: [id])
-  Organization  Organization  @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  Department   Department          @relation(fields: [departmentId], references: [id])
+  Area         Area?               @relation(fields: [areaId], references: [id])
+  Line         Line?               @relation(fields: [lineId], references: [id])
+  Shift        Shift?              @relation(fields: [shiftId], references: [id])
+  Equipment    Equipment?          @relation(fields: [equipmentId], references: [id])
+  Component    EquipmentComponent? @relation(fields: [componentId], references: [id])
+  DayOfWeek    DayOfWeek?          @relation(fields: [dayOfWeekId], references: [id])
+  ReportedBy   User                @relation("IssueReportedBy", fields: [reportedById], references: [id])
+  ResolvedBy   User?               @relation("IssueResolvedBy", fields: [resolvedById], references: [id])
+  Organization Organization        @relation(fields: [organizationId], references: [id], onDelete: Cascade)
 
   @@index([departmentId])
   @@index([areaId])
@@ -1028,71 +1028,72 @@ model Notification {
 }
 
 model Organization {
-  id                        String                      @id @default(uuid())
-  name                      String
-  region                    Region
-  defaultLanguage           Language                    @default(ENGLISH)
-  isActive                  Boolean                     @default(true)
-  regulatoryRuleset         String?
-  createdAt                 DateTime                    @default(now())
-  updatedAt                 DateTime                    @updatedAt
-  isPublic                  Boolean                     @default(false)
-  signupCode                String?                     @unique
-  AuditLog                  AuditLog[]
-  Category                  Category[]
-  DropdownOption            DropdownOption[]
-  FMIRAuditReport           FMIRAuditReport[]
-  Facility                  Facility[]
-  FieldConfiguration        FieldConfiguration[]
-  ForeignMaterialIncident   ForeignMaterialIncident[]
-  Incident                  Incident[]
-  OrganizationAccessCode    OrganizationAccessCode[]
-  PrivilegeAuditLog         PrivilegeAuditLog[]
-  RegulatoryTracking        RegulatoryTracking[]
-  RolePrivilege             RolePrivilege[]
-  SupportRequest            SupportRequest[]
-  Task                      Task[]
-  Meeting                   Meeting[]
-  User                      User[]
-  WorkOrder                 WorkOrder[]
-  WorkOrderSettings         WorkOrderSettings?
-  WorkOrderTemplate         WorkOrderTemplate[]
-  WorkplaceSafetyAssessment WorkplaceSafetyAssessment[]
-  
+  id                              String                           @id @default(uuid())
+  name                            String
+  region                          Region
+  defaultLanguage                 Language                         @default(ENGLISH)
+  isActive                        Boolean                          @default(true)
+  regulatoryRuleset               String?
+  createdAt                       DateTime                         @default(now())
+  updatedAt                       DateTime                         @updatedAt
+  isPublic                        Boolean                          @default(false)
+  signupCode                      String?                          @unique
+  AuditLog                        AuditLog[]
+  Category                        Category[]
+  DropdownOption                  DropdownOption[]
+  FMIRAuditReport                 FMIRAuditReport[]
+  Facility                        Facility[]
+  FieldConfiguration              FieldConfiguration[]
+  ForeignMaterialIncident         ForeignMaterialIncident[]
+  Incident                        Incident[]
+  OrganizationAccessCode          OrganizationAccessCode[]
+  PrivilegeAuditLog               PrivilegeAuditLog[]
+  RegulatoryTracking              RegulatoryTracking[]
+  RolePrivilege                   RolePrivilege[]
+  SupportRequest                  SupportRequest[]
+  Task                            Task[]
+  Meeting                         Meeting[]
+  MeetingRecordingRetentionPolicy MeetingRecordingRetentionPolicy?
+  User                            User[]
+  WorkOrder                       WorkOrder[]
+  WorkOrderSettings               WorkOrderSettings?
+  WorkOrderTemplate               WorkOrderTemplate[]
+  WorkplaceSafetyAssessment       WorkplaceSafetyAssessment[]
+
   // Conflict Resolution Relations
-  ConflictCases             ConflictCase[]
-  WorkplacePolicies         WorkplacePolicyDoc[]
+  ConflictCases     ConflictCase[]
+  WorkplacePolicies WorkplacePolicyDoc[]
 
   // LSW Configuration
-  calendarYearStartMonth    Int                         @default(1)   // 1=Jan .. 12=Dec
-  calendarYearStartDay      Int                         @default(1)   // Day of month (1-31)
+  calendarYearStartMonth Int @default(1) // 1=Jan .. 12=Dec
+  calendarYearStartDay   Int @default(1) // Day of month (1-31)
 
   // LSW Relations
-  LswBoards                 LswBoard[]                  @relation("LswBoardOrganization")
-  LswDepartments            LswDepartment[]             @relation("LswDepartmentOrganization")
-  LswKeyResultSets          LswKeyResultSet[]           @relation("LswKeyResultSetOrganization")
-  LswRcaTriggers            LswRcaTrigger[]             @relation("LswRcaTriggerOrganization")
+  LswBoards        LswBoard[]        @relation("LswBoardOrganization")
+  LswDepartments   LswDepartment[]   @relation("LswDepartmentOrganization")
+  LswKeyResultSets LswKeyResultSet[] @relation("LswKeyResultSetOrganization")
+  LswRcaTriggers   LswRcaTrigger[]   @relation("LswRcaTriggerOrganization")
 
   // Vacation Management Relations
-  VacationEmployees          VacationEmployee[]
-  Vacations                  Vacation[]
-  VacationSettings           VacationSettings[]
-  VacationBlackoutPeriods    VacationBlackoutPeriod[]
-  VacationActivityLogs       VacationActivityLog[]
-  VacationNotifications      VacationNotification[]
+  VacationEmployees       VacationEmployee[]
+  Vacations               Vacation[]
+  VacationSettings        VacationSettings[]
+  VacationBlackoutPeriods VacationBlackoutPeriod[]
+  VacationActivityLogs    VacationActivityLog[]
+  VacationNotifications   VacationNotification[]
 
   // Operations Issue Tracking
-  MachineIssue               MachineIssue[]
-  DaysOfWeek                 DayOfWeek[]
+  MachineIssue MachineIssue[]
+  DaysOfWeek   DayOfWeek[]
 
   // Invitation-only registration
-  Invitations                Invitation[]
+  Invitations Invitation[]
 
   // User-specific privilege overrides
-  UserPrivilegeOverrides     UserPrivilegeOverride[]
+  UserPrivilegeOverrides UserPrivilegeOverride[]
 
   // Canvas AI — Whiteboard Relations
-  Boards                     Board[]                     @relation("BoardOrganization")
+  Boards Board[] @relation("BoardOrganization")
 
   @@index([name])
   @@index([signupCode])
@@ -1120,23 +1121,23 @@ model OrganizationAccessCode {
 // Invitation-only registration: secure, time-limited invitations
 model Invitation {
   id             String           @id @default(uuid())
-  token          String           @unique         // 64-char hex (crypto.randomBytes(32))
-  email          String                           // Invited email address
-  role           UserRole                         // Role assigned to invitee
-  organizationId String                           // Organization they're joining
-  facilityId     String?                          // Optional facility assignment
+  token          String           @unique // 64-char hex (crypto.randomBytes(32))
+  email          String // Invited email address
+  role           UserRole // Role assigned to invitee
+  organizationId String // Organization they're joining
+  facilityId     String? // Optional facility assignment
   status         InvitationStatus @default(PENDING)
-  expiresAt      DateTime                         // 48-hour expiry
+  expiresAt      DateTime // 48-hour expiry
   acceptedAt     DateTime?
   revokedAt      DateTime?
-  invitedById    String                           // Admin/SystemAdmin who created it
-  acceptedUserId String?                          // User.id after acceptance
+  invitedById    String // Admin/SystemAdmin who created it
+  acceptedUserId String? // User.id after acceptance
   createdAt      DateTime         @default(now())
   updatedAt      DateTime         @updatedAt
 
-  Organization   Organization     @relation(fields: [organizationId], references: [id], onDelete: Cascade)
-  InvitedBy      User             @relation("InvitationsSent", fields: [invitedById], references: [id])
-  AcceptedUser   User?            @relation("InvitationsAccepted", fields: [acceptedUserId], references: [id])
+  Organization Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  InvitedBy    User         @relation("InvitationsSent", fields: [invitedById], references: [id])
+  AcceptedUser User?        @relation("InvitationsAccepted", fields: [acceptedUserId], references: [id])
 
   @@index([token])
   @@index([email])
@@ -1352,16 +1353,16 @@ model RolePrivilege {
 // privileges for individual users, independent of their role defaults.
 // Priority: UserPrivilegeOverride > RolePrivilege > DefaultPrivilege
 model UserPrivilegeOverride {
-  id             String          @id @default(uuid())
+  id             String       @id @default(uuid())
   userId         String
   organizationId String
   featureKey     String
   isEnabled      Boolean
-  createdAt      DateTime        @default(now())
-  updatedAt      DateTime        @updatedAt
+  createdAt      DateTime     @default(now())
+  updatedAt      DateTime     @updatedAt
   createdById    String?
-  User           User            @relation(fields: [userId], references: [id], onDelete: Cascade)
-  Organization   Organization    @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  User           User         @relation(fields: [userId], references: [id], onDelete: Cascade)
+  Organization   Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
 
   @@unique([userId, featureKey])
   @@index([userId])
@@ -1421,17 +1422,17 @@ model LoginTrustedDevice {
 }
 
 model Shift {
-  id         String      @id @default(uuid())
-  name       String
-  startTime  String
-  endTime    String
-  facilityId String?
-  createdAt  DateTime    @default(now())
-  updatedAt  DateTime    @updatedAt
-  lineId     String?
-  Incident   Incident[]
-  Facility   Facility?   @relation(fields: [facilityId], references: [id], onDelete: Cascade)
-  ShiftLine  ShiftLine[]
+  id           String         @id @default(uuid())
+  name         String
+  startTime    String
+  endTime      String
+  facilityId   String?
+  createdAt    DateTime       @default(now())
+  updatedAt    DateTime       @updatedAt
+  lineId       String?
+  Incident     Incident[]
+  Facility     Facility?      @relation(fields: [facilityId], references: [id], onDelete: Cascade)
+  ShiftLine    ShiftLine[]
   MachineIssue MachineIssue[]
 
   @@index([facilityId])
@@ -1540,12 +1541,12 @@ model User {
   socketId                                                            String?
   profilePicture                                                      String?
   autoSaveEnabled                                                     Boolean                              @default(false)
-  phone                                                               String?                              // Encrypted (AES-256-GCM)
-  phoneHash                                                           String?                              @unique  // HMAC-SHA256 for lookups
-  phoneVerified                                                       Boolean                              @default(false)  // Set true after email OTP verification on mobile
-  initialPhoneHash                                                    String?                              // HMAC-SHA256 of original phone — set once, never changes
-  phoneChangeVerified                                                 Boolean                              @default(true)   // False when phone changed, true after email re-verification
-  lswWorkDaysPerWeek                                                  Int                                  @default(5)  // 5=Mon-Fri, 6=Mon-Sat, 7=All days
+  phone                                                               String? // Encrypted (AES-256-GCM)
+  phoneHash                                                           String?                              @unique // HMAC-SHA256 for lookups
+  phoneVerified                                                       Boolean                              @default(false) // Set true after email OTP verification on mobile
+  initialPhoneHash                                                    String? // HMAC-SHA256 of original phone — set once, never changes
+  phoneChangeVerified                                                 Boolean                              @default(true) // False when phone changed, true after email re-verification
+  lswWorkDaysPerWeek                                                  Int                                  @default(5) // 5=Mon-Fri, 6=Mon-Sat, 7=All days
   AIFishboneSessionsUpdated                                           AIFishboneSession[]                  @relation("AIFishboneSessionUpdatedBy")
   AIFishboneSessionsStarted                                           AIFishboneSession[]                  @relation("AIFishboneSessionStartedBy")
   AuditLog                                                            AuditLog[]
@@ -1569,8 +1570,8 @@ model User {
   IncidentParticipant_IncidentParticipant_addedByIdToUser             IncidentParticipant[]                @relation("IncidentParticipant_addedByIdToUser")
   IncidentParticipant_IncidentParticipant_userIdToUser                IncidentParticipant[]                @relation("IncidentParticipant_userIdToUser")
   RecordingsCreated                                                   MeetingRecording[]                   @relation("RecordingRecordedBy")
-  MobileVerification                                                 MobileVerification[]
-  LoginTrustedDevices                                                LoginTrustedDevice[]
+  MobileVerification                                                  MobileVerification[]
+  LoginTrustedDevices                                                 LoginTrustedDevice[]
   OrganizationAccessCode                                              OrganizationAccessCode[]
   InvitationsSent                                                     Invitation[]                         @relation("InvitationsSent")
   InvitationsAccepted                                                 Invitation[]                         @relation("InvitationsAccepted")
@@ -1599,53 +1600,53 @@ model User {
   WorkOrderStatusHistory                                              WorkOrderStatusHistory[]
   WorkOrderTemplate                                                   WorkOrderTemplate[]
   WorkplaceSafetyAssessment                                           WorkplaceSafetyAssessment[]
-  
+
   // Conflict Resolution Relations
-  ConflictCasesCreated                                                ConflictCase[]                       @relation("CaseCreator")
-  ConflictCasesClosed                                                 ConflictCase[]                       @relation("CaseClosure")
-  WorkplacePoliciesCreated                                            WorkplacePolicyDoc[]                 @relation("PolicyCreator")
-  
+  ConflictCasesCreated     ConflictCase[]       @relation("CaseCreator")
+  ConflictCasesClosed      ConflictCase[]       @relation("CaseClosure")
+  WorkplacePoliciesCreated WorkplacePolicyDoc[] @relation("PolicyCreator")
+
   // Push Notification Device Tokens
-  DeviceTokens                                                        DeviceToken[]
+  DeviceTokens DeviceToken[]
 
   // LSW (Leader Standard Work) Relations
-  LswBoards                                                           LswBoard[]                           @relation("LswBoardOwner")
-  LswDailyTasks                                                       LswDailyTask[]                       @relation("LswDailyTaskUser")
-  LswTodoItems                                                        LswTodoItem[]                        @relation("LswTodoItemUser")
-  LswFrequencyTasks                                                   LswFrequencyTask[]                   @relation("LswFrequencyTaskUser")
-  LswProjects                                                         LswProject[]                         @relation("LswProjectUser")
-  LswMeetingRails                                                     LswMeetingRail[]                     @relation("LswMeetingRailUser")
-  LswFollowUps                                                        LswFollowUp[]                        @relation("LswFollowUpUser")
-  LswFollowUpsResponsible                                             LswFollowUp[]                        @relation("LswFollowUpResponsible")
-  LswKeyResultSets                                                    LswKeyResultSet[]                    @relation("LswKeyResultSetUser")
-  LswPersonalGoals                                                    LswPersonalGoal[]                    @relation("LswPersonalGoalUser")
-  LswRcaTriggers                                                      LswRcaTrigger[]                      @relation("LswRcaTriggerUser")
-  LswEarlyCompletionLogs                                              LswEarlyCompletionLog[]               @relation("LswEarlyCompletionLogUser")
+  LswBoards               LswBoard[]              @relation("LswBoardOwner")
+  LswDailyTasks           LswDailyTask[]          @relation("LswDailyTaskUser")
+  LswTodoItems            LswTodoItem[]           @relation("LswTodoItemUser")
+  LswFrequencyTasks       LswFrequencyTask[]      @relation("LswFrequencyTaskUser")
+  LswProjects             LswProject[]            @relation("LswProjectUser")
+  LswMeetingRails         LswMeetingRail[]        @relation("LswMeetingRailUser")
+  LswFollowUps            LswFollowUp[]           @relation("LswFollowUpUser")
+  LswFollowUpsResponsible LswFollowUp[]           @relation("LswFollowUpResponsible")
+  LswKeyResultSets        LswKeyResultSet[]       @relation("LswKeyResultSetUser")
+  LswPersonalGoals        LswPersonalGoal[]       @relation("LswPersonalGoalUser")
+  LswRcaTriggers          LswRcaTrigger[]         @relation("LswRcaTriggerUser")
+  LswEarlyCompletionLogs  LswEarlyCompletionLog[] @relation("LswEarlyCompletionLogUser")
 
   // Microsoft Outlook Calendar Integration
-  MicrosoftOAuthToken                                                 MicrosoftOAuthToken?                  @relation("MicrosoftOAuthTokenUser")
+  MicrosoftOAuthToken MicrosoftOAuthToken? @relation("MicrosoftOAuthTokenUser")
 
   // LSW Notification Preferences
-  LswNotificationPreference                                           LswNotificationPreference?
+  LswNotificationPreference LswNotificationPreference?
 
   // Vacation Management Relations
-  VacationEmployees                                                   VacationEmployee[]
-  VacationsRequested                                                  Vacation[]                            @relation("VacationRequestedBy")
-  VacationsApproved                                                   Vacation[]                            @relation("VacationApprovedBy")
-  VacationBlackoutPeriods                                             VacationBlackoutPeriod[]
+  VacationEmployees       VacationEmployee[]
+  VacationsRequested      Vacation[]               @relation("VacationRequestedBy")
+  VacationsApproved       Vacation[]               @relation("VacationApprovedBy")
+  VacationBlackoutPeriods VacationBlackoutPeriod[]
 
   // Operations Issue Tracking
-  IssuesReported                                                      MachineIssue[]                        @relation("IssueReportedBy")
-  IssuesResolved                                                      MachineIssue[]                        @relation("IssueResolvedBy")
+  IssuesReported MachineIssue[] @relation("IssueReportedBy")
+  IssuesResolved MachineIssue[] @relation("IssueResolvedBy")
 
   // User-specific privilege overrides
-  PrivilegeOverrides                                                  UserPrivilegeOverride[]
+  PrivilegeOverrides UserPrivilegeOverride[]
 
   // Canvas AI — Whiteboard Relations
-  BoardsOwned                                                         Board[]                               @relation("BoardOwner")
-  BoardCollaborations                                                 BoardCollaborator[]                   @relation("BoardCollaboratorUser")
-  BoardVersionsCreated                                                BoardVersion[]                        @relation("BoardVersionCreator")
-  BoardComments                                                       BoardComment[]                        @relation("BoardCommentUser")
+  BoardsOwned          Board[]             @relation("BoardOwner")
+  BoardCollaborations  BoardCollaborator[] @relation("BoardCollaboratorUser")
+  BoardVersionsCreated BoardVersion[]      @relation("BoardVersionCreator")
+  BoardComments        BoardComment[]      @relation("BoardCommentUser")
 
   @@index([email])
   @@index([isOnline])
@@ -1655,20 +1656,20 @@ model User {
 
 // Device Token for Push Notifications (Expo/FCM/APNs)
 model DeviceToken {
-  id           String       @id @default(uuid())
-  userId       String
-  token        String       // Expo/FCM/APNs device token
-  provider     PushTokenProvider @default(EXPO)
-  platform     DevicePlatform @default(IOS)
-  deviceId     String?      // Unique device identifier
-  appVersion   String?      // App version for debugging
-  isActive     Boolean      @default(true)
-  lastUsedAt   DateTime     @default(now())
-  lastFailureAt DateTime?
+  id                String            @id @default(uuid())
+  userId            String
+  token             String // Expo/FCM/APNs device token
+  provider          PushTokenProvider @default(EXPO)
+  platform          DevicePlatform    @default(IOS)
+  deviceId          String? // Unique device identifier
+  appVersion        String? // App version for debugging
+  isActive          Boolean           @default(true)
+  lastUsedAt        DateTime          @default(now())
+  lastFailureAt     DateTime?
   lastFailureReason String?
-  createdAt    DateTime     @default(now())
-  updatedAt    DateTime     @updatedAt
-  user         User         @relation(fields: [userId], references: [id], onDelete: Cascade)
+  createdAt         DateTime          @default(now())
+  updatedAt         DateTime          @updatedAt
+  user              User              @relation(fields: [userId], references: [id], onDelete: Cascade)
 
   @@unique([userId, token]) // Prevent duplicate tokens per user
   @@index([userId])
@@ -1689,16 +1690,16 @@ enum PushTokenProvider {
 }
 
 model MobilePushTicket {
-  id            String   @id @default(uuid())
-  userId        String?
-  token         String
-  ticketId      String?
-  status        String
-  message       String?
-  details       Json?
-  checkedAt     DateTime?
-  createdAt     DateTime @default(now())
-  updatedAt     DateTime @updatedAt
+  id        String    @id @default(uuid())
+  userId    String?
+  token     String
+  ticketId  String?
+  status    String
+  message   String?
+  details   Json?
+  checkedAt DateTime?
+  createdAt DateTime  @default(now())
+  updatedAt DateTime  @updatedAt
 
   @@index([ticketId])
   @@index([checkedAt])
@@ -2024,43 +2025,43 @@ model WorkplaceSafetyAssessment {
 }
 
 model Task {
-  id             String           @id @default(uuid())
-  title          String
-  description    String?
-  status         TaskStatus       @default(PENDING)
-  priority       TaskPriority     @default(MEDIUM)
-  startDate      DateTime?
-  dueDate        DateTime?
-  completedAt    DateTime?
-  completedById  String?          // Who marked this task as completed
-  completedBy    User?            @relation("TaskCompletedBy", fields: [completedById], references: [id])
-  progress       Int              @default(0) // 0-100 percentage
-  
+  id            String       @id @default(uuid())
+  title         String
+  description   String?
+  status        TaskStatus   @default(PENDING)
+  priority      TaskPriority @default(MEDIUM)
+  startDate     DateTime?
+  dueDate       DateTime?
+  completedAt   DateTime?
+  completedById String? // Who marked this task as completed
+  completedBy   User?        @relation("TaskCompletedBy", fields: [completedById], references: [id])
+  progress      Int          @default(0) // 0-100 percentage
+
   // Lock fields
-  isLocked       Boolean          @default(false)
-  lockedAt       DateTime?
-  lockedById     String?
-  lockedBy       User?            @relation("TaskLockedBy", fields: [lockedById], references: [id])
-  
+  isLocked   Boolean   @default(false)
+  lockedAt   DateTime?
+  lockedById String?
+  lockedBy   User?     @relation("TaskLockedBy", fields: [lockedById], references: [id])
+
   // Department assignment
-  departmentId   String?
-  department     Department?      @relation(fields: [departmentId], references: [id])
-  
+  departmentId String?
+  department   Department? @relation(fields: [departmentId], references: [id])
+
   ownerId        String
-  assigneeId     String?          // Legacy single assignee (kept for backwards compatibility)
+  assigneeId     String? // Legacy single assignee (kept for backwards compatibility)
   organizationId String
   facilityId     String?
   meetingId      String?
-  sourceText     String?          // Original text from transcript (if AI extracted)
-  isAiExtracted  Boolean          @default(false) // Whether this was AI extracted
-  createdAt      DateTime         @default(now())
-  updatedAt      DateTime         @updatedAt
-  assignee       User?            @relation("TaskAssignee", fields: [assigneeId], references: [id])
-  assignees      TaskAssignee[]   // Multiple assignees
-  facility       Facility?        @relation(fields: [facilityId], references: [id])
-  organization   Organization     @relation(fields: [organizationId], references: [id], onDelete: Cascade)
-  owner          User             @relation("TaskOwner", fields: [ownerId], references: [id])
-  meeting        Meeting?         @relation(fields: [meetingId], references: [id])
+  sourceText     String? // Original text from transcript (if AI extracted)
+  isAiExtracted  Boolean           @default(false) // Whether this was AI extracted
+  createdAt      DateTime          @default(now())
+  updatedAt      DateTime          @updatedAt
+  assignee       User?             @relation("TaskAssignee", fields: [assigneeId], references: [id])
+  assignees      TaskAssignee[] // Multiple assignees
+  facility       Facility?         @relation(fields: [facilityId], references: [id])
+  organization   Organization      @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  owner          User              @relation("TaskOwner", fields: [ownerId], references: [id])
+  meeting        Meeting?          @relation(fields: [meetingId], references: [id])
   comments       TaskComment[]
   evidence       TaskEvidence[]
   activityLogs   TaskActivityLog[]
@@ -2081,7 +2082,7 @@ model TaskAssignee {
   taskId     String
   userId     String
   assignedAt DateTime @default(now())
-  assignedBy String?  // Who assigned this user
+  assignedBy String? // Who assigned this user
   task       Task     @relation(fields: [taskId], references: [id], onDelete: Cascade)
   user       User     @relation("TaskAssignees", fields: [userId], references: [id])
   assigner   User?    @relation("TaskAssigner", fields: [assignedBy], references: [id])
@@ -2093,15 +2094,15 @@ model TaskAssignee {
 
 // Task Comments - for discussions and notes
 model TaskComment {
-  id        String   @id @default(uuid())
+  id        String        @id @default(uuid())
   content   String
   taskId    String
   authorId  String
-  parentId  String?  // For threaded replies
-  createdAt DateTime @default(now())
-  updatedAt DateTime @updatedAt
-  task      Task     @relation(fields: [taskId], references: [id], onDelete: Cascade)
-  author    User     @relation(fields: [authorId], references: [id])
+  parentId  String? // For threaded replies
+  createdAt DateTime      @default(now())
+  updatedAt DateTime      @updatedAt
+  task      Task          @relation(fields: [taskId], references: [id], onDelete: Cascade)
+  author    User          @relation(fields: [authorId], references: [id])
   parent    TaskComment?  @relation("CommentReplies", fields: [parentId], references: [id])
   replies   TaskComment[] @relation("CommentReplies")
 
@@ -2115,7 +2116,7 @@ model TaskEvidence {
   title       String
   description String?
   fileUrl     String?
-  fileType    String?  // image, pdf, link, etc.
+  fileType    String? // image, pdf, link, etc.
   fileName    String?
   taskId      String
   uploaderId  String
@@ -2131,12 +2132,12 @@ model TaskEvidence {
 model TaskActivityLog {
   id            String   @id @default(uuid())
   taskId        String
-  userId        String   // User who made the change
-  action        String   // Type of change: CREATE, UPDATE_STATUS, UPDATE_PRIORITY, UPDATE_PROGRESS, UPDATE_TITLE, UPDATE_DESCRIPTION, UPDATE_DUE_DATE, ADD_ASSIGNEE, REMOVE_ASSIGNEE, ADD_COMMENT, DELETE_COMMENT, ADD_EVIDENCE, DELETE_EVIDENCE
-  field         String?  // Field that was changed (e.g., "status", "priority", "title")
-  previousValue String?  // Value before the change
-  newValue      String?  // Value after the change
-  metadata      Json?    // Additional info (e.g., file name for evidence, assignee name)
+  userId        String // User who made the change
+  action        String // Type of change: CREATE, UPDATE_STATUS, UPDATE_PRIORITY, UPDATE_PROGRESS, UPDATE_TITLE, UPDATE_DESCRIPTION, UPDATE_DUE_DATE, ADD_ASSIGNEE, REMOVE_ASSIGNEE, ADD_COMMENT, DELETE_COMMENT, ADD_EVIDENCE, DELETE_EVIDENCE
+  field         String? // Field that was changed (e.g., "status", "priority", "title")
+  previousValue String? // Value before the change
+  newValue      String? // Value after the change
+  metadata      Json? // Additional info (e.g., file name for evidence, assignee name)
   createdAt     DateTime @default(now())
   task          Task     @relation(fields: [taskId], references: [id], onDelete: Cascade)
   user          User     @relation("TaskActivityLogUser", fields: [userId], references: [id])
@@ -2495,167 +2496,195 @@ enum MeetingType {
 }
 
 model Meeting {
-  id               String        @id @default(uuid())
-  title            String?
-  meetingType      MeetingType   @default(GENERAL)
-  status           MeetingStatus @default(DRAFT)
-  
+  id          String        @id @default(uuid())
+  title       String?
+  meetingType MeetingType   @default(GENERAL)
+  status      MeetingStatus @default(DRAFT)
+
   // Location & Context
-  location         String?
-  locationType     String?       // On-site, Remote, Hybrid, Custom
-  tags             String[]      @default([])
-  language         String        @default("en")
-  
+  location     String?
+  locationType String? // On-site, Remote, Hybrid, Custom
+  tags         String[] @default([])
+  language     String   @default("en")
+
   // Scheduling
-  scheduledAt      DateTime?     // Scheduled date/time for the meeting
-  
+  scheduledAt DateTime? // Scheduled date/time for the meeting
+
   // Department
-  departmentId     String?
-  department       Department?   @relation(fields: [departmentId], references: [id])
-  
+  departmentId String?
+  department   Department? @relation(fields: [departmentId], references: [id])
+
   // Meeting Purpose
-  objective        String?       // Meeting objective/goal
-  agendaItems      String[]      @default([])  // List of agenda items
-  
+  objective   String? // Meeting objective/goal
+  agendaItems String[] @default([]) // List of agenda items
+
   // AI Settings
   liveTranscriptionEnabled Boolean @default(true)
-  aiProcessingMode String?       // ExecutiveSummary, DetailedMinutes, ActionFocused, Compliance
-  confidentialityLevel String?   // Private, TeamVisible, Restricted
-  
+  aiProcessingMode         String? // ExecutiveSummary, DetailedMinutes, ActionFocused, Compliance
+  confidentialityLevel     String? // Private, TeamVisible, Restricted
+
   // Recording info
-  recordingUrl     String?       // Firebase Storage URL
-  duration         Int?          // Duration in seconds
-  recordedAt       DateTime?     // When recording started
-  
+  recordingUrl                String? // Firebase Storage gs:// object path for the saved audio
+  recordingStorageBucket      String?
+  recordingStoragePath        String?
+  recordingFileName           String?
+  recordingMimeType           String?
+  recordingFileSize           Int?
+  recordingUploadedAt         DateTime?
+  recordingRetentionExpiresAt DateTime?
+  recordingDeletedAt          DateTime?
+  recordingDeletionReason     String?
+  duration                    Int? // Duration in seconds
+  recordedAt                  DateTime? // When recording started
+
   // AI Processing
-  processingStartedAt DateTime?
+  processingStartedAt   DateTime?
   processingCompletedAt DateTime?
-  processingError  String?
-  
+  processingError       String?
+
   // Ownership
-  creatorId        String
-  creator          User          @relation("MeetingCreator", fields: [creatorId], references: [id])
-  
-  organizationId   String
-  organization     Organization  @relation(fields: [organizationId], references: [id], onDelete: Cascade)
-  
-  facilityId       String?
-  facility         Facility?     @relation("MeetingFacility", fields: [facilityId], references: [id])
-  
+  creatorId String
+  creator   User   @relation("MeetingCreator", fields: [creatorId], references: [id])
+
+  organizationId String
+  organization   Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+
+  facilityId String?
+  facility   Facility? @relation("MeetingFacility", fields: [facilityId], references: [id])
+
   // Timestamps
-  createdAt        DateTime      @default(now())
-  updatedAt        DateTime      @updatedAt
-  publishedAt      DateTime?
-  
+  createdAt   DateTime  @default(now())
+  updatedAt   DateTime  @updatedAt
+  publishedAt DateTime?
+
   // Relations
-  participants     MeetingParticipant[]
-  bookmarks        MeetingBookmark[]
-  transcript       TranscriptBlock[]
-  summary          MeetingSummary?
-  actionItems      Task[]
-  attachments      MeetingAttachment[]
-  consentRecords   RecordingConsentAudit[]
+  participants   MeetingParticipant[]
+  bookmarks      MeetingBookmark[]
+  transcript     TranscriptBlock[]
+  summary        MeetingSummary?
+  actionItems    Task[]
+  attachments    MeetingAttachment[]
+  consentRecords RecordingConsentAudit[]
 
   @@index([creatorId])
   @@index([departmentId])
   @@index([organizationId])
   @@index([status])
   @@index([createdAt])
+  @@index([recordingRetentionExpiresAt])
+}
+
+model MeetingRecordingRetentionPolicy {
+  id                      String   @id @default(uuid())
+  organizationId          String   @unique
+  audioRetentionMode      String   @default("RETAIN_FOR_DAYS")
+  audioRetentionDays      Int      @default(30)
+  transcriptRetentionDays Int      @default(90)
+  summaryRetentionDays    Int      @default(90)
+  allowUsersToDeleteAudio Boolean  @default(true)
+  updatedByUserId         String?
+  createdAt               DateTime @default(now())
+  updatedAt               DateTime @updatedAt
+
+  organization Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+
+  @@index([organizationId])
+  @@index([updatedByUserId])
 }
 
 model MeetingParticipant {
-  id          String   @id @default(uuid())
-  meetingId   String
-  meeting     Meeting  @relation(fields: [meetingId], references: [id], onDelete: Cascade)
-  
-  userId      String?
-  user        User?    @relation("MeetingParticipantUser", fields: [userId], references: [id])
-  
+  id        String  @id @default(uuid())
+  meetingId String
+  meeting   Meeting @relation(fields: [meetingId], references: [id], onDelete: Cascade)
+
+  userId String?
+  user   User?   @relation("MeetingParticipantUser", fields: [userId], references: [id])
+
   // For external participants without user account
-  name        String?
-  email       String?
-  phone       String?
-  
+  name  String?
+  email String?
+  phone String?
+
   // Speaker mapping from AI
-  speakerLabel String?  // "Speaker 1", "Speaker 2", etc.
-  
-  createdAt   DateTime @default(now())
+  speakerLabel String? // "Speaker 1", "Speaker 2", etc.
+
+  createdAt DateTime @default(now())
 
   @@index([meetingId])
   @@index([userId])
 }
 
 model MeetingBookmark {
-  id          String   @id @default(uuid())
-  meetingId   String
-  meeting     Meeting  @relation(fields: [meetingId], references: [id], onDelete: Cascade)
-  
-  timestamp   Int      // Seconds from start
-  label       String?
-  note        String?
-  
-  createdAt   DateTime @default(now())
+  id        String  @id @default(uuid())
+  meetingId String
+  meeting   Meeting @relation(fields: [meetingId], references: [id], onDelete: Cascade)
+
+  timestamp Int // Seconds from start
+  label     String?
+  note      String?
+
+  createdAt DateTime @default(now())
 
   @@index([meetingId])
 }
 
 model TranscriptBlock {
-  id           String   @id @default(uuid())
-  meetingId    String
-  meeting      Meeting  @relation(fields: [meetingId], references: [id], onDelete: Cascade)
-  
-  speakerLabel String   // "Speaker 1", "Speaker 2", etc.
-  speakerId    String?  // Linked to MeetingParticipant if resolved
-  
-  content      String
-  startTime    Int      // Seconds from start
-  endTime      Int      // Seconds from start
-  confidence   Float?   // AI confidence score
-  
-  createdAt    DateTime @default(now())
+  id        String  @id @default(uuid())
+  meetingId String
+  meeting   Meeting @relation(fields: [meetingId], references: [id], onDelete: Cascade)
+
+  speakerLabel String // "Speaker 1", "Speaker 2", etc.
+  speakerId    String? // Linked to MeetingParticipant if resolved
+
+  content    String
+  startTime  Int // Seconds from start
+  endTime    Int // Seconds from start
+  confidence Float? // AI confidence score
+
+  createdAt DateTime @default(now())
 
   @@index([meetingId])
   @@index([startTime])
 }
 
 model MeetingSummary {
-  id          String   @id @default(uuid())
-  meetingId   String   @unique
-  meeting     Meeting  @relation(fields: [meetingId], references: [id], onDelete: Cascade)
-  
-  keyPoints   Json?    // Array of key points
-  decisions   Json?    // Array of decisions
-  risks       Json?    // Array of risks/concerns
-  questions   Json?    // Array of open questions
-  nextSteps   Json?    // Array of next steps
-  
+  id        String  @id @default(uuid())
+  meetingId String  @unique
+  meeting   Meeting @relation(fields: [meetingId], references: [id], onDelete: Cascade)
+
+  keyPoints Json? // Array of key points
+  decisions Json? // Array of decisions
+  risks     Json? // Array of risks/concerns
+  questions Json? // Array of open questions
+  nextSteps Json? // Array of next steps
+
   // Full summary text
   executiveSummary String?
-  
+
   // Processed Transcript (AI speaker-detected)
-  rawTranscript       String?   @db.Text    // Original Whisper transcription
-  processedTranscript String?   @db.Text    // AI-processed with speaker labels
-  transcriptWordCount Int?                  // Word count
-  transcriptDuration  Int?                  // Duration in seconds
-  transcriptSavedAt   DateTime?             // When transcript was saved
-  
+  rawTranscript       String?   @db.Text // Original Whisper transcription
+  processedTranscript String?   @db.Text // AI-processed with speaker labels
+  transcriptWordCount Int? // Word count
+  transcriptDuration  Int? // Duration in seconds
+  transcriptSavedAt   DateTime? // When transcript was saved
+
   // AI Narrative Summary (GPT-4o generated)
-  narrative       String?   @db.Text    // Full narrative summary text
-  briefSummary    String?   @db.Text    // Brief one-paragraph summary
-  tone            String?               // Meeting tone (e.g., "productive", "collaborative")
-  objectives      Json?                 // Array of meeting objectives
-  keyDiscussions  Json?                 // Array of key discussion points
-  actionItems     Json?                 // Array of action items with assignees/deadlines
-  takeaways       Json?                 // Array of key takeaways
-  
+  narrative      String? @db.Text // Full narrative summary text
+  briefSummary   String? @db.Text // Brief one-paragraph summary
+  tone           String? // Meeting tone (e.g., "productive", "collaborative")
+  objectives     Json? // Array of meeting objectives
+  keyDiscussions Json? // Array of key discussion points
+  actionItems    Json? // Array of action items with assignees/deadlines
+  takeaways      Json? // Array of key takeaways
+
   // AI Audio Summary (TTS generated)
-  audioUrl        String?               // Firebase Storage URL for TTS audio
-  audioVoice      String?               // Voice used (onyx, echo, etc.)
-  audioDuration   Int?                  // Duration in seconds
-  
+  audioUrl      String? // Firebase Storage URL for TTS audio
+  audioVoice    String? // Voice used (onyx, echo, etc.)
+  audioDuration Int? // Duration in seconds
+
   // Versioning
-  version     Int      @default(1)
-  generatedAt DateTime @default(now())
+  version     Int       @default(1)
+  generatedAt DateTime  @default(now())
   editedAt    DateTime?
   editedById  String?
 
@@ -2663,17 +2692,17 @@ model MeetingSummary {
 }
 
 model MeetingAttachment {
-  id          String   @id @default(uuid())
-  meetingId   String
-  meeting     Meeting  @relation(fields: [meetingId], references: [id], onDelete: Cascade)
-  
-  fileName    String
-  fileUrl     String
-  fileSize    Int?
-  mimeType    String?
-  
+  id        String  @id @default(uuid())
+  meetingId String
+  meeting   Meeting @relation(fields: [meetingId], references: [id], onDelete: Cascade)
+
+  fileName String
+  fileUrl  String
+  fileSize Int?
+  mimeType String?
+
   uploadedById String
-  uploadedAt  DateTime @default(now())
+  uploadedAt   DateTime @default(now())
 
   @@index([meetingId])
 }
@@ -2685,30 +2714,30 @@ model MeetingAttachment {
 
 // Consent Policy Version - Tracks policy changes over time
 model ConsentPolicy {
-  id          String   @id @default(uuid())
-  version     String   @unique  // e.g., "1.0.0", "1.1.0"
-  title       String   @default("Meeting Recording Consent Policy")
-  
+  id      String @id @default(uuid())
+  version String @unique // e.g., "1.0.0", "1.1.0"
+  title   String @default("Meeting Recording Consent Policy")
+
   // Policy content sections
-  purposeOfRecording    String   @db.Text  // Why we record
-  dataRetentionPolicy   String   @db.Text  // How long data is kept
-  dataSecurityPolicy    String   @db.Text  // How data is secured
-  dataSharingPolicy     String   @db.Text  // Who can access data
-  userRights            String   @db.Text  // User rights (deletion, access, etc.)
-  
+  purposeOfRecording  String @db.Text // Why we record
+  dataRetentionPolicy String @db.Text // How long data is kept
+  dataSecurityPolicy  String @db.Text // How data is secured
+  dataSharingPolicy   String @db.Text // Who can access data
+  userRights          String @db.Text // User rights (deletion, access, etc.)
+
   // Full policy text (for legal reference)
-  fullPolicyText        String   @db.Text
-  
+  fullPolicyText String @db.Text
+
   // Metadata
-  isActive              Boolean  @default(true)
-  effectiveDate         DateTime @default(now())
-  expirationDate        DateTime?
-  createdAt             DateTime @default(now())
-  updatedAt             DateTime @updatedAt
-  createdById           String?
-  
+  isActive       Boolean   @default(true)
+  effectiveDate  DateTime  @default(now())
+  expirationDate DateTime?
+  createdAt      DateTime  @default(now())
+  updatedAt      DateTime  @updatedAt
+  createdById    String?
+
   // Audit trail
-  consentRecords        RecordingConsentAudit[]
+  consentRecords RecordingConsentAudit[]
 
   @@index([isActive])
   @@index([version])
@@ -2717,53 +2746,53 @@ model ConsentPolicy {
 // Recording Consent Audit Log - IMMUTABLE record of consent
 // This table should NEVER be updated or deleted (legal requirement)
 model RecordingConsentAudit {
-  id                    String   @id @default(uuid())
-  
+  id String @id @default(uuid())
+
   // Meeting Reference
-  meetingId             String
-  meeting               Meeting  @relation(fields: [meetingId], references: [id], onDelete: Cascade)
-  
+  meetingId String
+  meeting   Meeting @relation(fields: [meetingId], references: [id], onDelete: Cascade)
+
   // User who gave consent
-  userId                String
-  userEmail             String
-  userFirstName         String
-  userLastName          String
-  userPhoneNumber       String?
-  
+  userId          String
+  userEmail       String
+  userFirstName   String
+  userLastName    String
+  userPhoneNumber String?
+
   // Policy accepted
-  policyId              String
-  policy                ConsentPolicy @relation(fields: [policyId], references: [id])
-  policyVersion         String        // Snapshot of version at time of consent
-  
+  policyId      String
+  policy        ConsentPolicy @relation(fields: [policyId], references: [id])
+  policyVersion String // Snapshot of version at time of consent
+
   // Consent details
-  consentType           ConsentType   @default(RECORDING_START)
-  consentGiven          Boolean       @default(true)
-  consentMethod         ConsentMethod @default(IN_APP_MODAL)
-  
+  consentType   ConsentType   @default(RECORDING_START)
+  consentGiven  Boolean       @default(true)
+  consentMethod ConsentMethod @default(IN_APP_MODAL)
+
   // Legal verification data
-  ipAddress             String?
-  userAgent             String?       // Device/browser info
-  deviceId              String?       // Device identifier
-  deviceModel           String?       // e.g., "iPhone 15 Pro"
-  osVersion             String?       // e.g., "iOS 17.2"
-  appVersion            String?       // App version at time of consent
-  geoLocation           String?       // Optional: City/Country for legal purposes
-  
+  ipAddress   String?
+  userAgent   String? // Device/browser info
+  deviceId    String? // Device identifier
+  deviceModel String? // e.g., "iPhone 15 Pro"
+  osVersion   String? // e.g., "iOS 17.2"
+  appVersion  String? // App version at time of consent
+  geoLocation String? // Optional: City/Country for legal purposes
+
   // Confirmation that all participants were notified
   allParticipantsNotified Boolean @default(false)
   audioAnnouncementPlayed Boolean @default(false)
-  
+
   // Cryptographic hash for tamper-proofing
   // Hash of: meetingId + userId + timestamp + policyVersion
-  consentHash           String   @unique
-  
+  consentHash String @unique
+
   // Timestamps (immutable)
-  consentTimestamp      DateTime @default(now())
-  
+  consentTimestamp DateTime @default(now())
+
   // For soft-delete tracking (we never actually delete)
-  isRevoked             Boolean  @default(false)
-  revokedAt             DateTime?
-  revocationReason      String?
+  isRevoked        Boolean   @default(false)
+  revokedAt        DateTime?
+  revocationReason String?
 
   @@index([meetingId])
   @@index([userId])
@@ -2774,20 +2803,20 @@ model RecordingConsentAudit {
 
 // Consent Type Enum
 enum ConsentType {
-  RECORDING_START       // Consent to start recording
-  RECORDING_RESUME      // Consent to resume after pause
-  DATA_PROCESSING       // Consent for AI processing
-  DATA_RETENTION        // Consent for data storage
-  PARTICIPANT_ADDITION  // Consent when new participant joins
+  RECORDING_START // Consent to start recording
+  RECORDING_RESUME // Consent to resume after pause
+  DATA_PROCESSING // Consent for AI processing
+  DATA_RETENTION // Consent for data storage
+  PARTICIPANT_ADDITION // Consent when new participant joins
 }
 
 // Consent Method Enum
 enum ConsentMethod {
-  IN_APP_MODAL          // User clicked agree in app modal
-  VERBAL                // Verbal consent (recorded)
-  EMAIL                 // Email consent
-  WRITTEN               // Written/signed consent
-  IMPLICIT              // Implicit (stayed in meeting after announcement)
+  IN_APP_MODAL // User clicked agree in app modal
+  VERBAL // Verbal consent (recorded)
+  EMAIL // Email consent
+  WRITTEN // Written/signed consent
+  IMPLICIT // Implicit (stayed in meeting after announcement)
 }
 
 // ==========================================
@@ -2852,66 +2881,66 @@ enum ComparisonStatusType {
 
 // Conflict Case - Main Model (All sensitive fields encrypted)
 model ConflictCase {
-  id                    String                      @id @default(uuid())
-  caseNumber            String                      @unique
-  type                  ConflictCaseType
-  status                ConflictCaseStatus          @default(DRAFT)
-  description           String?                     @db.Text // Encrypted - Case description
-  incidentDate          DateTime
-  location              String                      // Encrypted
-  department            String                      // Encrypted
-  shift                 String?                     // Encrypted
-  
+  id           String             @id @default(uuid())
+  caseNumber   String             @unique
+  type         ConflictCaseType
+  status       ConflictCaseStatus @default(DRAFT)
+  description  String?            @db.Text // Encrypted - Case description
+  incidentDate DateTime
+  location     String // Encrypted
+  department   String // Encrypted
+  shift        String? // Encrypted
+
   // AI Analysis Results (Encrypted JSON)
-  comparisonResult      String?                     @db.Text // Encrypted JSON
-  policyMatches         String?                     @db.Text // Encrypted JSON  
-  recommendations       String?                     @db.Text // Encrypted JSON
-  policyMatchingResult  String?                     @db.Text // Encrypted JSON - Full policy matching result for UI
-  recommendationResult  String?                     @db.Text // Encrypted JSON - Full recommendation result for UI
-  
+  comparisonResult     String? @db.Text // Encrypted JSON
+  policyMatches        String? @db.Text // Encrypted JSON
+  recommendations      String? @db.Text // Encrypted JSON
+  policyMatchingResult String? @db.Text // Encrypted JSON - Full policy matching result for UI
+  recommendationResult String? @db.Text // Encrypted JSON - Full recommendation result for UI
+
   // Selected Action
-  selectedAction                  RecommendedActionType?
-  selectedTargetEmployeeIds       String?                     @db.Text // JSON array of employee IDs targeted by the action
-  generatedDocument               String?                     @db.Text // Encrypted JSON
-  fullGeneratedDocumentResult     String?                     @db.Text // Encrypted JSON - Full generated document for UI display
-  employeeGeneratedDocuments      String?                     @db.Text // Encrypted JSON - Per-employee generated documents map
-  approvedEmployeeNames           String?                     @db.Text // JSON array of employee names whose documents have been approved
-  
+  selectedAction              RecommendedActionType?
+  selectedTargetEmployeeIds   String?                @db.Text // JSON array of employee IDs targeted by the action
+  generatedDocument           String?                @db.Text // Encrypted JSON
+  fullGeneratedDocumentResult String?                @db.Text // Encrypted JSON - Full generated document for UI display
+  employeeGeneratedDocuments  String?                @db.Text // Encrypted JSON - Per-employee generated documents map
+  approvedEmployeeNames       String?                @db.Text // JSON array of employee names whose documents have been approved
+
   // Company Logo (Firebase Storage URL)
-  companyLogoUrl        String?                     @db.Text
-  
+  companyLogoUrl String? @db.Text
+
   // Supervisor Notes (Encrypted)
-  supervisorNotes       String?                     @db.Text
-  
+  supervisorNotes String? @db.Text
+
   // Case Closure Details
-  closureReason         String?                     // Encrypted - reason for closing
-  closureSummary        String?                     @db.Text // Encrypted - final closure summary
-  closedBy              String?                     // User ID who closed the case
-  closedByUser          User?                       @relation("CaseClosure", fields: [closedBy], references: [id])
-  isLocked              Boolean                     @default(false) // Prevents further edits
-  
+  closureReason  String? // Encrypted - reason for closing
+  closureSummary String? @db.Text // Encrypted - final closure summary
+  closedBy       String? // User ID who closed the case
+  closedByUser   User?   @relation("CaseClosure", fields: [closedBy], references: [id])
+  isLocked       Boolean @default(false) // Prevents further edits
+
   // Workplace Policy Reference
-  activePolicyId        String?
-  workplacePolicy       WorkplacePolicyDoc?         @relation(fields: [activePolicyId], references: [id])
-  
+  activePolicyId  String?
+  workplacePolicy WorkplacePolicyDoc? @relation(fields: [activePolicyId], references: [id])
+
   // Audit & Metadata
-  createdBy             String
-  createdByUser         User?                       @relation("CaseCreator", fields: [createdBy], references: [id])
-  organizationId        String
-  organization          Organization                @relation(fields: [organizationId], references: [id], onDelete: Cascade)
-  facilityId            String?
-  facility              Facility?                   @relation(fields: [facilityId], references: [id])
-  
-  createdAt             DateTime                    @default(now())
-  updatedAt             DateTime                    @updatedAt
-  closedAt              DateTime?
-  
+  createdBy      String
+  createdByUser  User?        @relation("CaseCreator", fields: [createdBy], references: [id])
+  organizationId String
+  organization   Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  facilityId     String?
+  facility       Facility?    @relation(fields: [facilityId], references: [id])
+
+  createdAt DateTime  @default(now())
+  updatedAt DateTime  @updatedAt
+  closedAt  DateTime?
+
   // Relations
-  involvedEmployees     ConflictInvolvedEmployee[]
-  documents             ConflictCaseDocument[]
-  auditLog              ConflictCaseAuditEntry[]
+  involvedEmployees ConflictInvolvedEmployee[]
+  documents         ConflictCaseDocument[]
+  auditLog          ConflictCaseAuditEntry[]
   // Note: documentEdits relation removed - edit history uses caseId as plain string reference
-  
+
   @@index([organizationId])
   @@index([facilityId])
   @@index([createdBy])
@@ -2924,17 +2953,17 @@ model ConflictCase {
 // Document Edit History (for tracking changes to generated documents)
 // Note: caseId is NOT a foreign key - edits can be stored for cases that only exist locally in the app
 model ConflictDocumentEdit {
-  id              String          @id @default(uuid())
-  caseId          String          // UUID of the case (may be local-only, not in DB)
-  
-  sectionId       String          // e.g., "expectations", "incidentSummary"
-  sectionTitle    String          // e.g., "Expectations", "Incident Summary" (Encrypted)
-  originalContent String          @db.Text // Encrypted
-  newContent      String          @db.Text // Encrypted
-  editedBy        String          // Encrypted - name or ID of editor
-  
-  createdAt       DateTime        @default(now())
-  
+  id     String @id @default(uuid())
+  caseId String // UUID of the case (may be local-only, not in DB)
+
+  sectionId       String // e.g., "expectations", "incidentSummary"
+  sectionTitle    String // e.g., "Expectations", "Incident Summary" (Encrypted)
+  originalContent String @db.Text // Encrypted
+  newContent      String @db.Text // Encrypted
+  editedBy        String // Encrypted - name or ID of editor
+
+  createdAt DateTime @default(now())
+
   @@index([caseId])
   @@index([createdAt])
 }
@@ -2942,17 +2971,17 @@ model ConflictDocumentEdit {
 // Document Review Comments (for supervisor review feedback)
 // Note: caseId is NOT a foreign key - comments can be stored for cases that only exist locally in the app
 model ConflictReviewComment {
-  id              String          @id @default(uuid())
-  caseId          String          // UUID of the case (may be local-only, not in DB)
-  
-  section         String          // Section ID the comment is attached to
-  comment         String          @db.Text // Encrypted - The comment text
-  createdBy       String          // Encrypted - name or ID of commenter
-  isResolved      Boolean         @default(false)
-  
-  createdAt       DateTime        @default(now())
-  updatedAt       DateTime        @updatedAt
-  
+  id     String @id @default(uuid())
+  caseId String // UUID of the case (may be local-only, not in DB)
+
+  section    String // Section ID the comment is attached to
+  comment    String  @db.Text // Encrypted - The comment text
+  createdBy  String // Encrypted - name or ID of commenter
+  isResolved Boolean @default(false)
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
   @@index([caseId])
   @@index([isResolved])
   @@index([createdAt])
@@ -2960,69 +2989,69 @@ model ConflictReviewComment {
 
 // Involved Employee (Encrypted)
 model ConflictInvolvedEmployee {
-  id              String          @id @default(uuid())
-  caseId          String
-  case            ConflictCase    @relation(fields: [caseId], references: [id], onDelete: Cascade)
-  
-  name            String          // Encrypted
-  role            String          // Encrypted
-  department      String          // Encrypted
-  employeeFileNo  String?         // Encrypted - Employee ID / File Number
-  isComplainant   Boolean         @default(false)
-  
-  createdAt       DateTime        @default(now())
-  updatedAt       DateTime        @updatedAt
-  
+  id     String       @id @default(uuid())
+  caseId String
+  case   ConflictCase @relation(fields: [caseId], references: [id], onDelete: Cascade)
+
+  name           String // Encrypted
+  role           String // Encrypted
+  department     String // Encrypted
+  employeeFileNo String? // Encrypted - Employee ID / File Number
+  isComplainant  Boolean @default(false)
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
   // Relation to documents (for witness statements)
-  documents       ConflictCaseDocument[]
-  
+  documents ConflictCaseDocument[]
+
   @@index([caseId])
 }
 
 // Case Document (Encrypted)
 model ConflictCaseDocument {
-  id                              String                    @id @default(uuid())
-  caseId                          String
-  case                            ConflictCase              @relation(fields: [caseId], references: [id], onDelete: Cascade)
-  
-  type                            ConflictDocumentType
-  
+  id     String       @id @default(uuid())
+  caseId String
+  case   ConflictCase @relation(fields: [caseId], references: [id], onDelete: Cascade)
+
+  type ConflictDocumentType
+
   // Image Storage (URLs or encrypted base64)
-  originalImageUrls               String?                   @db.Text // Encrypted JSON array
-  processedImageUrls              String?                   @db.Text // Encrypted JSON array
-  originalImageData               String?                   @db.Text // Encrypted base64
-  processedImageData              String?                   @db.Text // Encrypted base64
-  
+  originalImageUrls  String? @db.Text // Encrypted JSON array
+  processedImageUrls String? @db.Text // Encrypted JSON array
+  originalImageData  String? @db.Text // Encrypted base64
+  processedImageData String? @db.Text // Encrypted base64
+
   // Text Content (All Encrypted)
-  originalText                    String?                   @db.Text
-  translatedText                  String?                   @db.Text
-  cleanedText                     String?                   @db.Text
-  
+  originalText   String? @db.Text
+  translatedText String? @db.Text
+  cleanedText    String? @db.Text
+
   // Metadata
-  detectedLanguage                String?
-  isHandwritten                   Boolean?
-  pageCount                       Int                       @default(1)
-  
+  detectedLanguage String?
+  isHandwritten    Boolean?
+  pageCount        Int      @default(1)
+
   // Associated Employee (for witness statements)
-  employeeId                      String?
-  employee                        ConflictInvolvedEmployee? @relation(fields: [employeeId], references: [id])
-  submittedBy                     String?                   // Encrypted - Name of submitter
-  
+  employeeId  String?
+  employee    ConflictInvolvedEmployee? @relation(fields: [employeeId], references: [id])
+  submittedBy String? // Encrypted - Name of submitter
+
   // Digital Signature & Audit Log Fields (All Encrypted)
-  signatureImageData              String?                   @db.Text // Encrypted PNG base64
-  employeeReviewTimestamp         DateTime?
-  employeeSignatureTimestamp      DateTime?
+  signatureImageData               String?   @db.Text // Encrypted PNG base64
+  employeeReviewTimestamp          DateTime?
+  employeeSignatureTimestamp       DateTime?
   supervisorCertificationTimestamp DateTime?
-  supervisorId                    String?                   // Encrypted
-  supervisorName                  String?                   // Encrypted
-  submittedById                   String?                   // Encrypted
-  deviceId                        String?
-  appVersion                      String?
-  versionHash                     String?                   // Hash for document integrity
-  
-  createdAt                       DateTime                  @default(now())
-  updatedAt                       DateTime                  @updatedAt
-  
+  supervisorId                     String? // Encrypted
+  supervisorName                   String? // Encrypted
+  submittedById                    String? // Encrypted
+  deviceId                         String?
+  appVersion                       String?
+  versionHash                      String? // Hash for document integrity
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
   @@index([caseId])
   @@index([type])
   @@index([employeeId])
@@ -3030,17 +3059,17 @@ model ConflictCaseDocument {
 
 // Case Audit Entry
 model ConflictCaseAuditEntry {
-  id          String        @id @default(uuid())
-  caseId      String
-  case        ConflictCase  @relation(fields: [caseId], references: [id], onDelete: Cascade)
-  
-  action      String
-  details     String        @db.Text // Encrypted
-  userId      String
-  userName    String        // Encrypted
-  
-  timestamp   DateTime      @default(now())
-  
+  id     String       @id @default(uuid())
+  caseId String
+  case   ConflictCase @relation(fields: [caseId], references: [id], onDelete: Cascade)
+
+  action   String
+  details  String @db.Text // Encrypted
+  userId   String
+  userName String // Encrypted
+
+  timestamp DateTime @default(now())
+
   @@index([caseId])
   @@index([timestamp])
   @@index([userId])
@@ -3048,38 +3077,38 @@ model ConflictCaseAuditEntry {
 
 // Workplace Policy Document (for conflict resolution reference)
 model WorkplacePolicyDoc {
-  id                String                @id @default(uuid())
-  name              String
-  version           String
-  effectiveDate     DateTime
-  status            String                @default("DRAFT") // DRAFT, ACTIVE, ARCHIVED
-  description       String?               @db.Text
-  
+  id            String   @id @default(uuid())
+  name          String
+  version       String
+  effectiveDate DateTime
+  status        String   @default("DRAFT") // DRAFT, ACTIVE, ARCHIVED
+  description   String?  @db.Text
+
   // Document Source (Encrypted)
   documentFileName  String?
-  documentFileUrl   String?               @db.Text
+  documentFileUrl   String? @db.Text
   documentFileType  String?
   documentPageCount Int?
-  originalText      String?               @db.Text // Encrypted
-  
+  originalText      String? @db.Text // Encrypted
+
   // Parsed Sections (Encrypted JSON)
   // Each section includes: firstProgression, secondProgression, thirdProgression, fourthProgression
-  sections          String?               @db.Text // Encrypted JSON array
-  
+  sections String? @db.Text // Encrypted JSON array
+
   // Audit
-  organizationId    String
-  organization      Organization          @relation(fields: [organizationId], references: [id], onDelete: Cascade)
-  facilityId        String?
-  facility          Facility?             @relation(fields: [facilityId], references: [id])
-  createdBy         String
-  createdByUser     User?                 @relation("PolicyCreator", fields: [createdBy], references: [id])
-  
-  createdAt         DateTime              @default(now())
-  updatedAt         DateTime              @updatedAt
-  
+  organizationId String
+  organization   Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  facilityId     String?
+  facility       Facility?    @relation(fields: [facilityId], references: [id])
+  createdBy      String
+  createdByUser  User?        @relation("PolicyCreator", fields: [createdBy], references: [id])
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
   // Relations
-  cases             ConflictCase[]
-  
+  cases ConflictCase[]
+
   @@index([organizationId])
   @@index([status])
   @@index([createdBy])
@@ -3125,30 +3154,30 @@ enum LswDayOfWeek {
 // Stores page-level settings and preferences
 // ─────────────────────────────────────────────────────────────────────────────
 model LswBoard {
-  id               String        @id @default(uuid())
-  
+  id String @id @default(uuid())
+
   // Ownership & Scoping
-  userId           String
-  user             User          @relation("LswBoardOwner", fields: [userId], references: [id], onDelete: Cascade)
-  organizationId   String
-  organization     Organization  @relation("LswBoardOrganization", fields: [organizationId], references: [id], onDelete: Cascade)
-  facilityId       String?
-  facility         Facility?     @relation(fields: [facilityId], references: [id], onDelete: SetNull)
-  departmentId     String?
-  department       Department?   @relation("LswBoardDepartment", fields: [departmentId], references: [id], onDelete: SetNull)
-  
+  userId         String
+  user           User         @relation("LswBoardOwner", fields: [userId], references: [id], onDelete: Cascade)
+  organizationId String
+  organization   Organization @relation("LswBoardOrganization", fields: [organizationId], references: [id], onDelete: Cascade)
+  facilityId     String?
+  facility       Facility?    @relation(fields: [facilityId], references: [id], onDelete: SetNull)
+  departmentId   String?
+  department     Department?  @relation("LswBoardDepartment", fields: [departmentId], references: [id], onDelete: SetNull)
+
   // Week Context
-  weekNumber       Int
-  year             Int
-  
+  weekNumber Int
+  year       Int
+
   // Page-Level Preferences
-  selectedDay      LswDayOfWeek  @default(MONDAY)
-  todoTab          String        @default("today")  // 'today' | 'thisWeek'
-  
+  selectedDay LswDayOfWeek @default(MONDAY)
+  todoTab     String       @default("today") // 'today' | 'thisWeek'
+
   // Timestamps
-  createdAt        DateTime      @default(now())
-  updatedAt        DateTime      @updatedAt
-  
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
   @@unique([userId, weekNumber, year])
   @@index([userId])
   @@index([organizationId])
@@ -3162,22 +3191,22 @@ model LswBoard {
 // Replaces the hardcoded departments array on the LSW page
 // ─────────────────────────────────────────────────────────────────────────────
 model LswDepartment {
-  id              String        @id @default(uuid())
-  name            String
-  code            String        // Short code like 'production', 'quality', etc.
-  description     String?
-  sortOrder       Int           @default(0)
-  isActive        Boolean       @default(true)
-  
+  id          String  @id @default(uuid())
+  name        String
+  code        String // Short code like 'production', 'quality', etc.
+  description String?
+  sortOrder   Int     @default(0)
+  isActive    Boolean @default(true)
+
   // Scoping
-  organizationId  String
-  organization    Organization  @relation("LswDepartmentOrganization", fields: [organizationId], references: [id], onDelete: Cascade)
-  facilityId      String?
-  facility        Facility?     @relation("LswDepartmentFacility", fields: [facilityId], references: [id], onDelete: SetNull)
-  
-  createdAt       DateTime      @default(now())
-  updatedAt       DateTime      @updatedAt
-  
+  organizationId String
+  organization   Organization @relation("LswDepartmentOrganization", fields: [organizationId], references: [id], onDelete: Cascade)
+  facilityId     String?
+  facility       Facility?    @relation("LswDepartmentFacility", fields: [facilityId], references: [id], onDelete: SetNull)
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
   @@unique([organizationId, code])
   @@index([organizationId])
   @@index([facilityId])
@@ -3189,42 +3218,42 @@ model LswDepartment {
 // Each row in the daily task table with time, minutes, and day-of-week toggles
 // ─────────────────────────────────────────────────────────────────────────────
 model LswDailyTask {
-  id              String        @id @default(uuid())
-  
+  id String @id @default(uuid())
+
   // Ownership & Scoping
-  userId          String
-  user            User          @relation("LswDailyTaskUser", fields: [userId], references: [id], onDelete: Cascade)
-  facilityId      String?
-  facility        Facility?     @relation("LswDailyTaskFacility", fields: [facilityId], references: [id], onDelete: SetNull)
-  departmentId    String?
-  department      Department?   @relation("LswDailyTaskDepartment", fields: [departmentId], references: [id], onDelete: SetNull)
-  
+  userId       String
+  user         User        @relation("LswDailyTaskUser", fields: [userId], references: [id], onDelete: Cascade)
+  facilityId   String?
+  facility     Facility?   @relation("LswDailyTaskFacility", fields: [facilityId], references: [id], onDelete: SetNull)
+  departmentId String?
+  department   Department? @relation("LswDailyTaskDepartment", fields: [departmentId], references: [id], onDelete: SetNull)
+
   // Task Data
-  task            String
-  minutes         Int           @default(15)
-  time            String        // HH:MM format, e.g. "06:00"
-  
+  task    String
+  minutes Int    @default(15)
+  time    String // HH:MM format, e.g. "06:00"
+
   // Day-of-Week Schedule (legacy / defaults – actual completions stored in LswDailyTaskCompletion)
-  monday          Boolean       @default(false)
-  tuesday         Boolean       @default(false)
-  wednesday       Boolean       @default(false)
-  thursday        Boolean       @default(false)
-  friday          Boolean       @default(false)
-  saturday        Boolean       @default(false)
-  sunday          Boolean       @default(false)
-  
+  monday    Boolean @default(false)
+  tuesday   Boolean @default(false)
+  wednesday Boolean @default(false)
+  thursday  Boolean @default(false)
+  friday    Boolean @default(false)
+  saturday  Boolean @default(false)
+  sunday    Boolean @default(false)
+
   // Ordering
-  sortOrder       Int           @default(0)
-  isActive        Boolean       @default(true)
-  
+  sortOrder Int     @default(0)
+  isActive  Boolean @default(true)
+
   // Timestamps
-  createdAt       DateTime      @default(now())
-  updatedAt       DateTime      @updatedAt
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
 
   // Per-week completions
-  completions     LswDailyTaskCompletion[]
+  completions         LswDailyTaskCompletion[]
   earlyCompletionLogs LswEarlyCompletionLog[]
-  
+
   @@index([userId])
   @@index([facilityId])
   @@index([departmentId])
@@ -3236,29 +3265,29 @@ model LswDailyTask {
 // Each record tracks which days are checked off for a specific task in a specific week
 // ─────────────────────────────────────────────────────────────────────────────
 model LswDailyTaskCompletion {
-  id              String        @id @default(uuid())
-  
+  id String @id @default(uuid())
+
   // Link to the task
-  dailyTaskId     String
-  dailyTask       LswDailyTask  @relation(fields: [dailyTaskId], references: [id], onDelete: Cascade)
-  
+  dailyTaskId String
+  dailyTask   LswDailyTask @relation(fields: [dailyTaskId], references: [id], onDelete: Cascade)
+
   // Week Context
-  weekNumber      Int
-  year            Int
-  
+  weekNumber Int
+  year       Int
+
   // Day-of-Week Completion
-  monday          Boolean       @default(false)
-  tuesday         Boolean       @default(false)
-  wednesday       Boolean       @default(false)
-  thursday        Boolean       @default(false)
-  friday          Boolean       @default(false)
-  saturday        Boolean       @default(false)
-  sunday          Boolean       @default(false)
-  
+  monday    Boolean @default(false)
+  tuesday   Boolean @default(false)
+  wednesday Boolean @default(false)
+  thursday  Boolean @default(false)
+  friday    Boolean @default(false)
+  saturday  Boolean @default(false)
+  sunday    Boolean @default(false)
+
   // Timestamps
-  createdAt       DateTime      @default(now())
-  updatedAt       DateTime      @updatedAt
-  
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
   @@unique([dailyTaskId, weekNumber, year])
   @@index([dailyTaskId])
   @@index([weekNumber, year])
@@ -3269,29 +3298,29 @@ model LswDailyTaskCompletion {
 // When a user marks a future task as completed early, this logs the event
 // ─────────────────────────────────────────────────────────────────────────────
 model LswEarlyCompletionLog {
-  id              String        @id @default(uuid())
+  id String @id @default(uuid())
 
   // Who completed it
-  userId          String
-  user            User          @relation("LswEarlyCompletionLogUser", fields: [userId], references: [id], onDelete: Cascade)
-  organizationId  String
+  userId         String
+  user           User   @relation("LswEarlyCompletionLogUser", fields: [userId], references: [id], onDelete: Cascade)
+  organizationId String
 
   // Which task
-  dailyTaskId     String
-  dailyTask       LswDailyTask  @relation(fields: [dailyTaskId], references: [id], onDelete: Cascade)
+  dailyTaskId String
+  dailyTask   LswDailyTask @relation(fields: [dailyTaskId], references: [id], onDelete: Cascade)
 
   // Context
-  taskName        String        // Snapshot of task name at time of early completion
-  taskTime        String        // Scheduled time (HH:MM)
-  dayKey          String        // Day key: M, T, W, H, F, S1, S2
-  dayLabel        String        // Human-readable: Mon, Tue, Wed, etc.
-  weekNumber      Int
-  year            Int
-  scheduledDate   DateTime      // The actual date the task was scheduled for
+  taskName      String // Snapshot of task name at time of early completion
+  taskTime      String // Scheduled time (HH:MM)
+  dayKey        String // Day key: M, T, W, H, F, S1, S2
+  dayLabel      String // Human-readable: Mon, Tue, Wed, etc.
+  weekNumber    Int
+  year          Int
+  scheduledDate DateTime // The actual date the task was scheduled for
 
   // Timestamps
-  completedAt     DateTime      @default(now())
-  createdAt       DateTime      @default(now())
+  completedAt DateTime @default(now())
+  createdAt   DateTime @default(now())
 
   @@index([userId])
   @@index([organizationId])
@@ -3305,43 +3334,43 @@ model LswEarlyCompletionLog {
 // Checkbox list with completion tracking
 // ─────────────────────────────────────────────────────────────────────────────
 model LswTodoItem {
-  id              String        @id @default(uuid())
-  
+  id String @id @default(uuid())
+
   // Ownership & Scoping
-  userId          String
-  user            User          @relation("LswTodoItemUser", fields: [userId], references: [id], onDelete: Cascade)
-  departmentId    String?
-  department      Department?   @relation("LswTodoItemDepartment", fields: [departmentId], references: [id], onDelete: SetNull)
-  
+  userId       String
+  user         User        @relation("LswTodoItemUser", fields: [userId], references: [id], onDelete: Cascade)
+  departmentId String?
+  department   Department? @relation("LswTodoItemDepartment", fields: [departmentId], references: [id], onDelete: SetNull)
+
   // Item Data
-  task            String
-  completed       Boolean       @default(false)
-  completedAt     DateTime?
-  dueDate         String?       // Used as time HH:MM or date depending on context
-  note            String?
-  
+  task        String
+  completed   Boolean   @default(false)
+  completedAt DateTime?
+  dueDate     String? // Used as time HH:MM or date depending on context
+  note        String?
+
   // Organization
-  priority        String?       @default("none") // none, low, medium, high
-  category        String?
-  tags            String?       // JSON array of tag strings e.g. ["urgent","work"]
-  isFlagged       Boolean       @default(false)
-  
+  priority  String? @default("none") // none, low, medium, high
+  category  String?
+  tags      String? // JSON array of tag strings e.g. ["urgent","work"]
+  isFlagged Boolean @default(false)
+
   // Scheduling
-  reminderDate    DateTime?
-  recurrence      String?       @default("none") // none, daily, weekdays, weekly, biweekly, monthly, yearly
-  
+  reminderDate DateTime?
+  recurrence   String?   @default("none") // none, daily, weekdays, weekly, biweekly, monthly, yearly
+
   // Week Context
-  weekNumber      Int?
-  year            Int?
-  
+  weekNumber Int?
+  year       Int?
+
   // Ordering
-  sortOrder       Int           @default(0)
-  isActive        Boolean       @default(true)
-  
+  sortOrder Int     @default(0)
+  isActive  Boolean @default(true)
+
   // Timestamps
-  createdAt       DateTime      @default(now())
-  updatedAt       DateTime      @updatedAt
-  
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
   @@index([userId])
   @@index([departmentId])
   @@index([completed])
@@ -3354,31 +3383,31 @@ model LswTodoItem {
 // Tasks grouped by frequency with duration and due date
 // ─────────────────────────────────────────────────────────────────────────────
 model LswFrequencyTask {
-  id              String        @id @default(uuid())
-  
+  id String @id @default(uuid())
+
   // Ownership & Scoping
-  userId          String
-  user            User          @relation("LswFrequencyTaskUser", fields: [userId], references: [id], onDelete: Cascade)
-  facilityId      String?
-  facility        Facility?     @relation("LswFrequencyTaskFacility", fields: [facilityId], references: [id], onDelete: SetNull)
-  
+  userId     String
+  user       User      @relation("LswFrequencyTaskUser", fields: [userId], references: [id], onDelete: Cascade)
+  facilityId String?
+  facility   Facility? @relation("LswFrequencyTaskFacility", fields: [facilityId], references: [id], onDelete: SetNull)
+
   // Task Data
-  task            String
-  minutes         Int           @default(60)
-  dueDate         DateTime
-  frequency       LswFrequency
-  
+  task      String
+  minutes   Int          @default(60)
+  dueDate   DateTime
+  frequency LswFrequency
+
   // Period-based scoping (e.g., "BW-4-2026", "M-3-2026", "Q-1-2026", "A-2026")
-  periodKey       String?
-  
+  periodKey String?
+
   // Ordering
-  sortOrder       Int           @default(0)
-  isActive        Boolean       @default(true)
-  
+  sortOrder Int     @default(0)
+  isActive  Boolean @default(true)
+
   // Timestamps
-  createdAt       DateTime      @default(now())
-  updatedAt       DateTime      @updatedAt
-  
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
   @@index([userId])
   @@index([facilityId])
   @@index([frequency])
@@ -3391,46 +3420,46 @@ model LswFrequencyTask {
 // Supports rich styling per project and per update
 // ─────────────────────────────────────────────────────────────────────────────
 model LswProject {
-  id                          String             @id @default(uuid())
-  
+  id String @id @default(uuid())
+
   // Ownership & Scoping
-  userId                      String
-  user                        User               @relation("LswProjectUser", fields: [userId], references: [id], onDelete: Cascade)
-  facilityId                  String?
-  facility                    Facility?          @relation("LswProjectFacility", fields: [facilityId], references: [id], onDelete: SetNull)
-  
+  userId     String
+  user       User      @relation("LswProjectUser", fields: [userId], references: [id], onDelete: Cascade)
+  facilityId String?
+  facility   Facility? @relation("LswProjectFacility", fields: [facilityId], references: [id], onDelete: SetNull)
+
   // Project Data
-  name                        String
-  
+  name String
+
   // Project Name Cell Styling
-  fontColor                   String?            @default("#1f2937")
-  fontFamily                  String?            @default("Inter")
-  fontBold                    Boolean            @default(false)
-  fontItalic                  Boolean            @default(false)
-  cellColor                   String?            @default("#3b82f6")
-  cellColorIntensity          Int                @default(20)
-  
+  fontColor          String? @default("#1f2937")
+  fontFamily         String? @default("Inter")
+  fontBold           Boolean @default(false)
+  fontItalic         Boolean @default(false)
+  cellColor          String? @default("#3b82f6")
+  cellColorIntensity Int     @default(20)
+
   // Default Update Column Styling (applied to newly created updates)
-  defaultUpdateFontColor      String?            @default("#4b5563")
-  defaultUpdateFontItalic     Boolean            @default(false)
-  defaultUpdateCellColor      String?            @default("#10b981")
-  defaultUpdateCellColorIntensity Int            @default(10)
-  
+  defaultUpdateFontColor          String? @default("#4b5563")
+  defaultUpdateFontItalic         Boolean @default(false)
+  defaultUpdateCellColor          String? @default("#10b981")
+  defaultUpdateCellColorIntensity Int     @default(10)
+
   // Week Scoping
-  weekNumber                  Int?
-  year                        Int?
-  
+  weekNumber Int?
+  year       Int?
+
   // Ordering
-  sortOrder                   Int                @default(0)
-  isActive                    Boolean            @default(true)
-  
+  sortOrder Int     @default(0)
+  isActive  Boolean @default(true)
+
   // Timestamps
-  createdAt                   DateTime           @default(now())
-  updatedAt                   DateTime           @updatedAt
-  
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
   // Relations
-  updates                     LswProjectUpdate[]
-  
+  updates LswProjectUpdate[]
+
   @@index([userId])
   @@index([facilityId])
   @@index([isActive])
@@ -3442,28 +3471,28 @@ model LswProject {
 // Each project can have multiple updates with individual styling
 // ─────────────────────────────────────────────────────────────────────────────
 model LswProjectUpdate {
-  id                  String      @id @default(uuid())
-  
+  id String @id @default(uuid())
+
   // Parent Project
-  projectId           String
-  project             LswProject  @relation(fields: [projectId], references: [id], onDelete: Cascade)
-  
+  projectId String
+  project   LswProject @relation(fields: [projectId], references: [id], onDelete: Cascade)
+
   // Update Data
-  text                String      @default("")   @db.Text
-  
+  text String @default("") @db.Text
+
   // Per-Update Styling
-  fontColor           String?
-  fontItalic          Boolean     @default(false)
-  cellColor           String?
-  cellColorIntensity  Int?
-  
+  fontColor          String?
+  fontItalic         Boolean @default(false)
+  cellColor          String?
+  cellColorIntensity Int?
+
   // Ordering
-  sortOrder           Int         @default(0)
-  
+  sortOrder Int @default(0)
+
   // Timestamps
-  createdAt           DateTime    @default(now())
-  updatedAt           DateTime    @updatedAt
-  
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
   @@index([projectId])
   @@index([sortOrder])
 }
@@ -3473,32 +3502,32 @@ model LswProjectUpdate {
 // Checkbox list with due dates and completion tracking
 // ─────────────────────────────────────────────────────────────────────────────
 model LswMeetingRail {
-  id              String        @id @default(uuid())
-  
+  id String @id @default(uuid())
+
   // Ownership & Scoping
-  userId          String
-  user            User          @relation("LswMeetingRailUser", fields: [userId], references: [id], onDelete: Cascade)
-  facilityId      String?
-  facility        Facility?     @relation("LswMeetingRailFacility", fields: [facilityId], references: [id], onDelete: SetNull)
-  
+  userId     String
+  user       User      @relation("LswMeetingRailUser", fields: [userId], references: [id], onDelete: Cascade)
+  facilityId String?
+  facility   Facility? @relation("LswMeetingRailFacility", fields: [facilityId], references: [id], onDelete: SetNull)
+
   // Rail Data
-  rail            String        // e.g. "Level 1 - Daily Accountability"
-  dueDate         DateTime
-  completed       Boolean       @default(false)
-  completedAt     DateTime?
-  
+  rail        String // e.g. "Level 1 - Daily Accountability"
+  dueDate     DateTime
+  completed   Boolean   @default(false)
+  completedAt DateTime?
+
   // Week Context
-  weekNumber      Int?
-  year            Int?
-  
+  weekNumber Int?
+  year       Int?
+
   // Ordering
-  sortOrder       Int           @default(0)
-  isActive        Boolean       @default(true)
-  
+  sortOrder Int     @default(0)
+  isActive  Boolean @default(true)
+
   // Timestamps
-  createdAt       DateTime      @default(now())
-  updatedAt       DateTime      @updatedAt
-  
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
   @@index([userId])
   @@index([facilityId])
   @@index([completed])
@@ -3509,38 +3538,38 @@ model LswMeetingRail {
 // LswFollowUp: Follow Up items with responsible person tracking
 // ─────────────────────────────────────────────────────────────────────────────
 model LswFollowUp {
-  id                String        @id @default(uuid())
-  
+  id String @id @default(uuid())
+
   // Ownership & Scoping
-  userId            String
-  user              User          @relation("LswFollowUpUser", fields: [userId], references: [id], onDelete: Cascade)
-  facilityId        String?
-  facility          Facility?     @relation("LswFollowUpFacility", fields: [facilityId], references: [id], onDelete: SetNull)
-  
+  userId     String
+  user       User      @relation("LswFollowUpUser", fields: [userId], references: [id], onDelete: Cascade)
+  facilityId String?
+  facility   Facility? @relation("LswFollowUpFacility", fields: [facilityId], references: [id], onDelete: SetNull)
+
   // Follow Up Data
   task              String
   dueDate           DateTime
   responsibleUserId String?
-  responsibleUser   User?         @relation("LswFollowUpResponsible", fields: [responsibleUserId], references: [id], onDelete: SetNull)
-  responsibleName   String?       // Free-text fallback when user isn't in system
-  comments          String?       @db.Text
-  
+  responsibleUser   User?    @relation("LswFollowUpResponsible", fields: [responsibleUserId], references: [id], onDelete: SetNull)
+  responsibleName   String? // Free-text fallback when user isn't in system
+  comments          String?  @db.Text
+
   // Status
-  completed         Boolean       @default(false)
-  completedAt       DateTime?
-  
+  completed   Boolean   @default(false)
+  completedAt DateTime?
+
   // Week Scoping
-  weekNumber        Int?
-  year              Int?
-  
+  weekNumber Int?
+  year       Int?
+
   // Ordering
-  sortOrder         Int           @default(0)
-  isActive          Boolean       @default(true)
-  
+  sortOrder Int     @default(0)
+  isActive  Boolean @default(true)
+
   // Timestamps
-  createdAt         DateTime      @default(now())
-  updatedAt         DateTime      @updatedAt
-  
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
   @@index([userId])
   @@index([facilityId])
   @@index([responsibleUserId])
@@ -3554,33 +3583,33 @@ model LswFollowUp {
 // Maps to sections like "Plant Metrics" (Don Miguel) or "Corporate Metrics" (MegaMex)
 // ─────────────────────────────────────────────────────────────────────────────
 model LswKeyResultSet {
-  id              String            @id @default(uuid())
-  
+  id String @id @default(uuid())
+
   // Ownership & Scoping
-  userId          String
-  user            User              @relation("LswKeyResultSetUser", fields: [userId], references: [id], onDelete: Cascade)
-  organizationId  String
-  organization    Organization      @relation("LswKeyResultSetOrganization", fields: [organizationId], references: [id], onDelete: Cascade)
-  facilityId      String?
-  facility        Facility?         @relation("LswKeyResultSetFacility", fields: [facilityId], references: [id], onDelete: SetNull)
-  
+  userId         String
+  user           User         @relation("LswKeyResultSetUser", fields: [userId], references: [id], onDelete: Cascade)
+  organizationId String
+  organization   Organization @relation("LswKeyResultSetOrganization", fields: [organizationId], references: [id], onDelete: Cascade)
+  facilityId     String?
+  facility       Facility?    @relation("LswKeyResultSetFacility", fields: [facilityId], references: [id], onDelete: SetNull)
+
   // Set Metadata
-  name            String            // e.g. "Plant Metrics", "Corporate Metrics"
-  scope           LswKeyResultScope @default(PLANT)
-  description     String?
-  icon            String?           // Emoji or icon identifier
-  
+  name        String // e.g. "Plant Metrics", "Corporate Metrics"
+  scope       LswKeyResultScope @default(PLANT)
+  description String?
+  icon        String? // Emoji or icon identifier
+
   // Ordering
-  sortOrder       Int               @default(0)
-  isActive        Boolean           @default(true)
-  
+  sortOrder Int     @default(0)
+  isActive  Boolean @default(true)
+
   // Timestamps
-  createdAt       DateTime          @default(now())
-  updatedAt       DateTime          @updatedAt
-  
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
   // Relations
-  keyResults      LswKeyResult[]
-  
+  keyResults LswKeyResult[]
+
   @@index([userId])
   @@index([organizationId])
   @@index([facilityId])
@@ -3592,25 +3621,25 @@ model LswKeyResultSet {
 // Metric/value/target/trend data within a key result set
 // ─────────────────────────────────────────────────────────────────────────────
 model LswKeyResult {
-  id              String          @id @default(uuid())
-  
+  id String @id @default(uuid())
+
   // Parent Set
-  keyResultSetId  String
-  keyResultSet    LswKeyResultSet @relation(fields: [keyResultSetId], references: [id], onDelete: Cascade)
-  
+  keyResultSetId String
+  keyResultSet   LswKeyResultSet @relation(fields: [keyResultSetId], references: [id], onDelete: Cascade)
+
   // Metric Data
-  metric          String          // e.g. "TCIR", "Quality CPM", "Net Sales"
-  value           String          // Current value (string to support formats like "$845M")
-  target          String?         // Target value
-  trend           LswTrend?       // UP, DOWN, STABLE
-  
+  metric String // e.g. "TCIR", "Quality CPM", "Net Sales"
+  value  String // Current value (string to support formats like "$845M")
+  target String? // Target value
+  trend  LswTrend? // UP, DOWN, STABLE
+
   // Ordering
-  sortOrder       Int             @default(0)
-  
+  sortOrder Int @default(0)
+
   // Timestamps
-  createdAt       DateTime        @default(now())
-  updatedAt       DateTime        @updatedAt
-  
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
   @@index([keyResultSetId])
   @@index([sortOrder])
 }
@@ -3619,31 +3648,31 @@ model LswKeyResult {
 // LswPersonalGoal: Personal Objectives/Goals with progress tracking
 // ─────────────────────────────────────────────────────────────────────────────
 model LswPersonalGoal {
-  id              String        @id @default(uuid())
-  
+  id String @id @default(uuid())
+
   // Ownership & Scoping
-  userId          String
-  user            User          @relation("LswPersonalGoalUser", fields: [userId], references: [id], onDelete: Cascade)
-  facilityId      String?
-  facility        Facility?     @relation("LswPersonalGoalFacility", fields: [facilityId], references: [id], onDelete: SetNull)
-  
+  userId     String
+  user       User      @relation("LswPersonalGoalUser", fields: [userId], references: [id], onDelete: Cascade)
+  facilityId String?
+  facility   Facility? @relation("LswPersonalGoalFacility", fields: [facilityId], references: [id], onDelete: SetNull)
+
   // Goal Data
-  objective       String
-  dueDate         DateTime
-  progress        Int           @default(0)  // 0-100 percentage
-  
+  objective String
+  dueDate   DateTime
+  progress  Int      @default(0) // 0-100 percentage
+
   // Week Scoping
-  weekNumber      Int?
-  year            Int?
-  
+  weekNumber Int?
+  year       Int?
+
   // Ordering
-  sortOrder       Int           @default(0)
-  isActive        Boolean       @default(true)
-  
+  sortOrder Int     @default(0)
+  isActive  Boolean @default(true)
+
   // Timestamps
-  createdAt       DateTime      @default(now())
-  updatedAt       DateTime      @updatedAt
-  
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
   @@index([userId])
   @@index([facilityId])
   @@index([dueDate])
@@ -3655,33 +3684,33 @@ model LswPersonalGoal {
 // Organization-level trigger definitions with per-user event tracking
 // ─────────────────────────────────────────────────────────────────────────────
 model LswRcaTrigger {
-  id              String        @id @default(uuid())
-  
+  id String @id @default(uuid())
+
   // Ownership & Scoping
-  userId          String
-  user            User          @relation("LswRcaTriggerUser", fields: [userId], references: [id], onDelete: Cascade)
-  organizationId  String
-  organization    Organization  @relation("LswRcaTriggerOrganization", fields: [organizationId], references: [id], onDelete: Cascade)
-  facilityId      String?
-  facility        Facility?     @relation("LswRcaTriggerFacility", fields: [facilityId], references: [id], onDelete: SetNull)
-  
+  userId         String
+  user           User         @relation("LswRcaTriggerUser", fields: [userId], references: [id], onDelete: Cascade)
+  organizationId String
+  organization   Organization @relation("LswRcaTriggerOrganization", fields: [organizationId], references: [id], onDelete: Cascade)
+  facilityId     String?
+  facility       Facility?    @relation("LswRcaTriggerFacility", fields: [facilityId], references: [id], onDelete: SetNull)
+
   // Trigger Data
-  trigger         String        // e.g. "People Safety - OSHA recordable"
-  eventDate       DateTime?
-  comments        String?       @db.Text
-  
+  trigger   String // e.g. "People Safety - OSHA recordable"
+  eventDate DateTime?
+  comments  String?   @db.Text
+
   // Week Scoping
-  weekNumber      Int?
-  year            Int?
-  
+  weekNumber Int?
+  year       Int?
+
   // Ordering
-  sortOrder       Int           @default(0)
-  isActive        Boolean       @default(true)
-  
+  sortOrder Int     @default(0)
+  isActive  Boolean @default(true)
+
   // Timestamps
-  createdAt       DateTime      @default(now())
-  updatedAt       DateTime      @updatedAt
-  
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
   @@index([userId])
   @@index([organizationId])
   @@index([facilityId])
@@ -3694,31 +3723,31 @@ model LswRcaTrigger {
 // Stores the color/font option palettes per organization
 // ─────────────────────────────────────────────────────────────────────────────
 model LswStylePreset {
-  id              String        @id @default(uuid())
-  
+  id String @id @default(uuid())
+
   // Scoping
-  organizationId  String
-  
+  organizationId String
+
   // Preset Identity
-  name            String        // e.g. "Project Font Colors", "Cell Colors", "Font Families"
-  category        String        // 'fontColor' | 'cellColor' | 'fontFamily'
-  context         String        // 'project' | 'update' | 'general'
-  
+  name     String // e.g. "Project Font Colors", "Cell Colors", "Font Families"
+  category String // 'fontColor' | 'cellColor' | 'fontFamily'
+  context  String // 'project' | 'update' | 'general'
+
   // Preset Values (JSON array of options)
   // For fontColor: ["#1f2937", "#dc2626", "#16a34a", ...]
   // For cellColor: ["#3b82f6", "#22c55e", "#eab308", ...]
   // For fontFamily: ["Inter", "Arial", "Georgia", ...]
-  values          Json
-  
+  values Json
+
   // Defaults
-  isDefault       Boolean       @default(false)
-  sortOrder       Int           @default(0)
-  isActive        Boolean       @default(true)
-  
+  isDefault Boolean @default(false)
+  sortOrder Int     @default(0)
+  isActive  Boolean @default(true)
+
   // Timestamps
-  createdAt       DateTime      @default(now())
-  updatedAt       DateTime      @updatedAt
-  
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
   @@unique([organizationId, name, category, context])
   @@index([organizationId])
   @@index([category])
@@ -3729,17 +3758,17 @@ model LswStylePreset {
 // Stores OAuth tokens for Microsoft Graph API calendar access (per user).
 // ─────────────────────────────────────────────────────────────────────────────
 model MicrosoftOAuthToken {
-  id                     String    @id @default(uuid())
-  userId                 String    @unique
-  accessToken            String    @db.Text
-  refreshToken           String    @db.Text
-  tokenExpiry            DateTime
-  scope                  String?   // Granted scopes
-  microsoftEmail         String?   // The Microsoft account email used
-  createdAt              DateTime  @default(now())
-  updatedAt              DateTime  @updatedAt
+  id             String   @id @default(uuid())
+  userId         String   @unique
+  accessToken    String   @db.Text
+  refreshToken   String   @db.Text
+  tokenExpiry    DateTime
+  scope          String? // Granted scopes
+  microsoftEmail String? // The Microsoft account email used
+  createdAt      DateTime @default(now())
+  updatedAt      DateTime @updatedAt
 
-  user                   User      @relation("MicrosoftOAuthTokenUser", fields: [userId], references: [id], onDelete: Cascade)
+  user User @relation("MicrosoftOAuthTokenUser", fields: [userId], references: [id], onDelete: Cascade)
 
   @@index([userId])
 }
@@ -3944,16 +3973,16 @@ model BakeryMissingDataResolution {
 }
 
 model BakeryTrackerActivityLog {
-  id         Int      @id @default(autoincrement())
-  action     String   @db.VarChar(50)   // RESOLVED, UNRESOLVED, FILL_NOW
-  weekName   String   @db.VarChar(100)
-  dayOfWeek  String   @db.VarChar(20)
-  performedBy String  @db.VarChar(255)
-  reason     String?  @db.VarChar(1000) // resolution reason (for RESOLVED)
-  details    String?  @db.Text          // JSON string with extra context
-  ipAddress  String?  @db.VarChar(45)
-  userAgent  String?  @db.VarChar(500)
-  createdAt  DateTime @default(now())
+  id          Int      @id @default(autoincrement())
+  action      String   @db.VarChar(50) // RESOLVED, UNRESOLVED, FILL_NOW
+  weekName    String   @db.VarChar(100)
+  dayOfWeek   String   @db.VarChar(20)
+  performedBy String   @db.VarChar(255)
+  reason      String?  @db.VarChar(1000) // resolution reason (for RESOLVED)
+  details     String?  @db.Text // JSON string with extra context
+  ipAddress   String?  @db.VarChar(45)
+  userAgent   String?  @db.VarChar(500)
+  createdAt   DateTime @default(now())
 
   @@index([action])
   @@index([performedBy])
@@ -3967,19 +3996,19 @@ model BakeryTrackerActivityLog {
 // ═══════════════════════════════════════════════════════════════════════════════
 
 model BakeryDailyReport {
-  id              String   @id @default(uuid())
-  weekName        String   @db.VarChar(100)
-  dayOfWeek       String   @db.VarChar(20)
-  reportData      Json     // Full AI-generated report payload
-  rawMetrics      Json?    // _rawMetrics snapshot at generation time
-  metaData        Json?    // _meta info (model, generatedAt, etc.)
-  aiModel         String?  @db.VarChar(50)
-  tokenUsage      Int?
-  durationMs      Int?
-  generatedBy     String   @db.VarChar(255)
-  generatedByUserId String? @db.VarChar(255)
-  createdAt       DateTime @default(now())
-  updatedAt       DateTime @updatedAt
+  id                String   @id @default(uuid())
+  weekName          String   @db.VarChar(100)
+  dayOfWeek         String   @db.VarChar(20)
+  reportData        Json // Full AI-generated report payload
+  rawMetrics        Json? // _rawMetrics snapshot at generation time
+  metaData          Json? // _meta info (model, generatedAt, etc.)
+  aiModel           String?  @db.VarChar(50)
+  tokenUsage        Int?
+  durationMs        Int?
+  generatedBy       String   @db.VarChar(255)
+  generatedByUserId String?  @db.VarChar(255)
+  createdAt         DateTime @default(now())
+  updatedAt         DateTime @updatedAt
 
   @@unique([weekName, dayOfWeek])
   @@index([weekName])
@@ -3994,23 +4023,23 @@ model BakeryDailyReport {
 // ═══════════════════════════════════════════════════════════════════════════════
 
 model BakeryStandupReport {
-  id                 String   @id @default(uuid())
-  weekName           String   @db.VarChar(100)
-  dayOfWeek          String   @db.VarChar(20)
-  reportDate         DateTime @db.Date
-  reportData         Json     // Full AI-generated conversational report payload
-  rawMetrics         Json?    // Snapshot of metrics at generation time
-  metaData           Json?    // Meta info (model, generatedAt, etc.)
-  supervisorComments String?  @db.Text
-  commentsUpdatedBy  String?  @db.VarChar(255)
+  id                 String    @id @default(uuid())
+  weekName           String    @db.VarChar(100)
+  dayOfWeek          String    @db.VarChar(20)
+  reportDate         DateTime  @db.Date
+  reportData         Json // Full AI-generated conversational report payload
+  rawMetrics         Json? // Snapshot of metrics at generation time
+  metaData           Json? // Meta info (model, generatedAt, etc.)
+  supervisorComments String?   @db.Text
+  commentsUpdatedBy  String?   @db.VarChar(255)
   commentsUpdatedAt  DateTime?
-  aiModel            String?  @db.VarChar(50)
+  aiModel            String?   @db.VarChar(50)
   tokenUsage         Int?
   durationMs         Int?
-  generatedBy        String   @db.VarChar(255)
-  generatedByUserId  String?  @db.VarChar(255)
-  createdAt          DateTime @default(now())
-  updatedAt          DateTime @updatedAt
+  generatedBy        String    @db.VarChar(255)
+  generatedByUserId  String?   @db.VarChar(255)
+  createdAt          DateTime  @default(now())
+  updatedAt          DateTime  @updatedAt
 
   @@unique([weekName, dayOfWeek])
   @@index([reportDate])
@@ -4025,17 +4054,17 @@ model BakeryStandupReport {
 // ═══════════════════════════════════════════════════════════════════════════════
 
 model BakeryAiInsight {
-  id          Int      @id @default(autoincrement())
-  weekName    String   @unique @db.VarChar(100)
-  insightData Json     // Full GPT response (the data payload)
-  chartData   Json     // _chartData for frontend charts
-  metaData    Json     // _meta info (model, generatedAt, etc.)
-  aiModel     String   @db.VarChar(50)
-  generatedBy String   @db.VarChar(255) // user name who triggered
-  generatedByUserId String? @db.VarChar(255) // user UUID
-  tokenUsage  Int?     // total tokens used (if available)
-  createdAt   DateTime @default(now())
-  updatedAt   DateTime @updatedAt
+  id                Int      @id @default(autoincrement())
+  weekName          String   @unique @db.VarChar(100)
+  insightData       Json // Full GPT response (the data payload)
+  chartData         Json // _chartData for frontend charts
+  metaData          Json // _meta info (model, generatedAt, etc.)
+  aiModel           String   @db.VarChar(50)
+  generatedBy       String   @db.VarChar(255) // user name who triggered
+  generatedByUserId String?  @db.VarChar(255) // user UUID
+  tokenUsage        Int? // total tokens used (if available)
+  createdAt         DateTime @default(now())
+  updatedAt         DateTime @updatedAt
 
   @@index([weekName])
   @@index([generatedByUserId])
@@ -4044,19 +4073,19 @@ model BakeryAiInsight {
 }
 
 model BakeryAiInsightLog {
-  id          Int      @id @default(autoincrement())
-  weekName    String   @db.VarChar(100)
-  action      String   @db.VarChar(30) // GENERATED, REGENERATED, CACHE_HIT
-  aiModel     String?  @db.VarChar(50)
-  tokenUsage  Int?
-  userId      String?  @db.VarChar(255)
-  userName    String   @db.VarChar(255)
-  ipAddress   String?  @db.VarChar(45)
-  userAgent   String?  @db.VarChar(500)
-  durationMs  Int?     // how long the GPT call took
-  success     Boolean  @default(true)
-  errorMsg    String?  @db.Text
-  createdAt   DateTime @default(now())
+  id         Int      @id @default(autoincrement())
+  weekName   String   @db.VarChar(100)
+  action     String   @db.VarChar(30) // GENERATED, REGENERATED, CACHE_HIT
+  aiModel    String?  @db.VarChar(50)
+  tokenUsage Int?
+  userId     String?  @db.VarChar(255)
+  userName   String   @db.VarChar(255)
+  ipAddress  String?  @db.VarChar(45)
+  userAgent  String?  @db.VarChar(500)
+  durationMs Int? // how long the GPT call took
+  success    Boolean  @default(true)
+  errorMsg   String?  @db.Text
+  createdAt  DateTime @default(now())
 
   @@index([weekName])
   @@index([action])
@@ -4068,7 +4097,7 @@ model BakeryAiInsightLog {
 // ==================== VACATION MANAGEMENT ====================
 
 model VacationEmployee {
-  id                     Int                     @id @default(autoincrement())
+  id                     Int       @id @default(autoincrement())
   firstName              String
   lastName               String
   email                  String?
@@ -4079,25 +4108,25 @@ model VacationEmployee {
   shift                  String?
   workline               String?
   workarea               String?
-  dateOfEmployment       DateTime?               @db.Date
-  allocatedVacationHours Float?                  @default(0)
-  annualAllocation       Float?                  @default(25)
-  maxAccumulatedHours    Float?                  @default(0)
-  yearsOfEmployment      Int?                    @default(0)
-  monthsOfEmployment     Int?                    @default(0)
-  vacationScheduleYears  Int[]                   @default([])
-  vacationScheduleHours  Float[]                 @default([])
+  dateOfEmployment       DateTime? @db.Date
+  allocatedVacationHours Float?    @default(0)
+  annualAllocation       Float?    @default(25)
+  maxAccumulatedHours    Float?    @default(0)
+  yearsOfEmployment      Int?      @default(0)
+  monthsOfEmployment     Int?      @default(0)
+  vacationScheduleYears  Int[]     @default([])
+  vacationScheduleHours  Float[]   @default([])
   supervisorId           String?
   userId                 String?
   organizationId         String?
-  createdAt              DateTime                @default(now())
-  updatedAt              DateTime                @updatedAt
+  createdAt              DateTime  @default(now())
+  updatedAt              DateTime  @updatedAt
 
-  User                   User?                   @relation(fields: [userId], references: [id], onDelete: SetNull)
-  Organization           Organization?           @relation(fields: [organizationId], references: [id], onDelete: Cascade)
-  Vacations              Vacation[]
-  VacationNotifications  VacationNotification[]
-  VacationActivityLogs   VacationActivityLog[]
+  User                  User?                  @relation(fields: [userId], references: [id], onDelete: SetNull)
+  Organization          Organization?          @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  Vacations             Vacation[]
+  VacationNotifications VacationNotification[]
+  VacationActivityLogs  VacationActivityLog[]
 
   @@index([userId])
   @@index([organizationId])
@@ -4107,39 +4136,39 @@ model VacationEmployee {
 }
 
 model Vacation {
-  id                  Int                     @id @default(autoincrement())
-  employeeId          Int
-  requestedByUserId   String?
-  leaveType           String                  @default("vacation")
-  startDate           DateTime                @db.Date
-  endDate             DateTime                @db.Date
-  durationDays        Int                     @default(1)
-  returnToWork        DateTime?               @db.Date
-  reason              String
-  coveragePlan        String?
-  emergencyPhone      String?
-  emergencyEmail      String?
-  autoApprove         Boolean                 @default(false)
-  status              String                  @default("pending")
-  departmentSnapshot  String?
-  roleSnapshot        String?
-  shiftSnapshot       String?
-  worklineSnapshot    String?
-  workareaSnapshot    String?
-  statusHistory       Json?
-  approvedByUserId    String?
-  decidedAt           DateTime?
-  decisionReason      String?
-  organizationId      String?
-  createdAt           DateTime                @default(now())
-  updatedAt           DateTime                @updatedAt
+  id                 Int       @id @default(autoincrement())
+  employeeId         Int
+  requestedByUserId  String?
+  leaveType          String    @default("vacation")
+  startDate          DateTime  @db.Date
+  endDate            DateTime  @db.Date
+  durationDays       Int       @default(1)
+  returnToWork       DateTime? @db.Date
+  reason             String
+  coveragePlan       String?
+  emergencyPhone     String?
+  emergencyEmail     String?
+  autoApprove        Boolean   @default(false)
+  status             String    @default("pending")
+  departmentSnapshot String?
+  roleSnapshot       String?
+  shiftSnapshot      String?
+  worklineSnapshot   String?
+  workareaSnapshot   String?
+  statusHistory      Json?
+  approvedByUserId   String?
+  decidedAt          DateTime?
+  decisionReason     String?
+  organizationId     String?
+  createdAt          DateTime  @default(now())
+  updatedAt          DateTime  @updatedAt
 
-  Employee            VacationEmployee        @relation(fields: [employeeId], references: [id], onDelete: Cascade)
-  RequestedByUser     User?                   @relation("VacationRequestedBy", fields: [requestedByUserId], references: [id], onDelete: SetNull)
-  ApprovedByUser      User?                   @relation("VacationApprovedBy", fields: [approvedByUserId], references: [id], onDelete: SetNull)
-  Organization        Organization?           @relation(fields: [organizationId], references: [id], onDelete: Cascade)
-  Notifications       VacationNotification[]
-  ActivityLogs        VacationActivityLog[]
+  Employee        VacationEmployee       @relation(fields: [employeeId], references: [id], onDelete: Cascade)
+  RequestedByUser User?                  @relation("VacationRequestedBy", fields: [requestedByUserId], references: [id], onDelete: SetNull)
+  ApprovedByUser  User?                  @relation("VacationApprovedBy", fields: [approvedByUserId], references: [id], onDelete: SetNull)
+  Organization    Organization?          @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  Notifications   VacationNotification[]
+  ActivityLogs    VacationActivityLog[]
 
   @@index([employeeId])
   @@index([status])
@@ -4149,37 +4178,37 @@ model Vacation {
 }
 
 model VacationSettings {
-  id                          Int       @id @default(autoincrement())
-  standardAllocationDays      Int       @default(0)
-  minimumNoticeDays           Int       @default(0)
-  maxConsecutiveDays          Int       @default(0)
-  minTeamCoveragePercent      Int       @default(0)
-  maxSimultaneousAbsences     Int       @default(0)
+  id                           Int      @id @default(autoincrement())
+  standardAllocationDays       Int      @default(0)
+  minimumNoticeDays            Int      @default(0)
+  maxConsecutiveDays           Int      @default(0)
+  minTeamCoveragePercent       Int      @default(0)
+  maxSimultaneousAbsences      Int      @default(0)
   criticalRoleCoverageRequired Boolean  @default(false)
-  organizationId              String?
-  createdAt                   DateTime  @default(now())
-  updatedAt                   DateTime  @updatedAt
+  organizationId               String?
+  createdAt                    DateTime @default(now())
+  updatedAt                    DateTime @updatedAt
 
-  Organization                Organization? @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  Organization Organization? @relation(fields: [organizationId], references: [id], onDelete: Cascade)
 
   @@index([organizationId])
   @@map("vacation_settings")
 }
 
 model VacationBlackoutPeriod {
-  id               Int       @id @default(autoincrement())
-  name             String
-  startDate        DateTime  @db.Date
-  endDate          DateTime  @db.Date
-  description      String?
-  isActive         Boolean   @default(true)
-  createdByUserId  String?
-  organizationId   String?
-  createdAt        DateTime  @default(now())
-  updatedAt        DateTime  @updatedAt
+  id              Int      @id @default(autoincrement())
+  name            String
+  startDate       DateTime @db.Date
+  endDate         DateTime @db.Date
+  description     String?
+  isActive        Boolean  @default(true)
+  createdByUserId String?
+  organizationId  String?
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
 
-  CreatedByUser    User?         @relation(fields: [createdByUserId], references: [id], onDelete: SetNull)
-  Organization     Organization? @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  CreatedByUser User?         @relation(fields: [createdByUserId], references: [id], onDelete: SetNull)
+  Organization  Organization? @relation(fields: [organizationId], references: [id], onDelete: Cascade)
 
   @@index([organizationId])
   @@index([startDate])
@@ -4187,21 +4216,21 @@ model VacationBlackoutPeriod {
 }
 
 model VacationActivityLog {
-  id            Int       @id @default(autoincrement())
-  vacationId    Int
-  employeeId    Int
-  activityType  String
-  startDate     DateTime? @db.Date
-  endDate       DateTime? @db.Date
-  durationDays  Int?
-  leaveType     String?
-  status        String?
+  id             Int       @id @default(autoincrement())
+  vacationId     Int
+  employeeId     Int
+  activityType   String
+  startDate      DateTime? @db.Date
+  endDate        DateTime? @db.Date
+  durationDays   Int?
+  leaveType      String?
+  status         String?
   organizationId String?
-  createdAt     DateTime  @default(now())
+  createdAt      DateTime  @default(now())
 
-  Vacation      Vacation          @relation(fields: [vacationId], references: [id], onDelete: Cascade)
-  Employee      VacationEmployee  @relation(fields: [employeeId], references: [id], onDelete: Cascade)
-  Organization  Organization?     @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  Vacation     Vacation         @relation(fields: [vacationId], references: [id], onDelete: Cascade)
+  Employee     VacationEmployee @relation(fields: [employeeId], references: [id], onDelete: Cascade)
+  Organization Organization?    @relation(fields: [organizationId], references: [id], onDelete: Cascade)
 
   @@index([vacationId])
   @@index([employeeId])
@@ -4210,20 +4239,20 @@ model VacationActivityLog {
 }
 
 model VacationNotification {
-  id                 Int       @id @default(autoincrement())
-  employeeId         Int
-  notificationType   String
-  title              String
-  message            String
-  relatedVacationId  Int?
-  isRead             Boolean   @default(false)
-  readAt             DateTime?
-  organizationId     String?
-  createdAt          DateTime  @default(now())
+  id                Int       @id @default(autoincrement())
+  employeeId        Int
+  notificationType  String
+  title             String
+  message           String
+  relatedVacationId Int?
+  isRead            Boolean   @default(false)
+  readAt            DateTime?
+  organizationId    String?
+  createdAt         DateTime  @default(now())
 
-  Employee           VacationEmployee  @relation(fields: [employeeId], references: [id], onDelete: Cascade)
-  RelatedVacation    Vacation?         @relation(fields: [relatedVacationId], references: [id], onDelete: SetNull)
-  Organization       Organization?     @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  Employee        VacationEmployee @relation(fields: [employeeId], references: [id], onDelete: Cascade)
+  RelatedVacation Vacation?        @relation(fields: [relatedVacationId], references: [id], onDelete: SetNull)
+  Organization    Organization?    @relation(fields: [organizationId], references: [id], onDelete: Cascade)
 
   @@index([employeeId])
   @@index([relatedVacationId])
@@ -4236,20 +4265,20 @@ model VacationNotification {
 // DayOfWeek: Admin-managed working days per Organization/Facility/Department
 // ─────────────────────────────────────────────────────────────────────────────
 model DayOfWeek {
-  id               String        @id @default(uuid())
-  dayName          String        // e.g. "Monday", "Tuesday", etc.
-  dayOrder         Int           // 1=Monday, 2=Tuesday, ... 7=Sunday
-  isActive         Boolean       @default(true)
-  organizationId   String
-  facilityId       String?
-  departmentId     String?
-  createdAt        DateTime      @default(now())
-  updatedAt        DateTime      @updatedAt
+  id             String   @id @default(uuid())
+  dayName        String // e.g. "Monday", "Tuesday", etc.
+  dayOrder       Int // 1=Monday, 2=Tuesday, ... 7=Sunday
+  isActive       Boolean  @default(true)
+  organizationId String
+  facilityId     String?
+  departmentId   String?
+  createdAt      DateTime @default(now())
+  updatedAt      DateTime @updatedAt
 
-  Organization     Organization  @relation(fields: [organizationId], references: [id], onDelete: Cascade)
-  Facility         Facility?     @relation(fields: [facilityId], references: [id], onDelete: Cascade)
-  Department       Department?   @relation(fields: [departmentId], references: [id], onDelete: Cascade)
-  MachineIssues    MachineIssue[]
+  Organization  Organization   @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  Facility      Facility?      @relation(fields: [facilityId], references: [id], onDelete: Cascade)
+  Department    Department?    @relation(fields: [departmentId], references: [id], onDelete: Cascade)
+  MachineIssues MachineIssue[]
 
   @@index([organizationId])
   @@index([facilityId])
@@ -4279,31 +4308,31 @@ enum BoardCollaboratorRole {
 }
 
 model Board {
-  id              String           @id @default(uuid())
-  type            BoardType        @default(WHITEBOARD)
-  title           String           @default("Untitled Board")
-  description     String?          @db.Text
-  thumbnail       String?          // S3 URL for board preview image
+  id          String    @id @default(uuid())
+  type        BoardType @default(WHITEBOARD)
+  title       String    @default("Untitled Board")
+  description String?   @db.Text
+  thumbnail   String? // S3 URL for board preview image
 
-  ownerId         String
-  owner           User             @relation("BoardOwner", fields: [ownerId], references: [id], onDelete: Cascade)
-  organizationId  String
-  organization    Organization     @relation("BoardOrganization", fields: [organizationId], references: [id], onDelete: Cascade)
+  ownerId        String
+  owner          User         @relation("BoardOwner", fields: [ownerId], references: [id], onDelete: Cascade)
+  organizationId String
+  organization   Organization @relation("BoardOrganization", fields: [organizationId], references: [id], onDelete: Cascade)
 
-  visibility      BoardVisibility  @default(PRIVATE)
-  isFavorite      Boolean          @default(false)
-  isArchived      Boolean          @default(false)
+  visibility BoardVisibility @default(PRIVATE)
+  isFavorite Boolean         @default(false)
+  isArchived Boolean         @default(false)
 
   // Yjs document state stored as binary
-  yjsState        Bytes?
+  yjsState Bytes?
 
-  createdAt       DateTime         @default(now())
-  updatedAt       DateTime         @updatedAt
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
 
-  collaborators   BoardCollaborator[]
-  versions        BoardVersion[]
-  assets          BoardAsset[]
-  comments        BoardComment[]
+  collaborators BoardCollaborator[]
+  versions      BoardVersion[]
+  assets        BoardAsset[]
+  comments      BoardComment[]
 
   @@index([ownerId])
   @@index([organizationId])
@@ -4311,13 +4340,13 @@ model Board {
 }
 
 model BoardCollaborator {
-  id        String                @id @default(uuid())
-  boardId   String
-  board     Board                 @relation(fields: [boardId], references: [id], onDelete: Cascade)
-  userId    String
-  user      User                  @relation("BoardCollaboratorUser", fields: [userId], references: [id], onDelete: Cascade)
-  role      BoardCollaboratorRole @default(EDITOR)
-  joinedAt  DateTime              @default(now())
+  id       String                @id @default(uuid())
+  boardId  String
+  board    Board                 @relation(fields: [boardId], references: [id], onDelete: Cascade)
+  userId   String
+  user     User                  @relation("BoardCollaboratorUser", fields: [userId], references: [id], onDelete: Cascade)
+  role     BoardCollaboratorRole @default(EDITOR)
+  joinedAt DateTime              @default(now())
 
   @@unique([boardId, userId])
   @@index([userId])
@@ -4327,8 +4356,8 @@ model BoardVersion {
   id          String   @id @default(uuid())
   boardId     String
   board       Board    @relation(fields: [boardId], references: [id], onDelete: Cascade)
-  snapshot    Bytes    // Yjs state vector snapshot
-  label       String?  // Optional version label
+  snapshot    Bytes // Yjs state vector snapshot
+  label       String? // Optional version label
   createdById String
   createdBy   User     @relation("BoardVersionCreator", fields: [createdById], references: [id], onDelete: Cascade)
   createdAt   DateTime @default(now())
@@ -4341,7 +4370,7 @@ model BoardAsset {
   boardId   String
   board     Board    @relation(fields: [boardId], references: [id], onDelete: Cascade)
   fileName  String
-  url       String   // S3/R2 URL
+  url       String // S3/R2 URL
   mimeType  String
   sizeBytes Int
   width     Int?
@@ -4352,20 +4381,20 @@ model BoardAsset {
 }
 
 model BoardComment {
-  id        String   @id @default(uuid())
+  id        String         @id @default(uuid())
   boardId   String
-  board     Board    @relation(fields: [boardId], references: [id], onDelete: Cascade)
+  board     Board          @relation(fields: [boardId], references: [id], onDelete: Cascade)
   userId    String
-  user      User     @relation("BoardCommentUser", fields: [userId], references: [id], onDelete: Cascade)
-  content   String   @db.Text
+  user      User           @relation("BoardCommentUser", fields: [userId], references: [id], onDelete: Cascade)
+  content   String         @db.Text
   // Position on canvas
   posX      Float?
   posY      Float?
-  parentId  String?  // For threaded replies
+  parentId  String? // For threaded replies
   parent    BoardComment?  @relation("BoardCommentThread", fields: [parentId], references: [id], onDelete: Cascade)
   replies   BoardComment[] @relation("BoardCommentThread")
-  createdAt DateTime @default(now())
-  updatedAt DateTime @updatedAt
+  createdAt DateTime       @default(now())
+  updatedAt DateTime       @updatedAt
 
   @@index([boardId])
   @@index([userId])
@@ -4376,16 +4405,16 @@ model BoardComment {
 // ═══════════════════════════════════════════════════════════════════════════
 
 model MobileVerification {
-  id          String   @id @default(uuid())
-  userId      String
-  email       String
-  codeHash    String   // SHA-256 hash of OTP (never stored in plaintext)
-  attempts    Int      @default(0)  // Brute-force protection: max 5
-  used        Boolean  @default(false)
-  expiresAt   DateTime // 10-minute TTL
-  createdAt   DateTime @default(now())
+  id        String   @id @default(uuid())
+  userId    String
+  email     String
+  codeHash  String // SHA-256 hash of OTP (never stored in plaintext)
+  attempts  Int      @default(0) // Brute-force protection: max 5
+  used      Boolean  @default(false)
+  expiresAt DateTime // 10-minute TTL
+  createdAt DateTime @default(now())
 
-  user        User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
 
   @@index([userId])
   @@index([email])
@@ -4398,91 +4427,91 @@ model MobileVerification {
 // ═══════════════════════════════════════════════════════════════════════════
 
 model LswNotificationPreference {
-  id                    String   @id @default(uuid())
-  userId                String   @unique
-  user                  User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  id     String @id @default(uuid())
+  userId String @unique
+  user   User   @relation(fields: [userId], references: [id], onDelete: Cascade)
 
   // ── Master Toggles ──
-  emailEnabled          Boolean  @default(false)   // Global email on/off
-  browserEnabled        Boolean  @default(false)   // Global browser notification on/off
-  mobilePushEnabled     Boolean  @default(true)    // Global mobile push notification on/off
+  emailEnabled      Boolean @default(false) // Global email on/off
+  browserEnabled    Boolean @default(false) // Global browser notification on/off
+  mobilePushEnabled Boolean @default(true) // Global mobile push notification on/off
 
   // ── Bakery Metrics Notification Toggles ──
-  bakeryEmailEnabled    Boolean  @default(true)     // Email when bakery metrics submitted
-  bakeryBrowserEnabled  Boolean  @default(true)     // Browser notification when bakery metrics submitted
-  bakeryMobilePushEnabled Boolean @default(true)    // Mobile push when bakery metrics submitted
+  bakeryEmailEnabled      Boolean @default(true) // Email when bakery metrics submitted
+  bakeryBrowserEnabled    Boolean @default(true) // Browser notification when bakery metrics submitted
+  bakeryMobilePushEnabled Boolean @default(true) // Mobile push when bakery metrics submitted
 
   // ── Operations Issue Notification Toggles ──
-  issueMobilePushEnabled Boolean @default(false)     // Mobile push for operations issue activity
-  issueCreatedPushEnabled Boolean @default(true)     // Mobile push when an issue is reported
-  issueStatusPushEnabled Boolean @default(true)      // Mobile push when an issue status changes
-  issueEditedPushEnabled Boolean @default(true)      // Mobile push when an issue is edited
-  issueDeletedPushEnabled Boolean @default(true)     // Mobile push when an issue is deleted
+  issueMobilePushEnabled  Boolean @default(false) // Mobile push for operations issue activity
+  issueCreatedPushEnabled Boolean @default(true) // Mobile push when an issue is reported
+  issueStatusPushEnabled  Boolean @default(true) // Mobile push when an issue status changes
+  issueEditedPushEnabled  Boolean @default(true) // Mobile push when an issue is edited
+  issueDeletedPushEnabled Boolean @default(true) // Mobile push when an issue is deleted
 
   // ── Past-Due Notification Toggles ──
-  notifyTaskOverdue     Boolean  @default(true)     // Daily tasks past their scheduled time
-  notifyTodoOverdue     Boolean  @default(true)     // To-do items past due date/time
-  notifyMeetingOverdue  Boolean  @default(true)     // Meeting rails past due date
-  notifyFollowUpOverdue Boolean  @default(true)     // Follow-up items past due date
-  notifyFreqTaskOverdue Boolean  @default(true)     // Frequency tasks (bi-weekly/monthly) past due
+  notifyTaskOverdue     Boolean @default(true) // Daily tasks past their scheduled time
+  notifyTodoOverdue     Boolean @default(true) // To-do items past due date/time
+  notifyMeetingOverdue  Boolean @default(true) // Meeting rails past due date
+  notifyFollowUpOverdue Boolean @default(true) // Follow-up items past due date
+  notifyFreqTaskOverdue Boolean @default(true) // Frequency tasks (bi-weekly/monthly) past due
 
   // ── Upcoming Event Reminder Settings ──
-  upcomingReminderEnabled Boolean @default(true)    // Enable upcoming event reminders
-  reminderMinutesBefore  Int      @default(15)      // Minutes before event (e.g., 15, 30, 60)
-  reminderDaysBefore     Int      @default(1)       // Days before (0 = same day, 1 = day before)
-  reminderWeeksBefore    Int      @default(0)       // Weeks before (0 = disabled)
-  reminderMonthsBefore   Int      @default(0)       // Months before (0 = disabled)
+  upcomingReminderEnabled Boolean @default(true) // Enable upcoming event reminders
+  reminderMinutesBefore   Int     @default(15) // Minutes before event (e.g., 15, 30, 60)
+  reminderDaysBefore      Int     @default(1) // Days before (0 = same day, 1 = day before)
+  reminderWeeksBefore     Int     @default(0) // Weeks before (0 = disabled)
+  reminderMonthsBefore    Int     @default(0) // Months before (0 = disabled)
 
   // ── Notification Frequency ──
-  digestFrequency       String   @default("realtime") // realtime, hourly, daily, weekly
-  digestDays            Json     @default("[\"monday\",\"tuesday\",\"wednesday\",\"thursday\",\"friday\"]") // Days of week for daily digest
-  digestTime            String   @default("08:00")    // HH:MM — preferred delivery time for daily/weekly
-  customReminderMinutes Int?                           // User-typed custom minutes before
-  customReminderTime    String?                        // HH:MM — user-typed custom reminder time
-  quietHoursStart       String?  // HH:MM — no notifications during this window
-  quietHoursEnd         String?  // HH:MM
-  timezone              String   @default("America/Chicago")
+  digestFrequency       String  @default("realtime") // realtime, hourly, daily, weekly
+  digestDays            Json    @default("[\"monday\",\"tuesday\",\"wednesday\",\"thursday\",\"friday\"]") // Days of week for daily digest
+  digestTime            String  @default("08:00") // HH:MM — preferred delivery time for daily/weekly
+  customReminderMinutes Int? // User-typed custom minutes before
+  customReminderTime    String? // HH:MM — user-typed custom reminder time
+  quietHoursStart       String? // HH:MM — no notifications during this window
+  quietHoursEnd         String? // HH:MM
+  timezone              String  @default("America/Chicago")
 
   // ── Force Alert Sound ──
-  soundEnabled          Boolean  @default(true)       // Play alert sound on browser notifications
-  mobileSoundEnabled    Boolean  @default(true)       // Play sound on mobile push notifications
-  soundVolume           Int      @default(80)         // 0–100
-  soundType             String   @default("chime")    // chime, urgent, bell, ping, alarm
-  repeatSoundForOverdue Boolean  @default(true)       // Repeat sound every interval for overdue items
-  repeatSoundInterval   Int      @default(5)          // Minutes between sound repeats for overdue
+  soundEnabled          Boolean @default(true) // Play alert sound on browser notifications
+  mobileSoundEnabled    Boolean @default(true) // Play sound on mobile push notifications
+  soundVolume           Int     @default(80) // 0–100
+  soundType             String  @default("chime") // chime, urgent, bell, ping, alarm
+  repeatSoundForOverdue Boolean @default(true) // Repeat sound every interval for overdue items
+  repeatSoundInterval   Int     @default(5) // Minutes between sound repeats for overdue
 
   // ── Per-Section Reminder Overrides (JSON) ──
   // Each stores: { enabled, reminderMinutes, reminderDays, reminderWeeks, reminderMonths, soundType, escalate }
-  sectionDailyTasks     Json?    // Override for Daily Tasks section
-  sectionTodoItems      Json?    // Override for To-Do Items section
-  sectionMeetingRails   Json?    // Override for Meeting Rails section
-  sectionFollowUps      Json?    // Override for Follow-Ups section
-  sectionFreqTasks      Json?    // Override for Scheduled Tasks section
-  sectionProjects       Json?    // Override for Projects section
-  sectionKeyResults     Json?    // Override for Key Results section
-  sectionPersonalGoals  Json?    // Override for Personal Goals section
+  sectionDailyTasks    Json? // Override for Daily Tasks section
+  sectionTodoItems     Json? // Override for To-Do Items section
+  sectionMeetingRails  Json? // Override for Meeting Rails section
+  sectionFollowUps     Json? // Override for Follow-Ups section
+  sectionFreqTasks     Json? // Override for Scheduled Tasks section
+  sectionProjects      Json? // Override for Projects section
+  sectionKeyResults    Json? // Override for Key Results section
+  sectionPersonalGoals Json? // Override for Personal Goals section
 
   // ── Do Not Disturb Schedule ──
-  dndEnabled            Boolean  @default(false)      // Master DND toggle
-  dndMode               String   @default("scheduled") // scheduled, custom
-  dndDays               Json     @default("[\"saturday\",\"sunday\"]")  // Days of week DND is active
-  dndAllDay             Boolean  @default(false)      // When true, DND all day on selected days
-  dndStartTime          String?  // HH:MM — DND start time (used with dndDays)
-  dndEndTime            String?  // HH:MM — DND end time
-  dndCustomSlots        Json?    // Array of { day, startTime, endTime } for fine-grained DND
+  dndEnabled     Boolean @default(false) // Master DND toggle
+  dndMode        String  @default("scheduled") // scheduled, custom
+  dndDays        Json    @default("[\"saturday\",\"sunday\"]") // Days of week DND is active
+  dndAllDay      Boolean @default(false) // When true, DND all day on selected days
+  dndStartTime   String? // HH:MM — DND start time (used with dndDays)
+  dndEndTime     String? // HH:MM — DND end time
+  dndCustomSlots Json? // Array of { day, startTime, endTime } for fine-grained DND
 
   // ── Escalation Settings ──
-  escalationEnabled     Boolean  @default(true)       // Auto-escalate if item stays overdue
-  escalationMinutes     Int      @default(30)         // Minutes after overdue to escalate
-  escalationAction      String   @default("sound_repeat") // sound_repeat, email_resend, both
+  escalationEnabled Boolean @default(true) // Auto-escalate if item stays overdue
+  escalationMinutes Int     @default(30) // Minutes after overdue to escalate
+  escalationAction  String  @default("sound_repeat") // sound_repeat, email_resend, both
 
   // ── Last Check Timestamps (for cron to avoid duplicates) ──
-  lastOverdueCheckAt    DateTime?
-  lastReminderCheckAt   DateTime?
-  lastDigestSentAt      DateTime?
+  lastOverdueCheckAt  DateTime?
+  lastReminderCheckAt DateTime?
+  lastDigestSentAt    DateTime?
 
-  createdAt             DateTime @default(now())
-  updatedAt             DateTime @updatedAt
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
 
   @@index([userId])
   @@map("lsw_notification_preferences")
@@ -4490,13 +4519,13 @@ model LswNotificationPreference {
 
 // Track sent LSW notifications to avoid duplicates
 model LswNotificationLog {
-  id              String   @id @default(uuid())
-  userId          String
-  entityType      String   // dailyTask, todoItem, meetingRail, followUp, frequencyTask
-  entityId        String   // ID of the LSW item
-  notificationType String  // overdue, reminder_15min, reminder_1day, etc.
-  channel         String   // email, browser, mobile_push
-  sentAt          DateTime @default(now())
+  id               String   @id @default(uuid())
+  userId           String
+  entityType       String // dailyTask, todoItem, meetingRail, followUp, frequencyTask
+  entityId         String // ID of the LSW item
+  notificationType String // overdue, reminder_15min, reminder_1day, etc.
+  channel          String // email, browser, mobile_push
+  sentAt           DateTime @default(now())
 
   @@unique([userId, entityType, entityId, notificationType, channel])
   @@index([userId])

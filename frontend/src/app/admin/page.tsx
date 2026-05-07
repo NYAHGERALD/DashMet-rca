@@ -177,6 +177,11 @@ function AdminContent() {
             <p className="mt-2 text-sm font-semibold text-emerald-600 dark:text-emerald-400">Configure Start Date →</p>
             <p className="text-xs text-gray-400 dark:text-gray-500 mt-1">Set when your org year begins for LSW week numbering</p>
           </Link>
+          <Link href="/admin/meeting-recording-compliance" className="bg-white dark:bg-gray-800 p-6 rounded-lg shadow hover:shadow-md transition-shadow cursor-pointer border-2 border-transparent hover:border-blue-300 dark:hover:border-blue-700">
+            <h3 className="text-sm font-medium text-gray-500 dark:text-gray-400">🎙️ Meeting Recordings</h3>
+            <p className="mt-2 text-sm font-semibold text-blue-600 dark:text-blue-400">Retention & Consent →</p>
+            <p className="text-xs text-gray-400 dark:text-gray-500 mt-1">Manage audio retention and the recording consent policy</p>
+          </Link>
         </div>
 
         {/* Stats Cards */}

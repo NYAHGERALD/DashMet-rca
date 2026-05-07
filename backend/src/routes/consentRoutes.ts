@@ -7,6 +7,7 @@
 
 import { Router } from 'express';
 import { authenticate } from '../middleware/auth';
+import { requireRoles } from '../middleware/rbac';
 import {
   getCurrentPolicy,
   createPolicy,
@@ -16,7 +17,10 @@ import {
   getConsentRecords,
   verifyConsent,
   revokeConsent,
-  getAuditLogs
+  getAuditLogs,
+  getMeetingRecordingSettings,
+  updateMeetingRecordingSettings,
+  runMeetingRecordingRetentionCleanup
 } from '../controllers/consentController';
 
 const router = Router();
@@ -32,10 +36,15 @@ router.use(authenticate);
 router.get('/policy', getCurrentPolicy);
 
 // POST /api/consent/policy - Create new policy (admin only)
-router.post('/policy', createPolicy);
+router.post('/policy', requireRoles('ADMIN', 'SYSTEM_ADMIN'), createPolicy);
 
 // POST /api/consent/policy/initialize - Initialize default policy
-router.post('/policy/initialize', initializeDefaultPolicy);
+router.post('/policy/initialize', requireRoles('ADMIN', 'SYSTEM_ADMIN'), initializeDefaultPolicy);
+
+// GET/PUT /api/consent/admin/meeting-recording-settings - Manage recording retention and consent policy
+router.get('/admin/meeting-recording-settings', requireRoles('ADMIN', 'SYSTEM_ADMIN'), getMeetingRecordingSettings);
+router.put('/admin/meeting-recording-settings', requireRoles('ADMIN', 'SYSTEM_ADMIN'), updateMeetingRecordingSettings);
+router.post('/admin/meeting-recording-settings/cleanup', requireRoles('ADMIN', 'SYSTEM_ADMIN'), runMeetingRecordingRetentionCleanup);
 
 // ===========================================
 // CONSENT RECORDING ROUTES
@@ -61,6 +70,6 @@ router.post('/revoke', revokeConsent);
 router.get('/meeting/:meetingId', getConsentRecords);
 
 // GET /api/consent/audit - Get all audit logs (admin only)
-router.get('/audit', getAuditLogs);
+router.get('/audit', requireRoles('ADMIN', 'SYSTEM_ADMIN'), getAuditLogs);
 
 export default router;
