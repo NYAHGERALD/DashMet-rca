@@ -1,4 +1,5 @@
 import { Meeting, MeetingRecordingRetentionPolicy, User } from '@prisma/client';
+import path from 'path';
 import { v4 as uuidv4 } from 'uuid';
 import { adminStorage } from '../config/firebase-admin';
 import { prisma } from '../utils/prisma';
@@ -235,9 +236,10 @@ export async function downloadMeetingAudioBuffer(
 
   const [buffer] = await file.download();
   const [metadata] = await file.getMetadata();
+  const storedName = String(metadata.name || storagePath);
   return {
     buffer,
-    fileName: String(metadata.name || storagePath.split('/').pop() || 'meeting-audio.m4a'),
+    fileName: path.basename(storedName) || 'meeting-audio.m4a',
     contentType: String(metadata.contentType || 'audio/m4a'),
   };
 }

@@ -30,6 +30,12 @@ const openai = new OpenAI({
 const MAX_FILE_SIZE = 24 * 1024 * 1024; // 24MB (leave buffer below 25MB limit)
 const CHUNK_DURATION_MINUTES = 10; // Split into 10-minute chunks for reliability
 
+function safeAudioFileName(fileName: string | undefined) {
+  const baseName = path.basename(String(fileName || '').trim());
+  const sanitized = baseName.replace(/[^a-zA-Z0-9._-]/g, '_');
+  return sanitized || 'meeting-audio.m4a';
+}
+
 export interface WhisperConfig {
   language?: string;
   prompt?: string;
@@ -569,8 +575,8 @@ export async function transcribeFromBuffer(
   fileName: string,
   config: WhisperConfig = {}
 ): Promise<TranscriptionResult> {
-  const tempDir = os.tmpdir();
-  const tempFilePath = path.join(tempDir, `whisper_${Date.now()}_${fileName}`);
+  const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), 'whisper-buffer-'));
+  const tempFilePath = path.join(tempDir, `${Date.now()}_${safeAudioFileName(fileName)}`);
   
   console.log(`[Whisper] transcribeFromBuffer called`);
   console.log(`[Whisper] Buffer size: ${buffer.length} bytes (${(buffer.length / 1024 / 1024).toFixed(2)}MB)`);
@@ -589,8 +595,8 @@ export async function transcribeFromBuffer(
     
     return await transcribeFromFile(tempFilePath, config);
   } finally {
-    if (fs.existsSync(tempFilePath)) {
-      fs.unlinkSync(tempFilePath);
+    if (fs.existsSync(tempDir)) {
+      fs.rmSync(tempDir, { recursive: true, force: true });
       console.log(`[Whisper] Temp file cleaned up`);
     }
   }
