@@ -93,9 +93,29 @@ router.post('/:id/duplicate', async (req: Request, res: Response) => {
 // POST /api/boards/:id/snapshot — Save tldraw snapshot
 router.post('/:id/snapshot', async (req: Request, res: Response) => {
   try {
-    const { snapshot, thumbnail } = req.body;
+    const { id: userId } = (req as any).user;
+    const { snapshot, thumbnail, allowEmptySnapshot } = req.body;
     if (!snapshot) return res.status(400).json({ success: false, message: 'snapshot required' });
-    await boardService.saveSnapshot(req.params.id, snapshot, thumbnail);
+    const result = await boardService.saveSnapshot(
+      req.params.id,
+      userId,
+      snapshot,
+      thumbnail,
+      allowEmptySnapshot === true,
+    );
+
+    if (result.status === 'not_authorized') {
+      return res.status(403).json({ success: false, message: 'Not authorized' });
+    }
+
+    if (result.status === 'empty_snapshot_rejected') {
+      return res.json({
+        success: true,
+        skipped: true,
+        message: 'Empty snapshot ignored to protect existing board content',
+      });
+    }
+
     res.json({ success: true, message: 'Snapshot saved' });
   } catch (error: any) {
     console.error('Error saving snapshot:', error);

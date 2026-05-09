@@ -2,6 +2,18 @@ import { PrismaClient, BoardVisibility, BoardCollaboratorRole, BoardType } from 
 
 const prisma = new PrismaClient();
 
+function canEditBoard(board: { ownerId: string; collaborators: { userId: string; role: BoardCollaboratorRole }[] }, userId: string) {
+  if (board.ownerId === userId) return true;
+  const collaborator = board.collaborators.find((c) => c.userId === userId);
+  return !!collaborator && collaborator.role !== 'VIEWER';
+}
+
+function snapshotHasDrawableContent(snapshot: any) {
+  if (!snapshot || typeof snapshot !== 'object') return false;
+  const elements = Array.isArray(snapshot.elements) ? snapshot.elements : [];
+  return elements.some((element: any) => element && !element.isDeleted);
+}
+
 // ─── Board CRUD ───
 
 export async function createBoard(userId: string, organizationId: string, title?: string, type: BoardType = 'WHITEBOARD') {
@@ -206,14 +218,48 @@ export async function listComments(boardId: string) {
 
 // ─── Tldraw Snapshot Persistence ───
 
-export async function saveSnapshot(boardId: string, snapshot: any, thumbnail?: string) {
+export async function saveSnapshot(
+  boardId: string,
+  userId: string,
+  snapshot: any,
+  thumbnail?: string | null,
+  allowEmptySnapshot = false,
+) {
+  const board = await prisma.board.findUnique({
+    where: { id: boardId },
+    select: {
+      ownerId: true,
+      yjsState: true,
+      collaborators: { select: { userId: true, role: true } },
+    },
+  });
+
+  if (!board || !canEditBoard(board, userId)) {
+    return { saved: false, status: 'not_authorized' as const };
+  }
+
+  const incomingHasContent = snapshotHasDrawableContent(snapshot);
+  let existingHasContent = false;
+  if (board.yjsState) {
+    try {
+      existingHasContent = snapshotHasDrawableContent(JSON.parse(Buffer.from(board.yjsState).toString('utf-8')));
+    } catch {
+      existingHasContent = true;
+    }
+  }
+
+  if (!incomingHasContent && existingHasContent && !allowEmptySnapshot) {
+    return { saved: false, status: 'empty_snapshot_rejected' as const };
+  }
+
   const jsonStr = JSON.stringify(snapshot);
   const data: any = { yjsState: Buffer.from(jsonStr, 'utf-8'), updatedAt: new Date() };
-  if (thumbnail) data.thumbnail = thumbnail;
+  if (thumbnail !== undefined) data.thumbnail = thumbnail;
   await prisma.board.update({
     where: { id: boardId },
     data,
   });
+  return { saved: true, status: 'saved' as const };
 }
 
 export async function loadSnapshot(boardId: string): Promise<any | null> {

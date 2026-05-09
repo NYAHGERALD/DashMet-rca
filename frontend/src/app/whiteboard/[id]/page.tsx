@@ -10,7 +10,7 @@ import { getBoard, updateBoard } from '@/lib/boardApi';
 import api from '@/lib/api';
 import { ArrowLeft, Save, Star, StarOff, Loader2 } from 'lucide-react';
 
-import type { ExcalidrawImperativeAPI, ExcalidrawElement, AppState, BinaryFiles } from '@excalidraw/excalidraw/types';
+import type { ExcalidrawImperativeAPI, AppState, BinaryFiles } from '@excalidraw/excalidraw/types';
 import '@excalidraw/excalidraw/index.css';
 
 // Excalidraw must be loaded client-side only (uses window/document)
@@ -18,6 +18,122 @@ const Excalidraw = dynamic(
   () => import('@excalidraw/excalidraw').then((mod) => mod.Excalidraw),
   { ssr: false },
 );
+
+function getVisibleElements(elements: readonly any[]) {
+  return elements.filter((element: any) => !element.isDeleted);
+}
+
+function snapshotHasVisibleContent(snapshot: any) {
+  const elements = Array.isArray(snapshot?.elements) ? snapshot.elements : [];
+  return elements.some((element: any) => element && !element.isDeleted);
+}
+
+function createWhiteboardSnapshot(
+  elements: readonly any[],
+  appState: AppState,
+  files: BinaryFiles,
+) {
+  return {
+    elements,
+    appState: {
+      viewBackgroundColor: appState.viewBackgroundColor,
+      gridSize: appState.gridSize,
+    },
+    files,
+  };
+}
+
+function getSceneSignature(
+  elements: readonly any[],
+  appState: AppState,
+  files: BinaryFiles,
+) {
+  return JSON.stringify(createWhiteboardSnapshot(elements, appState, files));
+}
+
+function getImageDimensions(dataUrl: string) {
+  return new Promise<{ width: number; height: number }>((resolve) => {
+    if (typeof window === 'undefined') {
+      resolve({ width: 960, height: 540 });
+      return;
+    }
+
+    const image = new window.Image();
+    image.onload = () => {
+      resolve({
+        width: image.naturalWidth || 960,
+        height: image.naturalHeight || 540,
+      });
+    };
+    image.onerror = () => resolve({ width: 960, height: 540 });
+    image.src = dataUrl;
+  });
+}
+
+async function createThumbnailRecoverySnapshot(thumbnail: string) {
+  const now = Date.now();
+  const dimensions = await getImageDimensions(thumbnail);
+  const aspectRatio = dimensions.width > 0 ? dimensions.height / dimensions.width : 9 / 16;
+  const displayWidth = Math.min(1200, Math.max(720, dimensions.width * 2));
+  const displayHeight = Math.round(displayWidth * aspectRatio);
+  const fileId = `recovered-thumbnail-${now}` as any;
+  const mimeType = thumbnail.match(/^data:([^;]+);/)?.[1] || 'image/png';
+
+  return {
+    elements: [
+      {
+        id: `recovered-thumbnail-element-${now}`,
+        type: 'image',
+        x: 80,
+        y: 80,
+        width: displayWidth,
+        height: displayHeight,
+        angle: 0,
+        strokeColor: 'transparent',
+        backgroundColor: 'transparent',
+        fillStyle: 'solid',
+        strokeWidth: 1,
+        strokeStyle: 'solid',
+        roughness: 0,
+        opacity: 100,
+        groupIds: [],
+        frameId: null,
+        roundness: null,
+        seed: Math.floor(Math.random() * 1_000_000),
+        version: 1,
+        versionNonce: Math.floor(Math.random() * 1_000_000),
+        index: null,
+        isDeleted: false,
+        boundElements: null,
+        updated: now,
+        link: null,
+        locked: false,
+        status: 'saved',
+        fileId,
+        scale: [1, 1],
+        crop: null,
+        customData: {
+          recoveredFromThumbnail: true,
+        },
+      },
+    ],
+    appState: {
+      viewBackgroundColor: '#ffffff',
+      gridSize: 20,
+      scrollX: 80,
+      scrollY: 80,
+    },
+    files: {
+      [fileId]: {
+        id: fileId,
+        mimeType: mimeType as any,
+        dataURL: thumbnail as any,
+        created: now,
+        lastRetrieved: now,
+      },
+    },
+  };
+}
 
 export default function WhiteboardEditorPage() {
   const { id } = useParams<{ id: string }>();
@@ -33,6 +149,11 @@ export default function WhiteboardEditorPage() {
   const [error, setError] = useState<string | null>(null);
   const saveTimeoutRef = useRef<NodeJS.Timeout | null>(null);
   const hasLoadedRef = useRef(false);
+  const hasSeenInitialChangeRef = useRef(false);
+  const hasUserEditedRef = useRef(false);
+  const lastSceneSignatureRef = useRef<string | null>(null);
+  const hasAppliedInitialSceneRef = useRef(false);
+  const isApplyingInitialSceneRef = useRef(false);
   const [templatePickerOpen, setTemplatePickerOpen] = useState(false);
   const [excalidrawReady, setExcalidrawReady] = useState(false);
   const canvasContainerRef = useRef<HTMLDivElement>(null);
@@ -84,6 +205,41 @@ export default function WhiteboardEditorPage() {
     return () => container.removeEventListener('wheel', handleWheel, { capture: true } as any);
   }, [excalidrawReady]);
 
+  // Excalidraw may emit an initial blank scene before the loaded scene is
+  // fully hydrated. Re-apply stored data once the imperative API is ready so
+  // opening a saved board cannot accidentally display or persist a blank scene.
+  useEffect(() => {
+    const api = excalidrawAPIRef.current;
+    if (!api || !excalidrawReady || !initialData || hasAppliedInitialSceneRef.current) return;
+
+    hasAppliedInitialSceneRef.current = true;
+    isApplyingInitialSceneRef.current = true;
+
+    const files = initialData.files || {};
+    const elements = Array.isArray(initialData.elements) ? initialData.elements : [];
+    const appState = {
+      ...(initialData.appState || {}),
+      gridModeEnabled: true,
+      objectsSnapModeEnabled: true,
+    };
+
+    if (Object.keys(files).length > 0) {
+      api.addFiles(Object.values(files) as any);
+    }
+
+    api.updateScene({
+      elements,
+      appState,
+      captureUpdate: 'NEVER' as any,
+    });
+
+    requestAnimationFrame(() => {
+      const currentAppState = api.getAppState();
+      lastSceneSignatureRef.current = getSceneSignature(api.getSceneElements(), currentAppState, api.getFiles());
+      isApplyingInitialSceneRef.current = false;
+    });
+  }, [excalidrawReady, initialData]);
+
   // Load bundled libraries into Excalidraw after API is ready
   useEffect(() => {
     if (!excalidrawReady) return;
@@ -116,9 +272,15 @@ export default function WhiteboardEditorPage() {
         setBoardTitle(board.title);
         setIsFavorite(board.isFavorite);
 
-        // Load snapshot if exists
+        // Load snapshot if exists. Some older saves have an empty editable
+        // scene but still have a valid thumbnail preview; show that preview on
+        // canvas so the board never opens as a confusing blank grid.
         const { data } = await api.get(`/boards/${id}/snapshot`);
-        if (data.data) {
+        if (snapshotHasVisibleContent(data.data)) {
+          setInitialData(data.data);
+        } else if (board.thumbnail) {
+          setInitialData(await createThumbnailRecoverySnapshot(board.thumbnail));
+        } else if (data.data) {
           setInitialData(data.data);
         }
       } catch (err: any) {
@@ -144,11 +306,11 @@ export default function WhiteboardEditorPage() {
       const elements = excalidrawAPI.getSceneElements();
       const appState = excalidrawAPI.getAppState();
       const files = excalidrawAPI.getFiles();
-      const snap = { elements, appState: { viewBackgroundColor: appState.viewBackgroundColor, gridSize: appState.gridSize }, files };
+      const snap = createWhiteboardSnapshot(elements, appState, files);
 
       // Generate thumbnail
-      let thumbnail: string | undefined;
-      const visibleElements = elements.filter((el: any) => !el.isDeleted);
+      let thumbnail: string | null = null;
+      const visibleElements = getVisibleElements(elements);
       if (visibleElements.length > 0) {
         try {
           const { exportToBlob } = await import('@excalidraw/excalidraw');
@@ -168,7 +330,11 @@ export default function WhiteboardEditorPage() {
         }
       }
 
-      await api.post(`/boards/${id}/snapshot`, { snapshot: snap, thumbnail });
+      await api.post(`/boards/${id}/snapshot`, {
+        snapshot: snap,
+        thumbnail,
+        allowEmptySnapshot: visibleElements.length === 0 && hasUserEditedRef.current,
+      });
       setLastSaved(new Date());
     } catch (err) {
       console.error('Failed to save board:', err);
@@ -185,27 +351,30 @@ export default function WhiteboardEditorPage() {
     }, 3000);
   }, [saveSnapshot]);
 
-  // Cleanup save timeout on unmount; save final state
+  // Cleanup save timeout on unmount.
   useEffect(() => {
     return () => {
       if (saveTimeoutRef.current) clearTimeout(saveTimeoutRef.current);
-      // Final save on unmount
-      const excalidrawAPI = excalidrawAPIRef.current;
-      if (excalidrawAPI && id) {
-        const elements = excalidrawAPI.getSceneElements();
-        const appState = excalidrawAPI.getAppState();
-        const files = excalidrawAPI.getFiles();
-        const snap = { elements, appState: { viewBackgroundColor: appState.viewBackgroundColor, gridSize: appState.gridSize }, files };
-        const apiUrl = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:5002/api';
-        const blob = new Blob([JSON.stringify({ snapshot: snap })], { type: 'application/json' });
-        navigator.sendBeacon(`${apiUrl}/boards/${id}/snapshot`, blob);
-      }
     };
-  }, [id]);
+  }, []);
 
   // Excalidraw onChange — triggers auto-save on user edits
   const handleChange = useCallback(
-    (elements: readonly ExcalidrawElement[], appState: AppState, files: BinaryFiles) => {
+    (elements: readonly any[], appState: AppState, files: BinaryFiles) => {
+      const signature = getSceneSignature(elements, appState, files);
+
+      if (!hasSeenInitialChangeRef.current || isApplyingInitialSceneRef.current) {
+        hasSeenInitialChangeRef.current = true;
+        lastSceneSignatureRef.current = signature;
+        return;
+      }
+
+      if (signature === lastSceneSignatureRef.current) {
+        return;
+      }
+
+      lastSceneSignatureRef.current = signature;
+      hasUserEditedRef.current = true;
       debouncedSave();
     },
     [debouncedSave],
