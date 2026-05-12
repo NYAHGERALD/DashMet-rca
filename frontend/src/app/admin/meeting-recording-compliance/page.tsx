@@ -168,7 +168,7 @@ export default function MeetingRecordingCompliancePage() {
   return (
     <ProtectedRoute allowedRoles={['ADMIN']}>
       <div className="min-h-screen bg-gray-50 dark:bg-gray-950">
-        <main className="mx-auto max-w-7xl px-4 py-6 sm:px-6 lg:px-8">
+        <main className="w-full px-4 py-6 sm:px-6 lg:px-8 2xl:px-10">
           <div className="mb-6 flex flex-col gap-4 sm:flex-row sm:items-start sm:justify-between">
             <div>
               <Link href="/admin" className="text-sm font-medium text-gray-500 hover:text-gray-900 dark:text-gray-400 dark:hover:text-white">

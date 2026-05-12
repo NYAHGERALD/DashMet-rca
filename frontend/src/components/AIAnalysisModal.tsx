@@ -12,48 +12,42 @@ interface AIAnalysisModalProps {
 const stages = {
   preparing: {
     title: 'Preparing Analysis',
-    description: 'Getting everything ready for AI analysis...',
-    icon: '🔧',
+    description: 'Getting the incident details ready...',
     progress: 5,
   },
   uploading: {
     title: 'Processing Images',
-    description: 'Converting your attachments for AI analysis...',
-    icon: '📤',
+    description: 'Getting your attachments ready...',
     progress: 15,
   },
   analyzing: {
     title: 'Analyzing Evidence',
-    description: 'Our AI is carefully examining each attachment...',
-    icon: '🔍',
+    description: 'Reviewing each attachment...',
     progress: 45,
   },
   generating: {
     title: 'Generating Insights',
     description: 'Creating a comprehensive summary with key findings...',
-    icon: '✨',
     progress: 75,
   },
   finalizing: {
     title: 'Recommending RCA Method',
     description: 'Determining the best analysis approach for this incident...',
-    icon: '🎯',
     progress: 90,
   },
   complete: {
     title: 'Analysis Complete!',
-    description: 'Your AI-powered summary is ready.',
-    icon: '✅',
+    description: 'Your summary is ready.',
     progress: 100,
   },
 };
 
 const tips = [
-  "💡 Tip: Clear, high-quality images help the AI provide better insights.",
-  "💡 Did you know? The AI analyzes visual elements, text, and context clues.",
-  "💡 Tip: Include images from multiple angles for comprehensive analysis.",
-  "💡 The AI considers industry best practices when making recommendations.",
-  "💡 Tip: Label your files descriptively for better evidence tracking.",
+  'Clear, high-quality images help create better notes.',
+  'The review looks at visual details, text, and the incident context.',
+  'Images from more than one angle can make the review more complete.',
+  'Recommendations are based on the incident details and common RCA practices.',
+  'Clear file names make evidence easier to track.',
 ];
 
 export default function AIAnalysisModal({ 
@@ -88,10 +82,7 @@ export default function AIAnalysisModal({
   if (!isOpen) return null;
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center">
-      {/* Backdrop with blur */}
-      <div className="absolute inset-0 bg-black/50 backdrop-blur-sm" />
-      
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-transparent">
       {/* Modal */}
       <div className="relative bg-white dark:bg-gray-800 rounded-2xl shadow-2xl w-full max-w-md mx-4 overflow-hidden animate-scale-in">
         {/* Animated gradient header */}
@@ -99,13 +90,6 @@ export default function AIAnalysisModal({
         
         {/* Content */}
         <div className="p-8">
-          {/* Animated Icon */}
-          <div className="flex justify-center mb-6">
-            <div className={`text-6xl ${stage !== 'complete' ? 'animate-bounce-slow' : 'animate-pop'}`}>
-              {currentStage.icon}
-            </div>
-          </div>
-          
           {/* Title */}
           <h3 className="text-xl font-bold text-center text-gray-800 dark:text-white mb-2">
             {currentStage.title}{stage !== 'complete' && dots}
@@ -160,7 +144,7 @@ export default function AIAnalysisModal({
             </div>
           )}
           
-          {/* AI Processing Animation */}
+          {/* Processing Animation */}
           {stage !== 'complete' && (
             <div className="flex justify-center gap-2 mb-6">
               <div className="w-3 h-3 rounded-full bg-purple-500 animate-wave" style={{ animationDelay: '0ms' }} />
@@ -196,14 +180,6 @@ export default function AIAnalysisModal({
               </p>
             </div>
           )}
-        </div>
-        
-        {/* Footer with brain animation */}
-        <div className="px-8 pb-6">
-          <div className="flex items-center justify-center gap-2 text-xs text-gray-400 dark:text-gray-500">
-            <span className="animate-pulse">🧠</span>
-            <span>Powered by GPT-4 Vision AI</span>
-          </div>
         </div>
       </div>
       

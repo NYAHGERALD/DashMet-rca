@@ -594,7 +594,11 @@ function getDefaultFishboneCategories(incidentType: string): FishboneCategory[] 
 /**
  * Update RCA method selection
  */
-export async function updateRCAMethod(rcaId: string, method: RCAMethod) {
+export async function updateRCAMethod(
+  rcaId: string,
+  method: RCAMethod,
+  options: { start?: boolean } = {}
+) {
   console.log('[updateRCAMethod] Starting with rcaId:', rcaId, 'method:', method);
   
   const rca = await prisma.rCAAnalysis.findUnique({
@@ -610,6 +614,10 @@ export async function updateRCAMethod(rcaId: string, method: RCAMethod) {
 
   // Initialize data for the new method
   const updateData: Record<string, unknown> = { method };
+
+  if (options.start && rca.status === RCAStatus.NOT_STARTED) {
+    updateData.status = RCAStatus.IN_PROGRESS;
+  }
 
   if (method === RCAMethod.FIVE_WHYS && !rca.fiveWhysData) {
     updateData.fiveWhysData = { steps: [] };

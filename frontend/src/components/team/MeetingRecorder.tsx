@@ -30,6 +30,7 @@ interface MeetingRecorderProps {
   roomName: string;
   userId: string;
   userName?: string;
+  compact?: boolean;
   onRecordingStarted?: () => void;
   onRecordingStopped?: (recordingId: string) => void;
   onError?: (error: string) => void;
@@ -37,11 +38,18 @@ interface MeetingRecorderProps {
 
 type RecordingState = 'idle' | 'selecting' | 'recording' | 'stopping' | 'uploading' | 'complete' | 'error';
 
+const RECORDING_MAX_WIDTH = 1280;
+const RECORDING_MAX_HEIGHT = 720;
+const RECORDING_FRAME_RATE = 15;
+const RECORDING_VIDEO_BITRATE = 800_000;
+const RECORDING_AUDIO_BITRATE = 64_000;
+
 export default function MeetingRecorder({
   incidentId,
   roomName,
   userId,
   userName = 'Participant',
+  compact = false,
   onRecordingStarted,
   onRecordingStopped,
   onError
@@ -59,6 +67,7 @@ export default function MeetingRecorder({
   const streamRef = useRef<MediaStream | null>(null);
   const durationIntervalRef = useRef<NodeJS.Timeout | null>(null);
   const recordingStartTimeRef = useRef<Date | null>(null);
+  const recordingDurationRef = useRef(0);
 
   // Format duration as MM:SS
   const formatDuration = (seconds: number): string => {
@@ -74,19 +83,31 @@ export default function MeetingRecorder({
     return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
   };
 
-  // Cleanup function
-  const cleanup = useCallback(() => {
+  const clearDurationTimer = useCallback(() => {
     if (durationIntervalRef.current) {
       clearInterval(durationIntervalRef.current);
       durationIntervalRef.current = null;
     }
+  }, []);
+
+  const getElapsedRecordingSeconds = useCallback(() => {
+    const startedAt = recordingStartTimeRef.current;
+    if (!startedAt) return recordingDurationRef.current;
+
+    const elapsed = Math.ceil((Date.now() - startedAt.getTime()) / 1000);
+    return Math.max(recordingDurationRef.current, elapsed);
+  }, []);
+
+  // Cleanup function
+  const cleanup = useCallback(() => {
+    clearDurationTimer();
     if (streamRef.current) {
       streamRef.current.getTracks().forEach(track => track.stop());
       streamRef.current = null;
     }
     mediaRecorderRef.current = null;
     recordedChunksRef.current = [];
-  }, []);
+  }, [clearDurationTimer]);
 
   // Cleanup on unmount
   useEffect(() => {
@@ -131,15 +152,32 @@ export default function MeetingRecorder({
       setRecordingState('recording');
       setShowSourceSelector(false);
 
-      // Get display media with audio
+      // Get display media with web-optimized constraints to keep files manageable.
       const displayMediaOptions: DisplayMediaStreamOptions = {
         video: {
-          displaySurface: sourceType === 'screen' ? 'monitor' : sourceType === 'window' ? 'window' : 'browser'
+          displaySurface: sourceType === 'screen' ? 'monitor' : sourceType === 'window' ? 'window' : 'browser',
+          width: { ideal: RECORDING_MAX_WIDTH, max: RECORDING_MAX_WIDTH },
+          height: { ideal: RECORDING_MAX_HEIGHT, max: RECORDING_MAX_HEIGHT },
+          frameRate: { ideal: RECORDING_FRAME_RATE, max: RECORDING_FRAME_RATE }
         } as any,
         audio: true
       };
 
-      const displayStream = await navigator.mediaDevices.getDisplayMedia(displayMediaOptions);
+      let displayStream: MediaStream;
+      try {
+        displayStream = await navigator.mediaDevices.getDisplayMedia(displayMediaOptions);
+      } catch (err: any) {
+        if (err?.name !== 'TypeError' && err?.name !== 'OverconstrainedError') {
+          throw err;
+        }
+
+        displayStream = await navigator.mediaDevices.getDisplayMedia({
+          video: {
+            displaySurface: sourceType === 'screen' ? 'monitor' : sourceType === 'window' ? 'window' : 'browser',
+          } as any,
+          audio: true,
+        });
+      }
 
       // Try to get user audio as well (microphone)
       let audioStream: MediaStream | null = null;
@@ -163,19 +201,22 @@ export default function MeetingRecorder({
         handleStopRecording();
       });
 
-      // Create MediaRecorder
-      const mimeType = MediaRecorder.isTypeSupported('video/webm;codecs=vp9,opus') 
-        ? 'video/webm;codecs=vp9,opus'
-        : MediaRecorder.isTypeSupported('video/webm;codecs=vp8,opus')
-          ? 'video/webm;codecs=vp8,opus'
-          : 'video/webm';
+      const preferredMimeTypes = [
+        'video/webm;codecs=vp9,opus',
+        'video/webm;codecs=vp8,opus',
+        'video/webm',
+      ];
+      const mimeType = preferredMimeTypes.find(type => MediaRecorder.isTypeSupported(type)) || 'video/webm';
 
       const mediaRecorder = new MediaRecorder(combinedStream, {
         mimeType,
-        videoBitsPerSecond: 2500000 // 2.5 Mbps
+        videoBitsPerSecond: RECORDING_VIDEO_BITRATE,
+        audioBitsPerSecond: RECORDING_AUDIO_BITRATE,
       });
 
       recordedChunksRef.current = [];
+      recordingDurationRef.current = 0;
+      setUploadProgress(0);
 
       mediaRecorder.ondataavailable = (event) => {
         if (event.data.size > 0) {
@@ -204,7 +245,9 @@ export default function MeetingRecorder({
       recordingStartTimeRef.current = startTime;
       setRecordingDuration(0);
       durationIntervalRef.current = setInterval(() => {
-        setRecordingDuration(prev => prev + 1);
+        const elapsed = getElapsedRecordingSeconds();
+        recordingDurationRef.current = elapsed;
+        setRecordingDuration(elapsed);
       }, 1000);
 
       onRecordingStarted?.();
@@ -226,6 +269,10 @@ export default function MeetingRecorder({
   // Stop recording
   const handleStopRecording = () => {
     if (mediaRecorderRef.current && mediaRecorderRef.current.state !== 'inactive') {
+      const finalDuration = getElapsedRecordingSeconds();
+      recordingDurationRef.current = finalDuration;
+      setRecordingDuration(finalDuration);
+      clearDurationTimer();
       setRecordingState('stopping');
       mediaRecorderRef.current.stop();
     }
@@ -244,9 +291,10 @@ export default function MeetingRecorder({
 
     try {
       // Create blob from recorded chunks
-      const blob = new Blob(recordedChunksRef.current, { type: 'video/webm' });
+      const recordedMimeType = mediaRecorderRef.current?.mimeType || 'video/webm';
+      const blob = new Blob(recordedChunksRef.current, { type: recordedMimeType });
       const fileSize = blob.size;
-      const duration = recordingDuration;
+      const duration = Math.max(1, getElapsedRecordingSeconds());
       const fileName = `recording_${incidentId}_${Date.now()}.webm`;
       const firebasePath = `recordings/${incidentId}/${fileName}`;
 
@@ -284,7 +332,7 @@ export default function MeetingRecorder({
               firebasePath,
               fileSize,
               duration,
-              mimeType: 'video/webm',
+              mimeType: recordedMimeType,
               recordingType: 'screen',
               startedAt: recordingStartTimeRef.current?.toISOString() || new Date().toISOString(),
               endedAt: new Date().toISOString()
@@ -325,11 +373,14 @@ export default function MeetingRecorder({
     return (
       <button
         onClick={handleStartRecording}
-        className="flex items-center gap-1.5 px-2 py-1 bg-red-600 hover:bg-red-700 text-white rounded transition-colors text-xs"
+        className={compact
+          ? 'inline-flex h-8 w-8 items-center justify-center rounded-md bg-red-600 text-white transition-colors hover:bg-red-700'
+          : 'flex items-center gap-1.5 px-2 py-1 bg-red-600 hover:bg-red-700 text-white rounded transition-colors text-xs'}
         title="Start Recording"
+        aria-label="Start recording"
       >
-        <Circle className="w-3 h-3 fill-current" />
-        <span className="font-medium">Record</span>
+        <Circle className={compact ? 'h-3.5 w-3.5 fill-current' : 'w-3 h-3 fill-current'} />
+        {!compact && <span className="font-medium">Record</span>}
       </button>
     );
   }
@@ -410,6 +461,28 @@ export default function MeetingRecorder({
   }
 
   if (recordingState === 'recording') {
+    if (compact) {
+      return (
+        <div className="inline-flex h-8 items-center overflow-hidden rounded-md border border-red-500/60 bg-red-600/20 text-white">
+          <div className="inline-flex h-full items-center gap-1.5 px-2 text-[11px] font-semibold text-red-200">
+            <span className="relative flex h-2 w-2">
+              <span className="absolute inline-flex h-full w-full animate-ping rounded-full bg-red-400 opacity-75"></span>
+              <span className="relative inline-flex h-2 w-2 rounded-full bg-red-500"></span>
+            </span>
+            <span className="font-mono">{formatDuration(recordingDuration)}</span>
+          </div>
+          <button
+            onClick={handleStopRecording}
+            className="inline-flex h-full w-8 items-center justify-center border-l border-red-500/50 text-white transition-colors hover:bg-red-600/40"
+            title="Stop Recording"
+            aria-label="Stop recording"
+          >
+            <Square className="h-3.5 w-3.5 fill-current" />
+          </button>
+        </div>
+      );
+    }
+
     return (
       <div className="flex items-center gap-3">
         {/* Recording indicator */}
@@ -436,6 +509,17 @@ export default function MeetingRecorder({
   }
 
   if (recordingState === 'stopping' || recordingState === 'uploading') {
+    if (compact) {
+      return (
+        <div
+          className="inline-flex h-8 w-8 items-center justify-center rounded-md bg-slate-800 text-blue-300"
+          title={recordingState === 'stopping' ? 'Stopping recording' : `Uploading recording ${uploadProgress}%`}
+        >
+          <Loader2 className="h-4 w-4 animate-spin" />
+        </div>
+      );
+    }
+
     return (
       <div className="flex items-center gap-3 px-4 py-2 bg-gray-700/50 rounded-lg">
         <Loader2 className="w-5 h-5 text-blue-400 animate-spin" />
@@ -460,6 +544,17 @@ export default function MeetingRecorder({
   }
 
   if (recordingState === 'complete') {
+    if (compact) {
+      return (
+        <div
+          className="inline-flex h-8 w-8 items-center justify-center rounded-md bg-green-600/20 text-green-300"
+          title="Recording saved"
+        >
+          <CheckCircle className="h-4 w-4" />
+        </div>
+      );
+    }
+
     return (
       <div className="flex items-center gap-2 px-3 py-2 bg-green-600/20 border border-green-500/50 rounded-lg">
         <CheckCircle className="w-5 h-5 text-green-400" />
@@ -469,6 +564,22 @@ export default function MeetingRecorder({
   }
 
   if (recordingState === 'error') {
+    if (compact) {
+      return (
+        <button
+          onClick={() => {
+            setRecordingState('idle');
+            setErrorMessage(null);
+          }}
+          className="inline-flex h-8 w-8 items-center justify-center rounded-md bg-red-600/20 text-red-300 transition-colors hover:bg-red-600/30"
+          title={errorMessage || 'Recording failed'}
+          aria-label="Dismiss recording error"
+        >
+          <AlertCircle className="h-4 w-4" />
+        </button>
+      );
+    }
+
     return (
       <div className="flex items-center gap-3">
         <div className="flex items-center gap-2 px-3 py-2 bg-red-600/20 border border-red-500/50 rounded-lg">

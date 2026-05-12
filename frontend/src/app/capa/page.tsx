@@ -104,6 +104,140 @@ const priorityColors: Record<ActionPriority, string> = {
   CRITICAL: 'bg-red-100 text-red-800 dark:bg-red-900 dark:text-red-300',
 };
 
+type ImplementationPlanDetail = {
+  label: string;
+  value: string;
+};
+
+type ImplementationPlanStep = {
+  title: string;
+  details: ImplementationPlanDetail[];
+  paragraphs: string[];
+};
+
+const implementationPlanDetailLabels = [
+  'Estimated Time',
+  'Responsible',
+  'Due Date',
+  'Ownership',
+  'Verification',
+  'Notes',
+  'Resources Needed',
+  'Documentation Requirements',
+];
+
+const escapeRegExp = (value: string) => value.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+
+const parseInlinePlanText = (value: string) => (
+  value
+    .replace(/\*\*/g, '')
+    .replace(/\s+/g, ' ')
+    .trim()
+);
+
+const parseImplementationPlanDetails = (text: string) => {
+  const labelsPattern = implementationPlanDetailLabels.map(escapeRegExp).join('|');
+  const detailPattern = new RegExp(
+    `(?:^|\\s[-–—]\\s+)(${labelsPattern}):\\s*([\\s\\S]*?)(?=\\s[-–—]\\s+(?:${labelsPattern}):|$)`,
+    'gi'
+  );
+  const details: ImplementationPlanDetail[] = [];
+  const matches = Array.from(text.matchAll(detailPattern));
+
+  matches.forEach((match) => {
+    const label = parseInlinePlanText(match[1]);
+    const value = parseInlinePlanText(match[2]);
+    if (label && value) {
+      details.push({ label, value });
+    }
+  });
+
+  return details;
+};
+
+const parseImplementationPlanSteps = (text: string): ImplementationPlanStep[] => {
+  const normalized = text
+    .replace(/\r/g, '')
+    .replace(/^Implementation Plan:\s*/i, '')
+    .replace(/\s+(\*\*Step\s+\d+\s*:)/gi, '\n$1')
+    .replace(/\s+(Step\s+\d+\s*:)/gi, '\n$1')
+    .trim();
+
+  return normalized
+    .split(/\n+/)
+    .map((block) => block.trim())
+    .filter(Boolean)
+    .map((block) => {
+      const boldStepMatch = block.match(/^\*\*(Step\s+\d+\s*:\s*.+?)\*\*\s*(.*)$/i);
+      const plainStepPattern = new RegExp(
+        `^(Step\\s+\\d+\\s*:\\s*.*?)(?=\\s[-–—]\\s+(?:${implementationPlanDetailLabels.map(escapeRegExp).join('|')}):|$)([\\s\\S]*)$`,
+        'i'
+      );
+      const plainStepMatch = block.match(plainStepPattern);
+
+      if (!boldStepMatch && !plainStepMatch) {
+        return {
+          title: '',
+          details: [],
+          paragraphs: [parseInlinePlanText(block)],
+        };
+      }
+
+      const title = parseInlinePlanText((boldStepMatch || plainStepMatch)?.[1] || '');
+      const remainingText = ((boldStepMatch || plainStepMatch)?.[2] || '').replace(/^[-–—]\s*/, '').trim();
+      const details = parseImplementationPlanDetails(remainingText);
+      const paragraphs = details.length === 0 && remainingText ? [parseInlinePlanText(remainingText)] : [];
+
+      return {
+        title,
+        details,
+        paragraphs,
+      };
+    })
+    .filter((step) => step.title || step.details.length > 0 || step.paragraphs.some(Boolean));
+};
+
+function formatImplementationPlanForDetails(text: string) {
+  const steps = parseImplementationPlanSteps(text);
+
+  if (steps.length === 0) {
+    return (
+      <p className="text-sm leading-6 text-gray-700 dark:text-gray-300">
+        {parseInlinePlanText(text)}
+      </p>
+    );
+  }
+
+  return (
+    <div className="space-y-5">
+      {steps.map((step, index) => (
+        <section key={`${step.title}-${index}`} className="space-y-3">
+          {step.title && (
+            <h4 className="text-sm font-semibold leading-6 text-gray-950 dark:text-white sm:text-base">
+              {step.title}
+            </h4>
+          )}
+          {step.paragraphs.map((paragraph, paragraphIndex) => (
+            <p key={`${step.title}-p-${paragraphIndex}`} className="text-sm leading-6 text-gray-700 dark:text-gray-300">
+              {paragraph}
+            </p>
+          ))}
+          {step.details.length > 0 && (
+            <ul className="ml-5 list-disc space-y-2 text-sm leading-6 text-gray-700 dark:text-gray-300">
+              {step.details.map((detail) => (
+                <li key={`${step.title}-${detail.label}`}>
+                  <span className="font-medium text-gray-800 dark:text-gray-100">{detail.label}:</span>{' '}
+                  <span>{detail.value}</span>
+                </li>
+              ))}
+            </ul>
+          )}
+        </section>
+      ))}
+    </div>
+  );
+}
+
 function CAPAContent() {
   const { user } = useAuth();
   const router = useRouter();
@@ -922,9 +1056,9 @@ function CAPAContent() {
                                 {action.status === 'IN_PROGRESS' && (
                                   <button
                                     onClick={() => openCompleteModal(action)}
-                                    className="px-2.5 py-1.5 text-xs font-medium text-green-600 bg-green-50 dark:bg-green-900/20 rounded touch-manipulation"
+                                    className="px-2.5 py-1.5 text-xs font-medium text-blue-600 bg-blue-50 dark:bg-blue-900/20 rounded touch-manipulation"
                                   >
-                                    Complete
+                                    Continue
                                   </button>
                                 )}
                                 {action.status === 'COMPLETED' && (
@@ -1039,9 +1173,9 @@ function CAPAContent() {
                                       {action.status === 'IN_PROGRESS' && (
                                         <button
                                           onClick={() => openCompleteModal(action)}
-                                          className="text-green-600 hover:text-green-800 text-sm"
+                                          className="text-blue-600 hover:text-blue-800 text-sm"
                                         >
-                                          Complete
+                                          Continue
                                         </button>
                                       )}
                                       {action.status === 'COMPLETED' && (
@@ -1087,7 +1221,7 @@ function CAPAContent() {
         {/* Details Modal */}
         {showDetailsModal && selectedAction && (
           <div className="fixed inset-0 bg-black bg-opacity-50 flex items-end sm:items-center justify-center p-0 sm:p-4 z-50">
-            <div className="bg-white dark:bg-gray-800 rounded-t-2xl sm:rounded-lg shadow-xl w-full sm:max-w-2xl max-h-[85vh] sm:max-h-[90vh] overflow-y-auto">
+            <div className="bg-white dark:bg-gray-800 rounded-t-2xl sm:rounded-lg shadow-xl w-full sm:max-w-4xl max-h-[85vh] sm:max-h-[90vh] overflow-y-auto">
               <div className="p-4 sm:p-6">
                 <div className="flex justify-between items-start mb-3 sm:mb-4">
                   <div className="pr-4">
@@ -1282,9 +1416,13 @@ function CAPAContent() {
                         </div>
                       )}
                       {selectedAction.implementationPlan && (
-                        <div className="ml-8 p-2 bg-blue-50 dark:bg-blue-900/20 rounded text-sm">
-                          <strong className="text-blue-800 dark:text-blue-300">Implementation Plan:</strong>
-                          <p className="text-blue-700 dark:text-blue-400 mt-1">{selectedAction.implementationPlan}</p>
+                        <div className="ml-0 rounded-lg border border-blue-100 bg-blue-50 p-4 text-sm dark:border-blue-900/50 dark:bg-blue-950/30 sm:ml-8">
+                          <strong className="text-sm font-semibold text-blue-900 dark:text-blue-200">
+                            Implementation Plan
+                          </strong>
+                          <div className="mt-4">
+                            {formatImplementationPlanForDetails(selectedAction.implementationPlan)}
+                          </div>
                         </div>
                       )}
                       {selectedAction.completedAt && (

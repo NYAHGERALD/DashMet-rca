@@ -64,6 +64,22 @@ const formatDuration = (seconds?: number): string => {
   return `${mins.toString().padStart(2, '0')}:${secs.toString().padStart(2, '0')}`;
 };
 
+const getRecordingDurationSeconds = (recording: Pick<Recording, 'duration' | 'startedAt' | 'endedAt'>) => {
+  if (typeof recording.duration === 'number' && recording.duration > 0) {
+    return recording.duration;
+  }
+
+  if (!recording.endedAt) return undefined;
+
+  const started = new Date(recording.startedAt).getTime();
+  const ended = new Date(recording.endedAt).getTime();
+  if (!Number.isFinite(started) || !Number.isFinite(ended) || ended <= started) {
+    return undefined;
+  }
+
+  return Math.max(1, Math.ceil((ended - started) / 1000));
+};
+
 const formatFileSize = (bytes: number): string => {
   if (bytes < 1024) return `${bytes} B`;
   if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)} KB`;
@@ -216,6 +232,20 @@ export default function RecordingHistory({ incidentId, isOpen, onClose, currentR
     return Object.values(groups).sort((a, b) => b.date.getTime() - a.date.getTime());
   }, [recordings]);
 
+  const computedStats = React.useMemo(() => ({
+    totalRecordings: recordings.length,
+    totalDuration: recordings.reduce((sum, recording) => sum + (getRecordingDurationSeconds(recording) || 0), 0),
+    totalSize: recordings.reduce((sum, recording) => sum + (recording.fileSize || 0), 0),
+  }), [recordings]);
+
+  const displayStats = stats
+    ? {
+        totalRecordings: stats.totalRecordings || computedStats.totalRecordings,
+        totalDuration: stats.totalDuration || computedStats.totalDuration,
+        totalSize: stats.totalSize || computedStats.totalSize,
+      }
+    : computedStats;
+
   if (!isOpen) return null;
 
   return (
@@ -264,18 +294,18 @@ export default function RecordingHistory({ incidentId, isOpen, onClose, currentR
           ) : (
             <div className="space-y-3 sm:space-y-4">
               {/* Stats */}
-              {stats && (
+              {displayStats && (
                 <div className="grid grid-cols-3 gap-2 sm:gap-3 mb-4 sm:mb-6">
                   <div className="bg-gray-800 rounded-lg p-2 sm:p-3 text-center">
-                    <div className="text-lg sm:text-2xl font-bold text-white">{stats.totalRecordings}</div>
+                    <div className="text-lg sm:text-2xl font-bold text-white">{displayStats.totalRecordings}</div>
                     <div className="text-[10px] sm:text-xs text-gray-400">Recordings</div>
                   </div>
                   <div className="bg-gray-800 rounded-lg p-2 sm:p-3 text-center">
-                    <div className="text-lg sm:text-2xl font-bold text-blue-400">{formatDuration(stats.totalDuration)}</div>
+                    <div className="text-lg sm:text-2xl font-bold text-blue-400">{formatDuration(displayStats.totalDuration)}</div>
                     <div className="text-[10px] sm:text-xs text-gray-400">Total Duration</div>
                   </div>
                   <div className="bg-gray-800 rounded-lg p-2 sm:p-3 text-center">
-                    <div className="text-lg sm:text-2xl font-bold text-green-400">{formatFileSize(stats.totalSize)}</div>
+                    <div className="text-lg sm:text-2xl font-bold text-green-400">{formatFileSize(displayStats.totalSize)}</div>
                     <div className="text-[10px] sm:text-xs text-gray-400">Total Size</div>
                   </div>
                 </div>
@@ -332,7 +362,7 @@ export default function RecordingHistory({ incidentId, isOpen, onClose, currentR
                                   <div className="flex flex-wrap items-center gap-2 sm:gap-3 mt-1 text-[10px] sm:text-xs text-gray-400">
                                     <span className="flex items-center gap-1">
                                       <Clock className="w-3 h-3" />
-                                      {formatDuration(recording.duration)}
+                                      {formatDuration(getRecordingDurationSeconds(recording))}
                                     </span>
                                     <span className="flex items-center gap-1">
                                       <HardDrive className="w-3 h-3" />

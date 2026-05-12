@@ -52,11 +52,18 @@ router.put('/', async (req: AuthRequest, res: Response) => {
       bakeryEmailEnabled,
       bakeryBrowserEnabled,
       bakeryMobilePushEnabled,
+      bakerySubmissionPushEnabled,
+      bakeryOeeBelowTargetPushEnabled,
       issueMobilePushEnabled,
       issueCreatedPushEnabled,
       issueStatusPushEnabled,
       issueEditedPushEnabled,
       issueDeletedPushEnabled,
+      incidentMobilePushEnabled,
+      incidentCreatedPushEnabled,
+      incidentTeamInvitePushEnabled,
+      capaMobilePushEnabled,
+      capaBoardCreatedPushEnabled,
       notifyTaskOverdue,
       notifyTodoOverdue,
       notifyMeetingOverdue,
@@ -152,11 +159,18 @@ router.put('/', async (req: AuthRequest, res: Response) => {
     if (bakeryEmailEnabled !== undefined) updateData.bakeryEmailEnabled = Boolean(bakeryEmailEnabled);
     if (bakeryBrowserEnabled !== undefined) updateData.bakeryBrowserEnabled = Boolean(bakeryBrowserEnabled);
     if (bakeryMobilePushEnabled !== undefined) updateData.bakeryMobilePushEnabled = Boolean(bakeryMobilePushEnabled);
+    if (bakerySubmissionPushEnabled !== undefined) updateData.bakerySubmissionPushEnabled = Boolean(bakerySubmissionPushEnabled);
+    if (bakeryOeeBelowTargetPushEnabled !== undefined) updateData.bakeryOeeBelowTargetPushEnabled = Boolean(bakeryOeeBelowTargetPushEnabled);
     if (issueMobilePushEnabled !== undefined) updateData.issueMobilePushEnabled = Boolean(issueMobilePushEnabled);
     if (issueCreatedPushEnabled !== undefined) updateData.issueCreatedPushEnabled = Boolean(issueCreatedPushEnabled);
     if (issueStatusPushEnabled !== undefined) updateData.issueStatusPushEnabled = Boolean(issueStatusPushEnabled);
     if (issueEditedPushEnabled !== undefined) updateData.issueEditedPushEnabled = Boolean(issueEditedPushEnabled);
     if (issueDeletedPushEnabled !== undefined) updateData.issueDeletedPushEnabled = Boolean(issueDeletedPushEnabled);
+    if (incidentMobilePushEnabled !== undefined) updateData.incidentMobilePushEnabled = Boolean(incidentMobilePushEnabled);
+    if (incidentCreatedPushEnabled !== undefined) updateData.incidentCreatedPushEnabled = Boolean(incidentCreatedPushEnabled);
+    if (incidentTeamInvitePushEnabled !== undefined) updateData.incidentTeamInvitePushEnabled = Boolean(incidentTeamInvitePushEnabled);
+    if (capaMobilePushEnabled !== undefined) updateData.capaMobilePushEnabled = Boolean(capaMobilePushEnabled);
+    if (capaBoardCreatedPushEnabled !== undefined) updateData.capaBoardCreatedPushEnabled = Boolean(capaBoardCreatedPushEnabled);
     if (notifyTaskOverdue !== undefined) updateData.notifyTaskOverdue = Boolean(notifyTaskOverdue);
     if (notifyTodoOverdue !== undefined) updateData.notifyTodoOverdue = Boolean(notifyTodoOverdue);
     if (notifyMeetingOverdue !== undefined) updateData.notifyMeetingOverdue = Boolean(notifyMeetingOverdue);

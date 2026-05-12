@@ -2,6 +2,27 @@ import { Request, Response, NextFunction } from 'express';
 import { prisma } from '../utils/prisma';
 import { websocketService } from '../services/websocketService';
 
+const getRecordingDurationSeconds = (
+  duration: unknown,
+  startedAt?: Date | string | null,
+  endedAt?: Date | string | null
+) => {
+  const parsedDuration = Number(duration);
+  if (Number.isFinite(parsedDuration) && parsedDuration > 0) {
+    return Math.round(parsedDuration);
+  }
+
+  if (!startedAt || !endedAt) return null;
+
+  const started = new Date(startedAt).getTime();
+  const ended = new Date(endedAt).getTime();
+  if (!Number.isFinite(started) || !Number.isFinite(ended) || ended <= started) {
+    return null;
+  }
+
+  return Math.max(1, Math.ceil((ended - started) / 1000));
+};
+
 /**
  * Create a new meeting recording
  */
@@ -39,6 +60,8 @@ export const createRecording = async (req: Request, res: Response, next: NextFun
     // Check for invalid dates and use fallback
     const validStartedAt = isNaN(parsedStartedAt.getTime()) ? now : parsedStartedAt;
     const validEndedAt = isNaN(parsedEndedAt.getTime()) ? now : parsedEndedAt;
+    const normalizedDuration = getRecordingDurationSeconds(duration, validStartedAt, validEndedAt);
+    const normalizedFileSize = Number.isFinite(Number(fileSize)) ? Math.max(0, Math.round(Number(fileSize))) : 0;
 
     const recording = await prisma.meetingRecording.create({
       data: {
@@ -49,8 +72,8 @@ export const createRecording = async (req: Request, res: Response, next: NextFun
         fileName,
         fileUrl,
         firebasePath,
-        fileSize: fileSize || 0,
-        duration,
+        fileSize: normalizedFileSize,
+        duration: normalizedDuration,
         mimeType: mimeType || 'video/webm',
         recordingType: recordingType || 'screen',
         thumbnailUrl,
@@ -68,13 +91,19 @@ export const createRecording = async (req: Request, res: Response, next: NextFun
 
     // Broadcast to all participants using websocketService
     websocketService.emitToIncident(incidentId, 'recording:created', {
+      incidentId,
       recording: {
         id: recording.id,
         title: recording.title,
         fileName: recording.fileName,
         fileUrl: recording.fileUrl,
+        firebasePath: recording.firebasePath,
+        fileSize: recording.fileSize,
         duration: recording.duration,
+        mimeType: recording.mimeType,
         recordingType: recording.recordingType,
+        status: recording.status,
+        roomName: recording.roomName,
         recordedBy: recording.recordedBy,
         startedAt: recording.startedAt,
         endedAt: recording.endedAt,
@@ -114,7 +143,10 @@ export const getRecordingsByIncident = async (req: Request, res: Response, next:
       orderBy: { startedAt: 'desc' }
     });
 
-    return res.json(recordings);
+    return res.json(recordings.map(recording => ({
+      ...recording,
+      duration: getRecordingDurationSeconds(recording.duration, recording.startedAt, recording.endedAt)
+    })));
   } catch (error) {
     console.error('Error getting recordings:', error);
     next(error);
@@ -144,7 +176,10 @@ export const getRecordingById = async (req: Request, res: Response, next: NextFu
       return res.status(404).json({ error: 'Recording not found' });
     }
 
-    return res.json(recording);
+    return res.json({
+      ...recording,
+      duration: getRecordingDurationSeconds(recording.duration, recording.startedAt, recording.endedAt)
+    });
   } catch (error) {
     console.error('Error getting recording:', error);
     next(error);
@@ -174,7 +209,10 @@ export const updateRecording = async (req: Request, res: Response, next: NextFun
       }
     });
 
-    return res.json(recording);
+    return res.json({
+      ...recording,
+      duration: getRecordingDurationSeconds(recording.duration, recording.startedAt, recording.endedAt)
+    });
   } catch (error) {
     console.error('Error updating recording:', error);
     next(error);
@@ -234,13 +272,17 @@ export const getRecordingStats = async (req: Request, res: Response, next: NextF
         id: true,
         duration: true,
         fileSize: true,
-        roomName: true
+        roomName: true,
+        startedAt: true,
+        endedAt: true
       }
     });
 
     const stats = {
       totalRecordings: recordings.length,
-      totalDuration: recordings.reduce((sum: number, r: { duration: number | null }) => sum + (r.duration || 0), 0),
+      totalDuration: recordings.reduce((sum, recording) => {
+        return sum + (getRecordingDurationSeconds(recording.duration, recording.startedAt, recording.endedAt) || 0);
+      }, 0),
       totalSize: recordings.reduce((sum: number, r: { fileSize: number }) => sum + (r.fileSize || 0), 0),
       sessions: [...new Set(recordings.map((r: { roomName: string }) => r.roomName))].length
     };

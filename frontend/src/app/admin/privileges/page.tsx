@@ -5,6 +5,7 @@ import { useRouter } from 'next/navigation';
 import { useAuth } from '@/components/providers/AuthProvider';
 import LoadingState from '@/components/ui/LoadingState';
 import ProtectedRoute from '@/components/auth/ProtectedRoute';
+import { useToast } from '@/components/ui/Toast';
 import api from '@/lib/api';
 import { io, Socket } from 'socket.io-client';
 import { 
@@ -181,10 +182,10 @@ const CATEGORY_ICONS: Record<string, React.ReactNode> = {
 function PrivilegesContent() {
   const router = useRouter();
   const { user } = useAuth();
+  const { showToast } = useToast();
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
-  const [successMessage, setSuccessMessage] = useState<string | null>(null);
   
   // Data state
   const [definitions, setDefinitions] = useState<PrivilegeDefinition[]>([]);
@@ -322,8 +323,7 @@ function PrivilegesContent() {
       const response = await api.post(`/privileges/audit-logs/${logId}/revert`);
       
       if (response.data.success) {
-        setSuccessMessage(response.data.message);
-        setTimeout(() => setSuccessMessage(null), 3000);
+        showToast(response.data.message || 'Privilege change reverted', 'success');
         
         // Refresh audit logs
         fetchAuditLogs();
@@ -566,8 +566,7 @@ function PrivilegesContent() {
         ...prev,
         [role]: { ...prev[role], [featureKey]: !currentValue },
       }));
-      setSuccessMessage(`Updated ${featureKey} for ${ROLE_CONFIG[role]?.label || role}`);
-      setTimeout(() => setSuccessMessage(null), 2000);
+      showToast(`Updated ${featureKey} for ${ROLE_CONFIG[role]?.label || role}`, 'success');
     } catch (err: any) {
       setError(err.response?.data?.error || 'Failed to update navigation privilege');
     } finally {
@@ -614,8 +613,7 @@ function PrivilegesContent() {
           PrivilegeOverrides: [...u.PrivilegeOverrides, { featureKey, isEnabled }],
         };
       }));
-      setSuccessMessage(`User override updated for ${featureKey}`);
-      setTimeout(() => setSuccessMessage(null), 2000);
+      showToast(`User override updated for ${featureKey}`, 'success');
     } catch (err: any) {
       setError(err.response?.data?.error || 'Failed to update user override');
     } finally {
@@ -636,8 +634,7 @@ function PrivilegesContent() {
           PrivilegeOverrides: u.PrivilegeOverrides.filter(o => o.featureKey !== featureKey),
         };
       }));
-      setSuccessMessage(`Override removed — user will follow role defaults`);
-      setTimeout(() => setSuccessMessage(null), 2000);
+      showToast('Override removed - user will follow role defaults', 'success');
     } catch (err: any) {
       setError(err.response?.data?.error || 'Failed to remove override');
     } finally {
@@ -653,8 +650,7 @@ function PrivilegesContent() {
       setNavUsers(prev => prev.map(u =>
         u.id === userId ? { ...u, PrivilegeOverrides: [] } : u
       ));
-      setSuccessMessage('All user overrides have been reset to role defaults');
-      setTimeout(() => setSuccessMessage(null), 2000);
+      showToast('All user overrides have been reset to role defaults', 'success');
     } catch (err: any) {
       setError(err.response?.data?.error || 'Failed to reset overrides');
     } finally {
@@ -700,8 +696,7 @@ function PrivilegesContent() {
           },
         }));
         
-        setSuccessMessage(`Updated ${featureKey} for ${ROLE_CONFIG[role]?.label || role}`);
-        setTimeout(() => setSuccessMessage(null), 2000);
+        showToast(`Updated ${featureKey} for ${ROLE_CONFIG[role]?.label || role}`, 'success');
       }
     } catch (err: any) {
       console.error('Error updating privilege:', err);
@@ -725,8 +720,7 @@ function PrivilegesContent() {
       
       if (response.data.success) {
         await fetchPrivileges();
-        setSuccessMessage(`Privileges reset to defaults for ${ROLE_CONFIG[selectedRole]?.label || selectedRole}`);
-        setTimeout(() => setSuccessMessage(null), 3000);
+        showToast(`Privileges reset to defaults for ${ROLE_CONFIG[selectedRole]?.label || selectedRole}`, 'success');
       }
     } catch (err: any) {
       console.error('Error resetting privileges:', err);
@@ -871,15 +865,6 @@ function PrivilegesContent() {
             <button onClick={() => setError(null)} className="ml-auto text-red-600 dark:text-red-400 hover:text-red-800">
               <X className="w-5 h-5" />
             </button>
-          </div>
-        </div>
-      )}
-
-      {successMessage && (
-        <div className="w-full px-4 sm:px-6 lg:px-8 py-3">
-          <div className="bg-green-50 dark:bg-green-900/30 border border-green-200 dark:border-green-800 rounded-lg p-4 flex items-center gap-3">
-            <Check className="w-5 h-5 text-green-600 dark:text-green-400 flex-shrink-0" />
-            <p className="text-green-700 dark:text-green-300">{successMessage}</p>
           </div>
         </div>
       )}

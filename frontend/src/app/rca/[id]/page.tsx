@@ -1,10 +1,11 @@
 'use client';
 
-import { useState, useEffect, useCallback } from 'react';
+import { Suspense, useState, useEffect, useCallback, useRef } from 'react';
 import { useParams, useRouter } from 'next/navigation';
+import { AlertCircle, ArrowLeft, CheckCircle2, ClipboardList, Loader2, Pencil } from 'lucide-react';
 import api from '@/lib/api';
 import LoadingState from '@/components/ui/LoadingState';
-import { formatDate } from '@/lib/dateUtils';
+import { formatDateTime } from '@/lib/dateUtils';
 import FiveWhysBuilder from '@/components/rca/FiveWhysBuilder';
 import FishboneBuilder from '@/components/rca/FishboneBuilder';
 import TimelinePanel from '@/components/rca/TimelinePanel';
@@ -13,9 +14,10 @@ import CommentPanel from '@/components/rca/CommentPanel';
 import { ChatSidebar } from '@/components/team';
 import { useAuth } from '@/components/providers/AuthProvider';
 import { useWebSocket } from '@/lib/websocket';
-import { usePrivileges, RCA_PRIVILEGES } from '@/lib/usePrivileges';
+import { usePrivileges, INCIDENTS_PRIVILEGES, RCA_PRIVILEGES, CAPA_PRIVILEGES } from '@/lib/usePrivileges';
 import { useAccessDeniedModal, handlePrivilegeError } from '@/components/modals/AccessDeniedModal';
 import ProtectedRoute from '@/components/auth/ProtectedRoute';
+import IncidentFormModal from '@/components/incidents/IncidentFormModal';
 
 interface Participant {
   id: string;
@@ -45,6 +47,7 @@ interface RCAAnalysis {
   fishboneData: any;
   isValidated: boolean;
   validatedAt: string | null;
+  incidentId: string;
   createdAt: string;
   updatedAt: string;
   incident: {
@@ -54,6 +57,8 @@ interface RCAAnalysis {
     type: string;
     status: string;
     severity: string | null;
+    reportedAt?: string;
+    occurredAt?: string;
     isTeamIncident?: boolean;
     visibility?: 'PRIVATE' | 'TEAM' | 'PUBLIC';
     category: { name: string };
@@ -165,6 +170,7 @@ interface AIRecommendation {
   recommendedMethod: string;
   reason: string;
   confidence: number;
+  alternativeMethod?: string;
   alternativeReason?: string;
   factors: {
     complexity: string;
@@ -184,6 +190,56 @@ interface AIRecommendation {
     };
   };
 }
+
+type RCAWorkspaceTab = 'record' | 'analysis' | 'diagram' | 'actions' | 'controls';
+type RCAMethod = 'FIVE_WHYS' | 'FISHBONE';
+type RCAMethodSwitchState = {
+  from: RCAMethod;
+  to: RCAMethod;
+  activeStep: number;
+  progress: number;
+};
+type CAPAGenerationStep = 'idle' | 'validating' | 'generating' | 'complete' | 'error';
+
+const formatRCAMethodLabel = (method: RCAMethod) => method === 'FIVE_WHYS' ? '5 Whys' : 'Fishbone';
+const methodSwitchSteps = ['Saving selection', 'Refreshing analysis', 'Opening workspace'];
+const capaGenerationSteps = ['Validate RCA', 'Create CAPA records', 'Ready for CAPA Board'];
+const wait = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
+
+const countValidItems = (items: any[] | undefined, textKeys: string[]) => (
+  Array.isArray(items)
+    ? items.filter((item) => textKeys.some((key) => typeof item?.[key] === 'string' && item[key].trim())).length
+    : 0
+);
+
+const countActionPlans = (actionPlans: any) => (
+  countValidItems(actionPlans?.immediate, ['action']) +
+  countValidItems(actionPlans?.shortTerm, ['action']) +
+  countValidItems(actionPlans?.longTerm, ['action'])
+);
+
+const getCorrectiveActionCount = (analysis: RCAAnalysis | null) => (
+  analysis?.method === 'FIVE_WHYS'
+    ? countActionPlans(analysis.fiveWhysData?.actionPlans)
+    : countActionPlans(analysis?.fishboneData?.actionPlans)
+);
+
+const getPreventiveControlCount = (analysis: RCAAnalysis | null) => {
+  const controls = analysis?.method === 'FIVE_WHYS'
+    ? analysis?.fiveWhysData?.preventiveControls
+    : analysis?.fishboneData?.preventiveControls;
+
+  return countValidItems(controls, ['control', 'description']);
+};
+
+const getCAPARootCauseStatement = (analysis: RCAAnalysis | null) => {
+  const statement = analysis?.rootCauseStatement ||
+    analysis?.fiveWhysData?.rootCause ||
+    analysis?.fishboneData?.rootCauseText ||
+    '';
+
+  return typeof statement === 'string' ? statement.trim() : '';
+};
 
 export default function RCAWorkspacePageWrapper() {
   return (
@@ -216,9 +272,11 @@ function RCAWorkspaceContent() {
 
   // Privilege-based access control
   const { hasPrivilege } = usePrivileges();
+  const canEditIncident = hasPrivilege(INCIDENTS_PRIVILEGES.EDIT);
   const canEditRCA = hasPrivilege(RCA_PRIVILEGES.EDIT);
   const canUseAI = hasPrivilege(RCA_PRIVILEGES.AI_FIVE_WHYS) || hasPrivilege(RCA_PRIVILEGES.AI_FISHBONE);
-  const { showAccessDenied, accessDeniedModal } = useAccessDeniedModal();
+  const canCreateCAPA = hasPrivilege(CAPA_PRIVILEGES.CREATE);
+  const { showAccessDenied, modal: accessDeniedModal } = useAccessDeniedModal();
 
   // Connect to WebSocket when user is available
   useEffect(() => {
@@ -234,15 +292,95 @@ function RCAWorkspaceContent() {
   const [sidebarTab, setSidebarTab] = useState<'evidence' | 'timeline' | 'comments'>('evidence');
   const [isSidebarOpen, setIsSidebarOpen] = useState(false);
   const [recommendation, setRecommendation] = useState<AIRecommendation | null>(null);
-  const [showMethodSelector, setShowMethodSelector] = useState(false);
+  const [methodSwitch, setMethodSwitch] = useState<RCAMethodSwitchState | null>(null);
+  const [autoSaveEnabled, setAutoSaveEnabled] = useState(true);
+  const [manualSaveRequest, setManualSaveRequest] = useState(0);
   const [generatingCAPA, setGeneratingCAPA] = useState(false);
   const [capaGenerated, setCapaGenerated] = useState(false);
+  const [capaGenerationModalOpen, setCapaGenerationModalOpen] = useState(false);
+  const [capaGenerationStep, setCapaGenerationStep] = useState<CAPAGenerationStep>('idle');
+  const [generatedCapaCount, setGeneratedCapaCount] = useState(0);
+  const [capaGenerationMessage, setCapaGenerationMessage] = useState('');
+  const [capaGenerationError, setCapaGenerationError] = useState('');
+  const [workspaceTab, setWorkspaceTab] = useState<RCAWorkspaceTab>('record');
+  const [incidentEditModalOpen, setIncidentEditModalOpen] = useState(false);
+  const [methodologyModalOpen, setMethodologyModalOpen] = useState(false);
+  const [selectedRcaMethod, setSelectedRcaMethod] = useState<RCAMethod | null>(null);
+  const [analyzingMethodology, setAnalyzingMethodology] = useState(false);
+  const [methodologyRecommendation, setMethodologyRecommendation] = useState<AIRecommendation | null>(null);
+  const methodologyModalRef = useRef<HTMLDivElement | null>(null);
+  const methodologyDragRef = useRef<{
+    pointerId: number;
+    startX: number;
+    startY: number;
+    originLeft: number;
+    originTop: number;
+  } | null>(null);
+  const [methodologyModalPosition, setMethodologyModalPosition] = useState({ left: 0, top: 0 });
+  const [isMethodologyModalReady, setIsMethodologyModalReady] = useState(false);
+  const [isMethodologyModalDragging, setIsMethodologyModalDragging] = useState(false);
+
+  useEffect(() => {
+    if (typeof window === 'undefined') return;
+    const storedPreference = window.localStorage.getItem('dashmet-rca-auto-save');
+    if (storedPreference !== null) {
+      setAutoSaveEnabled(storedPreference === 'true');
+    }
+  }, []);
+
+  useEffect(() => {
+    if (rca?.method !== 'FISHBONE' && workspaceTab === 'diagram') {
+      setWorkspaceTab('analysis');
+    }
+  }, [rca?.method, workspaceTab]);
+
+  useEffect(() => {
+    if (rca?.status === 'NOT_STARTED' && workspaceTab !== 'record') {
+      setWorkspaceTab('record');
+    }
+  }, [rca?.status, workspaceTab]);
+
+  const formatLabel = (value?: string | null) => value ? value.replace(/_/g, ' ') : 'Not set';
+
+  const getIncidentStatusBadgeClass = (status?: string | null) => {
+    switch (status) {
+      case 'SUBMITTED':
+      case 'IN_PROGRESS':
+        return 'bg-blue-100 text-blue-800 dark:bg-blue-900/40 dark:text-blue-200';
+      case 'RESOLVED':
+      case 'CLOSED':
+        return 'bg-green-100 text-green-800 dark:bg-green-900/40 dark:text-green-200';
+      case 'DRAFT':
+        return 'bg-gray-100 text-gray-700 dark:bg-gray-700 dark:text-gray-200';
+      default:
+        return 'bg-gray-100 text-gray-800 dark:bg-gray-700 dark:text-gray-200';
+    }
+  };
+
+  const getSeverityBadgeClass = (severity?: string | null) => {
+    switch (severity) {
+      case 'CRITICAL':
+      case 'HIGH':
+        return 'bg-red-100 text-red-800 dark:bg-red-900/40 dark:text-red-200';
+      case 'MEDIUM':
+        return 'bg-yellow-100 text-yellow-800 dark:bg-yellow-900/40 dark:text-yellow-200';
+      case 'LOW':
+        return 'bg-green-100 text-green-800 dark:bg-green-900/40 dark:text-green-200';
+      default:
+        return 'bg-gray-100 text-gray-800 dark:bg-gray-700 dark:text-gray-200';
+    }
+  };
 
   // Check if current user is the incident owner
   const isOwner = Boolean(user?.id && rca?.incident?.createdBy?.id === user.id);
   
   // Check if current user is the RCA analyst
   const isAnalyst = Boolean(user?.id && rca?.analyst?.id === user.id);
+  const canOpenIncidentEdit = Boolean(
+    canEditIncident &&
+    rca?.incident?.id &&
+    (isOwner || user?.role === 'ADMIN' || user?.role === 'SYSTEM_ADMIN')
+  );
   
   // Check if current user is an active participant
   const isActiveParticipant = Boolean(
@@ -467,15 +605,193 @@ function RCAWorkspaceContent() {
     };
   }, [rcaId, user?.id, onRCAAIGenerationStarted, onRCAAIGenerationComplete, fetchRCA]);
 
-  const handleMethodChange = async (method: 'FIVE_WHYS' | 'FISHBONE') => {
+  const handleMethodChange = async (method: RCAMethod) => {
+    if (rca?.method === method) {
+      return;
+    }
+
+    const fromMethod = rca?.method || method;
+
     try {
+      setError('');
       setSaving(true);
+      setMethodSwitch({ from: fromMethod, to: method, activeStep: 0, progress: 8 });
+      await wait(200);
+      setMethodSwitch({ from: fromMethod, to: method, activeStep: 0, progress: 28 });
       await api.patch(`/rca/${rcaId}/method`, { method });
+      setMethodSwitch({ from: fromMethod, to: method, activeStep: 1, progress: 52 });
+      await wait(250);
       await fetchRCA();
-      setShowMethodSelector(false);
+      setMethodSwitch({ from: fromMethod, to: method, activeStep: 2, progress: 78 });
+      await wait(300);
+      setMethodSwitch({ from: fromMethod, to: method, activeStep: methodSwitchSteps.length, progress: 100 });
+      await wait(550);
     } catch (err: any) {
       // Check if this is a privilege error (403)
       handlePrivilegeError(err, showAccessDenied, setError, 'Change Method');
+    } finally {
+      setSaving(false);
+      setMethodSwitch(null);
+    }
+  };
+
+  const normalizeMethod = (method?: string | null): RCAMethod => (
+    method === 'FIVE_WHYS' ? 'FIVE_WHYS' : 'FISHBONE'
+  );
+
+  const getBestRecommendedMethod = (): RCAMethod => normalizeMethod(
+    methodologyRecommendation?.recommendedMethod ||
+    recommendation?.recommendedMethod ||
+    rca?.incident?.aiAnalysisData?.recommendedRCAMethodology?.primary ||
+    rca?.aiRecommendedMethod ||
+    rca?.method
+  );
+
+  const getConfidencePercent = (confidence?: number | null) => {
+    const value = confidence ?? 0;
+    return Math.round(value <= 1 ? value * 100 : value);
+  };
+
+  const getDisplayedRecommendation = () => (
+    methodologyRecommendation ||
+    recommendation ||
+    (rca?.incident?.aiAnalysisData?.recommendedRCAMethodology ? {
+      recommendedMethod: rca.incident.aiAnalysisData.recommendedRCAMethodology.primary,
+      reason: rca.incident.aiAnalysisData.recommendedRCAMethodology.reason || 'Based on the AI incident analysis.',
+      confidence: rca.incident.aiAnalysisData.recommendedRCAMethodology.confidence,
+      factors: {
+        complexity: 'medium',
+        recurrence: false,
+        severity: rca.incident.severity,
+        hasMultipleCauses: false,
+      },
+    } : null)
+  );
+
+  const handleOpenMethodologyModal = () => {
+    if (!canEditRCA) {
+      showAccessDenied();
+      return;
+    }
+
+    setSelectedRcaMethod(null);
+    setMethodologyRecommendation(null);
+    setMethodologyModalOpen(true);
+  };
+
+  useEffect(() => {
+    if (!methodologyModalOpen) return;
+
+    const centerMethodologyModal = () => {
+      const rect = methodologyModalRef.current?.getBoundingClientRect();
+      const width = rect?.width || Math.min(512, window.innerWidth - 32);
+      const height = rect?.height || Math.min(640, window.innerHeight - 32);
+
+      setMethodologyModalPosition({
+        left: Math.max(12, (window.innerWidth - width) / 2),
+        top: Math.max(12, (window.innerHeight - height) / 2),
+      });
+      setIsMethodologyModalReady(true);
+    };
+
+    setIsMethodologyModalReady(false);
+    requestAnimationFrame(centerMethodologyModal);
+    window.addEventListener('resize', centerMethodologyModal);
+
+    return () => {
+      window.removeEventListener('resize', centerMethodologyModal);
+      methodologyDragRef.current = null;
+      setIsMethodologyModalDragging(false);
+    };
+  }, [methodologyModalOpen]);
+
+  const clampMethodologyModalPosition = useCallback((left: number, top: number) => {
+    const rect = methodologyModalRef.current?.getBoundingClientRect();
+    const width = rect?.width || 0;
+    const height = rect?.height || 0;
+    const margin = 12;
+
+    return {
+      left: Math.min(Math.max(margin, left), Math.max(margin, window.innerWidth - width - margin)),
+      top: Math.min(Math.max(margin, top), Math.max(margin, window.innerHeight - height - margin)),
+    };
+  }, []);
+
+  const handleMethodologyModalPointerDown = (event: React.PointerEvent<HTMLDivElement>) => {
+    if (!isMethodologyModalReady || event.button !== 0) return;
+    if (analyzingMethodology) return;
+    if ((event.target as HTMLElement).closest('button')) return;
+
+    methodologyDragRef.current = {
+      pointerId: event.pointerId,
+      startX: event.clientX,
+      startY: event.clientY,
+      originLeft: methodologyModalPosition.left,
+      originTop: methodologyModalPosition.top,
+    };
+    event.currentTarget.setPointerCapture(event.pointerId);
+    setIsMethodologyModalDragging(true);
+  };
+
+  const handleMethodologyModalPointerMove = (event: React.PointerEvent<HTMLDivElement>) => {
+    const dragState = methodologyDragRef.current;
+    if (!dragState || dragState.pointerId !== event.pointerId) return;
+
+    const nextLeft = dragState.originLeft + event.clientX - dragState.startX;
+    const nextTop = dragState.originTop + event.clientY - dragState.startY;
+    setMethodologyModalPosition(clampMethodologyModalPosition(nextLeft, nextTop));
+  };
+
+  const handleMethodologyModalPointerUp = (event: React.PointerEvent<HTMLDivElement>) => {
+    const dragState = methodologyDragRef.current;
+    if (dragState?.pointerId === event.pointerId) {
+      methodologyDragRef.current = null;
+      setIsMethodologyModalDragging(false);
+    }
+  };
+
+  const handleAnalyzeMethodology = async () => {
+    if (!rca?.incident?.id) return;
+
+    setAnalyzingMethodology(true);
+    setError('');
+
+    try {
+      const response = await api.post(`/rca/incidents/${rca.incident.id}/analyze-methodology`);
+      const nextRecommendation = response.data?.data?.recommendation;
+
+      if (nextRecommendation) {
+        setMethodologyRecommendation(nextRecommendation);
+        setSelectedRcaMethod(normalizeMethod(nextRecommendation.recommendedMethod));
+      }
+    } catch (err: any) {
+      handlePrivilegeError(err, showAccessDenied, setError, 'Analyze Methodology');
+    } finally {
+      setAnalyzingMethodology(false);
+    }
+  };
+
+  const handleStartRCA = async () => {
+    if (!canEditRCA) {
+      showAccessDenied();
+      return;
+    }
+    if (!selectedRcaMethod) {
+      return;
+    }
+
+    try {
+      setSaving(true);
+      setError('');
+      await api.patch(`/rca/${rcaId}/method`, {
+        method: selectedRcaMethod,
+        start: true,
+      });
+      await fetchRCA();
+      setWorkspaceTab('analysis');
+      setMethodologyModalOpen(false);
+    } catch (err: any) {
+      handlePrivilegeError(err, showAccessDenied, setError, 'Create RCA');
     } finally {
       setSaving(false);
     }
@@ -497,7 +813,7 @@ function RCAWorkspaceContent() {
       // Check if this is a privilege error (403)
       handlePrivilegeError(err, showAccessDenied, setError, 'Save 5 Whys');
     } finally {
-      setSaving(true);
+      setSaving(false);
     }
   };
 
@@ -519,6 +835,52 @@ function RCAWorkspaceContent() {
     } finally {
       setSaving(false);
     }
+  };
+
+  const handleOpenFishboneWhiteboard = async (data: any) => {
+    if (!canEditRCA) {
+      showAccessDenied();
+      return;
+    }
+
+    const response = await api.post(`/rca/${rcaId}/fishbone/whiteboard`, {
+      fishboneData: data,
+    });
+    const boardId = response.data?.data?.board?.id;
+    if (!boardId) {
+      throw new Error('Fishbone whiteboard was not returned by the server');
+    }
+
+    const returnTo = `/rca/${rcaId}#rca-analysis-builder`;
+    const params = new URLSearchParams({
+      returnTo,
+      returnLabel: 'Back to RCA Fishbone',
+    });
+    const whiteboardPath = `/whiteboard/${boardId}?${params.toString()}`;
+    if (typeof window !== 'undefined') {
+      window.location.assign(whiteboardPath);
+      return;
+    }
+
+    router.push(whiteboardPath);
+  };
+
+  const handleAutoSaveToggle = (enabled: boolean) => {
+    setAutoSaveEnabled(enabled);
+    if (typeof window !== 'undefined') {
+      window.localStorage.setItem('dashmet-rca-auto-save', String(enabled));
+    }
+  };
+
+  const handleManualSaveRequest = () => {
+    if (!canEditRCA) {
+      showAccessDenied();
+      return;
+    }
+    if (workspaceTab === 'record') {
+      return;
+    }
+    setManualSaveRequest((current) => current + 1);
   };
 
   const handleValidate = async (rootCauseStatement: string) => {
@@ -566,21 +928,67 @@ function RCAWorkspaceContent() {
   };
 
   const handleGenerateCAPA = async () => {
-    if (!hasPrivilege('capa.create')) {
-      showAccessDenied();
+    if (!canCreateCAPA) {
+      showAccessDenied('Generate CAPA Board', CAPA_PRIVILEGES.CREATE);
       return;
     }
+    if (!rca) return;
+
+    if (getCorrectiveActionCount(rca) === 0 || getPreventiveControlCount(rca) === 0) {
+      setError('Add at least one corrective action and one preventive control before generating the CAPA Board.');
+      return;
+    }
+
+    if (rca.capActions?.length > 0) {
+      setGeneratedCapaCount(rca.capActions.length);
+      setCapaGenerationMessage('This RCA already has CAPA Board actions. Open the CAPA Board to review and manage them.');
+      setCapaGenerationError('');
+      setCapaGenerationStep('complete');
+      setCapaGenerationModalOpen(true);
+      return;
+    }
+
     try {
       setGeneratingCAPA(true);
+      setError('');
+      setCapaGenerationError('');
+      setGeneratedCapaCount(0);
+      setCapaGenerationMessage('');
+      setCapaGenerationModalOpen(true);
+
+      if (!rca.isValidated) {
+        const rootCauseStatement = getCAPARootCauseStatement(rca);
+
+        if (!rootCauseStatement) {
+          throw new Error('Add a root cause statement before generating the CAPA Board.');
+        }
+
+        setCapaGenerationStep('validating');
+        await wait(250);
+        await api.post(`/rca/${rcaId}/validate`, { rootCauseStatement });
+      }
+
+      setCapaGenerationStep('generating');
+      await wait(300);
       const response = await api.post(`/capa/generate-from-rca/${rcaId}`);
+      const createdCount = response.data?.data?.created ?? response.data?.data?.actions?.length ?? 0;
+
       setCapaGenerated(true);
-      // Show success toast instead of alert
-      setError(''); // Clear any previous error
-      // The CAPA generation was successful - user will be notified
-      router.push('/capa');
+      setGeneratedCapaCount(createdCount);
+      setCapaGenerationMessage(
+        response.data?.data?.message ||
+        `Successfully created ${createdCount} CAPA action${createdCount === 1 ? '' : 's'} from this RCA.`
+      );
+      await fetchRCA();
+      setCapaGenerationStep('complete');
     } catch (err: any) {
-      // Check if this is a privilege error (403)
-      handlePrivilegeError(err, showAccessDenied, setError, 'Generate CAPA');
+      const errorMessage = err?.response?.data?.error || err?.message || 'Failed to generate the CAPA Board';
+      setCapaGenerationStep('error');
+      setCapaGenerationError(errorMessage);
+      const handledPrivilegeError = handlePrivilegeError(err, showAccessDenied, undefined, 'Generate CAPA Board');
+      if (!handledPrivilegeError) {
+        setError(errorMessage);
+      }
     } finally {
       setGeneratingCAPA(false);
     }
@@ -612,29 +1020,707 @@ function RCAWorkspaceContent() {
     );
   }
 
+  const rcaWorkspaceStatus = rca.isValidated
+    ? 'Validated'
+    : rca.status === 'NOT_STARTED'
+      ? 'RCA NOT STARTED'
+      : (rca.status || 'In Progress').replace(/_/g, ' ');
+  const isRcaNotStarted = rca.status === 'NOT_STARTED';
+  const normalizedFishboneData = (() => {
+    if (rca.fishboneData) {
+      const currentProblem = rca.fishboneData.problem || '';
+      if (currentProblem.includes('FOREIGN MATERIAL INCIDENT REPORT') || currentProblem.includes('─')) {
+        return {
+          ...rca.fishboneData,
+          problem: extractProblemFromFMIR(currentProblem)
+        };
+      }
+      return rca.fishboneData;
+    }
+
+    return {
+      problem: extractProblemFromFMIR(rca.incident?.description) || '',
+      categories: []
+    };
+  })();
+  const causeCount = normalizedFishboneData.categories?.reduce(
+    (total: number, category: any) => total + (category.causes?.length || 0),
+    0
+  ) || 0;
+  const correctiveActionCount = getCorrectiveActionCount(rca);
+  const preventiveControlCount = getPreventiveControlCount(rca);
+  const existingCapaActionCount = rca.capActions?.length || 0;
+  const hasCapaSourceItems = correctiveActionCount > 0 && preventiveControlCount > 0;
+  const hasGeneratedCapaBoard = capaGenerated || existingCapaActionCount > 0;
+  const showCapaBoardAction = hasCapaSourceItems || hasGeneratedCapaBoard;
+  const capaGenerationProgress = capaGenerationStep === 'complete'
+    ? 100
+    : capaGenerationStep === 'generating'
+      ? 72
+      : capaGenerationStep === 'validating'
+        ? 34
+        : capaGenerationStep === 'error'
+          ? 100
+          : 8;
+  const capaGenerationStepIndex = capaGenerationStep === 'complete'
+    ? capaGenerationSteps.length - 1
+    : capaGenerationStep === 'generating'
+      ? 1
+      : 0;
+  const isCapaGenerationBusy = capaGenerationStep === 'validating' || capaGenerationStep === 'generating';
+  const fiveWhysCompletedCount = rca.fiveWhysData?.steps?.filter((step: any) => step.answer?.trim()).length || 0;
+  const fiveWhysStepCount = rca.fiveWhysData?.steps?.length || 0;
+  const workspaceTitleByTab = {
+    record: 'Incident Record',
+    analysis: 'Cause Analysis',
+    diagram: 'Fishbone Diagram',
+    actions: 'Corrective Actions',
+    controls: 'Preventive Controls'
+  } as const;
+  const workspaceTabs = [
+    {
+      id: 'record' as const,
+      label: 'Incident Record',
+      statusLabel: formatLabel(rca.incident.status),
+      icon: (
+        <svg className="w-4 h-4 sm:w-5 sm:h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414A1 1 0 0120 6.414V19a2 2 0 01-2 2z" />
+        </svg>
+      )
+    },
+    {
+      id: 'analysis' as const,
+      label: 'Cause Analysis',
+      count: rca.method === 'FIVE_WHYS' ? fiveWhysCompletedCount : causeCount,
+      countLabel: rca.method === 'FIVE_WHYS' && fiveWhysStepCount > 0
+        ? `${fiveWhysCompletedCount}/${fiveWhysStepCount}`
+        : undefined,
+      icon: (
+        <svg className="w-4 h-4 sm:w-5 sm:h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 5H7a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2V7a2 2 0 00-2-2h-2M9 5a2 2 0 002 2h2a2 2 0 002-2M9 5a2 2 0 012-2h2a2 2 0 012 2m-6 9l2 2 4-4" />
+        </svg>
+      )
+    },
+    {
+      id: 'diagram' as const,
+      label: 'Fishbone Diagram',
+      icon: <span className="text-base sm:text-lg">🐟</span>
+    },
+    {
+      id: 'actions' as const,
+      label: 'Corrective Actions',
+      count: correctiveActionCount,
+      icon: (
+        <svg className="w-4 h-4 sm:w-5 sm:h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z" />
+        </svg>
+      )
+    },
+    {
+      id: 'controls' as const,
+      label: 'Preventive Controls',
+      count: preventiveControlCount,
+      icon: (
+        <svg className="w-4 h-4 sm:w-5 sm:h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 12l2 2 4-4m5.618-4.016A11.955 11.955 0 0112 2.944a11.955 11.955 0 01-8.618 3.04A12.02 12.02 0 003 9c0 5.591 3.824 10.29 9 11.622 5.176-1.332 9-6.03 9-11.622 0-1.042-.133-2.052-.382-3.016z" />
+        </svg>
+      )
+    }
+  ];
+  const visibleWorkspaceTabs = isRcaNotStarted
+    ? workspaceTabs.filter((tab) => tab.id === 'record')
+    : rca.method === 'FISHBONE'
+      ? workspaceTabs
+      : workspaceTabs.filter((tab) => tab.id !== 'diagram');
+  const activeBuilderTab = workspaceTab === 'record' ? 'analysis' : workspaceTab;
+  const fiveWhysActiveTab = activeBuilderTab === 'diagram' ? 'analysis' : activeBuilderTab;
+  const saveControlsVisible = !isRcaNotStarted && !rca.isValidated && canEditRCA;
+  const manualSaveAvailable = workspaceTab !== 'record';
+  const displayedRecommendation = methodologyRecommendation;
+  const recommendedMethod = displayedRecommendation
+    ? normalizeMethod(displayedRecommendation.recommendedMethod)
+    : null;
+  const incidentVisibility = rca.incident.visibility;
+  const incidentListReturnTarget = incidentVisibility === 'PUBLIC'
+    ? { href: '/incidents?filter=public', label: 'Back to Public Incidents' }
+    : incidentVisibility === 'TEAM' || rca.incident.isTeamIncident
+      ? { href: '/incidents?filter=team', label: 'Back to Team Incidents' }
+      : { href: '/incidents?filter=my', label: 'Back to My Incidents' };
+
   return (
-    <div className="min-h-full">
+    <div className="relative min-h-full">
+      {methodSwitch && (
+        <div
+          className="fixed inset-0 z-[100] flex items-center justify-center bg-transparent px-4 py-6"
+          role="dialog"
+          aria-modal="true"
+          aria-labelledby="rca-method-switch-title"
+          aria-describedby="rca-method-switch-description"
+        >
+          <div className="relative w-full max-w-md overflow-hidden rounded-3xl border border-white/70 bg-white/95 p-6 text-center shadow-2xl shadow-slate-900/25 dark:border-slate-700/80 dark:bg-slate-900/95">
+            <div className="absolute inset-x-0 top-0 h-1.5 bg-gradient-to-r from-blue-500 via-violet-500 to-cyan-400" />
+            <div className="absolute -left-16 -top-16 h-36 w-36 rounded-full bg-blue-400/20 blur-3xl" />
+            <div className="absolute -bottom-20 -right-14 h-40 w-40 rounded-full bg-cyan-400/20 blur-3xl" />
+
+            <div className="relative mx-auto mb-5 flex h-24 w-24 items-center justify-center rounded-full bg-gradient-to-br from-blue-50 to-cyan-50 shadow-inner dark:from-blue-950/50 dark:to-slate-800">
+              <span className="absolute h-24 w-24 animate-ping rounded-full border border-blue-400/25" />
+              <span className="absolute h-20 w-20 animate-spin rounded-full border-4 border-transparent border-r-cyan-400 border-t-blue-600" />
+              <span className="absolute h-14 w-14 rounded-full bg-gradient-to-br from-blue-600 to-violet-600 shadow-lg shadow-blue-500/30" />
+              <svg className="relative h-7 w-7 text-white" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M13 10V3L4 14h7v7l9-11h-7z" />
+              </svg>
+            </div>
+
+            <h2 id="rca-method-switch-title" className="relative text-lg font-semibold text-slate-950 dark:text-white">
+              Switching Methodology
+            </h2>
+            <p id="rca-method-switch-description" className="relative mt-2 text-sm leading-6 text-slate-600 dark:text-slate-300" aria-live="polite">
+              DashMet is preparing your {formatRCAMethodLabel(methodSwitch.to)} workspace and syncing the updated RCA structure.
+            </p>
+
+            <div className="relative mt-6 grid grid-cols-[1fr_auto_1fr] items-center gap-3">
+              <div className="rounded-2xl border border-slate-200 bg-slate-50 px-4 py-3 text-left dark:border-slate-700 dark:bg-slate-800/70">
+                <span className="block text-[10px] font-semibold uppercase tracking-wide text-slate-400">From</span>
+                <span className="mt-1 block text-sm font-semibold text-slate-800 dark:text-slate-100">
+                  {formatRCAMethodLabel(methodSwitch.from)}
+                </span>
+              </div>
+              <div className="flex h-9 w-9 items-center justify-center rounded-full bg-blue-600 text-white shadow-lg shadow-blue-600/25">
+                <svg className="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M13 7l5 5m0 0l-5 5m5-5H6" />
+                </svg>
+              </div>
+              <div className="rounded-2xl border border-blue-200 bg-blue-50 px-4 py-3 text-left dark:border-blue-700/80 dark:bg-blue-950/40">
+                <span className="block text-[10px] font-semibold uppercase tracking-wide text-blue-500">To</span>
+                <span className="mt-1 block text-sm font-semibold text-blue-800 dark:text-blue-100">
+                  {formatRCAMethodLabel(methodSwitch.to)}
+                </span>
+              </div>
+            </div>
+
+            <div className="relative mt-6 space-y-3 text-left">
+              {methodSwitchSteps.map((step, index) => {
+                const isComplete = methodSwitch.activeStep > index;
+                const isActive = methodSwitch.activeStep === index;
+
+                return (
+                  <div
+                    key={step}
+                    className={`flex items-center gap-3 text-sm transition-colors duration-300 ${
+                      isComplete
+                        ? 'text-slate-800 dark:text-slate-100'
+                        : isActive
+                          ? 'text-blue-700 dark:text-blue-200'
+                          : 'text-slate-500 dark:text-slate-400'
+                    }`}
+                  >
+                    <span className={`flex h-6 w-6 items-center justify-center rounded-full transition-all duration-300 ${
+                      isComplete
+                        ? 'bg-green-100 text-green-700 dark:bg-green-900/40 dark:text-green-200'
+                        : isActive
+                          ? 'bg-blue-100 text-blue-700 ring-4 ring-blue-100 dark:bg-blue-900/40 dark:text-blue-200 dark:ring-blue-950'
+                          : 'bg-slate-100 text-slate-400 dark:bg-slate-800 dark:text-slate-500'
+                    }`}>
+                      {isComplete ? (
+                        <svg className="h-3.5 w-3.5 transition-transform duration-200" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={3} d="M5 13l4 4L19 7" />
+                        </svg>
+                      ) : isActive ? (
+                        <span className="h-2.5 w-2.5 animate-pulse rounded-full bg-current" />
+                      ) : (
+                        <span className="h-2 w-2 rounded-full bg-current" />
+                      )}
+                    </span>
+                    <span>{step}</span>
+                  </div>
+                );
+              })}
+            </div>
+
+            <div className="relative mt-6 h-2 overflow-hidden rounded-full bg-slate-100 dark:bg-slate-800">
+              <div
+                className="h-full rounded-full bg-gradient-to-r from-blue-600 via-violet-600 to-cyan-400 transition-all duration-500 ease-out"
+                style={{ width: `${methodSwitch.progress}%` }}
+              />
+            </div>
+          </div>
+        </div>
+      )}
+
+      {capaGenerationModalOpen && (
+        <div
+          className="fixed inset-0 z-[110] flex items-center justify-center bg-slate-900/50 px-4 py-6 backdrop-blur-sm"
+          role="dialog"
+          aria-modal="true"
+          aria-labelledby="capa-generation-title"
+          aria-describedby="capa-generation-description"
+        >
+          <div className="w-full max-w-lg overflow-hidden rounded-xl border border-slate-200 bg-white shadow-2xl dark:border-slate-700 dark:bg-slate-900">
+            <div className="border-b border-slate-200 px-5 py-4 dark:border-slate-700">
+              <div className="flex items-start justify-between gap-4">
+                <div className="flex items-start gap-3">
+                  <div className={`flex h-11 w-11 shrink-0 items-center justify-center rounded-lg ${
+                    capaGenerationStep === 'complete'
+                      ? 'bg-green-100 text-green-700 dark:bg-green-900/40 dark:text-green-200'
+                      : capaGenerationStep === 'error'
+                        ? 'bg-red-100 text-red-700 dark:bg-red-900/40 dark:text-red-200'
+                        : 'bg-blue-100 text-blue-700 dark:bg-blue-900/40 dark:text-blue-200'
+                  }`}>
+                    {capaGenerationStep === 'complete' ? (
+                      <CheckCircle2 className="h-6 w-6" aria-hidden="true" />
+                    ) : capaGenerationStep === 'error' ? (
+                      <AlertCircle className="h-6 w-6" aria-hidden="true" />
+                    ) : (
+                      <Loader2 className="h-6 w-6 animate-spin" aria-hidden="true" />
+                    )}
+                  </div>
+                  <div>
+                    <h2 id="capa-generation-title" className="text-base font-semibold text-slate-950 dark:text-white">
+                      {capaGenerationStep === 'complete'
+                        ? 'CAPA Board generated'
+                        : capaGenerationStep === 'error'
+                          ? 'CAPA Board generation stopped'
+                          : 'Generating CAPA Board'}
+                    </h2>
+                    <p id="capa-generation-description" className="mt-1 text-sm leading-6 text-slate-600 dark:text-slate-300">
+                      {capaGenerationStep === 'complete'
+                        ? 'Your RCA actions are now available in the CAPA Board section.'
+                        : capaGenerationStep === 'error'
+                          ? capaGenerationError
+                          : 'DashMet is converting the RCA corrective actions and preventive controls into CAPA Board records.'}
+                    </p>
+                  </div>
+                </div>
+                {!isCapaGenerationBusy && (
+                  <button
+                    type="button"
+                    onClick={() => setCapaGenerationModalOpen(false)}
+                    className="rounded-lg px-2 py-1 text-sm font-medium text-slate-500 transition-colors hover:bg-slate-100 hover:text-slate-900 dark:text-slate-300 dark:hover:bg-slate-800 dark:hover:text-white"
+                  >
+                    Close
+                  </button>
+                )}
+              </div>
+            </div>
+
+            <div className="px-5 py-5">
+              <div className="h-2 overflow-hidden rounded-full bg-slate-100 dark:bg-slate-800">
+                <div
+                  className={`h-full rounded-full transition-all duration-500 ease-out ${
+                    capaGenerationStep === 'error' ? 'bg-red-500' : 'bg-blue-600'
+                  }`}
+                  style={{ width: `${capaGenerationProgress}%` }}
+                />
+              </div>
+
+              <div className="mt-5 space-y-3">
+                {capaGenerationSteps.map((step, index) => {
+                  const isComplete = capaGenerationStep === 'complete' || capaGenerationStepIndex > index;
+                  const isActive = isCapaGenerationBusy && capaGenerationStepIndex === index;
+
+                  return (
+                    <div
+                      key={step}
+                      className={`flex items-center gap-3 text-sm ${
+                        isComplete
+                          ? 'text-slate-900 dark:text-slate-100'
+                          : isActive
+                            ? 'text-blue-700 dark:text-blue-200'
+                            : 'text-slate-500 dark:text-slate-400'
+                      }`}
+                    >
+                      <span className={`flex h-7 w-7 items-center justify-center rounded-full ${
+                        isComplete
+                          ? 'bg-green-100 text-green-700 dark:bg-green-900/40 dark:text-green-200'
+                          : isActive
+                            ? 'bg-blue-100 text-blue-700 ring-4 ring-blue-100 dark:bg-blue-900/40 dark:text-blue-200 dark:ring-blue-950'
+                            : 'bg-slate-100 text-slate-400 dark:bg-slate-800 dark:text-slate-500'
+                      }`}>
+                        {isComplete ? (
+                          <CheckCircle2 className="h-4 w-4" aria-hidden="true" />
+                        ) : isActive ? (
+                          <Loader2 className="h-4 w-4 animate-spin" aria-hidden="true" />
+                        ) : (
+                          <span className="h-2 w-2 rounded-full bg-current" />
+                        )}
+                      </span>
+                      <span>{step}</span>
+                    </div>
+                  );
+                })}
+              </div>
+
+              {capaGenerationStep === 'complete' && (
+                <div className="mt-5 rounded-lg border border-green-200 bg-green-50 p-4 dark:border-green-800 dark:bg-green-900/20">
+                  <p className="text-sm font-medium text-green-900 dark:text-green-100">
+                    {capaGenerationMessage || `Created ${generatedCapaCount} CAPA action${generatedCapaCount === 1 ? '' : 's'}.`}
+                  </p>
+                  <p className="mt-2 text-sm leading-6 text-green-800 dark:text-green-200">
+                    To get there later, open the CAPA section from the sidebar and choose CAPA Board. You can review owners, due dates, status, and effectiveness tracking from that board.
+                  </p>
+                </div>
+              )}
+            </div>
+
+            <div className="flex items-center justify-end gap-2 border-t border-slate-200 px-5 py-4 dark:border-slate-700">
+              {capaGenerationStep === 'error' && (
+                <button
+                  type="button"
+                  onClick={() => setCapaGenerationModalOpen(false)}
+                  className="rounded-lg px-4 py-2 text-sm font-medium text-slate-600 transition-colors hover:bg-slate-100 hover:text-slate-900 dark:text-slate-300 dark:hover:bg-slate-800 dark:hover:text-white"
+                >
+                  Stay here
+                </button>
+              )}
+              {capaGenerationStep === 'complete' ? (
+                <button
+                  type="button"
+                  onClick={() => router.push('/capa')}
+                  className="inline-flex items-center gap-2 rounded-lg bg-blue-600 px-4 py-2 text-sm font-semibold text-white shadow-sm transition-colors hover:bg-blue-700"
+                >
+                  <ClipboardList className="h-4 w-4" aria-hidden="true" />
+                  View CAPA Board
+                </button>
+              ) : (
+                <button
+                  type="button"
+                  onClick={handleGenerateCAPA}
+                  disabled={isCapaGenerationBusy}
+                  className="inline-flex items-center gap-2 rounded-lg bg-blue-600 px-4 py-2 text-sm font-semibold text-white shadow-sm transition-colors hover:bg-blue-700 disabled:cursor-wait disabled:opacity-60"
+                >
+                  {capaGenerationStep === 'error' ? 'Try Again' : 'Working...'}
+                </button>
+              )}
+            </div>
+          </div>
+        </div>
+      )}
+
+      {methodologyModalOpen && (
+        <div
+          className="fixed inset-0 z-[100] overflow-hidden bg-transparent pointer-events-none"
+          role="dialog"
+          aria-modal="true"
+          aria-labelledby="rca-methodology-title"
+        >
+          <div
+            ref={methodologyModalRef}
+            style={isMethodologyModalReady ? {
+              left: methodologyModalPosition.left,
+              top: methodologyModalPosition.top,
+              width: 'min(32rem, calc(100vw - 1.5rem))',
+              maxHeight: 'calc(100dvh - 1.5rem)',
+            } : {
+              left: '50%',
+              top: '50%',
+              width: 'min(32rem, calc(100vw - 1.5rem))',
+              maxHeight: 'calc(100dvh - 1.5rem)',
+              transform: 'translate(-50%, -50%)',
+            }}
+            className={`pointer-events-auto fixed flex min-h-0 flex-col overflow-hidden rounded-xl border border-slate-200 bg-white shadow-2xl shadow-slate-900/20 dark:border-slate-700 dark:bg-slate-900 ${
+              isMethodologyModalDragging ? 'select-none' : ''
+            }`}
+            aria-busy={analyzingMethodology}
+          >
+            <div
+              className={`flex shrink-0 items-start justify-between border-b border-slate-200 px-4 py-3 dark:border-slate-700 ${
+                analyzingMethodology
+                  ? 'cursor-wait'
+                  : isMethodologyModalDragging
+                    ? 'cursor-grabbing'
+                    : 'cursor-grab'
+              }`}
+              onPointerDown={handleMethodologyModalPointerDown}
+              onPointerMove={handleMethodologyModalPointerMove}
+              onPointerUp={handleMethodologyModalPointerUp}
+              onPointerCancel={handleMethodologyModalPointerUp}
+              style={{ touchAction: 'none' }}
+            >
+              <div>
+                <h2 id="rca-methodology-title" className="text-base font-semibold text-slate-950 dark:text-white">
+                  Create Root Cause Analysis
+                </h2>
+                <p className="mt-1 text-xs text-slate-500 dark:text-slate-400">
+                  Analyze the incident or choose a method manually before RCA work begins.
+                </p>
+              </div>
+              <button
+                type="button"
+                onClick={() => setMethodologyModalOpen(false)}
+                disabled={analyzingMethodology}
+                className="inline-flex h-8 w-8 items-center justify-center rounded-lg border border-slate-200 text-slate-500 transition-colors hover:bg-slate-100 hover:text-slate-900 disabled:cursor-wait disabled:opacity-50 dark:border-slate-700 dark:text-slate-300 dark:hover:bg-slate-800 dark:hover:text-white"
+                aria-label="Close methodology selection"
+              >
+                <svg className="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
+                </svg>
+              </button>
+            </div>
+
+            <div className="min-h-0 flex-1 overflow-y-auto px-4 py-4">
+              <button
+                type="button"
+                onClick={handleAnalyzeMethodology}
+                disabled={analyzingMethodology}
+                className="w-full rounded-lg border border-blue-200 bg-blue-50 px-3 py-3 text-left transition-colors hover:bg-blue-100 disabled:cursor-wait disabled:opacity-70 dark:border-blue-800 dark:bg-blue-950/40 dark:hover:bg-blue-950/60"
+              >
+                <div className="flex items-center gap-3">
+                  {analyzingMethodology && (
+                    <span className="inline-flex h-8 w-8 shrink-0 items-center justify-center rounded-full bg-white text-blue-700 shadow-sm dark:bg-slate-900 dark:text-blue-200">
+                      <svg className="h-4 w-4 animate-spin" viewBox="0 0 24 24" aria-hidden="true">
+                        <circle
+                          className="opacity-25"
+                          cx="12"
+                          cy="12"
+                          r="10"
+                          fill="none"
+                          stroke="currentColor"
+                          strokeWidth="4"
+                        />
+                        <path
+                          className="opacity-75"
+                          fill="currentColor"
+                          d="M4 12a8 8 0 018-8V0C5.37 0 0 5.37 0 12h4z"
+                        />
+                      </svg>
+                    </span>
+                  )}
+                  <div className="min-w-0">
+                    <p className="text-sm font-semibold text-blue-900 dark:text-blue-100">
+                      {analyzingMethodology ? 'Analyzing incident context...' : 'Analyze with AI'}
+                    </p>
+                    <p className="mt-0.5 text-xs text-blue-700 dark:text-blue-300">
+                      Review the incident details and suggest a method.
+                    </p>
+                  </div>
+                </div>
+              </button>
+
+              {displayedRecommendation && (
+                <div className="mt-3 rounded-lg border border-blue-200 bg-blue-50 p-3 dark:border-blue-800 dark:bg-blue-950/40">
+                  <div className="flex items-start justify-between gap-3">
+                    <div>
+                      <p className="text-sm font-semibold text-blue-900 dark:text-blue-100">
+                        Recommended: {recommendedMethod ? formatRCAMethodLabel(recommendedMethod) : 'Review complete'}
+                      </p>
+                      <p className="mt-1 text-xs leading-5 text-blue-800 dark:text-blue-200">
+                        {displayedRecommendation.reason}
+                      </p>
+                    </div>
+                    <span className="shrink-0 rounded-full bg-white px-2 py-1 text-[11px] font-semibold text-blue-700 shadow-sm dark:bg-slate-900 dark:text-blue-200">
+                      {getConfidencePercent(displayedRecommendation.confidence)}%
+                    </span>
+                  </div>
+                  <div className="mt-2 flex flex-wrap gap-1.5">
+                    <span className="rounded-full bg-white px-2 py-0.5 text-[11px] font-medium capitalize text-slate-600 dark:bg-slate-900 dark:text-slate-300">
+                      {displayedRecommendation.factors?.complexity || 'medium'} complexity
+                    </span>
+                    {displayedRecommendation.factors?.recurrence && (
+                      <span className="rounded-full bg-white px-2 py-0.5 text-[11px] font-medium text-slate-600 dark:bg-slate-900 dark:text-slate-300">
+                        Recurring issue
+                      </span>
+                    )}
+                    {displayedRecommendation.factors?.hasMultipleCauses && (
+                      <span className="rounded-full bg-white px-2 py-0.5 text-[11px] font-medium text-slate-600 dark:bg-slate-900 dark:text-slate-300">
+                        Multiple causes
+                      </span>
+                    )}
+                  </div>
+                </div>
+              )}
+
+              <div className="mt-4 space-y-2">
+                <p className="text-xs font-semibold uppercase tracking-wide text-slate-500 dark:text-slate-400">
+                  Choose methodology
+                  <span className="ml-1 font-normal normal-case tracking-normal text-slate-400">
+                    manually
+                  </span>
+                </p>
+                {(['FISHBONE', 'FIVE_WHYS'] as RCAMethod[]).map((method) => {
+                  const isSelected = selectedRcaMethod === method;
+                  const isRecommended = recommendedMethod === method;
+                  return (
+                    <button
+                      key={method}
+                      type="button"
+                      onClick={() => setSelectedRcaMethod(method)}
+                      disabled={analyzingMethodology}
+                      className={`w-full rounded-lg border px-3 py-3 text-left transition-colors ${
+                        isSelected
+                          ? 'border-blue-500 bg-blue-50 dark:border-blue-600 dark:bg-blue-950/40'
+                          : analyzingMethodology
+                            ? 'border-slate-200 bg-white opacity-60 dark:border-slate-700 dark:bg-slate-900'
+                          : 'border-slate-200 bg-white hover:border-blue-200 hover:bg-blue-50/60 dark:border-slate-700 dark:bg-slate-900 dark:hover:border-blue-800 dark:hover:bg-blue-950/30'
+                      } disabled:cursor-wait`}
+                    >
+                      <div className="flex items-center gap-3">
+                        <span className={`inline-flex h-8 w-8 items-center justify-center rounded-lg ${
+                          isSelected
+                            ? 'bg-blue-600 text-white'
+                            : 'bg-slate-100 text-slate-500 dark:bg-slate-800 dark:text-slate-300'
+                        }`}>
+                          {method === 'FISHBONE' ? (
+                            <svg className="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 12h16M7 8l-3 4 3 4m10-8 3 4-3 4M9 12l2-3m-2 3 2 3m4-6-2 3m2 3-2-3" />
+                            </svg>
+                          ) : (
+                            <svg className="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M8.228 9c.549-1.165 2.03-2 3.772-2 2.21 0 4 1.343 4 3 0 1.4-1.278 2.575-3.006 2.907-.542.104-.994.54-.994 1.093M12 17h.01" />
+                            </svg>
+                          )}
+                        </span>
+                        <span className="min-w-0 flex-1">
+                          <span className="flex flex-wrap items-center gap-2">
+                            <span className="text-sm font-semibold text-slate-900 dark:text-white">
+                              {formatRCAMethodLabel(method)}
+                            </span>
+                            {isRecommended && (
+                              <span className="rounded-full bg-blue-100 px-2 py-0.5 text-[10px] font-semibold text-blue-700 dark:bg-blue-900/60 dark:text-blue-200">
+                                Recommended
+                              </span>
+                            )}
+                          </span>
+                          <span className="mt-0.5 block text-xs text-slate-500 dark:text-slate-400">
+                            {method === 'FISHBONE'
+                              ? 'Explore multiple cause categories visually.'
+                              : 'Use iterative questions for a direct cause chain.'}
+                          </span>
+                        </span>
+                      </div>
+                    </button>
+                  );
+                })}
+              </div>
+            </div>
+
+            <div className="flex items-center justify-end gap-2 border-t border-slate-200 px-4 py-3 dark:border-slate-700">
+              <button
+                type="button"
+                onClick={() => setMethodologyModalOpen(false)}
+                disabled={analyzingMethodology}
+                className="rounded-lg px-3 py-2 text-sm font-medium text-slate-600 transition-colors hover:bg-slate-100 hover:text-slate-900 disabled:cursor-wait disabled:opacity-50 dark:text-slate-300 dark:hover:bg-slate-800 dark:hover:text-white"
+              >
+                Cancel
+              </button>
+              <button
+                type="button"
+                onClick={handleStartRCA}
+                disabled={saving || analyzingMethodology || !selectedRcaMethod}
+                className="rounded-lg bg-blue-600 px-4 py-2 text-sm font-semibold text-white shadow-sm transition-colors hover:bg-blue-700 disabled:cursor-wait disabled:opacity-60"
+              >
+                {saving ? 'Creating...' : 'Create RCA'}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
       {/* Header */}
       <div className="bg-white dark:bg-gray-800 shadow">
         <div className="w-full px-3 sm:px-4 md:px-6 lg:px-8 py-3 sm:py-4">
           <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3 sm:gap-0">
             <div className="flex items-center space-x-3 sm:space-x-4">
+              <button
+                type="button"
+                onClick={() => router.push(incidentListReturnTarget.href)}
+                aria-label={incidentListReturnTarget.label}
+                title={incidentListReturnTarget.label}
+                className="inline-flex h-9 w-9 shrink-0 items-center justify-center rounded-lg border border-slate-200 bg-white text-slate-600 shadow-sm transition-colors hover:border-blue-200 hover:bg-blue-50 hover:text-blue-700 dark:border-slate-700 dark:bg-slate-900 dark:text-slate-300 dark:hover:border-blue-800 dark:hover:bg-blue-900/30 dark:hover:text-blue-200 sm:h-10 sm:w-10"
+              >
+                <ArrowLeft className="h-4 w-4 sm:h-5 sm:w-5" aria-hidden="true" />
+              </button>
               <div className="min-w-0 flex-1">
                 <h1 className="text-base sm:text-xl font-bold text-gray-900 dark:text-white truncate">
-                  RCA Workspace - {rca.incident?.incidentNumber || 'Unknown'}
+                  {workspaceTitleByTab[workspaceTab]} - {rca.incident?.incidentNumber || 'Unknown'}
                 </h1>
                 <p className="text-xs sm:text-sm text-gray-500 dark:text-gray-400 truncate">
                   {rca.incident?.category?.name || 'Unknown'} | {rca.incident?.facility?.name || 'Unknown'}
                 </p>
               </div>
             </div>
-            <div className="flex items-center gap-2 sm:gap-4 flex-wrap">
+            <div className="flex items-center gap-2 sm:gap-3 flex-wrap">
+              {showCapaBoardAction && (
+                hasGeneratedCapaBoard ? (
+                  <button
+                    type="button"
+                    onClick={() => router.push('/capa')}
+                    className="inline-flex items-center gap-1.5 whitespace-nowrap rounded-lg border border-green-200 bg-green-50 px-3 py-1.5 text-xs font-medium text-green-700 shadow-sm transition-colors hover:bg-green-100 dark:border-green-800 dark:bg-green-900/30 dark:text-green-200 dark:hover:bg-green-900/50 sm:gap-2 sm:px-4 sm:py-2 sm:text-sm"
+                    title="Open the CAPA Board"
+                  >
+                    <ClipboardList className="h-3.5 w-3.5 sm:h-4 sm:w-4" aria-hidden="true" />
+                    <span className="hidden sm:inline">View CAPA Board</span>
+                    <span className="sm:hidden">CAPA Board</span>
+                  </button>
+                ) : (
+                  <button
+                    type="button"
+                    onClick={handleGenerateCAPA}
+                    disabled={generatingCAPA}
+                    className="inline-flex items-center gap-1.5 whitespace-nowrap rounded-lg border border-blue-200 bg-blue-600 px-3 py-1.5 text-xs font-semibold text-white shadow-sm transition-colors hover:bg-blue-700 disabled:cursor-wait disabled:opacity-70 dark:border-blue-700 sm:gap-2 sm:px-4 sm:py-2 sm:text-sm"
+                    title={canCreateCAPA ? 'Generate CAPA Board from this RCA' : 'Requires CAPA create access'}
+                  >
+                    {generatingCAPA ? (
+                      <Loader2 className="h-3.5 w-3.5 animate-spin sm:h-4 sm:w-4" aria-hidden="true" />
+                    ) : (
+                      <ClipboardList className="h-3.5 w-3.5 sm:h-4 sm:w-4" aria-hidden="true" />
+                    )}
+                    <span className="hidden sm:inline">
+                      {generatingCAPA ? 'Generating CAPA Board' : 'Generate CAPA Board'}
+                    </span>
+                    <span className="sm:hidden">CAPA</span>
+                  </button>
+                )
+              )}
+              {canOpenIncidentEdit && (
+                <button
+                  type="button"
+                  onClick={() => setIncidentEditModalOpen(true)}
+                  className="inline-flex items-center gap-1.5 whitespace-nowrap rounded-lg border border-blue-200 bg-blue-50 px-3 py-1.5 text-xs font-medium text-blue-700 shadow-sm transition-colors hover:bg-blue-100 dark:border-blue-800 dark:bg-blue-900/30 dark:text-blue-200 dark:hover:bg-blue-900/50 sm:gap-2 sm:px-4 sm:py-2 sm:text-sm"
+                  title="Edit incident details"
+                >
+                  <Pencil className="h-3.5 w-3.5 sm:h-4 sm:w-4" aria-hidden="true" />
+                  <span className="hidden sm:inline">Edit Incident Details</span>
+                  <span className="sm:hidden">Edit</span>
+                </button>
+              )}
+              {saveControlsVisible && (
+                <div className="inline-flex items-center gap-2 rounded-full border border-gray-200 bg-white px-2.5 py-1 text-xs font-medium text-gray-700 shadow-sm dark:border-gray-700 dark:bg-gray-900 dark:text-gray-200 sm:px-3 sm:py-1.5">
+                  <span>Auto save</span>
+                  <button
+                    type="button"
+                    role="switch"
+                    aria-label="Automatic save"
+                    aria-checked={autoSaveEnabled}
+                    onClick={() => handleAutoSaveToggle(!autoSaveEnabled)}
+                    className={`relative inline-flex h-5 w-9 items-center rounded-full transition-colors focus:outline-none focus:ring-2 focus:ring-blue-500 focus:ring-offset-2 dark:focus:ring-offset-gray-800 ${
+                      autoSaveEnabled ? 'bg-blue-600' : 'bg-gray-300 dark:bg-gray-600'
+                    }`}
+                  >
+                    <span
+                      className={`inline-block h-4 w-4 transform rounded-full bg-white shadow transition-transform ${
+                        autoSaveEnabled ? 'translate-x-4' : 'translate-x-0.5'
+                      }`}
+                    />
+                  </button>
+                </div>
+              )}
+              {saveControlsVisible && !autoSaveEnabled && (
+                <button
+                  type="button"
+                  onClick={handleManualSaveRequest}
+                  disabled={saving || !manualSaveAvailable}
+                  className="inline-flex items-center rounded-lg bg-blue-600 px-3 py-1.5 text-xs font-medium text-white shadow-sm transition-colors hover:bg-blue-700 disabled:cursor-not-allowed disabled:opacity-50 sm:px-4 sm:py-2 sm:text-sm"
+                  title={manualSaveAvailable ? 'Save the current RCA progress' : 'Open a cause analysis tab to save progress'}
+                >
+                  {saving ? 'Saving...' : 'Save Progress'}
+                </button>
+              )}
               <span className={`px-2 sm:px-3 py-0.5 sm:py-1 rounded-full text-xs sm:text-sm font-medium ${
                 rca.isValidated
                   ? 'bg-green-100 text-green-800 dark:bg-green-900 dark:text-green-200'
                   : 'bg-blue-100 text-blue-800 dark:bg-blue-900 dark:text-blue-200'
               }`}>
-                {rca.isValidated ? 'Validated' : rca.status.replace('_', ' ')}
+                {rcaWorkspaceStatus}
               </span>
               {saving && (
                 <span className="text-xs sm:text-sm text-gray-500 dark:text-gray-400">
@@ -642,6 +1728,39 @@ function RCAWorkspaceContent() {
                 </span>
               )}
             </div>
+          </div>
+          <div className="mt-3 overflow-x-auto border-b border-gray-200 dark:border-gray-700">
+            <nav className="flex min-w-max space-x-1" aria-label="Incident workspace tabs">
+              {visibleWorkspaceTabs.map((tab) => {
+                const isActive = workspaceTab === tab.id;
+                return (
+                  <button
+                    key={tab.id}
+                    type="button"
+                    onClick={() => setWorkspaceTab(tab.id)}
+                    aria-current={isActive ? 'page' : undefined}
+                    className={`flex items-center space-x-1 whitespace-nowrap rounded-t-lg px-3 py-2 text-xs font-medium transition-colors sm:space-x-2 sm:px-6 sm:py-3 sm:text-sm ${
+                      isActive
+                        ? 'bg-white text-blue-600 border-t-2 border-x border-blue-500 -mb-px dark:bg-gray-800 dark:text-blue-400'
+                        : 'text-gray-500 hover:text-gray-700 hover:bg-gray-50 dark:text-gray-400 dark:hover:text-gray-300 dark:hover:bg-gray-800/50'
+                    }`}
+                  >
+                    {tab.icon}
+                    <span>{tab.label}</span>
+                    {'statusLabel' in tab && tab.statusLabel && (
+                      <span className={`px-2 py-0.5 text-xs rounded-full ${getIncidentStatusBadgeClass(rca.incident.status)}`}>
+                        {tab.statusLabel}
+                      </span>
+                    )}
+                    {typeof tab.count === 'number' && (
+                      <span className="px-2 py-0.5 text-xs rounded-full bg-blue-100 dark:bg-blue-900/50 text-blue-600 dark:text-blue-400">
+                        {'countLabel' in tab && tab.countLabel ? tab.countLabel : tab.count}
+                      </span>
+                    )}
+                  </button>
+                );
+              })}
+            </nav>
           </div>
         </div>
       </div>
@@ -657,470 +1776,173 @@ function RCAWorkspaceContent() {
 
         {/* Full Width Main Panel */}
         <div className="space-y-4 sm:space-y-6">
-            {/* Incident Details Card */}
-            <div className="bg-white dark:bg-gray-800 rounded-lg shadow p-3 sm:p-6">
-              <h2 className="text-base sm:text-lg font-semibold text-gray-900 dark:text-white mb-3 sm:mb-4">
-                Incident Details
-              </h2>
-              <div className="space-y-3 sm:space-y-4">
-                <div>
-                  <span className="text-xs sm:text-sm font-medium text-gray-500 dark:text-gray-400">Description:</span>
-                  {/* Check if description contains FMIR report structure with section markers */}
-                  {rca.incident?.description?.includes('─') || rca.incident?.description?.includes('═') || rca.incident?.description?.includes('FOREIGN MATERIAL INCIDENT REPORT') ? (
-                    <div className="mt-2 space-y-3 sm:space-y-4 text-xs sm:text-sm text-gray-900 dark:text-white">
-                      {/* Parse and render FMIR-formatted description */}
-                      {(() => {
-                        const desc = rca.incident?.description || '';
-                        
-                        // First, clean all unicode box-drawing characters
-                        const cleanedDesc = desc
-                          .replace(/[═─━│┃┄┅┆┇┈┉┊┋╌╍╎╏┌┐└┘├┤┬┴┼╔╗╚╝╠╣╦╩╬╭╮╯╰▀▄█▌▐░▒▓■□▪▫●○◘◙♦♣♠♥—–―_]+/g, '')
-                          .replace(/[\u2500-\u257F]+/g, '') // Remove box drawing block
-                          .replace(/[\u2580-\u259F]+/g, '') // Remove block elements
-                          .replace(/\n{3,}/g, '\n\n') // Collapse multiple newlines
-                          .trim();
-                        
-                        // Extract sections from FMIR format
-                        const sections: { title: string; content: string }[] = [];
-                        
-                        // Known FMIR sections
-                        const sectionTitles = ['GENERAL INFORMATION', 'FOREIGN MATERIAL DESCRIPTION', 'CAUSE IDENTIFICATION', 'CORRECTIVE ACTION TAKEN', 'VERIFICATION ACTIONS', 'EVIDENCE'];
-                        
-                        // Split by section titles
-                        const lines = cleanedDesc.split('\n');
-                        let currentSection = '';
-                        let currentContent: string[] = [];
-                        
-                        for (const line of lines) {
-                          const trimmedLine = line.trim();
-                          const matchedTitle = sectionTitles.find(title => trimmedLine === title || trimmedLine.startsWith(title + ' '));
-                          
-                          if (matchedTitle) {
-                            // Save previous section
-                            if (currentSection) {
-                              sections.push({ title: currentSection, content: currentContent.join('\n').trim() });
-                            }
-                            currentSection = matchedTitle;
-                            // Check if there's content after the title on the same line
-                            const contentAfterTitle = trimmedLine.replace(matchedTitle, '').trim();
-                            currentContent = contentAfterTitle ? [contentAfterTitle] : [];
-                          } else if (trimmedLine.includes('FMIR-') && !currentSection) {
-                            // First part is usually the report title - skip it or add as report
-                            if (!sections.find(s => s.title === 'Report')) {
-                              sections.push({ title: 'Report', content: trimmedLine });
-                            }
-                          } else if (currentSection && trimmedLine) {
-                            currentContent.push(trimmedLine);
-                          } else if (!currentSection && trimmedLine && !trimmedLine.includes('FOREIGN MATERIAL INCIDENT REPORT')) {
-                            // Content before any section - add to a general section
-                            currentContent.push(trimmedLine);
-                          }
-                        }
-                        
-                        // Add last section
-                        if (currentSection && currentContent.length > 0) {
-                          sections.push({ title: currentSection, content: currentContent.join('\n').trim() });
-                        }
-                        
-                        // If no structured sections found, try to display as clean paragraphs
-                        if (sections.length === 0) {
-                          return (
-                            <p className="whitespace-pre-wrap leading-relaxed">
-                              {cleanedDesc}
-                            </p>
-                          );
-                        }
-                        
-                        return sections.map((section, idx) => (
-                          <div key={idx} className="border-l-2 border-blue-400 dark:border-blue-600 pl-3">
-                            <h4 className="font-medium text-blue-600 dark:text-blue-400 text-xs uppercase tracking-wide mb-1">
-                              {section.title}
-                            </h4>
-                            <p className="text-gray-800 dark:text-gray-200 leading-relaxed whitespace-pre-wrap">
-                              {section.content}
-                            </p>
-                          </div>
-                        ));
-                      })()}
+          {workspaceTab === 'record' ? (
+            <div className="grid grid-cols-1 gap-4 lg:grid-cols-3 lg:gap-6">
+              <div className="space-y-4 lg:col-span-2">
+                <section className="rounded-lg bg-white p-4 shadow dark:bg-gray-800 sm:p-6">
+                  <div className="mb-4 flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
+                    <div>
+                      <h2 className="text-base font-semibold text-gray-900 dark:text-white sm:text-lg">
+                        Incident Details
+                      </h2>
+                      <p className="mt-2 text-sm leading-6 text-gray-700 dark:text-gray-300">
+                        {rca.incident.description}
+                      </p>
                     </div>
-                  ) : (
-                    <p className="text-gray-900 dark:text-white mt-1">{rca.incident?.description || 'No description'}</p>
-                  )}
-                </div>
-                <div className="grid grid-cols-2 md:grid-cols-4 gap-4 pt-2 border-t border-gray-200 dark:border-gray-700">
-                  <div>
-                    <span className="text-sm font-medium text-gray-500 dark:text-gray-400">Type:</span>
-                    <p className="text-gray-900 dark:text-white">{rca.incident?.type?.replace('_', ' ') || 'Unknown'}</p>
+                    <span className={`inline-flex shrink-0 items-center self-start whitespace-nowrap rounded-full px-2.5 py-1 text-[10px] font-semibold uppercase leading-none sm:text-[11px] ${getIncidentStatusBadgeClass(rca.incident.status)}`}>
+                      {formatLabel(rca.incident.status)}
+                    </span>
                   </div>
-                  <div>
-                    <span className="text-sm font-medium text-gray-500 dark:text-gray-400">Severity:</span>
-                    <p className="text-gray-900 dark:text-white">{rca.incident?.severity || 'Not set'}</p>
-                  </div>
-                  <div>
-                    <span className="text-sm font-medium text-gray-500 dark:text-gray-400">Category:</span>
-                    <p className="text-gray-900 dark:text-white">{rca.incident?.category?.name || 'Unknown'}</p>
-                  </div>
-                  <div>
-                    <span className="text-sm font-medium text-gray-500 dark:text-gray-400">Reported By:</span>
-                    <p className="text-gray-900 dark:text-white">
-                      {rca.incident?.createdBy?.firstName || ''} {rca.incident?.createdBy?.lastName || 'Unknown'}
-                    </p>
-                  </div>
-                </div>
-              </div>
-            </div>
 
-            {/* AI Insights from Incident Analysis */}
-            {(rca.incident?.aiAnalysisData || rca.incident?.aiSummary) && (
-              <div className="bg-gradient-to-br from-purple-50 to-indigo-50 dark:from-purple-900/20 dark:to-indigo-900/20 rounded-lg shadow border border-purple-200 dark:border-purple-800 p-6">
-                <div className="flex items-center gap-2 mb-4">
-                  <span className="text-xl">🤖</span>
-                  <h2 className="text-lg font-semibold text-purple-900 dark:text-purple-100">
-                    AI Insights from Incident Analysis
-                  </h2>
-                </div>
-                
-                {/* AI Summary */}
-                {rca.incident?.aiSummary && (
-                  <div className="mb-4">
-                    <h3 className="text-sm font-medium text-purple-800 dark:text-purple-200 mb-2">Summary</h3>
-                    <p className="text-sm text-purple-700 dark:text-purple-300 bg-white/50 dark:bg-gray-800/50 rounded-lg p-3">
-                      {rca.incident.aiSummary}
-                    </p>
-                  </div>
-                )}
-
-                <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                  {/* Key Findings */}
-                  {rca.incident?.aiAnalysisData?.keyFindings && rca.incident.aiAnalysisData.keyFindings.length > 0 && (
-                    <div className="bg-white/50 dark:bg-gray-800/50 rounded-lg p-4">
-                      <h3 className="text-sm font-medium text-purple-800 dark:text-purple-200 mb-2 flex items-center gap-2">
-                        <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 5H7a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2V7a2 2 0 00-2-2h-2M9 5a2 2 0 002 2h2a2 2 0 002-2M9 5a2 2 0 012-2h2a2 2 0 012 2m-6 9l2 2 4-4" />
-                        </svg>
-                        Key Findings
-                      </h3>
-                      <ul className="space-y-1">
-                        {rca.incident.aiAnalysisData.keyFindings.map((finding: string, idx: number) => (
-                          <li key={idx} className="text-sm text-purple-700 dark:text-purple-300 flex items-start gap-2">
-                            <span className="text-purple-500 mt-1">•</span>
-                            <span>{finding}</span>
-                          </li>
-                        ))}
-                      </ul>
+                  <div className="grid grid-cols-2 gap-4 border-t border-gray-200 pt-4 dark:border-gray-700 sm:grid-cols-3 xl:grid-cols-5">
+                    <div>
+                      <span className="block text-xs text-gray-500 dark:text-gray-400">Type</span>
+                      <p className="mt-1 text-sm font-medium uppercase text-gray-900 dark:text-white">
+                        {formatLabel(rca.incident.type)}
+                      </p>
                     </div>
-                  )}
-
-                  {/* Investigation Guidance */}
-                  {rca.incident?.aiAnalysisData?.investigationGuidance && rca.incident.aiAnalysisData.investigationGuidance.length > 0 && (
-                    <div className="bg-white/50 dark:bg-gray-800/50 rounded-lg p-4">
-                      <h3 className="text-sm font-medium text-purple-800 dark:text-purple-200 mb-2 flex items-center gap-2">
-                        <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9.663 17h4.673M12 3v1m6.364 1.636l-.707.707M21 12h-1M4 12H3m3.343-5.657l-.707-.707m2.828 9.9a5 5 0 117.072 0l-.548.547A3.374 3.374 0 0014 18.469V19a2 2 0 11-4 0v-.531c0-.895-.356-1.754-.988-2.386l-.548-.547z" />
-                        </svg>
-                        Investigation Guidance
-                      </h3>
-                      <ul className="space-y-1">
-                        {rca.incident.aiAnalysisData.investigationGuidance.map((guidance: string, idx: number) => (
-                          <li key={idx} className="text-sm text-purple-700 dark:text-purple-300 flex items-start gap-2">
-                            <span className="text-purple-500 mt-1">•</span>
-                            <span>{guidance}</span>
-                          </li>
-                        ))}
-                      </ul>
-                    </div>
-                  )}
-                </div>
-
-                {/* Contributing Factors */}
-                {rca.incident?.aiAnalysisData?.contributingFactors && rca.incident.aiAnalysisData.contributingFactors.length > 0 && (
-                  <div className="mt-4 bg-white/50 dark:bg-gray-800/50 rounded-lg p-4">
-                    <h3 className="text-sm font-medium text-purple-800 dark:text-purple-200 mb-2 flex items-center gap-2">
-                      <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M13 10V3L4 14h7v7l9-11h-7z" />
-                      </svg>
-                      Contributing Factors to Explore
-                    </h3>
-                    <div className="flex flex-wrap gap-2">
-                      {rca.incident.aiAnalysisData.contributingFactors.map((factor: string, idx: number) => (
-                        <span key={idx} className="px-2 py-1 text-xs bg-purple-200 dark:bg-purple-800 text-purple-800 dark:text-purple-200 rounded-full">
-                          {factor}
-                        </span>
-                      ))}
-                    </div>
-                  </div>
-                )}
-
-                {/* AI Recommended RCA Methodology - Enhanced Display */}
-                {rca.incident?.aiAnalysisData?.recommendedRCAMethodology && (
-                  <div className="mt-4 bg-gradient-to-r from-amber-50 to-orange-50 dark:from-amber-900/20 dark:to-orange-900/20 rounded-lg p-4 border border-amber-200 dark:border-amber-700">
-                    <div className="flex items-start gap-3">
-                      <div className="flex-shrink-0 mt-0.5">
-                        <span className="text-2xl">✨</span>
-                      </div>
-                      <div className="flex-1">
-                        <h3 className="text-sm font-semibold text-amber-800 dark:text-amber-200 mb-2">
-                          AI Recommendation: {rca.incident.aiAnalysisData.recommendedRCAMethodology.primary === 'FISHBONE' 
-                            ? 'Fishbone Diagram' 
-                            : '5 Whys'}
-                        </h3>
-                        
-                        {/* Simple explanation */}
-                        <p className="text-sm text-amber-700 dark:text-amber-300 leading-relaxed">
-                          {rca.incident.aiAnalysisData.recommendedRCAMethodology.reason}
-                        </p>
-                        
-                        {/* Confidence indicator */}
-                        <div className="mt-3 flex items-center gap-2">
-                          <span className="text-xs text-amber-600 dark:text-amber-400 font-medium">
-                            Confidence: {rca.incident.aiAnalysisData.recommendedRCAMethodology.confidence}%
-                          </span>
-                          <div className="flex-1 h-1.5 bg-amber-200 dark:bg-amber-800 rounded-full overflow-hidden max-w-[100px]">
-                            <div 
-                              className="h-full bg-amber-500 dark:bg-amber-400 rounded-full transition-all duration-300"
-                              style={{ width: `${rca.incident.aiAnalysisData.recommendedRCAMethodology.confidence}%` }}
-                            />
-                          </div>
-                        </div>
-                        
-                        {/* Alternative method hint */}
-                        {rca.incident.aiAnalysisData.recommendedRCAMethodology.alternativeReason && (
-                          <p className="mt-3 text-xs text-amber-600 dark:text-amber-400 italic">
-                            💡 Alternative: {rca.incident.aiAnalysisData.recommendedRCAMethodology.alternativeReason}
-                          </p>
-                        )}
-                      </div>
-                    </div>
-                  </div>
-                )}
-              </div>
-            )}
-
-            {/* Method Selector / AI Recommendation */}
-            {!rca.isValidated && (
-              <div className="bg-white dark:bg-gray-800 rounded-lg shadow p-3 sm:p-6">
-                <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-2 sm:gap-0 mb-3 sm:mb-4">
-                  <h2 className="text-base sm:text-lg font-semibold text-gray-900 dark:text-white">
-                    Analysis Method
-                  </h2>
-                  <button
-                    onClick={() => setShowMethodSelector(!showMethodSelector)}
-                    className="text-blue-600 hover:text-blue-700 dark:text-blue-400 text-xs sm:text-sm font-medium self-start sm:self-auto"
-                  >
-                    Change Method
-                  </button>
-                </div>
-
-                {/* Current Method */}
-                <div className="flex items-center space-x-3 sm:space-x-4 mb-3 sm:mb-4">
-                  <div className={`p-2 sm:p-3 rounded-lg ${
-                    rca.method === 'FIVE_WHYS'
-                      ? 'bg-purple-100 dark:bg-purple-900'
-                      : 'bg-teal-100 dark:bg-teal-900'
-                  }`}>
-                    {rca.method === 'FIVE_WHYS' ? (
-                      <svg className="w-5 h-5 sm:w-6 sm:h-6 text-purple-600 dark:text-purple-300" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M8.228 9c.549-1.165 2.03-2 3.772-2 2.21 0 4 1.343 4 3 0 1.4-1.278 2.575-3.006 2.907-.542.104-.994.54-.994 1.093m0 3h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
-                      </svg>
-                    ) : (
-                      <svg className="w-5 h-5 sm:w-6 sm:h-6 text-teal-600 dark:text-teal-300" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 17V7m0 10a2 2 0 01-2 2H5a2 2 0 01-2-2V7a2 2 0 012-2h2a2 2 0 012 2m0 10a2 2 0 002 2h2a2 2 0 002-2M9 7a2 2 0 012-2h2a2 2 0 012 2m0 10V7m0 10a2 2 0 002 2h2a2 2 0 002-2V7a2 2 0 00-2-2h-2a2 2 0 00-2 2" />
-                      </svg>
-                    )}
-                  </div>
-                  <div>
-                    <p className="text-sm sm:text-base font-medium text-gray-900 dark:text-white">
-                      {rca.method === 'FIVE_WHYS' ? '5 Whys Analysis' : 'Fishbone Diagram'}
-                    </p>
-                    <p className="text-xs sm:text-sm text-gray-500 dark:text-gray-400">
-                      {rca.method === 'FIVE_WHYS'
-                        ? 'Iterative questioning to find root cause'
-                        : 'Visual cause-and-effect diagram'}
-                    </p>
-                  </div>
-                </div>
-
-                {/* AI Recommendation - Use incident's AI analysis data first, then fall back to recommendation API */}
-                {(() => {
-                  // Prioritize AI recommendation from incident analysis
-                  const incidentRec = rca.incident?.aiAnalysisData?.recommendedRCAMethodology;
-                  const apiRec = recommendation;
-                  
-                  // Determine which recommendation to show
-                  const recMethod = incidentRec?.primary || apiRec?.recommendedMethod;
-                  const recReason = incidentRec?.reason || apiRec?.reason;
-                  const recConfidence = incidentRec?.confidence || (apiRec?.confidence ? apiRec.confidence * 100 : null);
-                  const recAlternativeReason = incidentRec?.alternativeReason || apiRec?.alternativeReason;
-                  
-                  // Show recommendation box when method differs OR always show to explain current choice
-                  if (recMethod) {
-                    const methodMatches = rca.method === recMethod;
-                    
-                    return (
-                      <div className={`rounded-lg p-3 sm:p-4 ${
-                        methodMatches 
-                          ? 'bg-green-50 dark:bg-green-900/30 border border-green-200 dark:border-green-700'
-                          : 'bg-yellow-50 dark:bg-yellow-900/30 border border-yellow-200 dark:border-yellow-700'
-                      }`}>
-                        <div className="flex items-start space-x-2 sm:space-x-3">
-                          <span className="text-lg sm:text-xl mt-0.5">{methodMatches ? '✅' : '💡'}</span>
-                          <div className="flex-1 min-w-0">
-                            <p className={`text-xs sm:text-sm font-semibold ${
-                              methodMatches 
-                                ? 'text-green-800 dark:text-green-200'
-                                : 'text-yellow-800 dark:text-yellow-200'
-                            }`}>
-                              {methodMatches 
-                                ? `You're using the AI-recommended method: ${recMethod === 'FIVE_WHYS' ? '5 Whys' : 'Fishbone Diagram'}`
-                                : `AI Recommends: ${recMethod === 'FIVE_WHYS' ? '5 Whys' : 'Fishbone Diagram'}`
-                              }
-                            </p>
-                            {recReason && (
-                              <p className={`text-xs sm:text-sm mt-1.5 sm:mt-2 leading-relaxed ${
-                                methodMatches 
-                                  ? 'text-green-700 dark:text-green-300'
-                                  : 'text-yellow-700 dark:text-yellow-300'
-                              }`}>
-                                {recReason}
-                              </p>
-                            )}
-                            {recConfidence && (
-                              <div className="mt-1.5 sm:mt-2 flex items-center gap-2">
-                                <span className={`text-xs font-medium ${
-                                  methodMatches 
-                                    ? 'text-green-600 dark:text-green-400'
-                                    : 'text-yellow-600 dark:text-yellow-400'
-                                }`}>
-                                  Confidence: {Math.round(recConfidence)}%
-                                </span>
-                              </div>
-                            )}
-                            {!methodMatches && (
-                              <p className={`text-xs mt-1.5 sm:mt-2 italic text-yellow-600 dark:text-yellow-400`}>
-                                You can continue with your current choice. The AI recommendation is just a suggestion based on the incident analysis.
-                              </p>
-                            )}
-                          </div>
-                        </div>
-                      </div>
-                    );
-                  }
-                  return null;
-                })()}
-
-                {/* Method Selector Modal */}
-                {showMethodSelector && (
-                  <div className="mt-4 p-4 border border-gray-200 dark:border-gray-600 rounded-lg">
-                    <p className="text-sm text-gray-600 dark:text-gray-300 mb-4">
-                      Select your preferred analysis method:
-                    </p>
-                    <div className="flex space-x-4">
-                      <button
-                        onClick={() => handleMethodChange('FIVE_WHYS')}
-                        disabled={saving}
-                        className={`flex-1 p-4 border rounded-lg transition-colors ${
-                          rca.method === 'FIVE_WHYS'
-                            ? 'border-purple-500 bg-purple-50 dark:bg-purple-900/30'
-                            : 'border-gray-200 dark:border-gray-600 hover:border-purple-300'
-                        }`}
-                      >
-                        <span className="font-medium text-gray-900 dark:text-white">5 Whys</span>
-                        <p className="text-xs text-gray-500 dark:text-gray-400 mt-1">
-                          Best for simple, linear problems
-                        </p>
-                      </button>
-                      <button
-                        onClick={() => handleMethodChange('FISHBONE')}
-                        disabled={saving}
-                        className={`flex-1 p-4 border rounded-lg transition-colors ${
-                          rca.method === 'FISHBONE'
-                            ? 'border-teal-500 bg-teal-50 dark:bg-teal-900/30'
-                            : 'border-gray-200 dark:border-gray-600 hover:border-teal-300'
-                        }`}
-                      >
-                        <span className="font-medium text-gray-900 dark:text-white">Fishbone</span>
-                        <p className="text-xs text-gray-500 dark:text-gray-400 mt-1">
-                          Best for complex, multi-factor problems
-                        </p>
-                      </button>
-                    </div>
-                  </div>
-                )}
-              </div>
-            )}
-
-            {/* CAPA Generation Card - Show when RCA is validated */}
-            {rca.isValidated && (
-              <div className="bg-gradient-to-r from-green-50 to-emerald-50 dark:from-green-900/20 dark:to-emerald-900/20 border border-green-200 dark:border-green-800 rounded-lg shadow p-6">
-                <div className="flex items-start space-x-4">
-                  <div className="flex-shrink-0">
-                    <div className="p-3 bg-green-100 dark:bg-green-900/50 rounded-full">
-                      <svg className="w-6 h-6 text-green-600 dark:text-green-400" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z" />
-                      </svg>
-                    </div>
-                  </div>
-                  <div className="flex-1">
-                    <h3 className="text-lg font-semibold text-green-800 dark:text-green-200">
-                      RCA Analysis Validated ✓
-                    </h3>
-                    <p className="text-sm text-green-700 dark:text-green-300 mt-1">
-                      Root Cause: {rca.rootCauseStatement}
-                    </p>
-                    <p className="text-sm text-green-600 dark:text-green-400 mt-2">
-                      Now you can generate Corrective & Preventive Actions (CAPA) from your action plans.
-                    </p>
-                    <div className="mt-4 flex items-center space-x-4">
-                      {capaGenerated || (rca.capActions && rca.capActions.length > 0) ? (
-                        <a
-                          href="/capa"
-                          className="inline-flex items-center px-4 py-2 bg-green-600 hover:bg-green-700 text-white font-medium rounded-lg transition-colors"
-                        >
-                          <svg className="w-5 h-5 mr-2" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 5H7a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2V7a2 2 0 00-2-2h-2M9 5a2 2 0 002 2h2a2 2 0 002-2M9 5a2 2 0 012-2h2a2 2 0 012 2m-6 9l2 2 4-4" />
-                          </svg>
-                          View CAPA Board ({rca.capActions?.length || 'Generated'})
-                        </a>
-                      ) : (
-                        <button
-                          onClick={handleGenerateCAPA}
-                          disabled={generatingCAPA}
-                          className="inline-flex items-center px-4 py-2 bg-green-600 hover:bg-green-700 disabled:bg-green-400 text-white font-medium rounded-lg transition-colors"
-                        >
-                          {generatingCAPA ? (
-                            <>
-                              <svg className="animate-spin -ml-1 mr-2 h-5 w-5 text-white" fill="none" viewBox="0 0 24 24">
-                                <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"></circle>
-                                <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
-                              </svg>
-                              Generating...
-                            </>
-                          ) : (
-                            <>
-                              <svg className="w-5 h-5 mr-2" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 6v6m0 0v6m0-6h6m-6 0H6" />
-                              </svg>
-                              Generate CAPA Actions
-                            </>
-                          )}
-                        </button>
-                      )}
-                      <span className="text-xs text-green-600 dark:text-green-400">
-                        Creates formal action items from your action plans
+                    <div>
+                      <span className="block text-xs text-gray-500 dark:text-gray-400">Severity</span>
+                      <span className={`mt-1 inline-flex rounded-full px-2.5 py-0.5 text-xs font-medium ${getSeverityBadgeClass(rca.incident.severity)}`}>
+                        {formatLabel(rca.incident.severity)}
                       </span>
                     </div>
+                    <div>
+                      <span className="block text-xs text-gray-500 dark:text-gray-400">Category</span>
+                      <p className="mt-1 text-sm font-medium text-gray-900 dark:text-white">
+                        {rca.incident.category?.name || 'Not set'}
+                      </p>
+                    </div>
+                    <div>
+                      <span className="block text-xs text-gray-500 dark:text-gray-400">Reported By</span>
+                      <p className="mt-1 truncate text-sm font-medium text-gray-900 dark:text-white">
+                        {rca.incident.createdBy?.firstName} {rca.incident.createdBy?.lastName}
+                      </p>
+                    </div>
+                    <div>
+                      <span className="block text-xs text-gray-500 dark:text-gray-400">Reported</span>
+                      <p className="mt-1 text-sm font-medium text-gray-900 dark:text-white">
+                        {rca.incident.reportedAt ? formatDateTime(rca.incident.reportedAt) : 'Not set'}
+                      </p>
+                    </div>
                   </div>
-                </div>
-              </div>
-            )}
 
+                  {rca.incident.aiSummary && (
+                    <div className="mt-5 rounded-lg bg-blue-50 p-4 dark:bg-blue-900/30">
+                      <div className="mb-2 flex items-center gap-2 text-sm font-medium text-blue-700 dark:text-blue-300">
+                        <svg className="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9.663 17h4.673M12 3v1m6.364 1.636l-.707.707M21 12h-1M4 12H3m3.343-5.657l-.707-.707m2.828 9.9a5 5 0 117.072 0l-.548.547A3.374 3.374 0 0014 18.469V19a2 2 0 11-4 0v-.531c0-.895-.356-1.754-.988-2.386l-.548-.547z" />
+                        </svg>
+                        AI Insights from Incident Analysis
+                      </div>
+                      <p className="text-sm leading-6 text-blue-800 dark:text-blue-200">
+                        {rca.incident.aiSummary}
+                      </p>
+                    </div>
+                  )}
+                </section>
+
+                <section className="rounded-lg bg-white p-4 shadow dark:bg-gray-800 sm:p-6">
+                  <h2 className="text-base font-semibold text-gray-900 dark:text-white sm:text-lg">
+                    Operational Details
+                  </h2>
+                  <div className="mt-4 grid grid-cols-1 gap-4 sm:grid-cols-2">
+                    {[
+                      ['Facility', rca.incident.facility?.name],
+                      ['Department', rca.incident.department?.name],
+                      ['Area', rca.incident.area?.name],
+                      ['Line', rca.incident.line?.name],
+                      ['Shift', rca.incident.shift?.name],
+                      ['Occurred At', rca.incident.occurredAt ? formatDateTime(rca.incident.occurredAt) : undefined],
+                    ].map(([label, value]) => (
+                      <div key={label}>
+                        <span className="block text-xs text-gray-500 dark:text-gray-400">{label}</span>
+                        <p className="mt-1 text-sm font-medium text-gray-900 dark:text-white">
+                          {value || 'Not set'}
+                        </p>
+                      </div>
+                    ))}
+                  </div>
+                </section>
+              </div>
+
+              <aside className="space-y-4">
+                <section className="rounded-lg bg-white p-4 shadow dark:bg-gray-800 sm:p-6">
+                  <h3 className="text-sm font-semibold text-gray-900 dark:text-white">Visibility</h3>
+                  <div className="mt-4 rounded-lg border border-blue-200 bg-blue-50 p-4 dark:border-blue-800 dark:bg-blue-900/20">
+                    <p className="text-sm font-medium text-gray-900 dark:text-white">
+                      {formatLabel(rca.incident.visibility)}
+                    </p>
+                    <p className="mt-1 text-xs text-gray-500 dark:text-gray-400">
+                      This incident record is shown here without leaving the RCA workspace.
+                    </p>
+                  </div>
+                </section>
+
+                <section className="rounded-lg bg-white p-4 shadow dark:bg-gray-800 sm:p-6">
+                  <h3 className="text-sm font-semibold text-gray-900 dark:text-white">People</h3>
+                  <div className="mt-4">
+                    <span className="block text-xs text-gray-500 dark:text-gray-400">Reported By</span>
+                    <p className="mt-1 text-sm font-medium text-gray-900 dark:text-white">
+                      {rca.incident.createdBy?.firstName} {rca.incident.createdBy?.lastName}
+                    </p>
+                  </div>
+                  {rca.analyst && (
+                    <div className="mt-4 border-t border-gray-200 pt-4 dark:border-gray-700">
+                      <span className="block text-xs text-gray-500 dark:text-gray-400">RCA Analyst</span>
+                      <p className="mt-1 text-sm font-medium text-gray-900 dark:text-white">
+                        {rca.analyst.firstName} {rca.analyst.lastName}
+                      </p>
+                    </div>
+                  )}
+                </section>
+
+                <section className="rounded-lg bg-white p-4 shadow dark:bg-gray-800 sm:p-6">
+                  <h3 className="text-sm font-semibold text-gray-900 dark:text-white">Root Cause Analysis</h3>
+                  <div className="mt-4 flex items-center justify-between gap-3 rounded-lg bg-gray-50 p-3 dark:bg-gray-700/50">
+                    <span className="text-sm font-medium text-gray-900 dark:text-white">
+                      {rca.method === 'FISHBONE' ? 'Fishbone' : '5 Whys'}
+                    </span>
+                    {isRcaNotStarted ? (
+                      <button
+                        type="button"
+                        onClick={handleOpenMethodologyModal}
+                        className="rounded-lg bg-blue-600 px-3 py-1.5 text-xs font-semibold text-white shadow-sm transition-colors hover:bg-blue-700"
+                      >
+                        Create RCA
+                      </button>
+                    ) : (
+                      <span className={`rounded px-2 py-1 text-xs font-medium ${
+                        rca.isValidated
+                          ? 'bg-green-100 text-green-700 dark:bg-green-900/40 dark:text-green-200'
+                          : 'bg-blue-100 text-blue-700 dark:bg-blue-900/40 dark:text-blue-200'
+                      }`}>
+                        {rcaWorkspaceStatus}
+                      </span>
+                    )}
+                  </div>
+                </section>
+              </aside>
+            </div>
+          ) : (
+            <>
             {/* Analysis Builder */}
-            <div className="bg-white dark:bg-gray-800 rounded-lg shadow">
+            <div id="rca-analysis-builder" className="bg-white dark:bg-gray-800 rounded-lg shadow scroll-mt-24">
               {rca.method === 'FIVE_WHYS' ? (
                 <FiveWhysBuilder
                   rcaId={rca.id}
                   data={rca.fiveWhysData || { steps: [] }}
                   isValidated={rca.isValidated}
+                  activeTab={fiveWhysActiveTab}
+                  onTabChange={setWorkspaceTab}
+                  hideInternalTabs
+                  sectionTitle={fiveWhysActiveTab === 'analysis' ? '5 Whys Analysis' : workspaceTitleByTab[fiveWhysActiveTab]}
+                  currentMethod={rca.method}
+                  savingMethod={saving}
+                  autoSaveEnabled={autoSaveEnabled}
+                  saveRequestToken={manualSaveRequest}
+                  showLocalSaveControls={false}
+                  onChangeMethod={handleMethodChange}
                   onSave={handleSaveFiveWhys}
                   onValidate={handleValidate}
                 />
@@ -1129,58 +1951,28 @@ function RCAWorkspaceContent() {
                   rcaId={rca.id}
                   incidentId={rca.incident?.id || rca.incidentId}
                   currentUserId={user?.id}
-                  data={(() => {
-                    // If fishboneData exists, check if problem needs cleaning
-                    if (rca.fishboneData) {
-                      const currentProblem = rca.fishboneData.problem || '';
-                      // If the saved problem contains raw FMIR format, extract just the FM description
-                      if (currentProblem.includes('FOREIGN MATERIAL INCIDENT REPORT') || currentProblem.includes('─')) {
-                        return {
-                          ...rca.fishboneData,
-                          problem: extractProblemFromFMIR(currentProblem)
-                        };
-                      }
-                      return rca.fishboneData;
-                    }
-                    // No fishboneData, extract from incident description
-                    return { 
-                      problem: extractProblemFromFMIR(rca.incident?.description) || '', 
-                      categories: [] 
-                    };
-                  })()}
+                  data={normalizedFishboneData}
                   isValidated={rca.isValidated}
+                  activeTab={workspaceTab}
+                  onTabChange={setWorkspaceTab}
+                  hideInternalTabs
+                  sectionTitle={workspaceTitleByTab[workspaceTab]}
                   onSave={handleSaveFishbone}
+                  onOpenWhiteboard={handleOpenFishboneWhiteboard}
+                  currentMethod={rca.method}
+                  savingMethod={saving}
+                  autoSaveEnabled={autoSaveEnabled}
+                  saveRequestToken={manualSaveRequest}
+                  showLocalSaveControls={false}
+                  onChangeMethod={handleMethodChange}
                   onValidate={handleValidate}
                   onReopen={isAnalyst ? handleReopenRCA : undefined}
                 />
               )}
             </div>
 
-            {/* Version History - Now inline */}
-            {rca.versionHistory && rca.versionHistory.length > 0 && (
-              <div className="bg-white dark:bg-gray-800 rounded-lg shadow p-4">
-                <h3 className="text-sm font-semibold text-gray-900 dark:text-white mb-3">
-                  Version History
-                </h3>
-                <div className="flex flex-wrap gap-2">
-                  {rca.versionHistory.slice(0, 5).map((version: any) => (
-                    <div
-                      key={version.id}
-                      className="text-sm text-gray-600 dark:text-gray-300 px-3 py-2 bg-gray-50 dark:bg-gray-700 rounded"
-                    >
-                      <span className="font-medium">v{version.versionNumber}</span>
-                      <span className="mx-2">•</span>
-                      <span>{formatDate(version.createdAt)}</span>
-                      {version.changeReason && (
-                        <span className="text-xs text-gray-500 dark:text-gray-400 ml-2">
-                          ({version.changeReason})
-                        </span>
-                      )}
-                    </div>
-                  ))}
-                </div>
-              </div>
-            )}
+            </>
+          )}
           </div>
         </div>
 
@@ -1346,7 +2138,29 @@ function RCAWorkspaceContent() {
             } : null);
           }}
           visibility={rca.incident.visibility}
+          versionHistory={rca.versionHistory || []}
         />
+      )}
+
+      {incidentEditModalOpen && rca.incident?.id && (
+        <div className="absolute inset-0 z-[60] pointer-events-none">
+          <Suspense fallback={
+            <div className="absolute inset-0 flex items-center justify-center bg-transparent p-3">
+              <div className="rounded-xl border border-gray-200 bg-white px-4 py-3 text-sm font-medium text-gray-700 shadow-xl dark:border-slate-700 dark:bg-slate-900 dark:text-gray-200">
+                Loading incident details...
+              </div>
+            </div>
+          }>
+            <IncidentFormModal
+              embedded
+              editIncidentId={rca.incident.id}
+              onClose={() => {
+                setIncidentEditModalOpen(false);
+                fetchRCA();
+              }}
+            />
+          </Suspense>
+        </div>
       )}
 
       {/* Access Denied Modal */}

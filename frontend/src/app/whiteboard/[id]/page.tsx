@@ -135,6 +135,19 @@ async function createThumbnailRecoverySnapshot(thumbnail: string) {
   };
 }
 
+function getSafeInternalPath(value: string | null) {
+  if (!value) return null;
+  const trimmed = value.trim();
+  if (!trimmed.startsWith('/') || trimmed.startsWith('//') || trimmed.includes('://')) return null;
+  return trimmed;
+}
+
+function getNavigationLabel(value: string | null, fallback: string) {
+  const label = value?.trim();
+  if (!label) return fallback;
+  return label.slice(0, 40);
+}
+
 export default function WhiteboardEditorPage() {
   const { id } = useParams<{ id: string }>();
   const router = useRouter();
@@ -156,7 +169,26 @@ export default function WhiteboardEditorPage() {
   const isApplyingInitialSceneRef = useRef(false);
   const [templatePickerOpen, setTemplatePickerOpen] = useState(false);
   const [excalidrawReady, setExcalidrawReady] = useState(false);
+  const [returnContext, setReturnContext] = useState<{ to: string | null; label: string }>({
+    to: null,
+    label: 'Boards',
+  });
   const canvasContainerRef = useRef<HTMLDivElement>(null);
+  const backTitle = returnContext.to ? returnContext.label : 'Back to boards';
+
+  const handleBackNavigation = useCallback(() => {
+    router.push(returnContext.to || '/whiteboard');
+  }, [returnContext.to, router]);
+
+  useEffect(() => {
+    if (typeof window === 'undefined') return;
+    const params = new URLSearchParams(window.location.search);
+    const to = getSafeInternalPath(params.get('returnTo'));
+    setReturnContext({
+      to,
+      label: getNavigationLabel(params.get('returnLabel'), to ? 'Back' : 'Boards'),
+    });
+  }, []);
 
   // Mouse wheel → zoom (instead of scroll)
   useEffect(() => {
@@ -436,11 +468,12 @@ export default function WhiteboardEditorPage() {
       <div className="shrink-0 h-12 flex items-center justify-between px-4 bg-white dark:bg-gray-900 border-b border-gray-200 dark:border-gray-700 z-10">
         <div className="flex items-center gap-3">
           <button
-            onClick={() => router.push('/whiteboard')}
-            className="p-1.5 rounded-lg hover:bg-gray-100 dark:hover:bg-gray-800 transition-colors"
-            title="Back to boards"
+            onClick={handleBackNavigation}
+            className="inline-flex items-center gap-1.5 px-2 py-1.5 rounded-lg hover:bg-gray-100 dark:hover:bg-gray-800 transition-colors text-gray-600 dark:text-gray-300"
+            title={backTitle}
           >
-            <ArrowLeft size={18} className="text-gray-600 dark:text-gray-300" />
+            <ArrowLeft size={18} />
+            <span className="hidden sm:inline text-xs font-medium">{returnContext.label}</span>
           </button>
           <input
             type="text"

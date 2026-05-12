@@ -16,6 +16,7 @@ import {
   suggestActionImprovements,
   mapRegulatoryTags
 } from '../services/capaService';
+import { notifyCapaBoardCreatedPushSubscribers } from '../services/incidentPushNotificationService';
 
 const router = Router();
 
@@ -1124,7 +1125,7 @@ router.get('/:id/recurrence-check', async (req: AuthRequest, res: Response) => {
  */
 router.post(
   '/generate-from-rca/:rcaId',
-  requireMinimumRole(UserRole.SUPERVISOR),
+  requirePrivilege('capa.create'),
   async (req: AuthRequest, res: Response) => {
     try {
       const { rcaId } = req.params;
@@ -1157,50 +1158,100 @@ router.post(
         throw new ValidationError(`CAPA actions already exist for this RCA (${existingActions} actions found)`);
       }
 
-      // Extract action plans from RCA data
+      // Extract corrective action plans and preventive controls from RCA data
       let actionPlans: { immediate: any[]; shortTerm: any[]; longTerm: any[] } = {
         immediate: [],
         shortTerm: [],
         longTerm: [],
       };
+      let preventiveControls: any[] = [];
 
       if (rca.method === 'FIVE_WHYS' && rca.fiveWhysData) {
         const data = rca.fiveWhysData as any;
         if (data.actionPlans) {
           actionPlans = data.actionPlans;
         }
+        if (Array.isArray(data.preventiveControls)) {
+          preventiveControls = data.preventiveControls;
+        }
       } else if (rca.method === 'FISHBONE' && rca.fishboneData) {
         const data = rca.fishboneData as any;
         if (data.actionPlans) {
           actionPlans = data.actionPlans;
         }
+        if (Array.isArray(data.preventiveControls)) {
+          preventiveControls = data.preventiveControls;
+        }
       }
 
-      // Flatten and filter valid action items
-      const allActions: Array<{
-        action: string;
+      type CAPASourceItem = {
+        title: string;
+        description: string;
         priority: string;
-        category: 'immediate' | 'shortTerm' | 'longTerm';
-      }> = [];
+        category: 'immediate' | 'shortTerm' | 'longTerm' | 'preventiveControl';
+        actionType: ActionType;
+        dueDate?: string;
+        endDate?: string;
+        targetDate?: string;
+      };
 
-      for (const item of actionPlans.immediate || []) {
-        if (item.action && item.action.trim()) {
-          allActions.push({ ...item, category: 'immediate' });
+      const allActions: CAPASourceItem[] = [];
+
+      const getActionPlanDescription = (category: CAPASourceItem['category'], text: string) => {
+        if (category === 'immediate') return `Immediate Action: ${text}`;
+        if (category === 'shortTerm') return `Short-Term Action: ${text}`;
+        if (category === 'longTerm') return `Long-Term Action: ${text}`;
+        return `Preventive Control: ${text}`;
+      };
+
+      const addActionPlanItems = (
+        items: any[] | undefined,
+        category: 'immediate' | 'shortTerm' | 'longTerm',
+        actionType: ActionType
+      ) => {
+        for (const item of items || []) {
+          const title = typeof item.action === 'string' ? item.action.trim() : '';
+          if (!title) continue;
+
+          allActions.push({
+            title,
+            description: getActionPlanDescription(category, title),
+            priority: item.priority || 'medium',
+            category,
+            actionType,
+            dueDate: item.dueDate,
+            endDate: item.endDate,
+          });
         }
-      }
-      for (const item of actionPlans.shortTerm || []) {
-        if (item.action && item.action.trim()) {
-          allActions.push({ ...item, category: 'shortTerm' });
-        }
-      }
-      for (const item of actionPlans.longTerm || []) {
-        if (item.action && item.action.trim()) {
-          allActions.push({ ...item, category: 'longTerm' });
-        }
+      };
+
+      addActionPlanItems(actionPlans.immediate, 'immediate', ActionType.CORRECTIVE);
+      addActionPlanItems(actionPlans.shortTerm, 'shortTerm', ActionType.CORRECTIVE);
+      addActionPlanItems(actionPlans.longTerm, 'longTerm', ActionType.CORRECTIVE);
+
+      for (const control of preventiveControls) {
+        const title = typeof control.control === 'string' ? control.control.trim() : '';
+        const description = typeof control.description === 'string' ? control.description.trim() : '';
+        if (!title && !description) continue;
+
+        const details = [
+          description || undefined,
+          control.type ? `Control type: ${control.type}` : undefined,
+          control.frequency ? `Frequency: ${control.frequency}` : undefined,
+        ].filter(Boolean).join('\n');
+
+        allActions.push({
+          title: title || description.substring(0, 200),
+          description: details || `Preventive Control: ${title}`,
+          priority: 'medium',
+          category: 'preventiveControl',
+          actionType: ActionType.PREVENTIVE,
+          targetDate: control.targetDate,
+        });
       }
 
       if (allActions.length === 0) {
-        throw new ValidationError('No action plans found in the RCA analysis. Please add action items before generating CAPA.');
+        throw new ValidationError('No corrective actions or preventive controls found in the RCA analysis. Please add them before generating the CAPA Board.');
       }
 
       // Map priority from RCA format to CAPA format
@@ -1220,30 +1271,44 @@ router.post(
           case 'immediate': return 7;   // 1 week
           case 'shortTerm': return 30;  // 1 month
           case 'longTerm': return 90;   // 3 months
+          case 'preventiveControl': return 30;
           default: return 30;
         }
       };
 
-      // Determine action type based on category
-      const getActionType = (category: string): ActionType => {
-        // Immediate actions are corrective (fix the problem now)
-        // Short/Long term actions are preventive (prevent recurrence)
-        return category === 'immediate' ? ActionType.CORRECTIVE : ActionType.PREVENTIVE;
+      const parseSourceDate = (value?: string): Date | null => {
+        if (!value) return null;
+
+        const date = new Date(value);
+        return Number.isNaN(date.getTime()) ? null : date;
+      };
+
+      const getDueDate = (actionItem: CAPASourceItem): Date => {
+        const sourceDate = parseSourceDate(actionItem.dueDate) ||
+          parseSourceDate(actionItem.endDate) ||
+          parseSourceDate(actionItem.targetDate);
+
+        if (sourceDate) {
+          return sourceDate;
+        }
+
+        const dueDate = new Date();
+        dueDate.setDate(dueDate.getDate() + getDueDateOffset(actionItem.category));
+        return dueDate;
       };
 
       // Create CAPA actions
       const createdActions = [];
       for (const actionItem of allActions) {
-        const dueDate = new Date();
-        dueDate.setDate(dueDate.getDate() + getDueDateOffset(actionItem.category));
+        const dueDate = getDueDate(actionItem);
 
         // Analyze quality with AI (if available)
         let qualityAnalysis = { score: null as number | null, weaknesses: [] as string[] };
         try {
           qualityAnalysis = await analyzeActionQuality(
-            actionItem.action,
-            actionItem.action,
-            getActionType(actionItem.category)
+            actionItem.title,
+            actionItem.description,
+            actionItem.actionType
           );
         } catch {
           // AI analysis failed, continue without it
@@ -1265,9 +1330,9 @@ router.post(
             id: uuidv4(),
             updatedAt: new Date(),
             rcaAnalysisId: rcaId,
-            actionType: getActionType(actionItem.category),
-            title: actionItem.action.substring(0, 200), // Truncate if too long
-            description: `${actionItem.category === 'immediate' ? 'Immediate Action' : actionItem.category === 'shortTerm' ? 'Short-Term Action' : 'Long-Term Action'}: ${actionItem.action}`,
+            actionType: actionItem.actionType,
+            title: actionItem.title.substring(0, 200),
+            description: actionItem.description,
             priority: mapPriority(actionItem.priority, actionItem.category),
             ownerId: userId!, // Default to current user
             dueDate,
@@ -1295,6 +1360,14 @@ router.post(
         where: { id: rca.incidentId },
         data: { status: 'IN_PROGRESS' },
       });
+
+      notifyCapaBoardCreatedPushSubscribers({
+        rcaId,
+        actionCount: createdActions.length,
+        actor: req.user!,
+      })
+        .then(result => console.log(`[IncidentPush] CAPA board=${result.successCount}/${result.failureCount}`))
+        .catch(err => console.error('[IncidentPush] CAPA board push error:', err.message));
 
       res.status(201).json({
         success: true,

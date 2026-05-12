@@ -6,6 +6,7 @@ import { v4 as uuidv4 } from 'uuid';
 import { clearRoomFromCache } from '../routes/videoCallRoutes';
 import jwt from 'jsonwebtoken';
 import { ACCESS_COOKIE_NAME, hashToken } from '../utils/sessionCookies';
+import { syncRcaFishboneBoard } from './rcaFishboneBoardService';
 
 interface ConnectedUser {
   socketId: string;
@@ -466,6 +467,16 @@ class WebSocketService {
             }
           });
           console.log('📈 [WS] Categories auto-saved to database for RCA:', data.rcaId);
+          try {
+            await syncRcaFishboneBoard(data.rcaId, userInfo.userId, {
+              ...currentData,
+              problem: data.problem,
+              categories: data.categories,
+            }, 'FISHBONE_REALTIME_UPDATE');
+            console.log('📈 [WS] Fishbone whiteboard synced for RCA:', data.rcaId);
+          } catch (syncError) {
+            console.error('📈 [WS] Failed to sync fishbone whiteboard:', syncError);
+          }
         }
       } catch (error) {
         console.error('📈 [WS] Failed to auto-save categories:', error);

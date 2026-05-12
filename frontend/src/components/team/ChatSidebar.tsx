@@ -62,9 +62,26 @@ interface ChatSidebarProps {
   defaultTab?: TabType;
   onTeamTabClosed?: (hasTeamMembers: boolean) => void;
   ownerId?: string; // To exclude owner from team member count
+  versionHistory?: Array<{
+    id: string;
+    versionNumber: number | string;
+    createdAt: string;
+    changeReason?: string | null;
+    createdBy?: {
+      firstName?: string | null;
+      lastName?: string | null;
+      email?: string | null;
+    } | null;
+  }>;
 }
 
 type TabType = 'chat' | 'archived' | 'team' | 'activity' | 'recordings' | 'discussions';
+type ModalPosition = { left: number; top: number };
+type ModalDragState = ModalPosition & {
+  pointerId: number;
+  startX: number;
+  startY: number;
+};
 
 export default function ChatSidebar({
   incidentId,
@@ -81,14 +98,19 @@ export default function ChatSidebar({
   defaultTab = 'chat',
   onTeamTabClosed,
   ownerId,
+  versionHistory = [],
 }: ChatSidebarProps) {
   const [isOpen, setIsOpen] = useState(defaultOpen);
   const [activeTab, setActiveTab] = useState<TabType>(defaultTab);
   const [unreadCount, setUnreadCount] = useState(() => chatUnreadStore.getCount(incidentId));
   const [hasArchivedMessages, setHasArchivedMessages] = useState(false);
   const [detachedTab, setDetachedTab] = useState<TabType | null>(null);
+  const [detachedModalPosition, setDetachedModalPosition] = useState<ModalPosition | null>(null);
+  const [isDetachedModalDragging, setIsDetachedModalDragging] = useState(false);
   const [isTabVisible, setIsTabVisible] = useState(true);
   const sidebarRef = useRef<HTMLDivElement>(null);
+  const detachedModalRef = useRef<HTMLDivElement>(null);
+  const detachedDragStateRef = useRef<ModalDragState | null>(null);
   const previousTabRef = useRef<TabType>(defaultTab);
   const originalTitleRef = useRef<string>('');
 
@@ -219,6 +241,12 @@ export default function ChatSidebar({
     }
   }, [visibility, activeTab]);
 
+  useEffect(() => {
+    if (visibility !== 'TEAM' && detachedTab === 'chat') {
+      setDetachedTab('team');
+    }
+  }, [visibility, detachedTab]);
+
   // Helper to count non-owner team members
   const getNonOwnerTeamMemberCount = useCallback(() => {
     const ownerIdToUse = ownerId || currentUserId;
@@ -237,6 +265,11 @@ export default function ChatSidebar({
       onTeamTabClosed(hasTeamMembers);
     }
   }, [activeTab, onTeamTabClosed, getNonOwnerTeamMemberCount]);
+
+  const handleDetachedTabChange = useCallback((newTab: TabType) => {
+    setDetachedTab(newTab);
+    handleTabChange(newTab);
+  }, [handleTabChange]);
 
   // Handle sidebar close
   const handleCloseSidebar = useCallback(() => {
@@ -342,6 +375,27 @@ export default function ChatSidebar({
     }
   }, [incidentId, markMessagesRead]);
 
+  useEffect(() => {
+    const handleOpenIncidentChat = (event: Event) => {
+      const detail = (event as CustomEvent<{ incidentId?: string; tab?: TabType }>).detail;
+      if (!detail?.incidentId || detail.incidentId !== incidentId) return;
+
+      const requestedTab = detail.tab || 'chat';
+      setDetachedTab(null);
+      handleTabChange(requestedTab);
+      setIsOpen(true);
+      chatUnreadStore.clearCount(incidentId);
+      markMessagesAsRead();
+      document.title = originalTitleRef.current;
+      setChatOpen(incidentId, true);
+    };
+
+    window.addEventListener('dashmet:open-incident-chat', handleOpenIncidentChat);
+    return () => {
+      window.removeEventListener('dashmet:open-incident-chat', handleOpenIncidentChat);
+    };
+  }, [incidentId, handleTabChange, markMessagesAsRead, setChatOpen]);
+
   const toggleSidebar = () => {
     if (isOpen) {
       // Closing - use the handler that notifies about team members
@@ -359,25 +413,178 @@ export default function ChatSidebar({
 
   // When sidebar closes, mark chat as closed for notification service
   useEffect(() => {
-    // Mark chat as closed when sidebar is closed OR on initial mount if sidebar starts closed
-    if (!isOpen && incidentId) {
-      setChatOpen(incidentId, false);
+    if (incidentId) {
+      setChatOpen(incidentId, isOpen || Boolean(detachedTab));
     }
-    // Also mark as open if sidebar starts open
-    if (isOpen && incidentId) {
-      setChatOpen(incidentId, true);
+  }, [isOpen, detachedTab, incidentId, setChatOpen]);
+
+  const clampDetachedModalPosition = useCallback((position: ModalPosition): ModalPosition => {
+    if (typeof window === 'undefined') {
+      return position;
     }
-  }, [isOpen, incidentId, setChatOpen]);
+
+    const viewportWidth = window.innerWidth;
+    const viewportHeight = window.innerHeight;
+    const modal = detachedModalRef.current;
+    const modalWidth = modal?.offsetWidth || Math.min(1280, Math.max(320, viewportWidth - 16));
+    const modalHeight = modal?.offsetHeight || Math.min(832, Math.max(360, viewportHeight - 16));
+    const margin = 8;
+
+    return {
+      left: Math.min(
+        Math.max(margin, position.left),
+        Math.max(margin, viewportWidth - modalWidth - margin)
+      ),
+      top: Math.min(
+        Math.max(margin, position.top),
+        Math.max(margin, viewportHeight - modalHeight - margin)
+      ),
+    };
+  }, []);
+
+  const centerDetachedModal = useCallback(() => {
+    if (typeof window === 'undefined') {
+      return;
+    }
+
+    window.requestAnimationFrame(() => {
+      const modal = detachedModalRef.current;
+      if (!modal) {
+        return;
+      }
+
+      const modalWidth = modal?.offsetWidth || Math.min(1280, Math.max(320, window.innerWidth - 16));
+      const modalHeight = modal?.offsetHeight || Math.min(832, Math.max(360, window.innerHeight - 16));
+
+      setDetachedModalPosition(
+        clampDetachedModalPosition({
+          left: (window.innerWidth - modalWidth) / 2,
+          top: (window.innerHeight - modalHeight) / 2,
+        })
+      );
+    });
+  }, [clampDetachedModalPosition]);
+
+  useEffect(() => {
+    if (!detachedTab) {
+      detachedDragStateRef.current = null;
+      setDetachedModalPosition(null);
+      setIsDetachedModalDragging(false);
+      return;
+    }
+
+    centerDetachedModal();
+  }, [detachedTab, centerDetachedModal]);
+
+  useEffect(() => {
+    if (!detachedTab || typeof window === 'undefined') {
+      return;
+    }
+
+    const handleResize = () => {
+      setDetachedModalPosition((position) =>
+        position ? clampDetachedModalPosition(position) : position
+      );
+    };
+
+    window.addEventListener('resize', handleResize);
+    return () => window.removeEventListener('resize', handleResize);
+  }, [detachedTab, clampDetachedModalPosition]);
+
+  const handleDetachedModalPointerDown = useCallback((event: React.PointerEvent<HTMLDivElement>) => {
+    if (event.button !== 0) {
+      return;
+    }
+
+    const target = event.target as HTMLElement;
+    if (target.closest('button, a, input, textarea, select, [role="button"], [data-no-drag="true"]')) {
+      return;
+    }
+
+    const modal = detachedModalRef.current;
+    if (!modal) {
+      return;
+    }
+
+    const rect = modal.getBoundingClientRect();
+    const startPosition = clampDetachedModalPosition({
+      left: rect.left,
+      top: rect.top,
+    });
+
+    detachedDragStateRef.current = {
+      pointerId: event.pointerId,
+      startX: event.clientX,
+      startY: event.clientY,
+      left: startPosition.left,
+      top: startPosition.top,
+    };
+
+    setDetachedModalPosition(startPosition);
+    setIsDetachedModalDragging(true);
+    event.currentTarget.setPointerCapture(event.pointerId);
+  }, [clampDetachedModalPosition]);
+
+  const handleDetachedModalPointerMove = useCallback((event: React.PointerEvent<HTMLDivElement>) => {
+    const dragState = detachedDragStateRef.current;
+    if (!dragState || dragState.pointerId !== event.pointerId) {
+      return;
+    }
+
+    event.preventDefault();
+    setDetachedModalPosition(
+      clampDetachedModalPosition({
+        left: dragState.left + event.clientX - dragState.startX,
+        top: dragState.top + event.clientY - dragState.startY,
+      })
+    );
+  }, [clampDetachedModalPosition]);
+
+  const handleDetachedModalPointerEnd = useCallback((event: React.PointerEvent<HTMLDivElement>) => {
+    if (detachedDragStateRef.current?.pointerId !== event.pointerId) {
+      return;
+    }
+
+    detachedDragStateRef.current = null;
+    setIsDetachedModalDragging(false);
+
+    if (event.currentTarget.hasPointerCapture(event.pointerId)) {
+      event.currentTarget.releasePointerCapture(event.pointerId);
+    }
+  }, []);
 
   // Detach a tab into modal view
   const handleDetachTab = useCallback((tab: TabType) => {
+    setActiveTab(tab);
+    previousTabRef.current = tab;
     setDetachedTab(tab);
+    setIsOpen(false);
   }, []);
 
-  // Attach the detached tab back to sidebar
-  const handleAttachTab = useCallback(() => {
+  // Minimize the detached tab back into the sidebar
+  const handleMinimizeDetachedTab = useCallback(() => {
+    if (detachedTab) {
+      setActiveTab(detachedTab);
+      previousTabRef.current = detachedTab;
+    }
     setDetachedTab(null);
-  }, []);
+    setIsOpen(true);
+  }, [detachedTab]);
+
+  const handleCloseDetachedTab = useCallback(() => {
+    if (detachedTab) {
+      setActiveTab(detachedTab);
+      previousTabRef.current = detachedTab;
+    }
+
+    if (detachedTab === 'team' && onTeamTabClosed) {
+      const hasTeamMembers = getNonOwnerTeamMemberCount() > 0;
+      onTeamTabClosed(hasTeamMembers);
+    }
+
+    setDetachedTab(null);
+    setIsOpen(false);
+  }, [detachedTab, onTeamTabClosed, getNonOwnerTeamMemberCount]);
 
   // Get tab display name
   const getTabDisplayName = (tab: TabType): string => {
@@ -396,6 +603,22 @@ export default function ChatSidebar({
   if (!isParticipant) {
     return null;
   }
+
+  const detachedModalStyle: React.CSSProperties = {
+    width: 'min(80rem, calc(100vw - 1rem))',
+    height: 'min(52rem, calc(100dvh - 1rem))',
+    ...(detachedModalPosition
+      ? {
+          left: `${detachedModalPosition.left}px`,
+          top: `${detachedModalPosition.top}px`,
+        }
+      : {
+          left: '50%',
+          top: '50%',
+          transform: 'translate(-50%, -50%)',
+        }),
+  };
+  const detachedPanelTab = detachedTab || activeTab;
 
   return (
     <>
@@ -608,7 +831,7 @@ export default function ChatSidebar({
             </div>
           ) : activeTab === 'activity' ? (
             <div className="h-full">
-              <ActivityLogPanel incidentId={incidentId} />
+              <ActivityLogPanel incidentId={incidentId} versionHistory={versionHistory} />
             </div>
           ) : activeTab === 'recordings' ? (
             <div className="h-full">
@@ -734,63 +957,176 @@ export default function ChatSidebar({
 
       {/* Detached Tab Modal */}
       {detachedTab && (
-        <div className="fixed inset-0 z-[100] flex items-center justify-center p-0 sm:p-4 md:p-6 lg:p-8">
-          {/* Modal Backdrop */}
-          <div 
-            className="absolute inset-0 bg-black/50 backdrop-blur-sm"
-            onClick={handleAttachTab}
-          />
-          
-          {/* Modal Content - Full screen on mobile, contained on larger screens */}
-          <div className="relative w-full h-full sm:h-[95vh] md:h-[90vh] sm:max-w-4xl md:max-w-5xl lg:max-w-7xl bg-white dark:bg-slate-900 sm:rounded-xl shadow-2xl flex flex-col overflow-hidden">
-            {/* Modal Header */}
-            <div className="flex-none bg-gradient-to-r from-blue-600 to-indigo-600 text-white">
-              <div className="flex items-center justify-between px-3 sm:px-4 md:px-6 py-3 sm:py-4">
-                <div className="flex items-center space-x-2 sm:space-x-3 min-w-0 flex-1">
-                  <div className="flex-shrink-0">
-                    {detachedTab === 'chat' && <MessageSquare className="w-4 h-4 sm:w-5 sm:h-5" />}
-                    {detachedTab === 'archived' && <Archive className="w-4 h-4 sm:w-5 sm:h-5" />}
-                    {detachedTab === 'team' && <Users className="w-4 h-4 sm:w-5 sm:h-5" />}
-                    {detachedTab === 'activity' && <Clock className="w-4 h-4 sm:w-5 sm:h-5" />}
-                    {detachedTab === 'recordings' && <Film className="w-4 h-4 sm:w-5 sm:h-5" />}
-                    {detachedTab === 'discussions' && <History className="w-4 h-4 sm:w-5 sm:h-5" />}
-                  </div>
-                  <div className="min-w-0 flex-1">
-                    <h2 className="font-semibold text-base sm:text-lg truncate">
-                      {getTabDisplayName(detachedTab)}
-                    </h2>
-                    <p className="text-xs text-white/70 truncate">
-                      {incidentTitle || 'Incident'}
-                    </p>
-                  </div>
-                  {!isConnected && detachedTab === 'chat' && (
-                    <span className="flex-shrink-0 w-2 h-2 bg-yellow-400 rounded-full animate-pulse" title="Reconnecting..." />
+        <div className="pointer-events-none fixed inset-0 z-[100] bg-transparent">
+          <div
+            ref={detachedModalRef}
+            className={`pointer-events-auto fixed bg-white dark:bg-slate-900 rounded-xl shadow-2xl flex flex-col overflow-hidden ring-1 ring-black/10 ${
+              isDetachedModalDragging ? 'select-none shadow-[0_24px_80px_rgba(15,23,42,0.28)]' : ''
+            }`}
+            style={detachedModalStyle}
+          >
+            {/* Header */}
+            <div
+              className={`flex-none bg-gradient-to-r from-blue-600 to-indigo-600 text-white shadow-md ${
+                isDetachedModalDragging ? 'cursor-grabbing' : 'cursor-grab'
+              }`}
+              onPointerDown={handleDetachedModalPointerDown}
+              onPointerMove={handleDetachedModalPointerMove}
+              onPointerUp={handleDetachedModalPointerEnd}
+              onPointerCancel={handleDetachedModalPointerEnd}
+              style={{ touchAction: 'none' }}
+            >
+              <div className="flex items-center justify-between px-4 py-3">
+                <div className="flex items-center space-x-2 min-w-0">
+                  <MessageCircle className="w-5 h-5 flex-shrink-0" />
+                  <span className="font-semibold text-sm truncate max-w-[320px]">
+                    {incidentTitle || 'Incident Chat'}
+                  </span>
+                  {!isConnected && detachedPanelTab === 'chat' && (
+                    <span className="w-2 h-2 bg-yellow-400 rounded-full animate-pulse" title="Reconnecting..." />
                   )}
                 </div>
-                
-                <div className="flex items-center space-x-1 sm:space-x-2 flex-shrink-0 ml-2">
+
+                <div className="flex items-center space-x-1 flex-shrink-0 ml-2" data-no-drag="true">
                   <button
-                    onClick={handleAttachTab}
-                    className="flex items-center space-x-1 sm:space-x-1.5 px-2 sm:px-3 py-1.5 bg-white/20 hover:bg-white/30 rounded-lg transition-colors text-xs sm:text-sm"
+                    onClick={handleMinimizeDetachedTab}
+                    className="flex items-center space-x-1.5 px-3 py-1.5 bg-white/20 hover:bg-white/30 rounded-lg transition-colors text-sm"
                     title="Return to sidebar"
                   >
-                    <Minimize2 className="w-3.5 h-3.5 sm:w-4 sm:h-4" />
+                    <Minimize2 className="w-4 h-4" />
                     <span className="hidden sm:inline">Minimize</span>
                   </button>
                   <button
-                    onClick={handleAttachTab}
-                    className="p-1 sm:p-1.5 hover:bg-white/20 rounded-lg transition-colors"
+                    onClick={handleCloseDetachedTab}
+                    className="p-1.5 hover:bg-white/20 rounded-lg transition-colors"
                     title="Close"
                   >
-                    <X className="w-4 h-4 sm:w-5 sm:h-5" />
+                    <X className="w-5 h-5" />
                   </button>
                 </div>
               </div>
+
+              {/* Tabs - Same side panel tabs, just wider */}
+              <div className="flex border-t border-white/20 overflow-x-auto scrollbar-hide" data-no-drag="true">
+                {visibility === 'TEAM' && (
+                  <button
+                    onClick={() => handleDetachedTabChange('chat')}
+                    className={`flex-shrink-0 px-3 py-3 text-sm font-medium transition-colors relative ${
+                      detachedPanelTab === 'chat'
+                        ? 'bg-white/20'
+                        : 'hover:bg-white/10'
+                    }`}
+                  >
+                    <div className="flex items-center justify-center space-x-1.5">
+                      <MessageSquare className="w-4 h-4" />
+                      <span className="whitespace-nowrap">Chat</span>
+                      {unreadCount > 0 && detachedPanelTab !== 'chat' && (
+                        <span className="ml-1 px-1.5 py-0.5 bg-red-500 text-white text-xs rounded-full">
+                          {unreadCount}
+                        </span>
+                      )}
+                    </div>
+                    {detachedPanelTab === 'chat' && (
+                      <div className="absolute bottom-0 left-0 right-0 h-0.5 bg-white"></div>
+                    )}
+                  </button>
+                )}
+
+                {hasArchivedMessages && (
+                  <button
+                    onClick={() => handleDetachedTabChange('archived')}
+                    className={`flex-shrink-0 px-3 py-3 text-sm font-medium transition-colors relative ${
+                      detachedPanelTab === 'archived'
+                        ? 'bg-white/20'
+                        : 'hover:bg-white/10'
+                    }`}
+                  >
+                    <div className="flex items-center justify-center space-x-1.5">
+                      <Archive className="w-4 h-4" />
+                      <span className="whitespace-nowrap">Archive</span>
+                    </div>
+                    {detachedPanelTab === 'archived' && (
+                      <div className="absolute bottom-0 left-0 right-0 h-0.5 bg-white"></div>
+                    )}
+                  </button>
+                )}
+
+                <button
+                  onClick={() => handleDetachedTabChange('team')}
+                  className={`flex-shrink-0 px-3 py-3 text-sm font-medium transition-colors relative ${
+                    detachedPanelTab === 'team'
+                      ? 'bg-white/20'
+                      : 'hover:bg-white/10'
+                  }`}
+                >
+                  <div className="flex items-center justify-center space-x-1.5">
+                    <Users className="w-4 h-4" />
+                    <span className="whitespace-nowrap">Team</span>
+                    <span className="text-xs opacity-75">
+                      ({participants.length})
+                    </span>
+                  </div>
+                  {detachedPanelTab === 'team' && (
+                    <div className="absolute bottom-0 left-0 right-0 h-0.5 bg-white"></div>
+                  )}
+                </button>
+
+                <button
+                  onClick={() => handleDetachedTabChange('activity')}
+                  className={`flex-shrink-0 px-3 py-3 text-sm font-medium transition-colors relative ${
+                    detachedPanelTab === 'activity'
+                      ? 'bg-white/20'
+                      : 'hover:bg-white/10'
+                  }`}
+                >
+                  <div className="flex items-center justify-center space-x-1.5">
+                    <Clock className="w-4 h-4" />
+                    <span className="whitespace-nowrap">Activity</span>
+                  </div>
+                  {detachedPanelTab === 'activity' && (
+                    <div className="absolute bottom-0 left-0 right-0 h-0.5 bg-white"></div>
+                  )}
+                </button>
+
+                <button
+                  onClick={() => handleDetachedTabChange('recordings')}
+                  className={`flex-shrink-0 px-3 py-3 text-sm font-medium transition-colors relative ${
+                    detachedPanelTab === 'recordings'
+                      ? 'bg-white/20'
+                      : 'hover:bg-white/10'
+                  }`}
+                >
+                  <div className="flex items-center justify-center space-x-1.5">
+                    <Film className="w-4 h-4" />
+                    <span className="whitespace-nowrap">Recordings</span>
+                  </div>
+                  {detachedPanelTab === 'recordings' && (
+                    <div className="absolute bottom-0 left-0 right-0 h-0.5 bg-white"></div>
+                  )}
+                </button>
+
+                <button
+                  onClick={() => handleDetachedTabChange('discussions')}
+                  className={`flex-shrink-0 px-3 py-3 text-sm font-medium transition-colors relative ${
+                    detachedPanelTab === 'discussions'
+                      ? 'bg-white/20'
+                      : 'hover:bg-white/10'
+                  }`}
+                >
+                  <div className="flex items-center justify-center space-x-1.5">
+                    <History className="w-4 h-4" />
+                    <span className="whitespace-nowrap">Discussions</span>
+                  </div>
+                  {detachedPanelTab === 'discussions' && (
+                    <div className="absolute bottom-0 left-0 right-0 h-0.5 bg-white"></div>
+                  )}
+                </button>
+              </div>
             </div>
 
-            {/* Modal Body */}
+            {/* Content */}
             <div className="flex-1 min-h-0 overflow-hidden">
-              {detachedTab === 'chat' ? (
+              {detachedPanelTab === 'chat' ? (
                 <div className="h-full">
                   <IncidentChatPanel
                     incidentId={incidentId}
@@ -808,51 +1144,118 @@ export default function ChatSidebar({
                     isSidebarMode={true}
                   />
                 </div>
-              ) : detachedTab === 'archived' ? (
+              ) : detachedPanelTab === 'archived' ? (
                 <div className="h-full">
                   <ArchivedChatPanel incidentId={incidentId} />
                 </div>
-              ) : detachedTab === 'activity' ? (
+              ) : detachedPanelTab === 'activity' ? (
                 <div className="h-full">
-                  <ActivityLogPanel incidentId={incidentId} />
+                  <ActivityLogPanel incidentId={incidentId} versionHistory={versionHistory} />
                 </div>
-              ) : detachedTab === 'recordings' ? (
+              ) : detachedPanelTab === 'recordings' ? (
                 <div className="h-full">
                   <RecordingHistoryPanel incidentId={incidentId} />
                 </div>
-              ) : detachedTab === 'discussions' ? (
+              ) : detachedPanelTab === 'discussions' ? (
                 <div className="h-full">
                   <DiscussionHistoryPanel incidentId={incidentId} />
                 </div>
               ) : (
-                <div className="h-full overflow-y-auto p-4 sm:p-6 md:p-8 bg-gray-50 dark:bg-slate-800">
-                  <div className="max-w-4xl mx-auto">
-                    <div className="mb-4 sm:mb-6">
-                      <h3 className="text-lg sm:text-xl font-semibold text-gray-900 dark:text-white mb-1 sm:mb-2">
+                <div className="h-full overflow-y-auto p-6 bg-gray-50 dark:bg-slate-800">
+                  <div className="mb-4">
+                    <div className="flex items-center justify-between mb-2">
+                      <h3 className="text-lg font-semibold text-gray-900 dark:text-white">
                         Team Management
                       </h3>
-                      <p className="text-xs sm:text-sm text-gray-600 dark:text-gray-400">
-                        Add or remove team members and manage their roles for this incident and RCA.
-                      </p>
+                      <div className="flex items-center gap-2">
+                        {activeCallInfo && !isCallActive && (
+                          <button
+                            onClick={() => joinCall(
+                              activeCallInfo.roomUrl,
+                              activeCallInfo.roomName,
+                              incidentId
+                            )}
+                            className="flex items-center space-x-2 px-3 py-2 text-white text-sm font-medium rounded-lg transition-all bg-gradient-to-r from-green-500 to-emerald-600 hover:from-green-600 hover:to-emerald-700 shadow-lg animate-pulse hover:animate-none"
+                            title="Join the active team call"
+                          >
+                            <PhoneCall className="w-4 h-4" />
+                            <span>Join Call</span>
+                          </button>
+                        )}
+                        {activeCallInfo && !isCallActive && (
+                          <button
+                            onClick={async () => {
+                              if (confirm('Are you sure you want to end this call for everyone?')) {
+                                setIsEndingCall(true);
+                                const success = await terminateCall(incidentId, activeCallInfo.roomName);
+                                if (success) {
+                                  setActiveCallInfo(null);
+                                }
+                                setIsEndingCall(false);
+                              }
+                            }}
+                            disabled={isEndingCall}
+                            className="flex items-center space-x-2 px-3 py-2 text-white text-sm font-medium rounded-lg transition-colors bg-red-600 hover:bg-red-700 disabled:opacity-50"
+                            title="End call for everyone"
+                          >
+                            <Phone className="w-4 h-4" />
+                            <span>{isEndingCall ? 'Ending...' : 'End Call'}</span>
+                          </button>
+                        )}
+                        <button
+                          onClick={() => startCall(incidentId)}
+                          disabled={isCallActive || !!activeCallInfo}
+                          className={`flex items-center space-x-2 px-3 py-2 text-white text-sm font-medium rounded-lg transition-colors ${
+                            isCallActive
+                              ? 'bg-gray-400 cursor-not-allowed'
+                              : activeCallInfo
+                                ? 'bg-gray-400 cursor-not-allowed'
+                                : 'bg-green-600 hover:bg-green-700'
+                          }`}
+                          title={isCallActive ? 'Call in progress' : activeCallInfo ? 'A call is already active - join or end it first' : 'Start video call with team'}
+                        >
+                          <Video className="w-4 h-4" />
+                          <span>{isCallActive ? 'In Call' : 'Start Call'}</span>
+                        </button>
+                      </div>
                     </div>
-
-                    <TeamParticipantSelector
-                      incidentId={incidentId}
-                      organizationId={organizationId}
-                      currentUserId={currentUserId}
-                      selectedParticipants={participants.filter(p => p.user).map(p => ({
-                        ...p,
-                        user: {
-                          ...p.user,
-                          role: p.user?.role || 'USER'
-                        }
-                      }))}
-                      onParticipantsChange={onParticipantsChange}
-                      isTeamIncident={isTeamIncident}
-                      onVisibilityChange={onVisibilityChange}
-                      visibility={visibility}
-                    />
+                    <p className="text-sm text-gray-600 dark:text-gray-400">
+                      Add or remove team members and manage their roles for this incident and RCA.
+                    </p>
+                    {activeCallInfo && !isCallActive && (
+                      <div className="mt-3 p-3 bg-green-50 dark:bg-green-900/30 border border-green-200 dark:border-green-800 rounded-lg">
+                        <div className="flex items-center justify-between">
+                          <div className="flex items-center gap-2 text-green-700 dark:text-green-300">
+                            <span className="relative flex h-2 w-2">
+                              <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-green-400 opacity-75"></span>
+                              <span className="relative inline-flex rounded-full h-2 w-2 bg-green-500"></span>
+                            </span>
+                            <span className="text-sm font-medium">Team call in progress</span>
+                          </div>
+                        </div>
+                        <p className="text-xs text-green-600 dark:text-green-400 mt-1">
+                          Click &quot;Join Call&quot; to connect, or &quot;End Call&quot; to terminate the call for everyone.
+                        </p>
+                      </div>
+                    )}
                   </div>
+
+                  <TeamParticipantSelector
+                    incidentId={incidentId}
+                    organizationId={organizationId}
+                    currentUserId={currentUserId}
+                    selectedParticipants={participants.filter(p => p.user).map(p => ({
+                      ...p,
+                      user: {
+                        ...p.user,
+                        role: p.user?.role || 'USER'
+                      }
+                    }))}
+                    onParticipantsChange={onParticipantsChange}
+                    isTeamIncident={isTeamIncident}
+                    onVisibilityChange={onVisibilityChange}
+                    visibility={visibility}
+                  />
                 </div>
               )}
             </div>

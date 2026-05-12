@@ -1,17 +1,20 @@
 'use client';
 
-import { useState, useEffect, useCallback } from 'react';
+import { Suspense, useState, useEffect, useCallback } from 'react';
 import { useRouter, useSearchParams } from 'next/navigation';
-import Link from 'next/link';
-import Image from 'next/image';
 import { useAuth } from '@/components/providers/AuthProvider';
 import { useWebSocket } from '@/lib/websocket';
-import { usePrivileges, INCIDENTS_PRIVILEGES } from '@/lib/usePrivileges';
+import { usePrivileges, INCIDENTS_PRIVILEGES, RCA_PRIVILEGES } from '@/lib/usePrivileges';
 import { useAccessDeniedModal } from '@/components/modals/AccessDeniedModal';
 import ProtectedRoute from '@/components/auth/ProtectedRoute';
 import InvitationModal, { Invitation } from '@/components/team/InvitationModal';
+import IncidentFormModal from '@/components/incidents/IncidentFormModal';
 import api from '@/lib/api';
 import { formatDateTime } from '@/lib/dateUtils';
+import {
+  ensureRcaWorkspaceForIncident,
+  type IncidentWorkspaceAnalysis,
+} from '@/lib/incidentWorkspace';
 
 interface Incident {
   id: string;
@@ -57,6 +60,7 @@ interface Incident {
     name: string;
     email: string;
   };
+  RCAAnalysis?: IncidentWorkspaceAnalysis[];
 }
 
 export default function IncidentsPage() {
@@ -74,6 +78,12 @@ export default function IncidentsPage() {
   const canViewIncident = hasPrivilege(INCIDENTS_PRIVILEGES.VIEW);
   const canCreateIncident = hasPrivilege(INCIDENTS_PRIVILEGES.CREATE);
   const canDeleteIncident = hasPrivilege(INCIDENTS_PRIVILEGES.DELETE);
+  const createIncidentVisibility =
+    filterType === 'team' ? 'TEAM' :
+    filterType === 'public' ? 'PUBLIC' :
+    'PRIVATE';
+  const [createIncidentModalOpen, setCreateIncidentModalOpen] = useState(false);
+  const [editingDraftIncidentId, setEditingDraftIncidentId] = useState<string | null>(null);
 
   // Handler for creating new incident with privilege check
   const handleCreateIncident = useCallback(() => {
@@ -81,14 +91,15 @@ export default function IncidentsPage() {
       showAccessDenied('Create Incident Report', INCIDENTS_PRIVILEGES.CREATE);
       return;
     }
-    router.push('/incidents/new');
-  }, [canCreateIncident, showAccessDenied, router]);
+    setCreateIncidentModalOpen(true);
+  }, [canCreateIncident, showAccessDenied]);
 
   const [incidents, setIncidents] = useState<Incident[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
   const [statusFilter, setStatusFilter] = useState('all');
   const [typeFilter, setTypeFilter] = useState('all');
+  const [openingIncidentId, setOpeningIncidentId] = useState<string | null>(null);
   
   // Invitation state
   const [pendingInvitations, setPendingInvitations] = useState<Invitation[]>([]);
@@ -266,6 +277,44 @@ export default function IncidentsPage() {
     return status.replace(/_/g, ' ').replace(/\b\w/g, c => c.toUpperCase());
   };
 
+  const handleViewIncident = async (incident: Incident) => {
+    if (incident.status === 'DRAFT') {
+      setEditingDraftIncidentId(incident.id);
+      return;
+    }
+
+    setOpeningIncidentId(incident.id);
+    setError('');
+
+    try {
+      const rcaAnalysis = await ensureRcaWorkspaceForIncident(incident.id, incident.RCAAnalysis || []);
+
+      setIncidents((currentIncidents) => currentIncidents.map((currentIncident) => {
+        if (currentIncident.id !== incident.id) {
+          return currentIncident;
+        }
+
+        const currentAnalyses = currentIncident.RCAAnalysis || [];
+        const alreadyAttached = currentAnalyses.some((analysis) => analysis.id === rcaAnalysis.id);
+
+        return {
+          ...currentIncident,
+          RCAAnalysis: alreadyAttached ? currentAnalyses : [rcaAnalysis, ...currentAnalyses],
+        };
+      }));
+
+      router.push(`/rca/${rcaAnalysis.id}`);
+    } catch (err: any) {
+      if (err.response?.status === 403) {
+        showAccessDenied('Open RCA Workspace', RCA_PRIVILEGES.CREATE);
+      } else {
+        setError(err.response?.data?.error || 'Failed to open the incident workspace');
+      }
+    } finally {
+      setOpeningIncidentId(null);
+    }
+  };
+
   const [deletingId, setDeletingId] = useState<string | null>(null);
 
   const handleDelete = async (incidentId: string, incidentNumber: string) => {
@@ -295,7 +344,7 @@ export default function IncidentsPage() {
 
   return (
     <ProtectedRoute requireAuth={true}>
-      <div className="min-h-screen bg-gray-50 dark:bg-gray-900 p-3 sm:p-4 lg:p-8">
+      <div className="relative min-h-screen bg-gray-50 dark:bg-gray-900 p-3 sm:p-4 lg:p-8">
         {/* Invitation Modal */}
         <InvitationModal
           isOpen={showInvitationModal}
@@ -309,13 +358,10 @@ export default function IncidentsPage() {
         <div className="w-full">
           {/* Header */}
           <div className="mb-4 sm:mb-6 flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3 sm:gap-4">
-            <div className="flex items-start gap-3">
-              <div className="relative w-10 h-10 flex-shrink-0">
-                <Image src="/images/logo.png" alt="DASHMET Logo" fill className="object-contain" />
-              </div>
+            <div className="flex items-start">
               <div>
-                <h1 className="text-xl sm:text-2xl lg:text-3xl font-bold text-gray-900 dark:text-white">
-                  {filterType === 'team' ? '👥 Team Incidents' : filterType === 'public' ? '🌐 Public Incidents' : '📋 My Incidents'}
+                <h1 className="text-lg sm:text-xl lg:text-2xl font-semibold text-gray-900 dark:text-white">
+                  {filterType === 'team' ? 'Team Incidents' : filterType === 'public' ? 'Public Incidents' : 'My Incidents'}
                 </h1>
                 <p className="text-sm text-gray-600 dark:text-gray-400 mt-1 hidden sm:block">
                   {filterType === 'team' 
@@ -548,12 +594,14 @@ export default function IncidentsPage() {
                         <td className="px-3 sm:px-4 py-3 sm:py-4 min-w-[80px]">
                           <div className="flex items-center gap-2">
                             {canViewIncident ? (
-                              <Link
-                                href={`/incidents/${incident.id}`}
-                                className="text-primary-600 dark:text-primary-400 hover:text-primary-700 dark:hover:text-primary-300 text-sm font-medium whitespace-nowrap"
+                              <button
+                                type="button"
+                                onClick={() => handleViewIncident(incident)}
+                                disabled={openingIncidentId === incident.id}
+                                className="text-primary-600 dark:text-primary-400 hover:text-primary-700 dark:hover:text-primary-300 text-sm font-medium whitespace-nowrap disabled:opacity-60 disabled:cursor-wait"
                               >
-                                View →
-                              </Link>
+                                {openingIncidentId === incident.id ? 'Opening...' : 'View →'}
+                              </button>
                             ) : (
                               <button
                                 onClick={() => showAccessDenied('View Incident Report', INCIDENTS_PRIVILEGES.VIEW)}
@@ -597,6 +645,30 @@ export default function IncidentsPage() {
             </>
           )}
         </div>
+
+        {(createIncidentModalOpen || editingDraftIncidentId) && (
+          <div className="absolute inset-0 z-[60] pointer-events-none">
+            <Suspense fallback={
+              <div className="absolute inset-0 flex items-center justify-center bg-transparent p-3">
+                <div className="rounded-xl border border-gray-200 bg-white px-4 py-3 text-sm font-medium text-gray-700 shadow-xl dark:border-slate-700 dark:bg-slate-900 dark:text-gray-200">
+                  Loading incident form...
+                </div>
+              </div>
+            }>
+              <IncidentFormModal
+                embedded
+                key={editingDraftIncidentId ? `edit-${editingDraftIncidentId}` : `create-${filterType}`}
+                editIncidentId={editingDraftIncidentId || undefined}
+                initialVisibility={createIncidentVisibility}
+                onClose={() => {
+                  setCreateIncidentModalOpen(false);
+                  setEditingDraftIncidentId(null);
+                  loadIncidents();
+                }}
+              />
+            </Suspense>
+          </div>
+        )}
       </div>
 
       {/* Access Denied Modal */}

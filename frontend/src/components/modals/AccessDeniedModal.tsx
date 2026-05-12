@@ -72,6 +72,7 @@ interface AccessDeniedModalProps {
   onClose: () => void;
   featureName?: string;
   requiredPrivilege?: string;
+  onContactSupport?: () => void;
 }
 
 export default function AccessDeniedModal({

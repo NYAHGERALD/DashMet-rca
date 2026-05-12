@@ -87,6 +87,7 @@ interface WebSocketContextType {
   // Pin/Unpin event handlers
   onMessagePinned: (callback: (data: { messageId: string; message: ChatMessage; pinnedBy: { id: string; firstName: string; lastName: string } }) => void) => () => void;
   onMessageUnpinned: (callback: (data: { messageId: string; message: ChatMessage; unpinnedBy: { id: string; firstName: string; lastName: string } }) => void) => () => void;
+  onMessagesRead: (callback: (data: { userId: string; incidentId: string }) => void) => () => void;
   // FMIR collaborator event handler (supports both QA auto-add and manual add)
   onFmirCollaboratorAdded: (callback: (data: any) => void) => () => void;
   // FMIR collaborator removed event handler (for real-time removal notification)
@@ -158,11 +159,37 @@ interface WebSocketContextType {
   // RCA cause input typing (for real-time typing indicator in "Add a cause" input)
   onRCACauseInputTyping: (callback: (data: { incidentId: string; rcaId: string; categoryId: string; text: string; userId: string; userName: string; timestamp: string }) => void) => () => void;
   // RCA 5 Whys modal opened (for real-time modal sync across team)
-  onRCAFiveWhysModalOpened: (callback: (data: { incidentId: string; rcaId: string; causeId: string; causeText: string; categoryName: string; openedBy: { id: string; firstName: string; lastName: string }; timestamp: string }) => void) => () => void;
+  onRCAFiveWhysModalOpened: (callback: (data: {
+    incidentId: string;
+    rcaId: string;
+    causeId: string;
+    causeText: string;
+    categoryName: string;
+    mode?: 'choose' | 'manual' | 'ai';
+    hasAnswers?: boolean;
+    answerCount?: number;
+    steps?: Array<{ stepNumber: number; question: string; answer: string }>;
+    rootCause?: string;
+    openedBy: { id: string; firstName: string; lastName: string };
+    timestamp: string;
+  }) => void) => () => void;
   // RCA 5 Whys modal closed (for real-time modal sync across team)
   onRCAFiveWhysModalClosed: (callback: (data: { incidentId: string; rcaId: string; closedBy: { id: string; firstName: string; lastName: string }; timestamp: string }) => void) => () => void;
   // RCA 5 Whys mode changed (for real-time mode sync across team)
-  onRCAFiveWhysModeChanged: (callback: (data: { incidentId: string; rcaId: string; mode: 'choose' | 'manual' | 'ai'; changedBy: { id: string; firstName: string; lastName: string }; timestamp: string }) => void) => () => void;
+  onRCAFiveWhysModeChanged: (callback: (data: {
+    incidentId: string;
+    rcaId: string;
+    mode: 'choose' | 'continue-or-restart' | 'manual' | 'ai';
+    resetData?: {
+      causeId: string;
+      causeText: string;
+      steps: Array<{ stepNumber: number; question: string; answer: string }>;
+      hasAnswers: boolean;
+      answerCount: number;
+    };
+    changedBy: { id: string; firstName: string; lastName: string };
+    timestamp: string;
+  }) => void) => () => void;
   // Emit RCA modal state change
   emitRCAModalState: (incidentId: string, action: 'opened' | 'closed' | 'method-selected' | 'visibility-changed' | 'analyzing', data?: { selectedMethod?: string; visibility?: string }) => void;
   // Emit RCA clarification answer update

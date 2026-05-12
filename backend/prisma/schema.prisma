@@ -811,6 +811,8 @@ model Incident {
   MeetingRecording                               MeetingRecording[]
   Notification                                   Notification[]
   RCAAnalysis                                    RCAAnalysis[]
+  RCAFishboneBoardLink                           RCAFishboneBoardLink[]
+  RCAFishboneSyncEvent                           RCAFishboneSyncEvent[]
 
   @@index([assignedToId])
   @@index([createdById])
@@ -1054,6 +1056,8 @@ model Organization {
   Task                            Task[]
   Meeting                         Meeting[]
   MeetingRecordingRetentionPolicy MeetingRecordingRetentionPolicy?
+  RCAFishboneBoardLink            RCAFishboneBoardLink[]
+  RCAFishboneSyncEvent            RCAFishboneSyncEvent[]
   User                            User[]
   WorkOrder                       WorkOrder[]
   WorkOrderSettings               WorkOrderSettings?
@@ -1233,6 +1237,9 @@ model RCAAnalysis {
   Comment                Comment[]
   Evidence               Evidence[]
   FiveWhysAnalyses       FiveWhysAnalysis[]
+  RCAFishboneBoardLink   RCAFishboneBoardLink?
+  RCAFishboneDiagramElement RCAFishboneDiagramElement[]
+  RCAFishboneSyncEvent   RCAFishboneSyncEvent[]
   User                   User               @relation(fields: [analystId], references: [id])
   Incident               Incident           @relation(fields: [incidentId], references: [id], onDelete: Cascade)
   RCAVersion             RCAVersion[]
@@ -1647,6 +1654,9 @@ model User {
   BoardCollaborations  BoardCollaborator[] @relation("BoardCollaboratorUser")
   BoardVersionsCreated BoardVersion[]      @relation("BoardVersionCreator")
   BoardComments        BoardComment[]      @relation("BoardCommentUser")
+  RCAFishboneBoardLinksCreated RCAFishboneBoardLink[] @relation("RCAFishboneBoardLinkCreatedBy")
+  RCAFishboneBoardLinksSynced  RCAFishboneBoardLink[] @relation("RCAFishboneBoardLinkLastSyncedBy")
+  RCAFishboneSyncEventsRequested RCAFishboneSyncEvent[] @relation("RCAFishboneSyncEventRequestedBy")
 
   @@index([email])
   @@index([isOnline])
@@ -4307,6 +4317,21 @@ enum BoardCollaboratorRole {
   VIEWER
 }
 
+enum RCAFishboneSyncStatus {
+  PENDING
+  SYNCING
+  SYNCED
+  FAILED
+  STALE
+}
+
+enum RCAFishboneSyncEventStatus {
+  QUEUED
+  PROCESSING
+  COMPLETED
+  FAILED
+}
+
 model Board {
   id          String    @id @default(uuid())
   type        BoardType @default(WHITEBOARD)
@@ -4333,10 +4358,105 @@ model Board {
   versions      BoardVersion[]
   assets        BoardAsset[]
   comments      BoardComment[]
+  rcaFishboneLinks RCAFishboneBoardLink[]
+  rcaFishboneElements RCAFishboneDiagramElement[]
+  rcaFishboneSyncEvents RCAFishboneSyncEvent[]
 
   @@index([ownerId])
   @@index([organizationId])
   @@index([ownerId, isArchived])
+}
+
+model RCAFishboneBoardLink {
+  id                     String                @id @default(uuid())
+  rcaAnalysisId          String                @unique
+  incidentId             String
+  organizationId         String
+  boardId                String                @unique
+  sourceVersion          Int                   @default(1)
+  syncStatus             RCAFishboneSyncStatus @default(PENDING)
+  lastSyncedAt           DateTime?
+  lastSyncError          String?               @db.Text
+  generatedElementCount  Int                   @default(0)
+  annotationElementCount Int                   @default(0)
+  createdById            String?
+  lastSyncedById         String?
+  createdAt              DateTime              @default(now())
+  updatedAt              DateTime              @updatedAt
+
+  rcaAnalysis  RCAAnalysis  @relation(fields: [rcaAnalysisId], references: [id], onDelete: Cascade)
+  incident     Incident     @relation(fields: [incidentId], references: [id], onDelete: Cascade)
+  organization Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  board        Board        @relation(fields: [boardId], references: [id], onDelete: Cascade)
+  createdBy    User?        @relation("RCAFishboneBoardLinkCreatedBy", fields: [createdById], references: [id], onDelete: SetNull)
+  lastSyncedBy User?        @relation("RCAFishboneBoardLinkLastSyncedBy", fields: [lastSyncedById], references: [id], onDelete: SetNull)
+
+  elements   RCAFishboneDiagramElement[]
+  syncEvents RCAFishboneSyncEvent[]
+
+  @@index([incidentId])
+  @@index([organizationId])
+  @@index([syncStatus])
+  @@index([lastSyncedAt])
+}
+
+model RCAFishboneDiagramElement {
+  id            String   @id @default(uuid())
+  linkId        String
+  rcaAnalysisId String
+  boardId       String
+  categoryId    String?
+  causeId       String?
+  elementId     String
+  elementType   String
+  sourceType    String   @default("GENERATED")
+  isGenerated   Boolean  @default(true)
+  metadata      Json?
+  createdAt     DateTime @default(now())
+  updatedAt     DateTime @updatedAt
+
+  link        RCAFishboneBoardLink @relation(fields: [linkId], references: [id], onDelete: Cascade)
+  rcaAnalysis RCAAnalysis          @relation(fields: [rcaAnalysisId], references: [id], onDelete: Cascade)
+  board       Board                @relation(fields: [boardId], references: [id], onDelete: Cascade)
+
+  @@unique([boardId, elementId])
+  @@index([linkId])
+  @@index([rcaAnalysisId])
+  @@index([boardId])
+  @@index([categoryId])
+  @@index([causeId])
+}
+
+model RCAFishboneSyncEvent {
+  id             String                     @id @default(uuid())
+  linkId         String?
+  rcaAnalysisId  String
+  incidentId     String
+  organizationId String
+  boardId        String?
+  eventType      String
+  status         RCAFishboneSyncEventStatus @default(QUEUED)
+  errorMessage   String?                    @db.Text
+  requestedById  String?
+  startedAt      DateTime?
+  completedAt    DateTime?
+  createdAt      DateTime                   @default(now())
+  updatedAt      DateTime                   @updatedAt
+
+  link         RCAFishboneBoardLink? @relation(fields: [linkId], references: [id], onDelete: SetNull)
+  rcaAnalysis  RCAAnalysis           @relation(fields: [rcaAnalysisId], references: [id], onDelete: Cascade)
+  incident     Incident              @relation(fields: [incidentId], references: [id], onDelete: Cascade)
+  organization Organization          @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  board        Board?                @relation(fields: [boardId], references: [id], onDelete: SetNull)
+  requestedBy  User?                 @relation("RCAFishboneSyncEventRequestedBy", fields: [requestedById], references: [id], onDelete: SetNull)
+
+  @@index([linkId])
+  @@index([rcaAnalysisId])
+  @@index([incidentId])
+  @@index([organizationId])
+  @@index([boardId])
+  @@index([status])
+  @@index([createdAt])
 }
 
 model BoardCollaborator {
@@ -4437,9 +4557,11 @@ model LswNotificationPreference {
   mobilePushEnabled Boolean @default(true) // Global mobile push notification on/off
 
   // ── Bakery Metrics Notification Toggles ──
-  bakeryEmailEnabled      Boolean @default(true) // Email when bakery metrics submitted
-  bakeryBrowserEnabled    Boolean @default(true) // Browser notification when bakery metrics submitted
-  bakeryMobilePushEnabled Boolean @default(true) // Mobile push when bakery metrics submitted
+  bakeryEmailEnabled              Boolean @default(true) // Email when bakery metrics submitted
+  bakeryBrowserEnabled            Boolean @default(true) // Browser notification when bakery metrics submitted
+  bakeryMobilePushEnabled         Boolean @default(true) // Master mobile push toggle for bakery metrics
+  bakerySubmissionPushEnabled     Boolean @default(true) // Mobile push when bakery metrics are submitted
+  bakeryOeeBelowTargetPushEnabled Boolean @default(true) // Mobile push when OEE is below target
 
   // ── Operations Issue Notification Toggles ──
   issueMobilePushEnabled  Boolean @default(false) // Mobile push for operations issue activity
@@ -4447,6 +4569,13 @@ model LswNotificationPreference {
   issueStatusPushEnabled  Boolean @default(true) // Mobile push when an issue status changes
   issueEditedPushEnabled  Boolean @default(true) // Mobile push when an issue is edited
   issueDeletedPushEnabled Boolean @default(true) // Mobile push when an issue is deleted
+
+  // ── Incident and CAPA Notification Toggles ──
+  incidentMobilePushEnabled    Boolean @default(true) // Master mobile push toggle for RCA incidents
+  incidentCreatedPushEnabled   Boolean @default(true) // Mobile push when an incident is created
+  incidentTeamInvitePushEnabled Boolean @default(true) // Mobile push when invited to an incident team
+  capaMobilePushEnabled        Boolean @default(true) // Master mobile push toggle for CAPA events
+  capaBoardCreatedPushEnabled  Boolean @default(true) // Mobile push when a CAPA Board is created
 
   // ── Past-Due Notification Toggles ──
   notifyTaskOverdue     Boolean @default(true) // Daily tasks past their scheduled time

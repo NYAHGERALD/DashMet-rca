@@ -5,6 +5,7 @@ import api from '@/lib/api';
 import { useToast } from '@/components/ui/Toast';
 import LoadingState from '@/components/ui/LoadingState';
 import { useWebSocket } from '@/lib/websocket';
+import { ExternalLink, Loader2 } from 'lucide-react';
 
 interface FishboneCause {
   id: string;
@@ -13,12 +14,36 @@ interface FishboneCause {
   aiSuggested?: boolean;
   likelihood?: 'high' | 'medium' | 'low';
   reasoning?: string;  // AI explanation for why this cause was identified
+  resolutionValidation?: CauseResolutionSelection;
   fiveWhysAnalysis?: {
     steps: Array<{ stepNumber: number; question: string; answer: string; explanation?: string }>;
     rootCause: string;
     isValidRootCause: boolean;
     confidence: number;
   };
+}
+
+interface CauseResolutionSelection {
+  causeId: string;
+  categoryName: string;
+  causeText: string;
+  rootCause: string;
+  classification: 'likely' | 'unlikely';
+  confidence: number;
+  reason: string;
+  implementationImpact: string;
+  linkedCauseIds?: string[];
+  source?: 'ai' | 'manual';
+}
+
+interface CauseResolutionValidationResult {
+  overallDecision: string;
+  problemResolutionSummary: string;
+  recommendedCombination: string;
+  selections: CauseResolutionSelection[];
+  likelyCauseIds: string[];
+  unlikelyCauseIds: string[];
+  limitations: string[];
 }
 
 interface FishboneCategory {
@@ -97,13 +122,37 @@ interface CauseFiveWhysResult {
   recommendation: 'keep' | 'eliminate' | 'needs_more_analysis' | 'reclassify_as_contributing';
 }
 
+interface ManualStepValidationResult {
+  rating: 'ACCEPTED' | 'SHALLOW';
+  score: number;
+  feedback: string;
+  suggestedAnswer?: string | null;
+  reasoning?: string;
+  suggestionDismissed?: boolean;
+  feedbackDismissed?: boolean;
+}
+
+type FishboneBuilderTab = 'analysis' | 'diagram' | 'actions' | 'controls';
+type RCAMethod = 'FIVE_WHYS' | 'FISHBONE';
+
 interface FishboneBuilderProps {
   rcaId: string;
   incidentId: string;
   data: FishboneData;
   isValidated: boolean;
   currentUserId?: string;
+  activeTab?: FishboneBuilderTab;
+  onTabChange?: (tab: FishboneBuilderTab) => void;
+  hideInternalTabs?: boolean;
+  sectionTitle?: string;
   onSave: (data: FishboneData) => Promise<void>;
+  onOpenWhiteboard?: (data: FishboneData) => Promise<void>;
+  currentMethod?: RCAMethod;
+  savingMethod?: boolean;
+  autoSaveEnabled?: boolean;
+  saveRequestToken?: number;
+  showLocalSaveControls?: boolean;
+  onChangeMethod?: (method: RCAMethod) => void;
   onValidate: (rootCauseStatement: string) => Promise<void>;
   onReopen?: () => Promise<void>;
 }
@@ -116,7 +165,18 @@ export default function FishboneBuilder({
   data,
   isValidated,
   currentUserId,
+  activeTab: controlledActiveTab,
+  onTabChange,
+  hideInternalTabs = false,
+  sectionTitle = 'Fishbone Diagram (Ishikawa)',
   onSave,
+  onOpenWhiteboard,
+  currentMethod = 'FISHBONE',
+  savingMethod = false,
+  autoSaveEnabled = false,
+  saveRequestToken = 0,
+  showLocalSaveControls = true,
+  onChangeMethod,
   onValidate,
   onReopen,
 }: FishboneBuilderProps) {
@@ -177,7 +237,7 @@ export default function FishboneBuilder({
   const [categories, setCategories] = useState<FishboneCategory[]>(data.categories || []);
   const [rootCauseText, setRootCauseText] = useState(data.rootCauseText || '');
   const [saving, setSaving] = useState(false);
-  const [loadingAI, setLoadingAI] = useState<string | null>(null);
+  const [, setLoadingAI] = useState<string | null>(null);
   const [generatingFullAnalysis, setGeneratingFullAnalysis] = useState(false);
   const [showValidateModal, setShowValidateModal] = useState(false);
   const [validationStatement, setValidationStatement] = useState(rootCauseText);
@@ -185,6 +245,9 @@ export default function FishboneBuilder({
   const [aiAnalysis, setAiAnalysis] = useState<AIAnalysisResult | null>(null);
   const [showAIPanel, setShowAIPanel] = useState(false);
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
+  const manualSaveRequestRef = useRef(saveRequestToken);
+  const analysisAutoSaveTimerRef = useRef<NodeJS.Timeout | null>(null);
+  const analysisAutoSaveReadyRef = useRef(false);
   
   // Remote typing indicators for "Add a cause" inputs
   const [remoteTypingIndicators, setRemoteTypingIndicators] = useState<Record<string, { userName: string; text: string; timestamp: string }>>({});
@@ -218,8 +281,8 @@ export default function FishboneBuilder({
     suggestedRootCause?: string;
   } | null>(null);
   
-  // 5 Whys Analysis Mode State - removed 'continue-or-restart' as we now use a unified 'choose' screen
-  const [fiveWhysMode, setFiveWhysMode] = useState<'choose' | 'manual' | 'ai'>('choose');
+  // 5 Whys Analysis Mode State
+  const [fiveWhysMode, setFiveWhysMode] = useState<'choose' | 'manual' | 'ai'>('manual');
   const [manualFiveWhysSteps, setManualFiveWhysSteps] = useState<Array<{ stepNumber: number; question: string; answer: string }>>([
     { stepNumber: 1, question: 'Why did this happen?', answer: '' },
     { stepNumber: 2, question: 'Why?', answer: '' },
@@ -237,6 +300,8 @@ export default function FishboneBuilder({
     suggestedRootCause?: string;
     spellingCorrections?: Array<{ original: string; corrected: string; stepNumber?: number }>;
   } | null>(null);
+  const [manualStepValidations, setManualStepValidations] = useState<Record<number, ManualStepValidationResult>>({});
+  const [validatingManualStep, setValidatingManualStep] = useState<number | null>(null);
   
   // 5 Whys field typing indicators (who is typing on which field)
   const [fiveWhysTypingIndicators, setFiveWhysTypingIndicators] = useState<Record<string, { userName: string; userId: string; timestamp: string }>>({});
@@ -244,6 +309,15 @@ export default function FishboneBuilder({
   // Track which causes have 5 Whys analyses with answers (for color coding)
   // Key: causeId, Value: { hasAnswers: boolean, answerCount: number }
   const [causeAnalysisStatuses, setCauseAnalysisStatuses] = useState<Record<string, { hasAnswers: boolean; answerCount: number }>>({});
+  const [validatingCauseResolution, setValidatingCauseResolution] = useState(false);
+  const [causeResolutionValidation, setCauseResolutionValidation] = useState<CauseResolutionValidationResult | null>(null);
+  const [showCauseResolutionResultModal, setShowCauseResolutionResultModal] = useState(false);
+  const [manualCauseResolutionDrafts, setManualCauseResolutionDrafts] = useState<Record<string, {
+    classification: 'likely' | 'unlikely';
+    reason: string;
+  }>>({});
+  const [savingManualCauseResolution, setSavingManualCauseResolution] = useState<string | null>(null);
+  const [pendingMethodChange, setPendingMethodChange] = useState<RCAMethod | null>(null);
   
   // Currently loaded database analysis for the open 5 Whys modal
   const [currentDbAnalysis, setCurrentDbAnalysis] = useState<{
@@ -255,6 +329,168 @@ export default function FishboneBuilder({
   
   // Track the analysis method used (manual or ai) - stored in database
   const [currentAnalysisMethod, setCurrentAnalysisMethod] = useState<'manual' | 'ai' | null>(null);
+  const fiveWhysModalRef = useRef<HTMLDivElement | null>(null);
+  const fiveWhysModalDragRef = useRef<{
+    pointerId: number;
+    startX: number;
+    startY: number;
+    originLeft: number;
+    originTop: number;
+  } | null>(null);
+  const [fiveWhysModalPosition, setFiveWhysModalPosition] = useState({ left: 0, top: 0 });
+  const [isFiveWhysModalReady, setIsFiveWhysModalReady] = useState(false);
+  const [isFiveWhysModalDragging, setIsFiveWhysModalDragging] = useState(false);
+  const causeResolutionModalRef = useRef<HTMLDivElement | null>(null);
+  const causeResolutionModalDragRef = useRef<{
+    pointerId: number;
+    startX: number;
+    startY: number;
+    originLeft: number;
+    originTop: number;
+  } | null>(null);
+  const [causeResolutionModalPosition, setCauseResolutionModalPosition] = useState({ left: 0, top: 0 });
+  const [isCauseResolutionModalReady, setIsCauseResolutionModalReady] = useState(false);
+  const [isCauseResolutionModalDragging, setIsCauseResolutionModalDragging] = useState(false);
+
+  useEffect(() => {
+    if (!selectedCauseForAnalysis) return;
+
+    const centerFiveWhysModal = () => {
+      const rect = fiveWhysModalRef.current?.getBoundingClientRect();
+      const width = rect?.width || Math.min(960, window.innerWidth - 24);
+      const height = rect?.height || Math.min(720, window.innerHeight - 24);
+
+      setFiveWhysModalPosition({
+        left: Math.max(12, (window.innerWidth - width) / 2),
+        top: Math.max(12, (window.innerHeight - height) / 2),
+      });
+      setIsFiveWhysModalReady(true);
+    };
+
+    setIsFiveWhysModalReady(false);
+    requestAnimationFrame(centerFiveWhysModal);
+    window.addEventListener('resize', centerFiveWhysModal);
+
+    return () => {
+      window.removeEventListener('resize', centerFiveWhysModal);
+      fiveWhysModalDragRef.current = null;
+      setIsFiveWhysModalDragging(false);
+    };
+  }, [selectedCauseForAnalysis]);
+
+  const clampFiveWhysModalPosition = useCallback((left: number, top: number) => {
+    const rect = fiveWhysModalRef.current?.getBoundingClientRect();
+    const width = rect?.width || 0;
+    const height = rect?.height || 0;
+    const margin = 12;
+
+    return {
+      left: Math.min(Math.max(margin, left), Math.max(margin, window.innerWidth - width - margin)),
+      top: Math.min(Math.max(margin, top), Math.max(margin, window.innerHeight - height - margin)),
+    };
+  }, []);
+
+  const handleFiveWhysModalPointerDown = (event: React.PointerEvent<HTMLDivElement>) => {
+    if (!isFiveWhysModalReady || event.button !== 0) return;
+    if ((event.target as HTMLElement).closest('button, input, textarea, select, a')) return;
+
+    fiveWhysModalDragRef.current = {
+      pointerId: event.pointerId,
+      startX: event.clientX,
+      startY: event.clientY,
+      originLeft: fiveWhysModalPosition.left,
+      originTop: fiveWhysModalPosition.top,
+    };
+    event.currentTarget.setPointerCapture(event.pointerId);
+    setIsFiveWhysModalDragging(true);
+  };
+
+  const handleFiveWhysModalPointerMove = (event: React.PointerEvent<HTMLDivElement>) => {
+    const dragState = fiveWhysModalDragRef.current;
+    if (!dragState || dragState.pointerId !== event.pointerId) return;
+
+    const nextLeft = dragState.originLeft + event.clientX - dragState.startX;
+    const nextTop = dragState.originTop + event.clientY - dragState.startY;
+    setFiveWhysModalPosition(clampFiveWhysModalPosition(nextLeft, nextTop));
+  };
+
+  const handleFiveWhysModalPointerUp = (event: React.PointerEvent<HTMLDivElement>) => {
+    const dragState = fiveWhysModalDragRef.current;
+    if (dragState?.pointerId === event.pointerId) {
+      fiveWhysModalDragRef.current = null;
+      setIsFiveWhysModalDragging(false);
+    }
+  };
+
+  useEffect(() => {
+    if (!validatingCauseResolution && !showCauseResolutionResultModal) return;
+
+    const centerCauseResolutionModal = () => {
+      const rect = causeResolutionModalRef.current?.getBoundingClientRect();
+      const width = rect?.width || Math.min(720, window.innerWidth - 24);
+      const height = rect?.height || Math.min(620, window.innerHeight - 24);
+
+      setCauseResolutionModalPosition({
+        left: Math.max(12, (window.innerWidth - width) / 2),
+        top: Math.max(12, (window.innerHeight - height) / 2),
+      });
+      setIsCauseResolutionModalReady(true);
+    };
+
+    setIsCauseResolutionModalReady(false);
+    requestAnimationFrame(centerCauseResolutionModal);
+    window.addEventListener('resize', centerCauseResolutionModal);
+
+    return () => {
+      window.removeEventListener('resize', centerCauseResolutionModal);
+      causeResolutionModalDragRef.current = null;
+      setIsCauseResolutionModalDragging(false);
+    };
+  }, [validatingCauseResolution, showCauseResolutionResultModal]);
+
+  const clampCauseResolutionModalPosition = useCallback((left: number, top: number) => {
+    const rect = causeResolutionModalRef.current?.getBoundingClientRect();
+    const width = rect?.width || 0;
+    const height = rect?.height || 0;
+    const margin = 12;
+
+    return {
+      left: Math.min(Math.max(margin, left), Math.max(margin, window.innerWidth - width - margin)),
+      top: Math.min(Math.max(margin, top), Math.max(margin, window.innerHeight - height - margin)),
+    };
+  }, []);
+
+  const handleCauseResolutionModalPointerDown = (event: React.PointerEvent<HTMLDivElement>) => {
+    if (!isCauseResolutionModalReady || event.button !== 0) return;
+    if ((event.target as HTMLElement).closest('button, input, textarea, select, a')) return;
+
+    causeResolutionModalDragRef.current = {
+      pointerId: event.pointerId,
+      startX: event.clientX,
+      startY: event.clientY,
+      originLeft: causeResolutionModalPosition.left,
+      originTop: causeResolutionModalPosition.top,
+    };
+    event.currentTarget.setPointerCapture(event.pointerId);
+    setIsCauseResolutionModalDragging(true);
+  };
+
+  const handleCauseResolutionModalPointerMove = (event: React.PointerEvent<HTMLDivElement>) => {
+    const dragState = causeResolutionModalDragRef.current;
+    if (!dragState || dragState.pointerId !== event.pointerId) return;
+
+    const nextLeft = dragState.originLeft + event.clientX - dragState.startX;
+    const nextTop = dragState.originTop + event.clientY - dragState.startY;
+    setCauseResolutionModalPosition(clampCauseResolutionModalPosition(nextLeft, nextTop));
+  };
+
+  const handleCauseResolutionModalPointerUp = (event: React.PointerEvent<HTMLDivElement>) => {
+    const dragState = causeResolutionModalDragRef.current;
+    if (dragState?.pointerId === event.pointerId) {
+      causeResolutionModalDragRef.current = null;
+      setIsCauseResolutionModalDragging(false);
+    }
+  };
   
   // Auto-save toast notification state
   const [autoSaveToast, setAutoSaveToast] = useState<{show: boolean; message: string}>({show: false, message: ''});
@@ -326,7 +562,10 @@ export default function FishboneBuilder({
   ]);
   
   // Tab State
-  const [activeTab, setActiveTab] = useState<'analysis' | 'diagram' | 'actions' | 'controls'>('analysis');
+  const [internalActiveTab, setInternalActiveTab] = useState<FishboneBuilderTab>('analysis');
+  const activeTab = controlledActiveTab || internalActiveTab;
+  const setActiveTab = onTabChange || setInternalActiveTab;
+  const [openingWhiteboard, setOpeningWhiteboard] = useState(false);
   
   // AI Session State - For auto-save and recovery
   const [sessionLoaded, setSessionLoaded] = useState(false);
@@ -718,8 +957,8 @@ export default function FishboneBuilder({
           categoryName: data.categoryName 
         });
         
-        // Use the broadcasted mode (this ensures all team members see the same screen)
-        setFiveWhysMode(data.mode || 'choose');
+        // Open directly in the analysis form. Older "choose" broadcasts are mapped to manual.
+        setFiveWhysMode(data.mode === 'ai' ? 'ai' : 'manual');
         setCauseAnalysisResult(null);
         
         // Use the broadcasted steps data if available, otherwise use defaults
@@ -737,10 +976,11 @@ export default function FishboneBuilder({
         
         // Update the cause analysis status for color coding
         if (data.hasAnswers !== undefined) {
+          const hasAnswers = data.hasAnswers;
           setCauseAnalysisStatuses(prev => ({
             ...prev,
             [data.causeId]: {
-              hasAnswers: data.hasAnswers,
+              hasAnswers,
               answerCount: data.answerCount || 0
             }
           }));
@@ -761,7 +1001,7 @@ export default function FishboneBuilder({
         // Close the modal for this user as well
         setSelectedCauseForAnalysis(null);
         setCauseAnalysisResult(null);
-        setFiveWhysMode('choose');
+        setFiveWhysMode('manual');
         setAnalyzingCause(false);
         setIsEditingFiveWhys(false);
         setEditedFiveWhysSteps([]);
@@ -777,6 +1017,8 @@ export default function FishboneBuilder({
         setManualRootCause('');
         setManualAnalysisValidation(null);
         setValidatingManualAnalysis(false);
+        setManualStepValidations({});
+        setValidatingManualStep(null);
         setFiveWhysModalOpenedBy(null);
         // Only show toast if closed by another user, not self
         if (data.closedBy.id !== currentUserId) {
@@ -789,25 +1031,28 @@ export default function FishboneBuilder({
     const unsubFiveWhysModeChanged = onRCAFiveWhysModeChanged((data) => {
       if (data.rcaId === rcaId) {
         console.log('🔍 5 Whys mode changed by:', data.changedBy, 'to:', data.mode, 'hasResetData:', !!data.resetData);
-        // Update the mode for this user as well (map old 'continue-or-restart' to 'choose')
-        const newMode = data.mode === 'continue-or-restart' ? 'choose' : data.mode as 'choose' | 'manual' | 'ai';
+        // Update the mode for this user as well; old chooser modes now open manual analysis.
+        const newMode = data.mode === 'ai' ? 'ai' : 'manual';
         setFiveWhysMode(newMode);
         
         // If resetData is provided (Start Fresh scenario), apply the cleared steps
         if (data.resetData && data.changedBy.id !== currentUserId) {
+          const resetData = data.resetData;
           // Update the steps to the cleared state
-          setManualFiveWhysSteps(data.resetData.steps);
+          setManualFiveWhysSteps(resetData.steps);
           // Update the cause analysis status for color coding using causeId from resetData
           setCauseAnalysisStatuses(prev => ({
             ...prev,
-            [data.resetData.causeId]: {
-              hasAnswers: data.resetData.hasAnswers,
-              answerCount: data.resetData.answerCount
+            [resetData.causeId]: {
+              hasAnswers: resetData.hasAnswers,
+              answerCount: resetData.answerCount
             }
           }));
           // Clear root cause and validation state
           setManualRootCause('');
           setManualAnalysisValidation(null);
+          setManualStepValidations({});
+          setValidatingManualStep(null);
         }
         
         // Only show toast if changed by another user, not self
@@ -856,15 +1101,23 @@ export default function FishboneBuilder({
           // Update root cause text
           setManualRootCause(data.text);
         } else if (data.fieldType === 'why' && data.stepNumber) {
+          const stepNumber = data.stepNumber;
+          setManualStepValidations(prev => {
+            const next = { ...prev };
+            for (let index = stepNumber; index <= 5; index += 1) {
+              delete next[index];
+            }
+            return next;
+          });
           // Update the specific Why step AND the next step's question
           setManualFiveWhysSteps(steps => {
             const updatedSteps = steps.map(step =>
-              step.stepNumber === data.stepNumber ? { ...step, answer: data.text } : step
+              step.stepNumber === stepNumber ? { ...step, answer: data.text } : step
             );
             
             // Also update the next step's question if included in the broadcast
-            if (data.nextQuestion && data.stepNumber < 5) {
-              const nextStepIndex = updatedSteps.findIndex(s => s.stepNumber === data.stepNumber + 1);
+            if (data.nextQuestion && stepNumber < 5) {
+              const nextStepIndex = updatedSteps.findIndex(s => s.stepNumber === stepNumber + 1);
               if (nextStepIndex !== -1) {
                 updatedSteps[nextStepIndex] = {
                   ...updatedSteps[nextStepIndex],
@@ -1077,7 +1330,7 @@ export default function FishboneBuilder({
         if (selectedCauseForAnalysis?.id === data.causeId) {
           setSelectedCauseForAnalysis(null);
           setCauseAnalysisResult(null);
-          setFiveWhysMode('choose');
+          setFiveWhysMode('manual');
         }
       }
     });
@@ -1361,19 +1614,24 @@ export default function FishboneBuilder({
     setShowProblemOverrideConfirm(false);
   };
 
-  // Open 5 Whys modal for a cause (shows choice between Manual and AI)
+  // Open 5 Whys modal for a cause and go straight to manual analysis.
   const openFiveWhysModal = async (cause: FishboneCause, categoryName: string) => {
     setSelectedCauseForAnalysis({ id: cause.id, text: cause.text, categoryName });
     setCauseAnalysisResult(null);
     setCurrentDbAnalysis(null);
+    setFiveWhysMode('manual');
+    setCurrentAnalysisMethod('manual');
+    setManualStepValidations({});
+    setValidatingManualStep(null);
     
     // Variables to track for broadcasting
-    let finalMode: 'choose' | 'manual' | 'ai' = 'choose';
+    let finalMode: 'choose' | 'manual' | 'ai' = 'manual';
     let hasAnswers = false;
     let answerCount = 0;
     let finalRootCause = '';
+    const firstWhyQuestion = `Why did "${cause.text}" happen?`;
     let finalSteps: Array<{ stepNumber: number; question: string; answer: string }> = [
-      { stepNumber: 1, question: `Why did "${cause.text}" happen?`, answer: '' },
+      { stepNumber: 1, question: firstWhyQuestion, answer: '' },
       { stepNumber: 2, question: 'Why?', answer: '' },
       { stepNumber: 3, question: 'Why?', answer: '' },
       { stepNumber: 4, question: 'Why?', answer: '' },
@@ -1390,7 +1648,7 @@ export default function FishboneBuilder({
         causeText: cause.text,
         categoryId: '', // Optional
         categoryName: categoryName,
-        initialQuestion: `Why did "${cause.text}" happen?`
+        initialQuestion: firstWhyQuestion
       });
       
       if (response.data.success && response.data.analysis) {
@@ -1414,7 +1672,7 @@ export default function FishboneBuilder({
         if (hasExistingAnswers) {
           finalSteps = dbAnalysis.steps.map((s: { stepNumber: number; question: string; answer: string | null }) => ({
             stepNumber: s.stepNumber,
-            question: s.question,
+            question: s.stepNumber === 1 ? firstWhyQuestion : s.question,
             answer: s.answer || ''
           }));
           setManualFiveWhysSteps(finalSteps);
@@ -1423,9 +1681,8 @@ export default function FishboneBuilder({
           setManualFiveWhysSteps(finalSteps);
         }
         
-        // Always show 'choose' mode - it will show Continue button if hasAnswers
-        finalMode = 'choose';
-        setFiveWhysMode('choose');
+        finalMode = 'manual';
+        setFiveWhysMode('manual');
         
         // Update the status for this cause
         setCauseAnalysisStatuses(prev => ({
@@ -1446,19 +1703,19 @@ export default function FishboneBuilder({
         
         console.log('📊 Loaded/Created 5 Whys analysis:', dbAnalysis.id, 'isNew:', response.data.isNew, 'hasAnswers:', hasExistingAnswers, 'method:', dbAnalysis.analysisMethod, 'rootCause:', dbAnalysis.rootCause);
       } else {
-        // No analysis returned, use default choose mode
+        // No analysis returned, use default manual mode
         setManualFiveWhysSteps(finalSteps);
-        setFiveWhysMode('choose');
+        setFiveWhysMode('manual');
         setManualRootCause('');
-        setCurrentAnalysisMethod(null);
+        setCurrentAnalysisMethod('manual');
       }
     } catch (error) {
       console.error('Failed to load/create 5 Whys analysis:', error);
-      // Fallback to default empty steps and choose mode
+      // Fallback to default empty steps and manual mode
       setManualFiveWhysSteps(finalSteps);
-      setFiveWhysMode('choose');
+      setFiveWhysMode('manual');
       setManualRootCause('');
-      setCurrentAnalysisMethod(null);
+      setCurrentAnalysisMethod('manual');
     }
     
     setManualAnalysisValidation(null);
@@ -1476,6 +1733,8 @@ export default function FishboneBuilder({
     if (modeToUse === 'ai' && causeAnalysisStatuses[selectedCauseForAnalysis?.id || '']?.hasAnswers) {
       // For AI mode with existing data, set up the result and show AI view
       setCauseAnalysisResult({
+        causeId: selectedCauseForAnalysis?.id || '',
+        causeText: selectedCauseForAnalysis?.text || '',
         fiveWhys: {
           steps: manualFiveWhysSteps.map(s => ({
             stepNumber: s.stepNumber,
@@ -1484,9 +1743,11 @@ export default function FishboneBuilder({
             explanation: ''
           })),
           rootCause: manualRootCause,
+          confidence: 0,
         },
         resolvesOriginalProblem: true,
         validationExplanation: 'Continuing from saved AI analysis.',
+        recommendation: 'keep',
       });
       setFiveWhysMode('ai');
     } else {
@@ -1541,11 +1802,10 @@ export default function FishboneBuilder({
       console.error('Failed to clear 5 Whys answers:', error);
     }
     
-    // Show the choose mode (Manual vs AI)
-    setFiveWhysMode('choose');
+    setFiveWhysMode('manual');
     
     // Broadcast mode change with reset data to all team members
-    emitRCAFiveWhysModeChanged(incidentId, rcaId, 'choose', {
+    emitRCAFiveWhysModeChanged(incidentId, rcaId, 'manual', {
       causeId: selectedCauseForAnalysis.id,
       causeText: selectedCauseForAnalysis.text,
       steps: clearedSteps,
@@ -1626,9 +1886,8 @@ export default function FishboneBuilder({
     } catch (err) {
       console.error('5 Whys analysis failed:', err);
       setErrorMessage('Failed to analyze cause with 5 Whys. Please try again.');
-      setFiveWhysMode('choose');
-      // Broadcast mode change back to choose on error
-      emitRCAFiveWhysModeChanged(incidentId, rcaId, 'choose');
+      setFiveWhysMode('manual');
+      emitRCAFiveWhysModeChanged(incidentId, rcaId, 'manual');
     } finally {
       setAnalyzingCause(false);
       // Broadcast analyzing state complete
@@ -1661,69 +1920,149 @@ export default function FishboneBuilder({
     emitRCAFiveWhysModeChanged(incidentId, rcaId, 'manual');
   };
 
-  // Go back to choose mode (from either manual or AI)
+  // Go back to manual mode.
   const goBackToChooseMode = () => {
-    setFiveWhysMode('choose');
+    setFiveWhysMode('manual');
     
     // Broadcast mode change to all team members
-    emitRCAFiveWhysModeChanged(incidentId, rcaId, 'choose');
+    emitRCAFiveWhysModeChanged(incidentId, rcaId, 'manual');
   };
 
   // Update a manual 5 Whys step with real-time broadcast
-  // Conjunctions to filter from the start of answers (English, French, Spanish)
-  // These words are filtered to make the next "Why [answer]?" question grammatically correct
-  const conjunctionsToFilter = new Set([
-    // English Coordinating Conjunctions
-    'and', 'but', 'or', 'nor', 'for', 'yet', 'so',
-    // English Subordinating Conjunctions
-    'because', 'since', 'although', 'though', 'while', 'whereas', 'if', 'unless',
-    'until', 'when', 'whenever', 'where', 'wherever', 'after', 'before', 'as',
-    'once', 'than', 'that', 'whether', 'while', 'even', 'even though', 'even if',
-    'in order that', 'so that', 'provided that', 'assuming that', 'given that',
-    // French Coordinating Conjunctions
-    'et', 'ou', 'mais', 'donc', 'or', 'ni', 'car',
-    // French Subordinating Conjunctions  
-    'parce que', 'puisque', 'comme', 'quand', 'lorsque', 'si', 'bien que',
-    'quoique', 'pour que', 'afin que', 'avant que', 'après que', 'depuis que',
-    'pendant que', 'tandis que', 'alors que', 'dès que', 'aussitôt que',
-    // Spanish Coordinating Conjunctions
-    'y', 'e', 'o', 'u', 'pero', 'sino', 'ni', 'que',
-    // Spanish Subordinating Conjunctions
-    'porque', 'ya que', 'puesto que', 'como', 'cuando', 'mientras', 'si',
-    'aunque', 'para que', 'a fin de que', 'antes de que', 'después de que',
-    'desde que', 'hasta que', 'en cuanto', 'tan pronto como', 'a menos que',
-  ]);
+  // These prefixes are removed locally so each next "Why" reads like a real question without needing the insight service.
+  const leadingQuestionPrefixPhrases = [
+    'not only but also',
+    'not only but',
+    'as soon as',
+    'as long as',
+    'as though',
+    'provided that',
+    'even though',
+    'even if',
+    'rather than',
+    'whether or',
+    'both and',
+    'either or',
+    'neither nor',
+    'so that',
+    'as if',
+    'not only',
+    'in order that',
+    'assuming that',
+    'given that',
+    'about',
+    'after',
+    'although',
+    'and',
+    'as',
+    'because',
+    'before',
+    'both',
+    'but',
+    'either',
+    'for',
+    'however',
+    'if',
+    'lest',
+    'moreover',
+    'neither',
+    'nor',
+    'once',
+    'or',
+    'since',
+    'so',
+    'than',
+    'that',
+    'though',
+    'therefore',
+    'unless',
+    'until',
+    'when',
+    'whenever',
+    'where',
+    'whereas',
+    'wherever',
+    'whether',
+    'while',
+    'yet',
+    // Existing multilingual prefixes from earlier manual question generation.
+    'a fin de que',
+    'a menos que',
+    'afin que',
+    'alors que',
+    'antes de que',
+    'apres que',
+    'aussitot que',
+    'avant que',
+    'bien que',
+    'cuando',
+    'depuis que',
+    'desde que',
+    'despues de que',
+    'en cuanto',
+    'hasta que',
+    'lorsque',
+    'mientras',
+    'parce que',
+    'para que',
+    'pendant que',
+    'puesto que',
+    'puisque',
+    'quoique',
+    'tan pronto como',
+    'tandis que',
+    'ya que',
+    'aunque',
+    'car',
+    'comme',
+    'donc',
+    'et',
+    'mais',
+    'ni',
+    'ou',
+    'pero',
+    'porque',
+    'que',
+    'si',
+    'sino',
+    'y',
+  ];
 
-  // Helper function to filter leading conjunctions from an answer
-  const filterLeadingConjunction = (text: string): string => {
-    if (!text.trim()) return text;
-    
-    const trimmedText = text.trim();
-    const lowerText = trimmedText.toLowerCase();
-    
-    // Check for multi-word conjunctions first (longer matches take priority)
-    const multiWordConjunctions = [
-      'even though', 'even if', 'in order that', 'so that', 'provided that',
-      'assuming that', 'given that', 'parce que', 'bien que', 'pour que',
-      'afin que', 'avant que', 'après que', 'depuis que', 'pendant que',
-      'tandis que', 'alors que', 'dès que', 'aussitôt que', 'ya que',
-      'puesto que', 'para que', 'a fin de que', 'antes de que', 'después de que',
-      'desde que', 'hasta que', 'en cuanto', 'tan pronto como', 'a menos que',
-    ];
-    
-    for (const conj of multiWordConjunctions) {
-      if (lowerText.startsWith(conj + ' ')) {
-        return trimmedText.substring(conj.length).trim();
+  const phraseSeparatorPattern = `[\\s,.;:!?"'()\\-\\u2013\\u2014\\u2026]+`;
+  const phraseEdgePattern = `[\\s,.;:!?"'()\\-\\u2013\\u2014\\u2026]*`;
+
+  const escapeRegExp = (value: string): string => value.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+
+  const buildFlexiblePhrasePattern = (phrase: string): string =>
+    phrase
+      .split(/\s+/)
+      .filter(Boolean)
+      .map(escapeRegExp)
+      .join(phraseSeparatorPattern);
+
+  const filterLeadingQuestionPrefix = (text: string): string => {
+    let cleaned = text.trim().replace(new RegExp(`^${phraseEdgePattern}`), '');
+    let passCount = 0;
+    let removedPrefix = true;
+
+    while (cleaned && removedPrefix && passCount < 3) {
+      removedPrefix = false;
+      passCount += 1;
+
+      for (const phrase of leadingQuestionPrefixPhrases) {
+        const phrasePattern = buildFlexiblePhrasePattern(phrase);
+        const prefixPattern = new RegExp(`^${phrasePattern}(?=$|${phraseSeparatorPattern})${phraseEdgePattern}`, 'i');
+        const nextText = cleaned.replace(prefixPattern, '').trim();
+
+        if (nextText !== cleaned) {
+          cleaned = nextText;
+          removedPrefix = true;
+          break;
+        }
       }
     }
-    
-    // Check for single-word conjunctions
-    const words = trimmedText.split(/\s+/);
-    if (words.length > 0 && conjunctionsToFilter.has(words[0].toLowerCase())) {
-      return words.slice(1).join(' ');
-    }
-    
-    return trimmedText;
+
+    return cleaned.replace(/[?.!]+$/g, '').trim();
   };
 
   // Generate the dynamic question for a Why step based on previous answer
@@ -1735,7 +2074,7 @@ export default function FishboneBuilder({
         : 'Why did this happen?';
     }
     
-    const filteredAnswer = filterLeadingConjunction(previousAnswer);
+    const filteredAnswer = filterLeadingQuestionPrefix(previousAnswer);
     
     if (!filteredAnswer.trim()) {
       return 'Why?';
@@ -1743,6 +2082,44 @@ export default function FishboneBuilder({
     
     // Construct the question: "Why [filtered answer]?"
     return `Why ${filteredAnswer}?`;
+  };
+
+  const refreshManualQuestionFromPreviousAnswer = (stepNumber: number) => {
+    setManualFiveWhysSteps(steps => {
+      const currentStep = steps.find(step => step.stepNumber === stepNumber);
+
+      if (!currentStep) {
+        return steps;
+      }
+
+      if (stepNumber === 1) {
+        const firstWhyQuestion = generateWhyQuestion(1, '');
+
+        if (currentStep.question === firstWhyQuestion) {
+          return steps;
+        }
+
+        return steps.map(step =>
+          step.stepNumber === 1 ? { ...step, question: firstWhyQuestion } : step
+        );
+      }
+
+      const previousStep = steps.find(step => step.stepNumber === stepNumber - 1);
+
+      if (!previousStep?.answer.trim()) {
+        return steps;
+      }
+
+      const nextQuestion = generateWhyQuestion(stepNumber, previousStep.answer);
+
+      if (currentStep.question === nextQuestion) {
+        return steps;
+      }
+
+      return steps.map(step =>
+        step.stepNumber === stepNumber ? { ...step, question: nextQuestion } : step
+      );
+    });
   };
 
   // Show auto-save toast notification
@@ -1762,6 +2139,14 @@ export default function FishboneBuilder({
   };
 
   const updateManualStep = (stepNumber: number, answer: string) => {
+    setManualStepValidations(prev => {
+      const next = { ...prev };
+      for (let index = stepNumber; index <= 5; index += 1) {
+        delete next[index];
+      }
+      return next;
+    });
+
     // Update local state immediately - both the answer AND the next step's question
     setManualFiveWhysSteps(steps => {
       const updatedSteps = steps.map(step => 
@@ -1782,6 +2167,10 @@ export default function FishboneBuilder({
       
       return updatedSteps;
     });
+
+    if (stepNumber === 5) {
+      updateManualRootCause(answer);
+    }
     
     const fieldKey = `why-${stepNumber}`;
     
@@ -1933,6 +2322,99 @@ export default function FishboneBuilder({
     }, 500);
   };
 
+  const validateManualStepAnswer = async (stepNumber: number) => {
+    if (!selectedCauseForAnalysis) return;
+
+    const step = manualFiveWhysSteps.find(item => item.stepNumber === stepNumber);
+    if (!step || !step.answer.trim()) return;
+
+    setValidatingManualStep(stepNumber);
+
+    try {
+      const response = await api.post(`/rca/${rcaId}/ai/validate-five-whys-step`, {
+        causeText: selectedCauseForAnalysis.text,
+        categoryName: selectedCauseForAnalysis.categoryName,
+        problem,
+        stepNumber,
+        question: step.question,
+        answer: step.answer,
+        previousSteps: manualFiveWhysSteps
+          .filter(item => item.stepNumber < stepNumber && item.answer.trim())
+          .map(item => ({
+            stepNumber: item.stepNumber,
+            question: item.question,
+            answer: item.answer,
+          })),
+      });
+
+      const result = response.data?.data as ManualStepValidationResult | undefined;
+      if (!result) return;
+
+      setManualStepValidations(prev => ({
+        ...prev,
+        [stepNumber]: {
+          rating: result.rating === 'ACCEPTED' ? 'ACCEPTED' : 'SHALLOW',
+          score: result.score,
+          feedback: result.feedback,
+          suggestedAnswer: result.suggestedAnswer,
+          reasoning: result.reasoning,
+          suggestionDismissed: false,
+          feedbackDismissed: false,
+        },
+      }));
+    } catch (error) {
+      console.error(`Failed to validate 5 Whys step ${stepNumber}:`, error);
+      setManualStepValidations(prev => ({
+        ...prev,
+        [stepNumber]: {
+          rating: 'SHALLOW',
+          score: 0,
+          feedback: 'Validation could not be completed. Please review this answer manually.',
+          suggestedAnswer: null,
+          suggestionDismissed: true,
+          feedbackDismissed: false,
+        },
+      }));
+    } finally {
+      setValidatingManualStep(null);
+    }
+  };
+
+  const acceptManualStepSuggestion = (stepNumber: number, suggestedAnswer: string) => {
+    updateManualStep(stepNumber, suggestedAnswer);
+    setManualStepValidations(prev => ({
+      ...prev,
+      [stepNumber]: {
+        ...(prev[stepNumber] || {
+          score: 80,
+          feedback: 'Suggestion accepted.',
+        }),
+        rating: 'ACCEPTED',
+        suggestedAnswer: null,
+        suggestionDismissed: true,
+        feedbackDismissed: false,
+      },
+    }));
+  };
+
+  const declineManualStepSuggestion = (stepNumber: number) => {
+    setManualStepValidations(prev => ({
+      ...prev,
+      ...(prev[stepNumber]
+        ? { [stepNumber]: { ...prev[stepNumber], suggestionDismissed: true } }
+        : {}),
+    }));
+  };
+
+  const dismissManualStepValidationFeedback = (stepNumber: number) => {
+    setManualStepValidations(prev => ({
+      ...prev,
+      ...(prev[stepNumber]
+        ? { [stepNumber]: { ...prev[stepNumber], feedbackDismissed: true } }
+        : {}),
+    }));
+  };
+
   // Validate manual 5 Whys analysis with AI
   const validateManualFiveWhysAnalysis = async () => {
     if (!selectedCauseForAnalysis) return;
@@ -1963,7 +2445,7 @@ export default function FishboneBuilder({
       const defaultResult = {
         isValid: true,
         issues: [],
-        overallFeedback: 'AI validation is currently unavailable. Please review your analysis manually.',
+        overallFeedback: 'Validation is currently unavailable. Please review your analysis manually.',
         resolvesOriginalProblem: true,
       };
       setManualAnalysisValidation(defaultResult);
@@ -1996,6 +2478,7 @@ export default function FishboneBuilder({
     if (!selectedCauseForAnalysis) return;
     
     let fiveWhysAnalysis: any = undefined;
+    const finalRootCauseAnswer = manualFiveWhysSteps.find(step => step.stepNumber === 5)?.answer.trim() || manualRootCause.trim();
     
     if (recommendation === 'eliminate') {
       // Remove the cause from its category
@@ -2005,10 +2488,12 @@ export default function FishboneBuilder({
       }));
       setCategories(updated);
     } else {
+      if (!finalRootCauseAnswer) return;
+
       // Mark as validated root cause with manual analysis
       fiveWhysAnalysis = {
         steps: manualFiveWhysSteps,
-        rootCause: manualRootCause,
+        rootCause: finalRootCauseAnswer,
         isValidRootCause: true,
         confidence: manualAnalysisValidation?.resolvesOriginalProblem ? 0.85 : 0.7, // Higher confidence if AI validated as resolving problem
       };
@@ -2040,7 +2525,7 @@ export default function FishboneBuilder({
   const closeFiveWhysModal = () => {
     setSelectedCauseForAnalysis(null);
     setCauseAnalysisResult(null);
-    setFiveWhysMode('choose');
+    setFiveWhysMode('manual');
     setAnalyzingCause(false);
     setIsEditingFiveWhys(false);
     setEditedFiveWhysSteps([]);
@@ -2056,6 +2541,8 @@ export default function FishboneBuilder({
     setManualRootCause('');
     setManualAnalysisValidation(null);
     setValidatingManualAnalysis(false);
+    setManualStepValidations({});
+    setValidatingManualStep(null);
     setFiveWhysModalOpenedBy(null);
     
     // Broadcast to all team members to close the modal
@@ -2268,13 +2755,13 @@ export default function FishboneBuilder({
       setSaveStatus('saved');
       showAutoSaveToast();
       
-      // Exit edit mode and go back to choose mode after a brief delay to show success
+      // Exit edit mode and return to manual mode after a brief delay to show success
       setTimeout(() => {
         setIsEditingFiveWhys(false);
         setEditedFiveWhysSteps([]);
         setEditedRootCause('');
         setEditValidationFeedback(null);
-        setFiveWhysMode('choose');
+        setFiveWhysMode('manual');
         setSaveStatus('idle');
         
         // Broadcast edit mode off to all team members
@@ -2542,8 +3029,7 @@ export default function FishboneBuilder({
       });
       setCategories(updated);
       
-      // NOTE: Do NOT broadcast AI suggestions automatically - each team member 
-      // should explicitly click "Get AI suggestions" to see them. This prevents
+      // NOTE: Do NOT broadcast AI suggestions automatically. This prevents
       // AI-generated causes from appearing on other users' screens without consent.
       // The causes will be saved to database when user clicks "Save Progress" or
       // when they manually add/edit/remove causes.
@@ -2554,18 +3040,319 @@ export default function FishboneBuilder({
     }
   };
 
-  const handleSave = async () => {
+  const getCauseResolutionSelection = (cause: FishboneCause): CauseResolutionSelection | undefined =>
+    causeResolutionValidation?.selections.find(selection => selection.causeId === cause.id) || cause.resolutionValidation;
+
+  const getCauseFinalRootCause = (cause: FishboneCause) =>
+    cause.fiveWhysAnalysis?.rootCause?.trim()
+    || cause.fiveWhysAnalysis?.steps?.find(step => step.stepNumber === 5)?.answer?.trim()
+    || cause.resolutionValidation?.rootCause?.trim()
+    || cause.text.trim();
+
+  const getCorrectiveActionGenerationCauses = () => {
+    const analyzedCauses = categories.flatMap(category =>
+      category.causes
+        .filter(cause => cause.text.trim())
+        .map(cause => {
+          const resolutionSelection = getCauseResolutionSelection(cause);
+          const rootCause = cause.fiveWhysAnalysis?.rootCause?.trim()
+            || cause.fiveWhysAnalysis?.steps?.find(step => step.stepNumber === 5)?.answer?.trim()
+            || resolutionSelection?.rootCause?.trim()
+            || '';
+          const hasSavedAnalysis = Boolean(cause.fiveWhysAnalysis?.rootCause?.trim())
+            || (causeAnalysisStatuses[cause.id]?.answerCount || 0) >= 5
+            || Boolean(resolutionSelection?.rootCause?.trim());
+
+          return {
+            causeId: cause.id,
+            categoryName: category.name,
+            causeText: cause.text,
+            rootCause,
+            fiveWhysSteps: cause.fiveWhysAnalysis?.steps || [],
+            resolutionClassification: resolutionSelection?.classification,
+            resolutionReason: resolutionSelection?.reason,
+            implementationImpact: resolutionSelection?.implementationImpact,
+            ready: hasSavedAnalysis,
+          };
+        })
+        .filter(cause => cause.ready)
+    );
+    const hasResolutionDecisions = analyzedCauses.some(cause => cause.resolutionClassification);
+    const likelyCauses = analyzedCauses.filter(cause => cause.resolutionClassification === 'likely');
+
+    if (likelyCauses.length > 0) {
+      return likelyCauses;
+    }
+
+    return analyzedCauses.filter(cause =>
+      !hasResolutionDecisions || cause.resolutionClassification !== 'unlikely'
+    );
+  };
+
+  const isCauseReadyForManualResolution = (cause: FishboneCause) =>
+    Boolean(cause.fiveWhysAnalysis?.rootCause?.trim())
+    || Boolean(cause.resolutionValidation)
+    || (causeAnalysisStatuses[cause.id]?.answerCount || 0) >= 5;
+
+  const startManualCauseResolution = (cause: FishboneCause, classification: 'likely' | 'unlikely') => {
+    const currentDraft = manualCauseResolutionDrafts[cause.id];
+    const existingSelection = getCauseResolutionSelection(cause);
+
+    setManualCauseResolutionDrafts(prev => ({
+      ...prev,
+      [cause.id]: {
+        classification,
+        reason: currentDraft?.reason ?? existingSelection?.reason ?? '',
+      },
+    }));
+  };
+
+  const editManualCauseResolution = (cause: FishboneCause) => {
+    const existingSelection = getCauseResolutionSelection(cause);
+    if (!existingSelection) return;
+
+    setManualCauseResolutionDrafts(prev => ({
+      ...prev,
+      [cause.id]: {
+        classification: existingSelection.classification,
+        reason: existingSelection.reason || '',
+      },
+    }));
+  };
+
+  const updateManualCauseResolutionReason = (causeId: string, reason: string) => {
+    setManualCauseResolutionDrafts(prev => ({
+      ...prev,
+      ...(prev[causeId]
+        ? { [causeId]: { ...prev[causeId], reason } }
+        : {}),
+    }));
+  };
+
+  const cancelManualCauseResolution = (causeId: string) => {
+    setManualCauseResolutionDrafts(prev => {
+      const next = { ...prev };
+      delete next[causeId];
+      return next;
+    });
+  };
+
+  const saveManualCauseResolution = async (category: FishboneCategory, cause: FishboneCause) => {
+    const draft = manualCauseResolutionDrafts[cause.id];
+    const reason = draft?.reason.trim();
+
+    if (!draft || !reason) {
+      showToast('Add a reason before saving the decision', 'error');
+      return;
+    }
+
+    const selection: CauseResolutionSelection = {
+      causeId: cause.id,
+      categoryName: category.name,
+      causeText: cause.text,
+      rootCause: getCauseFinalRootCause(cause),
+      classification: draft.classification,
+      confidence: 100,
+      reason,
+      implementationImpact: draft.classification === 'likely'
+        ? 'This cause was manually marked as likely to resolve the problem when addressed.'
+        : 'This cause was manually marked as not likely to resolve the problem by itself.',
+      linkedCauseIds: [],
+      source: 'manual',
+    };
+
+    const previousCategories = categories;
+    const previousCauseResolutionValidation = causeResolutionValidation;
+    const updatedCategories = categories.map(cat => (
+      cat.id === category.id
+        ? {
+            ...cat,
+            causes: cat.causes.map(item => (
+              item.id === cause.id
+                ? { ...item, resolutionValidation: selection }
+                : item
+            )),
+          }
+        : cat
+    ));
+
+    setSavingManualCauseResolution(cause.id);
+    setCategories(updatedCategories);
+    cancelManualCauseResolution(cause.id);
+    setCauseResolutionValidation(prev => prev
+      ? {
+          ...prev,
+          selections: prev.selections.filter(selectionItem => selectionItem.causeId !== cause.id),
+          likelyCauseIds: prev.likelyCauseIds.filter(id => id !== cause.id),
+          unlikelyCauseIds: prev.unlikelyCauseIds.filter(id => id !== cause.id),
+        }
+      : prev);
+
+    try {
+      await onSave({ problem, categories: updatedCategories, rootCauseText, actionPlans, preventiveControls });
+      emitRCACategoriesUpdated(incidentId, rcaId, updatedCategories, problem);
+      showToast('Manual root cause decision saved', 'success');
+    } catch (err: any) {
+      console.error('Failed to save manual root cause decision:', err);
+      setCategories(previousCategories);
+      setCauseResolutionValidation(previousCauseResolutionValidation);
+      setErrorMessage(err.response?.data?.error || err.message || 'Failed to save manual root cause decision.');
+      showToast('Failed to save manual root cause decision', 'error');
+    } finally {
+      setSavingManualCauseResolution(null);
+    }
+  };
+
+  const getAnalyzedFishboneCausesForValidation = () => categories.flatMap(category =>
+    category.causes
+      .filter(cause => cause.text.trim())
+      .map(cause => ({
+        causeId: cause.id,
+        categoryName: category.name,
+        causeText: cause.text,
+        rootCause: cause.fiveWhysAnalysis?.rootCause || cause.resolutionValidation?.rootCause || '',
+        fiveWhysSteps: cause.fiveWhysAnalysis?.steps || [],
+      }))
+  );
+
+  const analyzedFishboneCauseCount = getAnalyzedFishboneCausesForValidation().filter(cause => cause.rootCause.trim()).length;
+
+  const validateAnalyzedFishboneRootCauses = async () => {
+    const causesForValidation = getAnalyzedFishboneCausesForValidation();
+
+    if (!problem.trim()) {
+      showToast('Add a problem statement before validating root causes', 'error');
+      return;
+    }
+
+    if (causesForValidation.length === 0) {
+      showToast('Add and analyze at least one cause first', 'error');
+      return;
+    }
+
+    setCauseResolutionValidation(null);
+    setShowCauseResolutionResultModal(false);
+    setValidatingCauseResolution(true);
+    setErrorMessage(null);
+
+    try {
+      const response = await api.post(`/rca/${rcaId}/ai/validate-fishbone-root-causes`, {
+        problem,
+        causes: causesForValidation,
+      }, {
+        timeout: 120000,
+      });
+
+      setCauseResolutionValidation(response.data.data);
+      setShowCauseResolutionResultModal(true);
+    } catch (err: any) {
+      const message = err.response?.data?.error || err.message || 'Failed to validate analyzed root causes.';
+      setErrorMessage(message);
+      showToast(message, 'error');
+    } finally {
+      setValidatingCauseResolution(false);
+    }
+  };
+
+  const acceptCauseResolutionValidation = async () => {
+    if (!causeResolutionValidation) return;
+
+    const selectionByCauseId = new Map(causeResolutionValidation.selections.map(selection => [selection.causeId, selection]));
+    const updatedCategories = categories.map(category => ({
+      ...category,
+      causes: category.causes.map(cause => ({
+        ...cause,
+        resolutionValidation: selectionByCauseId.has(cause.id)
+          ? { ...selectionByCauseId.get(cause.id)!, source: selectionByCauseId.get(cause.id)!.source || 'ai' }
+          : cause.resolutionValidation,
+      })),
+    }));
+
+    setCategories(updatedCategories);
+    setShowCauseResolutionResultModal(false);
+    setCauseResolutionValidation(null);
+
+    try {
+      await onSave({ problem, categories: updatedCategories, rootCauseText, actionPlans, preventiveControls });
+      showToast('Root cause selections saved', 'success');
+    } catch (err: any) {
+      console.error('Failed to save root cause selections:', err);
+      setErrorMessage(err.response?.data?.error || err.message || 'Failed to save root cause selections.');
+      showToast('Failed to save root cause selections', 'error');
+    }
+  };
+
+  const declineCauseResolutionValidation = () => {
+    setShowCauseResolutionResultModal(false);
+    setCauseResolutionValidation(null);
+  };
+
+  const handleSave = async (options?: { silent?: boolean }) => {
     setSaving(true);
     setErrorMessage(null);
     try {
       await onSave({ problem, categories, rootCauseText, actionPlans, preventiveControls });
-      showToast('Progress saved successfully', 'success');
+      if (!options?.silent) {
+        showToast('Progress saved successfully', 'success');
+      }
     } catch (err: any) {
       console.error('Failed to save:', err);
       setErrorMessage(err.response?.data?.error || err.message || 'Failed to save. Please try again.');
-      showToast('Failed to save progress', 'error');
+      if (!options?.silent) {
+        showToast('Failed to save progress', 'error');
+      }
     } finally {
       setSaving(false);
+    }
+  };
+
+  useEffect(() => {
+    if (!saveRequestToken || manualSaveRequestRef.current === saveRequestToken) {
+      return;
+    }
+    manualSaveRequestRef.current = saveRequestToken;
+    handleSave();
+  }, [saveRequestToken]);
+
+  useEffect(() => {
+    if (analysisAutoSaveTimerRef.current) {
+      clearTimeout(analysisAutoSaveTimerRef.current);
+    }
+
+    if (!autoSaveEnabled || isValidated) {
+      analysisAutoSaveReadyRef.current = false;
+      return;
+    }
+
+    if (!analysisAutoSaveReadyRef.current) {
+      analysisAutoSaveReadyRef.current = true;
+      return;
+    }
+
+    analysisAutoSaveTimerRef.current = setTimeout(() => {
+      handleSave({ silent: true });
+    }, 1500);
+
+    return () => {
+      if (analysisAutoSaveTimerRef.current) {
+        clearTimeout(analysisAutoSaveTimerRef.current);
+      }
+    };
+  }, [autoSaveEnabled, isValidated, problem, categories, rootCauseText, actionPlans, preventiveControls]);
+
+  const handleOpenWhiteboard = async () => {
+    if (!onOpenWhiteboard || openingWhiteboard) return;
+
+    setOpeningWhiteboard(true);
+    setErrorMessage(null);
+    try {
+      await onOpenWhiteboard({ problem, categories, rootCauseText, actionPlans, preventiveControls });
+    } catch (err: any) {
+      console.error('Failed to open fishbone whiteboard:', err);
+      setErrorMessage(err.response?.data?.error || err.message || 'Failed to open the fishbone whiteboard.');
+      showToast('Failed to open fishbone whiteboard', 'error');
+    } finally {
+      setOpeningWhiteboard(false);
     }
   };
 
@@ -2677,27 +3464,8 @@ export default function FishboneBuilder({
     setPreventiveControls((prev) => prev.filter((item) => item.id !== id));
   };
 
-  const getControlTypeIcon = (type: PreventiveControlItem['type']) => {
-    switch (type) {
-      case 'process': return '⚙️';
-      case 'training': return '📚';
-      case 'equipment': return '🔧';
-      case 'documentation': return '📋';
-      case 'monitoring': return '📊';
-      default: return '🛡️';
-    }
-  };
-
-  const getControlTypeColor = (type: PreventiveControlItem['type']) => {
-    switch (type) {
-      case 'process': return 'bg-blue-100 text-blue-700 dark:bg-blue-800 dark:text-blue-300';
-      case 'training': return 'bg-purple-100 text-purple-700 dark:bg-purple-800 dark:text-purple-300';
-      case 'equipment': return 'bg-orange-100 text-orange-700 dark:bg-orange-800 dark:text-orange-300';
-      case 'documentation': return 'bg-green-100 text-green-700 dark:bg-green-800 dark:text-green-300';
-      case 'monitoring': return 'bg-indigo-100 text-indigo-700 dark:bg-indigo-800 dark:text-indigo-300';
-      default: return 'bg-gray-100 text-gray-700 dark:bg-gray-700 dark:text-gray-300';
-    }
-  };
+  const getControlTypeColor = (_type: PreventiveControlItem['type']) =>
+    'bg-blue-100 text-blue-700 dark:bg-blue-900/50 dark:text-blue-200';
 
   // Generate AI Corrective Actions based on analyzed causes
   const generateAICorrectiveActions = async () => {
@@ -2705,39 +3473,50 @@ export default function FishboneBuilder({
     setCorrectiveActionsValidation(null);
     
     try {
-      // Collect all analyzed causes with their 5 Whys data
-      const analyzedCauses = categories.flatMap(cat => 
-        cat.causes.filter(c => c.fiveWhysAnalysis && c.fiveWhysAnalysis.isValidRootCause)
-          .map(c => ({
-            categoryName: cat.name,
-            causeText: c.text,
-            rootCause: c.fiveWhysAnalysis?.rootCause,
-            fiveWhysSteps: c.fiveWhysAnalysis?.steps,
-          }))
-      );
+      const analyzedCauses = getCorrectiveActionGenerationCauses();
+
+      if (analyzedCauses.length === 0) {
+        showToast('Analyze at least one likely root cause before generating actions', 'error');
+        return;
+      }
       
       const response = await api.post(`/rca/${rcaId}/ai/generate-corrective-actions`, {
         problem,
         analyzedCauses,
         existingActions: actionPlans,
+        existingPreventiveControls: preventiveControls,
       });
       
       const result = response.data.data;
-      setActionPlans(result.actionPlans);
+      const nextActionPlans = result.actionPlans;
+      const nextPreventiveControls = result.preventiveControls || preventiveControls;
+
+      setActionPlans(nextActionPlans);
       // Also set preventive controls if returned
-      if (result.preventiveControls) {
-        setPreventiveControls(result.preventiveControls);
-        setShowPreventiveControls(true);
+      if (nextPreventiveControls) {
+        setPreventiveControls(nextPreventiveControls);
+        setShowPreventiveControls(nextPreventiveControls.length > 0);
       }
       setShowActionPlans(true);
       setShowCorrectiveActionsSection(true);
+      setShowManualActionForm(false);
       
+      await onSave({
+        problem,
+        categories,
+        rootCauseText,
+        actionPlans: nextActionPlans,
+        preventiveControls: nextPreventiveControls,
+      });
+
       // Broadcast to all team members
       console.log('🛠️ Broadcasting corrective actions update, incidentId:', incidentId);
-      emitRCACorrectiveActionsUpdated(incidentId, rcaId, result.actionPlans, result.preventiveControls || []);
+      emitRCACorrectiveActionsUpdated(incidentId, rcaId, nextActionPlans, nextPreventiveControls || []);
+      showToast('Corrective actions and preventive controls generated', 'success');
     } catch (err: any) {
       console.error('Failed to generate AI corrective actions:', err);
       setErrorMessage(err.response?.data?.error || 'Failed to generate corrective actions. Please try again.');
+      showToast('Failed to generate corrective actions', 'error');
     } finally {
       setGeneratingCorrectiveActions(false);
     }
@@ -2834,58 +3613,37 @@ export default function FishboneBuilder({
     }
   };
 
-  const getPriorityColor = (priority: string) => {
-    switch (priority) {
-      case 'high':
-        return 'bg-red-100 text-red-800 dark:bg-red-900 dark:text-red-200';
-      case 'medium':
-        return 'bg-yellow-100 text-yellow-800 dark:bg-yellow-900 dark:text-yellow-200';
-      case 'low':
-        return 'bg-green-100 text-green-800 dark:bg-green-900 dark:text-green-200';
-      default:
-        return 'bg-gray-100 text-gray-800 dark:bg-gray-700 dark:text-gray-200';
-    }
-  };
+  const getPriorityColor = (_priority: string) =>
+    'bg-blue-100 text-blue-800 dark:bg-blue-900/50 dark:text-blue-200';
 
-  const getStatusColor = (status: string) => {
-    switch (status) {
-      case 'completed':
-        return 'bg-green-100 text-green-800 dark:bg-green-900 dark:text-green-200';
-      case 'in-progress':
-        return 'bg-blue-100 text-blue-800 dark:bg-blue-900 dark:text-blue-200';
-      case 'pending':
-        return 'bg-gray-100 text-gray-800 dark:bg-gray-700 dark:text-gray-200';
-      default:
-        return 'bg-gray-100 text-gray-800 dark:bg-gray-700 dark:text-gray-200';
-    }
-  };
+  const getStatusColor = (_status: string) =>
+    'bg-blue-100 text-blue-800 dark:bg-blue-900/50 dark:text-blue-200';
 
   const totalCauses = categories.reduce((sum, cat) => sum + cat.causes.length, 0);
 
-  // Get category colors
-  const getCategoryColor = (index: number) => {
-    const colors = [
-      'border-blue-500 bg-blue-50 dark:bg-blue-900/20',
-      'border-green-500 bg-green-50 dark:bg-green-900/20',
-      'border-yellow-500 bg-yellow-50 dark:bg-yellow-900/20',
-      'border-red-500 bg-red-50 dark:bg-red-900/20',
-      'border-purple-500 bg-purple-50 dark:bg-purple-900/20',
-      'border-orange-500 bg-orange-50 dark:bg-orange-900/20',
-    ];
-    return colors[index % colors.length];
+  const requestMethodChange = (method: RCAMethod) => {
+    if (!onChangeMethod || method === currentMethod || savingMethod) return;
+
+    if (totalCauses > 0) {
+      setPendingMethodChange(method);
+      return;
+    }
+
+    onChangeMethod(method);
   };
 
-  const getCategoryHeaderColor = (index: number) => {
-    const colors = [
-      'bg-blue-500',
-      'bg-green-500',
-      'bg-yellow-500',
-      'bg-red-500',
-      'bg-purple-500',
-      'bg-orange-500',
-    ];
-    return colors[index % colors.length];
+  const confirmMethodChange = () => {
+    if (!pendingMethodChange || !onChangeMethod) return;
+    const nextMethod = pendingMethodChange;
+    setPendingMethodChange(null);
+    onChangeMethod(nextMethod);
   };
+
+  // Keep 6M category cards visually consistent; color does not encode meaning here.
+  const getCategoryColor = (_index: number) => 'border-blue-500 bg-blue-50 dark:bg-blue-900/20';
+  const getCategoryHeaderColor = (_index: number) => 'bg-blue-500';
+  const manualFinalRootCauseAnswer = manualFiveWhysSteps.find(step => step.stepNumber === 5)?.answer.trim() || '';
+  const manualAnalysisIsComplete = Boolean(manualFinalRootCauseAnswer);
 
   return (
     <div className="p-3 sm:p-6">
@@ -2910,33 +3668,68 @@ export default function FishboneBuilder({
       )}
 
       <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3 sm:gap-0 mb-4 sm:mb-6">
-        <h2 className="text-base sm:text-lg font-semibold text-gray-900 dark:text-white">
-          Fishbone Diagram (Ishikawa)
-        </h2>
+        <div>
+          <h2 className="text-base sm:text-lg font-semibold text-gray-900 dark:text-white">
+            {sectionTitle}
+          </h2>
+          {activeTab === 'actions' && !isValidated && (
+            <p className="mt-1 text-xs sm:text-sm text-gray-500 dark:text-gray-400">
+              Use Generate to create corrective actions and preventive controls from the analyzed root causes.
+            </p>
+          )}
+        </div>
         <div className="flex flex-wrap items-center gap-2 sm:gap-3">
-          {!isValidated && (
-            <button
-              onClick={startAIWorkflow}
-              disabled={generatingFullAnalysis || showAIPanel}
-              className="px-3 sm:px-4 py-1.5 sm:py-2 bg-gradient-to-r from-purple-600 to-indigo-600 text-white rounded-lg hover:from-purple-700 hover:to-indigo-700 disabled:opacity-50 transition-all flex items-center space-x-1.5 sm:space-x-2 shadow-lg text-xs sm:text-sm"
-            >
-              {generatingFullAnalysis ? (
-                <>
-                  <svg className="animate-spin h-4 w-4 sm:h-5 sm:w-5" viewBox="0 0 24 24">
-                    <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" fill="none" />
-                    <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z" />
-                  </svg>
-                  <span>Analyzing...</span>
-                </>
-              ) : (
-                <>
-                  <svg className="w-4 h-4 sm:w-5 sm:h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M13 10V3L4 14h7v7l9-11h-7z" />
-                  </svg>
-                  <span>🤖 AI Generate Analysis</span>
-                </>
-              )}
-            </button>
+          {!isValidated && onChangeMethod && activeTab === 'analysis' && (
+            <fieldset className="inline-flex items-center gap-1 rounded-full border border-gray-200 bg-white p-1 shadow-sm dark:border-gray-700 dark:bg-gray-900">
+              <legend className="sr-only">Root cause analysis method</legend>
+              {[
+                { value: 'FIVE_WHYS' as const, label: '5 Whys' },
+                { value: 'FISHBONE' as const, label: 'Fishbone' },
+              ].map((option) => {
+                const selected = currentMethod === option.value;
+                return (
+                  <label
+                    key={option.value}
+                    className={`inline-flex cursor-pointer items-center gap-1.5 rounded-full px-3 py-1.5 text-xs font-medium transition-colors ${
+                      selected
+                        ? 'bg-blue-600 text-white shadow-sm'
+                        : 'text-gray-600 hover:bg-gray-50 dark:text-gray-300 dark:hover:bg-gray-800'
+                    } ${savingMethod ? 'cursor-not-allowed opacity-60' : ''}`}
+                  >
+                    <input
+                      type="radio"
+                      name={`rca-method-${rcaId}`}
+                      value={option.value}
+                      checked={selected}
+                      disabled={savingMethod}
+                      onChange={() => requestMethodChange(option.value)}
+                      className="h-3.5 w-3.5 accent-blue-600"
+                    />
+                    <span>{option.label}</span>
+                  </label>
+                );
+              })}
+            </fieldset>
+          )}
+          {activeTab === 'actions' && !isValidated && (
+            <>
+              <button
+                type="button"
+                onClick={startManualCorrectiveActions}
+                disabled={generatingCorrectiveActions}
+                className="rounded-lg border border-blue-200 bg-white px-3 py-1.5 text-xs font-semibold text-blue-700 transition-colors hover:bg-blue-50 disabled:cursor-not-allowed disabled:opacity-50 dark:border-blue-700 dark:bg-gray-900 dark:text-blue-200 dark:hover:bg-blue-900/30 sm:text-sm"
+              >
+                Create Manually
+              </button>
+              <button
+                type="button"
+                onClick={generateAICorrectiveActions}
+                disabled={generatingCorrectiveActions}
+                className="inline-flex items-center justify-center rounded-lg bg-blue-600 px-3 py-1.5 text-xs font-semibold text-white transition-colors hover:bg-blue-700 disabled:cursor-not-allowed disabled:opacity-50 sm:text-sm"
+              >
+                {generatingCorrectiveActions ? 'Generating...' : 'Generate'}
+              </button>
+            </>
           )}
           <span className="px-2 sm:px-3 py-1 rounded-full text-xs font-medium bg-gray-100 text-gray-800 dark:bg-gray-700 dark:text-gray-200">
             {totalCauses} causes identified
@@ -2945,6 +3738,7 @@ export default function FishboneBuilder({
       </div>
 
       {/* Tab Navigation */}
+      {!hideInternalTabs && (
       <div className="mb-6 border-b border-gray-200 dark:border-gray-700 overflow-x-auto">
         <nav className="flex space-x-1 min-w-max" aria-label="Tabs">
           <button
@@ -2987,7 +3781,7 @@ export default function FishboneBuilder({
             </svg>
             <span className="hidden xs:inline">Corrective</span> <span>Actions</span>
             {(actionPlans.immediate.length + actionPlans.shortTerm.length + actionPlans.longTerm.length) > 0 && (
-              <span className="px-2 py-0.5 text-xs rounded-full bg-green-100 dark:bg-green-900/50 text-green-600 dark:text-green-400">
+              <span className="px-2 py-0.5 text-xs rounded-full bg-blue-100 dark:bg-blue-900/50 text-blue-600 dark:text-blue-400">
                 {actionPlans.immediate.length + actionPlans.shortTerm.length + actionPlans.longTerm.length}
               </span>
             )}
@@ -3005,13 +3799,14 @@ export default function FishboneBuilder({
             </svg>
             <span className="hidden xs:inline">Preventive</span> <span>Controls</span>
             {preventiveControls.length > 0 && (
-              <span className="px-2 py-0.5 text-xs rounded-full bg-purple-100 dark:bg-purple-900/50 text-purple-600 dark:text-purple-400">
+              <span className="px-2 py-0.5 text-xs rounded-full bg-blue-100 dark:bg-blue-900/50 text-blue-600 dark:text-blue-400">
                 {preventiveControls.length}
               </span>
             )}
           </button>
         </nav>
       </div>
+      )}
 
       {/* Enhanced AI Workflow Panel */}
       {showAIPanel && (
@@ -3260,177 +4055,273 @@ export default function FishboneBuilder({
         </div>
       )}
 
+      {(validatingCauseResolution || (showCauseResolutionResultModal && causeResolutionValidation)) && (
+        <div className="fixed inset-0 z-50 overflow-hidden bg-transparent pointer-events-none">
+          <div
+            ref={causeResolutionModalRef}
+            style={isCauseResolutionModalReady ? {
+              left: causeResolutionModalPosition.left,
+              top: causeResolutionModalPosition.top,
+              width: 'min(44rem, calc(100vw - 1.5rem))',
+              maxHeight: 'min(40rem, calc(100dvh - 1.5rem))',
+            } : {
+              left: '50%',
+              top: '50%',
+              width: 'min(44rem, calc(100vw - 1.5rem))',
+              maxHeight: 'min(40rem, calc(100dvh - 1.5rem))',
+              transform: 'translate(-50%, -50%)',
+            }}
+            className={`pointer-events-auto fixed flex flex-col overflow-hidden rounded-lg border border-gray-200 bg-white shadow-2xl shadow-gray-900/20 dark:border-gray-700 dark:bg-gray-800 ${
+              isCauseResolutionModalDragging ? 'select-none' : ''
+            }`}
+          >
+            <div
+              className={`flex shrink-0 items-start justify-between border-b border-gray-200 px-4 py-3 dark:border-gray-700 ${
+                isCauseResolutionModalDragging ? 'cursor-grabbing' : 'cursor-grab'
+              }`}
+              onPointerDown={handleCauseResolutionModalPointerDown}
+              onPointerMove={handleCauseResolutionModalPointerMove}
+              onPointerUp={handleCauseResolutionModalPointerUp}
+              onPointerCancel={handleCauseResolutionModalPointerUp}
+              style={{ touchAction: 'none' }}
+            >
+              <div>
+                <h3 className="text-base font-semibold text-gray-900 dark:text-white">
+                  Root Cause Review
+                </h3>
+                <p className="mt-0.5 text-xs text-gray-500 dark:text-gray-400">
+                  Review analyzed causes against the problem statement.
+                </p>
+              </div>
+              {!validatingCauseResolution && (
+                <button
+                  type="button"
+                  onClick={declineCauseResolutionValidation}
+                  className="inline-flex h-7 w-7 items-center justify-center rounded-md text-gray-500 transition-colors hover:bg-gray-100 hover:text-gray-800 dark:text-gray-300 dark:hover:bg-gray-700 dark:hover:text-white"
+                  aria-label="Close root cause review"
+                >
+                  X
+                </button>
+              )}
+            </div>
+
+            {validatingCauseResolution ? (
+              <div className="flex min-h-[18rem] flex-col items-center justify-center px-6 py-8 text-center">
+                <div className="relative mb-5 flex h-16 w-16 items-center justify-center rounded-full bg-blue-50 dark:bg-blue-900/30">
+                  <div className="absolute h-16 w-16 animate-ping rounded-full bg-blue-200 opacity-40 dark:bg-blue-700" />
+                  <Loader2 className="relative h-8 w-8 animate-spin text-blue-600 dark:text-blue-300" />
+                </div>
+                <h4 className="text-base font-semibold text-gray-900 dark:text-white">Analyzing final root causes...</h4>
+                <p className="mt-2 max-w-md text-sm leading-6 text-gray-600 dark:text-gray-300">
+                  Reviewing the problem statement, incident details, evidence, and saved 5 Whys answers to identify the causes most likely to prevent recurrence.
+                </p>
+                <div className="mt-6 h-2 w-full max-w-sm overflow-hidden rounded-full bg-gray-100 dark:bg-gray-700">
+                  <div className="h-full w-2/3 animate-pulse rounded-full bg-blue-600" />
+                </div>
+              </div>
+            ) : causeResolutionValidation && (
+              <>
+                <div className="min-h-0 flex-1 overflow-y-auto px-4 py-3">
+                  <div className="rounded-md border border-blue-200 bg-blue-50 p-3 dark:border-blue-800 dark:bg-blue-900/20">
+                    <p className="text-sm font-semibold text-blue-900 dark:text-blue-100">
+                      {causeResolutionValidation.overallDecision}
+                    </p>
+                    <p className="mt-1 text-xs leading-5 text-blue-800 dark:text-blue-200">
+                      {causeResolutionValidation.problemResolutionSummary}
+                    </p>
+                    {causeResolutionValidation.recommendedCombination && (
+                      <p className="mt-2 text-xs leading-5 text-blue-800 dark:text-blue-200">
+                        {causeResolutionValidation.recommendedCombination}
+                      </p>
+                    )}
+                  </div>
+
+                  <div className="mt-3 grid gap-2">
+                    {causeResolutionValidation.selections.map(selection => (
+                      <div
+                        key={selection.causeId}
+                        className={`rounded-md border p-3 ${
+                          selection.classification === 'likely'
+                            ? 'border-green-200 bg-green-50 dark:border-green-800 dark:bg-green-900/20'
+                            : 'border-yellow-200 bg-yellow-50 dark:border-yellow-800 dark:bg-yellow-900/20'
+                        }`}
+                      >
+                        <div className="flex flex-col gap-2 sm:flex-row sm:items-start sm:justify-between">
+                          <div>
+                            <p className={`text-sm font-semibold text-gray-900 dark:text-white ${
+                              selection.classification === 'unlikely' ? 'line-through decoration-yellow-700 decoration-2' : ''
+                            }`}>
+                              {selection.causeText}
+                            </p>
+                            <p className="mt-1 text-xs text-gray-500 dark:text-gray-400">
+                              {selection.categoryName} · {selection.confidence}% confidence
+                            </p>
+                          </div>
+                          <span className={`shrink-0 rounded-full px-2 py-0.5 text-[10px] font-semibold ${
+                            selection.classification === 'likely'
+                              ? 'bg-green-100 text-green-700 dark:bg-green-900/50 dark:text-green-200'
+                              : 'bg-yellow-100 text-yellow-800 dark:bg-yellow-900/50 dark:text-yellow-200'
+                          }`}>
+                            {selection.classification === 'likely' ? 'Likely' : 'Not likely'}
+                          </span>
+                        </div>
+                        <p className="mt-2 text-xs leading-5 text-gray-700 dark:text-gray-300">
+                          {selection.reason}
+                        </p>
+                        {selection.implementationImpact && (
+                          <p className="mt-1 text-xs leading-5 text-gray-600 dark:text-gray-400">
+                            {selection.implementationImpact}
+                          </p>
+                        )}
+                      </div>
+                    ))}
+                  </div>
+
+                  {causeResolutionValidation.limitations.length > 0 && (
+                    <div className="mt-3 rounded-md border border-gray-200 bg-gray-50 p-3 dark:border-gray-700 dark:bg-gray-700/40">
+                      <p className="text-xs font-semibold uppercase tracking-wide text-gray-600 dark:text-gray-300">Limitations</p>
+                      <ul className="mt-1 space-y-1">
+                        {causeResolutionValidation.limitations.map((item, index) => (
+                          <li key={`${item}-${index}`} className="text-xs leading-5 text-gray-600 dark:text-gray-300">
+                            {item}
+                          </li>
+                        ))}
+                      </ul>
+                    </div>
+                  )}
+                </div>
+
+                <div className="flex shrink-0 justify-end gap-2 border-t border-gray-200 px-4 py-3 dark:border-gray-700">
+                  <button
+                    type="button"
+                    onClick={declineCauseResolutionValidation}
+                    className="rounded-md border border-gray-300 bg-white px-3 py-1.5 text-xs font-semibold text-gray-700 transition-colors hover:bg-gray-50 dark:border-gray-600 dark:bg-gray-700 dark:text-gray-200 dark:hover:bg-gray-600"
+                  >
+                    Decline
+                  </button>
+                  <button
+                    type="button"
+                    onClick={acceptCauseResolutionValidation}
+                    className="rounded-md bg-blue-600 px-3 py-1.5 text-xs font-semibold text-white transition-colors hover:bg-blue-700"
+                  >
+                    Accept
+                  </button>
+                </div>
+              </>
+            )}
+          </div>
+        </div>
+      )}
+
       {/* Cause 5 Whys Analysis Modal */}
       {selectedCauseForAnalysis && (
-        <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50">
-          <div className="bg-white dark:bg-gray-800 rounded-lg shadow-xl max-w-6xl w-full mx-4 p-6 max-h-[85vh] overflow-y-auto relative">
+        <div className="fixed inset-0 z-50 overflow-hidden bg-transparent pointer-events-none">
+          <div
+            ref={fiveWhysModalRef}
+            style={isFiveWhysModalReady ? {
+              left: fiveWhysModalPosition.left,
+              top: fiveWhysModalPosition.top,
+              width: 'min(60rem, calc(100vw - 1.5rem))',
+              height: 'min(43rem, calc(100dvh - 1.5rem))',
+              maxHeight: 'calc(100dvh - 1.5rem)',
+            } : {
+              left: '50%',
+              top: '50%',
+              width: 'min(60rem, calc(100vw - 1.5rem))',
+              height: 'min(43rem, calc(100dvh - 1.5rem))',
+              maxHeight: 'calc(100dvh - 1.5rem)',
+              transform: 'translate(-50%, -50%)',
+            }}
+            className={`pointer-events-auto fixed flex min-h-0 flex-col overflow-hidden rounded-lg border border-gray-200 bg-white shadow-2xl shadow-gray-900/20 dark:border-gray-700 dark:bg-gray-800 ${
+              isFiveWhysModalDragging ? 'select-none' : ''
+            }`}
+          >
             {/* Auto-save toast notification */}
             {autoSaveToast.show && (
-              <div className="absolute top-2 right-14 bg-green-500 text-white px-3 py-1 rounded-full text-xs font-medium shadow-lg flex items-center space-x-1 animate-pulse z-50">
-                <svg className="w-3 h-3" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 13l4 4L19 7" />
-                </svg>
+              <div className="absolute right-12 top-2 z-50 rounded-full bg-green-500 px-3 py-1 text-xs font-medium text-white shadow-lg">
                 <span>{autoSaveToast.message}</span>
               </div>
             )}
-            
-            <div className="flex items-center justify-between mb-4">
-              <h3 className="text-lg font-semibold text-gray-900 dark:text-white">
-                5 Whys Analysis: {selectedCauseForAnalysis.categoryName}
-              </h3>
+
+            <div
+              className={`flex shrink-0 items-start justify-between border-b border-gray-200 px-4 py-3 dark:border-gray-700 ${
+                isFiveWhysModalDragging ? 'cursor-grabbing' : 'cursor-grab'
+              }`}
+              onPointerDown={handleFiveWhysModalPointerDown}
+              onPointerMove={handleFiveWhysModalPointerMove}
+              onPointerUp={handleFiveWhysModalPointerUp}
+              onPointerCancel={handleFiveWhysModalPointerUp}
+              style={{ touchAction: 'none' }}
+            >
+              <div>
+                <h3 className="text-base font-semibold text-gray-900 dark:text-white">
+                  5 Whys Analysis: {selectedCauseForAnalysis.categoryName}
+                </h3>
+                <p className="mt-0.5 text-xs text-gray-500 dark:text-gray-400">
+                  Manual cause review
+                </p>
+              </div>
               <button
+                type="button"
                 onClick={closeFiveWhysModal}
-                className="text-gray-500 hover:text-gray-700"
+                className="inline-flex h-7 w-7 items-center justify-center rounded-md text-gray-500 transition-colors hover:bg-gray-100 hover:text-gray-800 dark:text-gray-300 dark:hover:bg-gray-700 dark:hover:text-white"
+                aria-label="Close 5 Whys analysis"
               >
-                <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                <svg className="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
                   <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
                 </svg>
               </button>
             </div>
 
-            <div className="p-3 bg-gray-100 dark:bg-gray-700 rounded-lg mb-4">
-              <span className="text-xs text-gray-500 dark:text-gray-400">Analyzing Cause:</span>
-              <p className="text-gray-900 dark:text-white font-medium">{selectedCauseForAnalysis.text}</p>
-            </div>
-
-            {/* Choice Screen - Manual vs AI with Continue option when work exists */}
-            {fiveWhysMode === 'choose' && (
-              <div className="space-y-4">
-                {/* Continue Section - Only shows when there's existing work */}
-                {causeAnalysisStatuses[selectedCauseForAnalysis.id]?.hasAnswers && (
-                  <>
-                    {/* Continue Button */}
-                    <button
-                      onClick={continueFiveWhysAnalysis}
-                      className="w-full p-4 bg-gradient-to-r from-green-500 to-emerald-500 hover:from-green-600 hover:to-emerald-600 text-white rounded-xl transition-all shadow-lg hover:shadow-xl flex items-center justify-center space-x-3"
-                    >
-                      <svg className="w-6 h-6" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M14.752 11.168l-3.197-2.132A1 1 0 0010 9.87v4.263a1 1 0 001.555.832l3.197-2.132a1 1 0 000-1.664z" />
-                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
-                      </svg>
-                      <span className="font-semibold text-lg">Continue Analysis</span>
-                      <span className="text-sm opacity-80">
-                        ({causeAnalysisStatuses[selectedCauseForAnalysis.id]?.answerCount || 0}/5 answered)
-                      </span>
-                    </button>
-                    
-                    {/* Alert message */}
-                    <div className="p-3 bg-amber-50 dark:bg-amber-900/20 border border-amber-200 dark:border-amber-700 rounded-lg">
-                      <p className="text-sm text-amber-700 dark:text-amber-300 text-center">
-                        <span className="font-medium">Click continue</span> to continue editing the 5 Whys from the previously selected method
-                        {currentAnalysisMethod ? ` (${currentAnalysisMethod === 'ai' ? 'AI Analysis' : 'Manual Analysis'})` : ''}, 
-                        or choose an option below to clear current data and start fresh.
-                      </p>
-                    </div>
-                    
-                    <div className="relative">
-                      <div className="absolute inset-0 flex items-center">
-                        <div className="w-full border-t border-gray-300 dark:border-gray-600"></div>
-                      </div>
-                      <div className="relative flex justify-center text-sm">
-                        <span className="px-2 bg-white dark:bg-gray-800 text-gray-500 dark:text-gray-400">or start fresh</span>
-                      </div>
-                    </div>
-                  </>
-                )}
-
-                {/* Instructions text - only show when no existing work */}
-                {!causeAnalysisStatuses[selectedCauseForAnalysis.id]?.hasAnswers && (
-                  <p className="text-sm text-gray-600 dark:text-gray-400 text-center mb-6">
-                    Choose how you want to perform the 5 Whys analysis for this cause:
-                  </p>
-                )}
-                
-                <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                  {/* Manual Analysis Button */}
-                  <button
-                    onClick={startManualFiveWhysAnalysis}
-                    className="p-6 bg-gradient-to-br from-blue-50 to-indigo-50 dark:from-blue-900/20 dark:to-indigo-900/20 border-2 border-blue-200 dark:border-blue-700 rounded-xl hover:border-blue-400 dark:hover:border-blue-500 transition-all group"
-                  >
-                    <div className="flex flex-col items-center text-center">
-                      <div className="w-16 h-16 bg-blue-100 dark:bg-blue-900/50 rounded-full flex items-center justify-center mb-4 group-hover:bg-blue-200 dark:group-hover:bg-blue-800/50 transition-colors">
-                        <svg className="w-8 h-8 text-blue-600 dark:text-blue-400" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M11 5H6a2 2 0 00-2 2v11a2 2 0 002 2h11a2 2 0 002-2v-5m-1.414-9.414a2 2 0 112.828 2.828L11.828 15H9v-2.828l8.586-8.586z" />
-                        </svg>
-                      </div>
-                      <h4 className="text-lg font-semibold text-blue-900 dark:text-blue-100 mb-2">Manual Analysis</h4>
-                      <p className="text-sm text-blue-600 dark:text-blue-400">
-                        Enter your own 5 Whys analysis. AI will validate your answers for accuracy and spelling.
-                      </p>
-                      {causeAnalysisStatuses[selectedCauseForAnalysis.id]?.hasAnswers && (
-                        <p className="text-xs text-amber-500 dark:text-amber-400 mt-2">
-                          ⚠️ This will start fresh
-                        </p>
-                      )}
-                    </div>
-                  </button>
-
-                  {/* AI Analysis Button */}
-                  <button
-                    onClick={startAIFiveWhysAnalysis}
-                    className="p-6 bg-gradient-to-br from-purple-50 to-violet-50 dark:from-purple-900/20 dark:to-violet-900/20 border-2 border-purple-200 dark:border-purple-700 rounded-xl hover:border-purple-400 dark:hover:border-purple-500 transition-all group"
-                  >
-                    <div className="flex flex-col items-center text-center">
-                      <div className="w-16 h-16 bg-purple-100 dark:bg-purple-900/50 rounded-full flex items-center justify-center mb-4 group-hover:bg-purple-200 dark:group-hover:bg-purple-800/50 transition-colors">
-                        <svg className="w-8 h-8 text-purple-600 dark:text-purple-400" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9.75 17L9 20l-1 1h8l-1-1-.75-3M3 13h18M5 17h14a2 2 0 002-2V5a2 2 0 00-2-2H5a2 2 0 00-2 2v10a2 2 0 002 2z" />
-                        </svg>
-                      </div>
-                      <h4 className="text-lg font-semibold text-purple-900 dark:text-purple-100 mb-2">AI Analysis</h4>
-                      <p className="text-sm text-purple-600 dark:text-purple-400">
-                        Let AI automatically generate the 5 Whys analysis based on the cause and context.
-                      </p>
-                      {causeAnalysisStatuses[selectedCauseForAnalysis.id]?.hasAnswers && (
-                        <p className="text-xs text-amber-500 dark:text-amber-400 mt-2">
-                          ⚠️ This will start fresh
-                        </p>
-                      )}
-                    </div>
-                  </button>
-                </div>
+            <div className="min-h-0 flex-1 overflow-y-auto overscroll-contain px-3 py-3">
+              <div className="mb-3 rounded-md bg-gray-50 p-2 dark:bg-gray-700/60">
+                <span className="text-[11px] font-medium uppercase tracking-wide text-gray-500 dark:text-gray-400">Analyzing Cause</span>
+                <p className="mt-0.5 text-sm font-medium leading-5 text-gray-900 dark:text-white">{selectedCauseForAnalysis.text}</p>
               </div>
-            )}
 
             {/* Manual Analysis Mode */}
             {fiveWhysMode === 'manual' && (
-              <div className="space-y-4">
-                {/* Back button */}
-                <button
-                  onClick={goBackToChooseMode}
-                  className="text-sm text-gray-500 hover:text-gray-700 dark:text-gray-400 dark:hover:text-gray-200 flex items-center space-x-1 mb-2"
-                >
-                  <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 19l-7-7 7-7" />
-                  </svg>
-                  <span>Back to options</span>
-                </button>
-
+              <div className="space-y-2">
                 {/* Validating spinner */}
                 {validatingManualAnalysis && (
-                  <LoadingState message="AI is validating your analysis..." icon="search" color="purple" fullScreen={false} />
+                  <LoadingState message="Validating your analysis..." icon="search" color="blue" fullScreen={false} />
                 )}
 
                 {/* Manual 5 Whys Steps */}
                 {!validatingManualAnalysis && (
                   <>
-                    <div className="space-y-3">
+                    <div className="space-y-2">
                       {manualFiveWhysSteps.map((step) => {
                         const issue = manualAnalysisValidation?.issues.find(i => i.stepNumber === step.stepNumber);
+                        const stepValidation = manualStepValidations[step.stepNumber];
+                        const isValidatingStep = validatingManualStep === step.stepNumber;
+                        const showStepValidate = Boolean(step.answer.trim());
                         return (
-                          <div key={step.stepNumber} className={`p-3 rounded-lg ${
+                          <div key={step.stepNumber} className={`rounded-md p-2 ${
                             issue 
                               ? 'bg-amber-50 dark:bg-amber-900/20 border border-amber-200 dark:border-amber-700' 
                               : 'bg-gray-50 dark:bg-gray-700/50'
                           }`}>
-                            <div className="flex items-start space-x-2">
-                              <span className={`flex items-center justify-center w-6 h-6 rounded-full text-white text-xs font-bold shrink-0 ${
+                            <div className="flex items-start gap-2">
+                              <span className={`flex h-5 w-5 shrink-0 items-center justify-center rounded-full text-[11px] font-bold text-white ${
                                 issue ? 'bg-amber-500' : 'bg-blue-600'
                               }`}>
                                 {step.stepNumber}
                               </span>
                               <div className="flex-1">
-                                <div className="flex items-center justify-between">
-                                  <p className="text-sm font-medium text-gray-700 dark:text-gray-300">{step.question}</p>
+                                <div className="flex items-center justify-between gap-2">
+                                  <div className="flex min-w-0 flex-wrap items-center gap-2">
+                                    <p className="text-xs font-medium text-gray-700 dark:text-gray-300">{step.question}</p>
+                                    {stepValidation && (
+                                      <span className={`rounded-full px-2 py-0.5 text-[10px] font-semibold ${
+                                        stepValidation.rating === 'ACCEPTED'
+                                          ? 'bg-green-100 text-green-700 dark:bg-green-900/40 dark:text-green-200'
+                                          : 'bg-yellow-100 text-yellow-800 dark:bg-yellow-900/40 dark:text-yellow-200'
+                                      }`}>
+                                        {stepValidation.rating === 'ACCEPTED' ? 'Accepted' : 'Shallow'}
+                                      </span>
+                                    )}
+                                  </div>
                                   {/* Typing indicator for this Why step */}
                                   {fiveWhysTypingIndicators[`why-${step.stepNumber}`] && (
                                     <span className="text-xs text-blue-500 dark:text-blue-400 flex items-center animate-pulse">
@@ -3439,19 +4330,87 @@ export default function FishboneBuilder({
                                     </span>
                                   )}
                                 </div>
-                                <textarea
-                                  value={step.answer}
-                                  onChange={(e) => updateManualStep(step.stepNumber, e.target.value)}
-                                  placeholder="Enter your answer..."
-                                  rows={2}
-                                  className={`w-full mt-1 px-2 py-1 text-sm border rounded bg-white dark:bg-gray-700 text-gray-900 dark:text-white ${
-                                    fiveWhysTypingIndicators[`why-${step.stepNumber}`]
-                                      ? 'border-blue-400 dark:border-blue-500 ring-1 ring-blue-300 dark:ring-blue-600'
-                                      : issue 
-                                        ? 'border-amber-300 dark:border-amber-600' 
-                                        : 'border-gray-300 dark:border-gray-600'
-                                  } focus:outline-none focus:ring-1 focus:border-blue-500`}
-                                />
+                                <div className="relative mt-1">
+                                  <textarea
+                                    value={step.answer}
+                                    onFocus={() => refreshManualQuestionFromPreviousAnswer(step.stepNumber)}
+                                    onChange={(e) => updateManualStep(step.stepNumber, e.target.value)}
+                                    placeholder="Enter your answer..."
+                                    rows={2}
+                                    className={`w-full resize-y rounded border bg-white px-2 py-1 pr-24 text-xs text-gray-900 dark:bg-gray-700 dark:text-white ${
+                                      fiveWhysTypingIndicators[`why-${step.stepNumber}`]
+                                        ? 'border-blue-400 dark:border-blue-500 ring-1 ring-blue-300 dark:ring-blue-600'
+                                        : issue
+                                          ? 'border-amber-300 dark:border-amber-600'
+                                          : 'border-gray-300 dark:border-gray-600'
+                                    } focus:outline-none focus:ring-1 focus:border-blue-500`}
+                                  />
+                                  {showStepValidate && (
+                                    <button
+                                      type="button"
+                                      onClick={() => validateManualStepAnswer(step.stepNumber)}
+                                      disabled={isValidatingStep}
+                                      className="absolute bottom-2 right-2 rounded-md bg-blue-600 px-2.5 py-1 text-[11px] font-semibold text-white shadow-sm transition-colors hover:bg-blue-700 disabled:cursor-wait disabled:opacity-60"
+                                    >
+                                      {isValidatingStep ? 'Checking...' : 'Validate'}
+                                    </button>
+                                  )}
+                                </div>
+
+                                {stepValidation && !stepValidation.feedbackDismissed && (
+                                  <div className={`mt-2 rounded-md border p-2 ${
+                                    stepValidation.rating === 'ACCEPTED'
+                                      ? 'border-green-200 bg-green-50 dark:border-green-800 dark:bg-green-900/20'
+                                      : 'border-yellow-200 bg-yellow-50 dark:border-yellow-800 dark:bg-yellow-900/20'
+                                  }`}>
+                                    <div className="flex flex-col gap-1 sm:flex-row sm:items-start sm:justify-between">
+                                      <p className="text-xs leading-5 text-gray-700 dark:text-gray-300">
+                                        {stepValidation.feedback}
+                                      </p>
+                                      <div className="flex shrink-0 items-center gap-2 self-end sm:self-auto">
+                                        {typeof stepValidation.score === 'number' && (
+                                          <span className="text-[10px] font-semibold text-gray-500 dark:text-gray-400">
+                                            {Math.round(stepValidation.score)}%
+                                          </span>
+                                        )}
+                                        <button
+                                          type="button"
+                                          onClick={() => dismissManualStepValidationFeedback(step.stepNumber)}
+                                          className="inline-flex h-5 w-5 items-center justify-center rounded text-[11px] font-semibold text-gray-500 transition-colors hover:bg-white/80 hover:text-gray-800 dark:text-gray-300 dark:hover:bg-gray-700 dark:hover:text-white"
+                                          aria-label="Close validation feedback"
+                                        >
+                                          X
+                                        </button>
+                                      </div>
+                                    </div>
+                                    {stepValidation.suggestedAnswer && !stepValidation.suggestionDismissed && (
+                                      <div className="mt-2 rounded border border-blue-200 bg-white p-2 dark:border-blue-800 dark:bg-gray-800">
+                                        <p className="text-[11px] font-semibold uppercase tracking-wide text-blue-700 dark:text-blue-300">
+                                          Suggested Answer
+                                        </p>
+                                        <p className="mt-1 text-xs leading-5 text-gray-800 dark:text-gray-200">
+                                          {stepValidation.suggestedAnswer}
+                                        </p>
+                                        <div className="mt-2 flex flex-wrap gap-2">
+                                          <button
+                                            type="button"
+                                            onClick={() => acceptManualStepSuggestion(step.stepNumber, stepValidation.suggestedAnswer!)}
+                                            className="rounded-md bg-blue-600 px-2.5 py-1 text-[11px] font-semibold text-white hover:bg-blue-700"
+                                          >
+                                            Accept
+                                          </button>
+                                          <button
+                                            type="button"
+                                            onClick={() => declineManualStepSuggestion(step.stepNumber)}
+                                            className="rounded-md bg-gray-100 px-2.5 py-1 text-[11px] font-semibold text-gray-700 hover:bg-gray-200 dark:bg-gray-700 dark:text-gray-200 dark:hover:bg-gray-600"
+                                          >
+                                            Decline
+                                          </button>
+                                        </div>
+                                      </div>
+                                    )}
+                                  </div>
+                                )}
                                 
                                 {/* Issue Feedback from validation */}
                                 {issue && (
@@ -3478,50 +4437,25 @@ export default function FishboneBuilder({
                     </div>
 
                     {/* Root Cause Input */}
-                    <div className="p-4 bg-green-50 dark:bg-green-900/20 rounded-lg border border-green-200 dark:border-green-700">
-                      <div className="flex items-center justify-between mb-2">
-                        <label className="block text-sm font-medium text-green-700 dark:text-green-300">
+                    <div className="rounded-md border border-blue-200 bg-blue-50 p-2 dark:border-blue-800 dark:bg-blue-900/20">
+                      <div className="mb-1.5 flex items-center justify-between gap-2">
+                        <label className="block text-xs font-medium text-blue-700 dark:text-blue-300">
                           Root Cause (Final Answer)
                         </label>
-                        {/* Typing indicator for root cause */}
-                        {fiveWhysTypingIndicators['rootCause'] && (
-                          <span className="text-xs text-green-600 dark:text-green-400 flex items-center animate-pulse">
-                            <span className="w-2 h-2 bg-green-500 rounded-full mr-1 animate-bounce"></span>
-                            {fiveWhysTypingIndicators['rootCause'].userName} is typing...
-                          </span>
-                        )}
                       </div>
                       <textarea
-                        value={manualRootCause}
-                        onChange={(e) => updateManualRootCause(e.target.value)}
-                        placeholder="Based on your 5 Whys analysis, what is the root cause?"
+                        value={manualFinalRootCauseAnswer}
+                        readOnly
+                        placeholder="The answer from Why 5 will appear here."
                         rows={2}
-                        className={`w-full px-2 py-1 text-sm border rounded bg-white dark:bg-gray-700 text-gray-900 dark:text-white focus:outline-none focus:ring-1 focus:border-green-500 ${
-                          fiveWhysTypingIndicators['rootCause']
-                            ? 'border-green-400 dark:border-green-500 ring-1 ring-green-300 dark:ring-green-600'
-                            : 'border-green-300 dark:border-green-600'
-                        }`}
+                        className="w-full cursor-default resize-y rounded border border-blue-300 bg-white/80 px-2 py-1 text-xs text-gray-800 focus:outline-none dark:border-blue-700 dark:bg-gray-700/80 dark:text-white"
                       />
-                      
-                      {/* Suggested Root Cause from validation */}
-                      {manualAnalysisValidation?.suggestedRootCause && manualAnalysisValidation.suggestedRootCause !== manualRootCause && (
-                        <div className="mt-2 p-2 bg-blue-100 dark:bg-blue-900/30 rounded">
-                          <p className="text-xs text-blue-700 dark:text-blue-300">💡 AI Suggested Root Cause:</p>
-                          <p className="text-xs text-blue-900 dark:text-blue-100 mt-1 italic">&quot;{manualAnalysisValidation.suggestedRootCause}&quot;</p>
-                          <button
-                            onClick={() => setManualRootCause(manualAnalysisValidation.suggestedRootCause!)}
-                            className="mt-1 text-xs text-blue-600 hover:text-blue-700 dark:text-blue-400 underline"
-                          >
-                            Apply Suggestion
-                          </button>
-                        </div>
-                      )}
                     </div>
 
                     {/* Spelling Corrections */}
                     {manualAnalysisValidation?.spellingCorrections && manualAnalysisValidation.spellingCorrections.length > 0 && (
-                      <div className="p-3 bg-yellow-50 dark:bg-yellow-900/20 rounded-lg border border-yellow-200 dark:border-yellow-700">
-                        <p className="text-xs font-medium text-yellow-700 dark:text-yellow-300 mb-2">📝 Spelling Corrections Detected:</p>
+                      <div className="rounded-md border border-yellow-200 bg-yellow-50 p-2 dark:border-yellow-700 dark:bg-yellow-900/20">
+                        <p className="mb-1.5 text-xs font-medium text-yellow-700 dark:text-yellow-300">Spelling corrections detected:</p>
                         <ul className="space-y-1">
                           {manualAnalysisValidation.spellingCorrections.map((corr, idx) => (
                             <li key={idx} className="text-xs text-yellow-600 dark:text-yellow-400">
@@ -3534,62 +4468,14 @@ export default function FishboneBuilder({
 
                     {/* Overall Validation Feedback */}
                     {manualAnalysisValidation && (
-                      <div className={`p-3 rounded-lg ${
+                      <div className={`rounded-md p-2 ${
                         manualAnalysisValidation.isValid
                           ? 'bg-green-50 dark:bg-green-900/20 border border-green-200 dark:border-green-700'
                           : 'bg-amber-50 dark:bg-amber-900/20 border border-amber-200 dark:border-amber-700'
                       }`}>
-                        <div className="flex items-start space-x-2">
-                          {manualAnalysisValidation.isValid ? (
-                            <svg className="w-5 h-5 text-green-600 shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 13l4 4L19 7" />
-                            </svg>
-                          ) : (
-                            <svg className="w-5 h-5 text-amber-600 shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z" />
-                            </svg>
-                          )}
-                          <p className="text-sm text-gray-700 dark:text-gray-300">{manualAnalysisValidation.overallFeedback}</p>
-                        </div>
+                        <p className="text-xs leading-5 text-gray-700 dark:text-gray-300">{manualAnalysisValidation.overallFeedback}</p>
                       </div>
                     )}
-
-                    {/* Action Buttons for Manual Analysis */}
-                    <div className="flex flex-col sm:flex-row justify-between gap-3 pt-4 border-t border-gray-200 dark:border-gray-700">
-                      <button
-                        onClick={validateManualFiveWhysAnalysis}
-                        disabled={validatingManualAnalysis || manualFiveWhysSteps.some(s => !s.answer.trim()) || !manualRootCause.trim()}
-                        className="px-4 py-2 bg-purple-600 text-white rounded-lg hover:bg-purple-700 disabled:opacity-50 disabled:cursor-not-allowed flex items-center justify-center space-x-2"
-                      >
-                        <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z" />
-                        </svg>
-                        <span>Validate with AI</span>
-                      </button>
-                      
-                      <div className="flex space-x-3">
-                        <button
-                          onClick={() => handleManualCauseRecommendation('eliminate')}
-                          disabled={manualFiveWhysSteps.some(s => !s.answer.trim()) || !manualRootCause.trim()}
-                          className="px-4 py-2 bg-red-100 text-red-700 hover:bg-red-200 dark:bg-red-900/30 dark:text-red-300 rounded-lg disabled:opacity-50 disabled:cursor-not-allowed flex items-center space-x-2"
-                        >
-                          <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
-                          </svg>
-                          <span>Eliminate Cause</span>
-                        </button>
-                        <button
-                          onClick={() => handleManualCauseRecommendation('keep')}
-                          disabled={manualFiveWhysSteps.some(s => !s.answer.trim()) || !manualRootCause.trim()}
-                          className="px-4 py-2 bg-green-600 text-white rounded-lg hover:bg-green-700 disabled:opacity-50 disabled:cursor-not-allowed flex items-center space-x-2"
-                        >
-                          <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 13l4 4L19 7" />
-                          </svg>
-                          <span>Keep as Root Cause</span>
-                        </button>
-                      </div>
-                    </div>
                   </>
                 )}
               </div>
@@ -3599,9 +4485,9 @@ export default function FishboneBuilder({
             {fiveWhysMode === 'ai' && (
               <>
                 {analyzingCause ? (
-                  <LoadingState message="AI is performing 5 Whys analysis..." icon="search" color="purple" fullScreen={false} />
+                  <LoadingState message="Performing 5 Whys analysis..." icon="search" color="blue" fullScreen={false} />
                 ) : validatingEdits ? (
-                  <LoadingState message="AI is validating your edits..." icon="search" color="purple" fullScreen={false} />
+                  <LoadingState message="Validating your edits..." icon="search" color="blue" fullScreen={false} />
                 ) : causeAnalysisResult ? (
               <div className="space-y-4">
                 {/* Edit Mode Toggle */}
@@ -3714,7 +4600,7 @@ export default function FishboneBuilder({
                   {/* Suggested Root Cause from validation */}
                   {editValidationFeedback?.suggestedRootCause && editValidationFeedback.suggestedRootCause !== editedRootCause && (
                     <div className="mt-2 p-2 bg-blue-100 dark:bg-blue-900/30 rounded">
-                      <p className="text-xs text-blue-700 dark:text-blue-300">💡 AI Suggested Root Cause:</p>
+                      <p className="text-xs text-blue-700 dark:text-blue-300">Suggested root cause:</p>
                       <p className="text-xs text-blue-900 dark:text-blue-100 mt-1 italic">&quot;{editValidationFeedback.suggestedRootCause}&quot;</p>
                       <button
                         onClick={() => updateEditedRootCause(editValidationFeedback.suggestedRootCause!)}
@@ -3864,7 +4750,7 @@ export default function FishboneBuilder({
                         <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
                           <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z" />
                         </svg>
-                        <span>Validate with AI</span>
+                        <span>Validate Answers</span>
                       </button>
                     </div>
                   </div>
@@ -3892,21 +4778,25 @@ export default function FishboneBuilder({
                 )}
               </div>
             ) : (
-              /* No AI result yet - show back button */
-              <div className="text-center py-4">
-                <button
-                  onClick={goBackToChooseMode}
-                  className="text-sm text-gray-500 hover:text-gray-700 dark:text-gray-400 dark:hover:text-gray-200 flex items-center space-x-1 mx-auto"
-                >
-                  <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 19l-7-7 7-7" />
-                  </svg>
-                  <span>Back to options</span>
-                </button>
+              <div className="py-4 text-center text-xs text-gray-500 dark:text-gray-400">
+                Manual analysis is ready.
               </div>
             )}
               </>
             )}
+          </div>
+          {fiveWhysMode === 'manual' && (
+            <div className="flex shrink-0 justify-end border-t border-gray-200 px-3 py-2 dark:border-gray-700">
+              <button
+                type="button"
+                onClick={() => handleManualCauseRecommendation('keep')}
+                disabled={!manualAnalysisIsComplete}
+                className="rounded-md bg-blue-600 px-3 py-1.5 text-xs font-semibold text-white transition-colors hover:bg-blue-700 disabled:cursor-not-allowed disabled:opacity-50"
+              >
+                Keep as Root Cause
+              </button>
+            </div>
+          )}
           </div>
         </div>
       )}
@@ -4064,15 +4954,31 @@ export default function FishboneBuilder({
 
                 {/* Causes List */}
                 <div className="space-y-2 mb-4">
-                  {category.causes.map((cause) => (
-                    <div
-                      key={cause.id}
-                      className={`flex items-start justify-between p-2 rounded ${
-                        cause.aiSuggested
-                          ? 'bg-blue-100 dark:bg-blue-800/30 border border-blue-200 dark:border-blue-600'
-                          : 'bg-white dark:bg-gray-700 border border-gray-200 dark:border-gray-600'
-                      }`}
-                    >
+                  {category.causes.map((cause) => {
+                    const resolutionSelection = getCauseResolutionSelection(cause);
+                    const manualDraft = manualCauseResolutionDrafts[cause.id];
+                    const activeClassification = manualDraft?.classification || resolutionSelection?.classification;
+                    const isLikelyResolution = activeClassification === 'likely';
+                    const isUnlikelyResolution = activeClassification === 'unlikely';
+                    const canManuallyReviewCause = !isValidated && Boolean(cause.text.trim()) && isCauseReadyForManualResolution(cause);
+                    const hasResolutionDecision = Boolean(resolutionSelection);
+                    const showManualDecisionButtons = canManuallyReviewCause && !hasResolutionDecision && !manualDraft;
+                    const showManualEditButton = canManuallyReviewCause && hasResolutionDecision && !manualDraft;
+                    const showResolutionLabel = Boolean(resolutionSelection?.reason?.trim()) && !manualDraft;
+
+                    return (
+                      <div
+                        key={cause.id}
+                        className={`flex items-start justify-between rounded border p-2 transition-colors ${
+                          isLikelyResolution
+                            ? 'border-green-300 bg-green-50 dark:border-green-700 dark:bg-green-900/20'
+                            : isUnlikelyResolution
+                              ? 'border-yellow-300 bg-yellow-50 dark:border-yellow-700 dark:bg-yellow-900/20'
+                              : cause.aiSuggested
+                                ? 'border-blue-200 bg-blue-100 dark:border-blue-600 dark:bg-blue-800/30'
+                                : 'border-gray-200 bg-white dark:border-gray-600 dark:bg-gray-700'
+                        }`}
+                      >
                       <div className="flex-1">
                         <div className="flex items-center space-x-2">
                           {cause.likelihood && (
@@ -4082,17 +4988,17 @@ export default function FishboneBuilder({
                             }`}>●</span>
                           )}
                           {isValidated ? (
-                            <p className="text-sm text-gray-900 dark:text-white">{cause.text}</p>
+                            <p className={`text-sm text-gray-900 dark:text-white ${isUnlikelyResolution ? 'line-through decoration-yellow-700 decoration-2' : ''}`}>{cause.text}</p>
                           ) : (
                             <input
                               type="text"
                               value={cause.text}
                               onChange={(e) => updateCause(category.id, cause.id, e.target.value)}
-                              className="w-full text-sm bg-transparent text-gray-900 dark:text-white border-none p-0 focus:ring-0"
+                              className={`w-full border-none bg-transparent p-0 text-sm text-gray-900 focus:ring-0 dark:text-white ${isUnlikelyResolution ? 'line-through decoration-yellow-700 decoration-2' : ''}`}
                             />
                           )}
                         </div>
-                        <div className="flex items-center space-x-2 mt-1 ml-4">
+                        <div className="mt-1 ml-4 flex flex-wrap items-center gap-2">
                           {cause.aiSuggested && (
                             <span className="text-xs text-blue-600 dark:text-blue-400">AI suggested</span>
                           )}
@@ -4133,7 +5039,114 @@ export default function FishboneBuilder({
                               <span>Analyzed</span>
                             </span>
                           )}
+                          {showResolutionLabel && (
+                            <span className={`rounded-full px-2 py-0.5 text-[10px] font-semibold ${
+                              isLikelyResolution
+                                ? 'bg-green-100 text-green-700 dark:bg-green-900/50 dark:text-green-200'
+                                : 'bg-yellow-100 text-yellow-800 dark:bg-yellow-900/50 dark:text-yellow-200'
+                            }`}>
+                              {isLikelyResolution ? 'Likely root cause' : 'Not Likely'}
+                            </span>
+                          )}
+                          {showManualDecisionButtons && (
+                            <span className="flex items-center gap-1">
+                              <button
+                                type="button"
+                                onClick={() => startManualCauseResolution(cause, 'likely')}
+                                className="rounded border border-green-200 bg-green-50 px-1.5 py-0.5 text-[10px] font-semibold text-green-700 transition-colors hover:bg-green-100 dark:border-green-700 dark:bg-green-900/30 dark:text-green-200"
+                              >
+                                Accept
+                              </button>
+                              <button
+                                type="button"
+                                onClick={() => startManualCauseResolution(cause, 'unlikely')}
+                                className="rounded border border-yellow-200 bg-yellow-50 px-1.5 py-0.5 text-[10px] font-semibold text-yellow-800 transition-colors hover:bg-yellow-100 dark:border-yellow-700 dark:bg-yellow-900/30 dark:text-yellow-200"
+                              >
+                                Decline
+                              </button>
+                            </span>
+                          )}
+                          {showManualEditButton && (
+                            <button
+                              type="button"
+                              onClick={() => editManualCauseResolution(cause)}
+                              className="rounded border border-blue-200 bg-blue-50 px-1.5 py-0.5 text-[10px] font-semibold text-blue-700 transition-colors hover:bg-blue-100 dark:border-blue-700 dark:bg-blue-900/30 dark:text-blue-200"
+                            >
+                              Edit
+                            </button>
+                          )}
                         </div>
+                        {resolutionSelection?.reason && !manualDraft && (
+                          <p className={`mt-1 ml-4 text-xs leading-4 ${
+                            isLikelyResolution ? 'text-green-700 dark:text-green-200' : 'text-yellow-800 dark:text-yellow-200'
+                          }`}>
+                            {resolutionSelection.reason}
+                          </p>
+                        )}
+                        {manualDraft && (
+                          <div className={`mt-2 ml-4 rounded-md border p-2 ${
+                            manualDraft.classification === 'likely'
+                              ? 'border-green-200 bg-green-50 dark:border-green-700 dark:bg-green-900/20'
+                              : 'border-yellow-200 bg-yellow-50 dark:border-yellow-700 dark:bg-yellow-900/20'
+                          }`}>
+                            <div className="mb-2 flex flex-wrap items-center justify-between gap-2">
+                              <span className="text-[11px] font-semibold uppercase tracking-wide text-gray-600 dark:text-gray-300">
+                                Manual decision
+                              </span>
+                              <div className="flex items-center gap-1">
+                                <button
+                                  type="button"
+                                  onClick={() => startManualCauseResolution(cause, 'likely')}
+                                  className={`rounded px-2 py-0.5 text-[10px] font-semibold transition-colors ${
+                                    manualDraft.classification === 'likely'
+                                      ? 'bg-green-600 text-white'
+                                      : 'border border-green-200 bg-white text-green-700 hover:bg-green-50 dark:border-green-700 dark:bg-gray-800 dark:text-green-200'
+                                  }`}
+                                >
+                                  Accept
+                                </button>
+                                <button
+                                  type="button"
+                                  onClick={() => startManualCauseResolution(cause, 'unlikely')}
+                                  className={`rounded px-2 py-0.5 text-[10px] font-semibold transition-colors ${
+                                    manualDraft.classification === 'unlikely'
+                                      ? 'bg-yellow-500 text-yellow-950'
+                                      : 'border border-yellow-200 bg-white text-yellow-800 hover:bg-yellow-50 dark:border-yellow-700 dark:bg-gray-800 dark:text-yellow-200'
+                                  }`}
+                                >
+                                  Decline
+                                </button>
+                              </div>
+                            </div>
+                            <textarea
+                              value={manualDraft.reason}
+                              onChange={(event) => updateManualCauseResolutionReason(cause.id, event.target.value)}
+                              rows={2}
+                              className="w-full resize-y rounded border border-gray-300 bg-white px-2 py-1 text-xs text-gray-900 placeholder:text-gray-400 focus:border-blue-500 focus:outline-none focus:ring-1 focus:ring-blue-500 dark:border-gray-600 dark:bg-gray-800 dark:text-white"
+                              placeholder={manualDraft.classification === 'likely'
+                                ? 'Add why this cause is likely to resolve the problem.'
+                                : 'Add why this cause is not likely to resolve the problem.'}
+                            />
+                            <div className="mt-2 flex justify-end gap-2">
+                              <button
+                                type="button"
+                                onClick={() => cancelManualCauseResolution(cause.id)}
+                                disabled={savingManualCauseResolution === cause.id}
+                                className="rounded border border-gray-200 bg-white px-2 py-1 text-[11px] font-medium text-gray-600 transition-colors hover:bg-gray-50 disabled:opacity-50 dark:border-gray-600 dark:bg-gray-800 dark:text-gray-200"
+                              >
+                                Cancel
+                              </button>
+                              <button
+                                type="button"
+                                onClick={() => saveManualCauseResolution(category, cause)}
+                                disabled={!manualDraft.reason.trim() || savingManualCauseResolution === cause.id}
+                                className="rounded bg-blue-600 px-2.5 py-1 text-[11px] font-semibold text-white transition-colors hover:bg-blue-700 disabled:cursor-not-allowed disabled:opacity-50"
+                              >
+                                {savingManualCauseResolution === cause.id ? 'Saving...' : 'Save reason'}
+                              </button>
+                            </div>
+                          </div>
+                        )}
                       </div>
                       {!isValidated && (
                         <button
@@ -4145,8 +5158,9 @@ export default function FishboneBuilder({
                           </svg>
                         </button>
                       )}
-                    </div>
-                  ))}
+                      </div>
+                    );
+                  })}
 
                   {category.causes.length === 0 && (
                     <p className="text-sm text-gray-400 dark:text-gray-500 italic">
@@ -4199,35 +5213,32 @@ export default function FishboneBuilder({
                         +
                       </button>
                     </div>
-
-                    {/* AI Suggestions Button */}
-                    <button
-                      onClick={() => getAISuggestions(category.id, category.name)}
-                      disabled={loadingAI === category.id}
-                      className="w-full py-1 text-xs text-blue-600 dark:text-blue-400 hover:text-blue-700 flex items-center justify-center space-x-1"
-                    >
-                      {loadingAI === category.id ? (
-                        <>
-                          <svg className="animate-spin h-3 w-3" viewBox="0 0 24 24">
-                            <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" fill="none" />
-                            <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z" />
-                          </svg>
-                          <span>Getting suggestions...</span>
-                        </>
-                      ) : (
-                        <>
-                          <svg className="w-3 h-3" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9.663 17h4.673M12 3v1m6.364 1.636l-.707.707M21 12h-1M4 12H3m3.343-5.657l-.707-.707m2.828 9.9a5 5 0 117.072 0l-.548.547A3.374 3.374 0 0014 18.469V19a2 2 0 11-4 0v-.531c0-.895-.356-1.754-.988-2.386l-.548-.547z" />
-                          </svg>
-                          <span>Get AI suggestions</span>
-                        </>
-                      )}
-                    </button>
                   </div>
                 )}
               </div>
             ))}
           </div>
+
+          {!isValidated && (
+            <div className="mb-4 flex flex-col gap-2 rounded-md border border-blue-200 bg-white p-3 shadow-sm dark:border-blue-800 dark:bg-gray-800 sm:flex-row sm:items-center sm:justify-between">
+              <div>
+                <p className="text-sm font-semibold text-gray-900 dark:text-white">Validate analyzed root causes</p>
+                <p className="mt-0.5 text-xs text-gray-500 dark:text-gray-400">
+                  Review final 5 Whys answers and identify which causes are most likely to resolve the problem.
+                  {analyzedFishboneCauseCount > 0 ? ` ${analyzedFishboneCauseCount} final answer${analyzedFishboneCauseCount === 1 ? '' : 's'} ready.` : ' Saved answers will be checked before the review starts.'}
+                </p>
+              </div>
+              <button
+                type="button"
+                onClick={validateAnalyzedFishboneRootCauses}
+                disabled={validatingCauseResolution || totalCauses === 0}
+                className="inline-flex items-center justify-center gap-2 rounded-md bg-blue-600 px-3 py-1.5 text-xs font-semibold text-white transition-colors hover:bg-blue-700 disabled:cursor-not-allowed disabled:opacity-50"
+              >
+                {validatingCauseResolution && <Loader2 size={14} className="animate-spin" />}
+                {validatingCauseResolution ? 'Validating...' : 'Validate Root Causes'}
+              </button>
+            </div>
+          )}
         </>
       )}
 
@@ -4242,13 +5253,41 @@ export default function FishboneBuilder({
                   <span className="text-lg">🐟</span>
                   Ishikawa (Fishbone) Diagram
                 </h3>
-                <span className="text-xs font-medium text-blue-700 bg-blue-50 px-3 py-1.5 rounded-full border border-blue-100">
-                  {totalCauses} cause{totalCauses !== 1 ? 's' : ''} identified
-                </span>
+                <div className="flex items-center gap-2">
+                  <span className="text-xs font-medium text-blue-700 bg-blue-50 px-3 py-1.5 rounded-full border border-blue-100">
+                    {totalCauses} cause{totalCauses !== 1 ? 's' : ''} identified
+                  </span>
+                  {onOpenWhiteboard && (
+                    <button
+                      type="button"
+                      onClick={(event) => {
+                        event.stopPropagation();
+                        handleOpenWhiteboard();
+                      }}
+                      disabled={openingWhiteboard}
+                      className="inline-flex items-center gap-2 px-3 py-1.5 rounded-lg border border-blue-200 bg-white text-xs font-medium text-blue-700 hover:bg-blue-50 disabled:opacity-60 disabled:cursor-not-allowed transition-colors"
+                    >
+                      {openingWhiteboard ? <Loader2 size={14} className="animate-spin" /> : <ExternalLink size={14} />}
+                      Whiteboard
+                    </button>
+                  )}
+                </div>
               </div>
               
               {/* Fishbone SVG Diagram */}
-              <div className="bg-slate-100 rounded-lg p-4 overflow-x-auto">
+              <div
+                className={`bg-slate-100 rounded-lg p-4 overflow-x-auto ${onOpenWhiteboard ? 'cursor-pointer hover:ring-2 hover:ring-blue-200 transition-shadow' : ''}`}
+                role={onOpenWhiteboard ? 'button' : undefined}
+                tabIndex={onOpenWhiteboard ? 0 : undefined}
+                onClick={onOpenWhiteboard ? handleOpenWhiteboard : undefined}
+                onKeyDown={(event) => {
+                  if (onOpenWhiteboard && (event.key === 'Enter' || event.key === ' ')) {
+                    event.preventDefault();
+                    handleOpenWhiteboard();
+                  }
+                }}
+                title={onOpenWhiteboard ? 'Open this fishbone in the whiteboard' : undefined}
+              >
                 {(() => {
                   const catsWithCauses = categories.filter(c => c.causes.length > 0);
                   const topCats = catsWithCauses.filter((_, i) => i % 2 === 0);
@@ -4766,36 +5805,33 @@ export default function FishboneBuilder({
       {correctiveActionsValidation && (
         <div className="mt-6 p-5 bg-white dark:bg-gray-800 rounded-xl border border-gray-200 dark:border-gray-700 shadow-sm">
           <div className="flex items-center justify-between mb-4">
-            <h4 className="font-semibold text-gray-900 dark:text-white flex items-center gap-2">
-              <span className="text-xl">🤖</span>
-              AI Validation Results
+            <h4 className="font-semibold text-gray-900 dark:text-white">
+              Validation Results
             </h4>
             <button
               onClick={() => setCorrectiveActionsValidation(null)}
-              className="text-gray-400 hover:text-gray-600 dark:hover:text-gray-300"
+              className="text-xs font-medium text-blue-600 hover:text-blue-700 dark:text-blue-300"
             >
-              <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
-              </svg>
+              Close
             </button>
           </div>
 
           {/* Scores */}
           <div className="grid grid-cols-3 gap-4 mb-5">
-            <div className="text-center p-3 bg-gray-50 dark:bg-gray-700/50 rounded-lg">
-              <div className={`text-2xl font-bold ${correctiveActionsValidation.alignmentScore >= 70 ? 'text-green-600' : correctiveActionsValidation.alignmentScore >= 40 ? 'text-amber-600' : 'text-red-600'}`}>
+            <div className="rounded-lg border border-blue-100 bg-blue-50 p-3 text-center dark:border-blue-800 dark:bg-blue-900/20">
+              <div className="text-2xl font-bold text-blue-700 dark:text-blue-200">
                 {correctiveActionsValidation.alignmentScore}%
               </div>
               <div className="text-xs text-gray-500 dark:text-gray-400">Alignment</div>
             </div>
-            <div className="text-center p-3 bg-gray-50 dark:bg-gray-700/50 rounded-lg">
-              <div className={`text-2xl font-bold ${correctiveActionsValidation.effectivenessScore >= 70 ? 'text-green-600' : correctiveActionsValidation.effectivenessScore >= 40 ? 'text-amber-600' : 'text-red-600'}`}>
+            <div className="rounded-lg border border-blue-100 bg-blue-50 p-3 text-center dark:border-blue-800 dark:bg-blue-900/20">
+              <div className="text-2xl font-bold text-blue-700 dark:text-blue-200">
                 {correctiveActionsValidation.effectivenessScore}%
               </div>
               <div className="text-xs text-gray-500 dark:text-gray-400">Effectiveness</div>
             </div>
-            <div className="text-center p-3 bg-gray-50 dark:bg-gray-700/50 rounded-lg">
-              <div className={`text-2xl font-bold ${correctiveActionsValidation.feasibilityScore >= 70 ? 'text-green-600' : correctiveActionsValidation.feasibilityScore >= 40 ? 'text-amber-600' : 'text-red-600'}`}>
+            <div className="rounded-lg border border-blue-100 bg-blue-50 p-3 text-center dark:border-blue-800 dark:bg-blue-900/20">
+              <div className="text-2xl font-bold text-blue-700 dark:text-blue-200">
                 {correctiveActionsValidation.feasibilityScore}%
               </div>
               <div className="text-xs text-gray-500 dark:text-gray-400">Feasibility</div>
@@ -4803,18 +5839,9 @@ export default function FishboneBuilder({
           </div>
 
           {/* Overall Assessment */}
-          <div className={`p-4 rounded-lg mb-4 ${correctiveActionsValidation.isValid ? 'bg-green-50 dark:bg-green-900/20 border border-green-200 dark:border-green-700' : 'bg-amber-50 dark:bg-amber-900/20 border border-amber-200 dark:border-amber-700'}`}>
-            <div className="flex items-start gap-2">
-              {correctiveActionsValidation.isValid ? (
-                <svg className="w-5 h-5 text-green-600 dark:text-green-400 flex-shrink-0 mt-0.5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z" />
-                </svg>
-              ) : (
-                <svg className="w-5 h-5 text-amber-600 dark:text-amber-400 flex-shrink-0 mt-0.5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z" />
-                </svg>
-              )}
-              <p className={`text-sm ${correctiveActionsValidation.isValid ? 'text-green-700 dark:text-green-300' : 'text-amber-700 dark:text-amber-300'}`}>
+          <div className="mb-4 rounded-lg border border-blue-200 bg-blue-50 p-4 dark:border-blue-800 dark:bg-blue-900/20">
+            <div className="flex items-start">
+              <p className="text-sm text-blue-800 dark:text-blue-200">
                 {correctiveActionsValidation.overallAssessment}
               </p>
             </div>
@@ -4828,21 +5855,13 @@ export default function FishboneBuilder({
                 {correctiveActionsValidation.issues.map((issue, idx) => (
                   <div 
                     key={idx} 
-                    className={`p-3 rounded-lg text-sm ${
-                      issue.severity === 'critical' ? 'bg-red-50 dark:bg-red-900/20 border border-red-200 dark:border-red-700' :
-                      issue.severity === 'warning' ? 'bg-amber-50 dark:bg-amber-900/20 border border-amber-200 dark:border-amber-700' :
-                      'bg-blue-50 dark:bg-blue-900/20 border border-blue-200 dark:border-blue-700'
-                    }`}
+                    className="rounded-lg border border-blue-200 bg-blue-50 p-3 text-sm dark:border-blue-800 dark:bg-blue-900/20"
                   >
-                    <p className={`font-medium ${
-                      issue.severity === 'critical' ? 'text-red-700 dark:text-red-300' :
-                      issue.severity === 'warning' ? 'text-amber-700 dark:text-amber-300' :
-                      'text-blue-700 dark:text-blue-300'
-                    }`}>
+                    <p className="font-medium text-blue-800 dark:text-blue-200">
                       {issue.issue}
                     </p>
                     <p className="text-gray-600 dark:text-gray-400 mt-1">
-                      💡 {issue.suggestion}
+                      {issue.suggestion}
                     </p>
                   </div>
                 ))}
@@ -4870,12 +5889,9 @@ export default function FishboneBuilder({
             <div className="flex gap-3 pt-3 border-t border-gray-200 dark:border-gray-700">
               <button
                 onClick={applyRefinedActions}
-                className="flex-1 py-2 px-4 bg-gradient-to-r from-violet-500 to-purple-600 text-white rounded-lg hover:from-violet-600 hover:to-purple-700 transition-all flex items-center justify-center gap-2"
+                className="flex-1 rounded-lg bg-blue-600 px-4 py-2 text-white transition-colors hover:bg-blue-700"
               >
-                <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M13 10V3L4 14h7v7l9-11h-7z" />
-                </svg>
-                Apply AI Refinements
+                Apply Refinements
               </button>
               <button
                 onClick={() => setCorrectiveActionsValidation(null)}
@@ -4888,12 +5904,22 @@ export default function FishboneBuilder({
         </div>
       )}
 
+      {!isValidated
+        && totalCauses > 0
+        && !showCorrectiveActionsSection
+        && actionPlans.immediate.length === 0
+        && actionPlans.shortTerm.length === 0
+        && actionPlans.longTerm.length === 0 && (
+        <div className="mt-4 rounded-lg border border-blue-200 bg-blue-50 p-4 text-sm text-blue-800 dark:border-blue-800 dark:bg-blue-900/20 dark:text-blue-200">
+          Use Generate to create corrective actions and preventive controls from the analyzed root causes, or create corrective actions manually.
+        </div>
+      )}
+
       {/* Action Plans Section - Show always when there are actions (even when validated) */}
       {(showCorrectiveActionsSection || (actionPlans.immediate.length > 0 || actionPlans.shortTerm.length > 0 || actionPlans.longTerm.length > 0)) && (
         <div className="mt-8 space-y-6">
           <div className="flex items-center justify-between">
-            <h3 className="text-lg font-semibold text-gray-900 dark:text-white flex items-center space-x-2">
-              <span>📋</span>
+            <h3 className="flex items-center space-x-2 text-lg font-semibold text-gray-900 dark:text-white">
               <span>Corrective Action Plans</span>
               {isValidated && (
                 <span className="text-xs px-2 py-0.5 bg-green-100 dark:bg-green-800 text-green-700 dark:text-green-300 rounded-full">
@@ -4902,29 +5928,13 @@ export default function FishboneBuilder({
               )}
             </h3>
             <div className="flex items-center gap-3">
-              {/* AI Validate Button */}
               {!isValidated && (actionPlans.immediate.length > 0 || actionPlans.shortTerm.length > 0 || actionPlans.longTerm.length > 0) && (
                 <button
                   onClick={validateCorrectiveActionsWithAI}
                   disabled={validatingCorrectiveActions}
-                  className="flex items-center gap-2 px-3 py-1.5 bg-gradient-to-r from-violet-500 to-purple-600 text-white text-sm rounded-lg hover:from-violet-600 hover:to-purple-700 disabled:opacity-50 transition-all"
+                  className="rounded-lg bg-blue-600 px-3 py-1.5 text-sm text-white transition-colors hover:bg-blue-700 disabled:opacity-50"
                 >
-                  {validatingCorrectiveActions ? (
-                    <>
-                      <svg className="w-4 h-4 animate-spin" fill="none" viewBox="0 0 24 24">
-                        <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
-                        <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z" />
-                      </svg>
-                      <span>Validating...</span>
-                    </>
-                  ) : (
-                    <>
-                      <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 12l2 2 4-4m5.618-4.016A11.955 11.955 0 0112 2.944a11.955 11.955 0 01-8.618 3.04A12.02 12.02 0 003 9c0 5.591 3.824 10.29 9 11.622 5.176-1.332 9-6.03 9-11.622 0-1.042-.133-2.052-.382-3.016z" />
-                      </svg>
-                      <span>🤖 AI Validate</span>
-                    </>
-                  )}
+                  {validatingCorrectiveActions ? 'Validating...' : 'Validate'}
                 </button>
               )}
               <button
@@ -4939,21 +5949,17 @@ export default function FishboneBuilder({
           {showActionPlans && (
             <div className="space-y-6">
               {/* Immediate Actions */}
-              <div className="p-4 bg-red-50 dark:bg-red-900/20 border border-red-200 dark:border-red-700 rounded-lg">
+              <div className="rounded-lg border border-blue-200 bg-blue-50 p-4 dark:border-blue-800 dark:bg-blue-900/20">
                 <div className="flex items-center justify-between mb-4">
-                  <h4 className="font-medium text-red-700 dark:text-red-300 flex items-center space-x-2">
-                    <span>🔴</span>
-                    <span>Immediate Actions</span>
+                  <h4 className="font-medium text-blue-800 dark:text-blue-200">
+                    Immediate Actions
                   </h4>
                   {!isValidated && (
                     <button
                       onClick={() => addActionItem('immediate')}
-                      className="text-xs text-red-600 hover:text-red-700 dark:text-red-400 flex items-center space-x-1"
+                      className="text-xs font-medium text-blue-700 hover:text-blue-800 dark:text-blue-200"
                     >
-                      <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 4v16m8-8H4" />
-                      </svg>
-                      <span>Add Action</span>
+                      Add Action
                     </button>
                   )}
                 </div>
@@ -4962,7 +5968,7 @@ export default function FishboneBuilder({
                     <p className="text-sm text-gray-500 dark:text-gray-400 italic">No immediate actions defined</p>
                   ) : (
                     actionPlans.immediate.map((item) => (
-                      <div key={item.id} className="p-3 bg-white dark:bg-gray-800 rounded-lg border border-red-100 dark:border-red-800">
+                      <div key={item.id} className="rounded-lg border border-blue-100 bg-white p-3 dark:border-blue-800 dark:bg-gray-800">
                         <div className="flex items-start justify-between">
                           <div className="flex-1 space-y-2">
                             {!isValidated ? (
@@ -5005,7 +6011,7 @@ export default function FishboneBuilder({
                                     />
                                   </div>
                                   {getDateError(item) && (
-                                    <span className="text-red-500 font-medium">⚠️ {getDateError(item)}</span>
+                                    <span className="font-medium text-red-500">{getDateError(item)}</span>
                                   )}
                                   <select
                                     value={item.priority}
@@ -5040,11 +6046,9 @@ export default function FishboneBuilder({
                           {!isValidated && (
                             <button
                               onClick={() => removeActionItem('immediate', item.id)}
-                              className="text-red-400 hover:text-red-600 ml-2"
+                              className="ml-2 text-xs font-medium text-blue-700 hover:text-blue-800 dark:text-blue-200"
                             >
-                              <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
-                              </svg>
+                              Remove
                             </button>
                           )}
                         </div>
@@ -5055,21 +6059,17 @@ export default function FishboneBuilder({
               </div>
 
               {/* Short-term Actions */}
-              <div className="p-4 bg-amber-50 dark:bg-amber-900/20 border border-amber-200 dark:border-amber-700 rounded-lg">
+              <div className="rounded-lg border border-blue-200 bg-blue-50 p-4 dark:border-blue-800 dark:bg-blue-900/20">
                 <div className="flex items-center justify-between mb-4">
-                  <h4 className="font-medium text-amber-700 dark:text-amber-300 flex items-center space-x-2">
-                    <span>🟡</span>
-                    <span>Short-term Actions</span>
+                  <h4 className="font-medium text-blue-800 dark:text-blue-200">
+                    Short-term Actions
                   </h4>
                   {!isValidated && (
                     <button
                       onClick={() => addActionItem('shortTerm')}
-                      className="text-xs text-amber-600 hover:text-amber-700 dark:text-amber-400 flex items-center space-x-1"
+                      className="text-xs font-medium text-blue-700 hover:text-blue-800 dark:text-blue-200"
                     >
-                      <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 4v16m8-8H4" />
-                      </svg>
-                      <span>Add Action</span>
+                      Add Action
                     </button>
                   )}
                 </div>
@@ -5078,7 +6078,7 @@ export default function FishboneBuilder({
                     <p className="text-sm text-gray-500 dark:text-gray-400 italic">No short-term actions defined</p>
                   ) : (
                     actionPlans.shortTerm.map((item) => (
-                      <div key={item.id} className="p-3 bg-white dark:bg-gray-800 rounded-lg border border-amber-100 dark:border-amber-800">
+                      <div key={item.id} className="rounded-lg border border-blue-100 bg-white p-3 dark:border-blue-800 dark:bg-gray-800">
                         <div className="flex items-start justify-between">
                           <div className="flex-1 space-y-2">
                             {!isValidated ? (
@@ -5121,7 +6121,7 @@ export default function FishboneBuilder({
                                     />
                                   </div>
                                   {getDateError(item) && (
-                                    <span className="text-red-500 font-medium">⚠️ {getDateError(item)}</span>
+                                    <span className="font-medium text-red-500">{getDateError(item)}</span>
                                   )}
                                   <select
                                     value={item.priority}
@@ -5156,11 +6156,9 @@ export default function FishboneBuilder({
                           {!isValidated && (
                             <button
                               onClick={() => removeActionItem('shortTerm', item.id)}
-                              className="text-amber-400 hover:text-amber-600 ml-2"
+                              className="ml-2 text-xs font-medium text-blue-700 hover:text-blue-800 dark:text-blue-200"
                             >
-                              <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
-                              </svg>
+                              Remove
                             </button>
                           )}
                         </div>
@@ -5171,21 +6169,17 @@ export default function FishboneBuilder({
               </div>
 
               {/* Long-term Actions */}
-              <div className="p-4 bg-blue-50 dark:bg-blue-900/20 border border-blue-200 dark:border-blue-700 rounded-lg">
+              <div className="rounded-lg border border-blue-200 bg-blue-50 p-4 dark:border-blue-800 dark:bg-blue-900/20">
                 <div className="flex items-center justify-between mb-4">
-                  <h4 className="font-medium text-blue-700 dark:text-blue-300 flex items-center space-x-2">
-                    <span>🔵</span>
-                    <span>Long-term Actions</span>
+                  <h4 className="font-medium text-blue-800 dark:text-blue-200">
+                    Long-term Actions
                   </h4>
                   {!isValidated && (
                     <button
                       onClick={() => addActionItem('longTerm')}
-                      className="text-xs text-blue-600 hover:text-blue-700 dark:text-blue-400 flex items-center space-x-1"
+                      className="text-xs font-medium text-blue-700 hover:text-blue-800 dark:text-blue-200"
                     >
-                      <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 4v16m8-8H4" />
-                      </svg>
-                      <span>Add Action</span>
+                      Add Action
                     </button>
                   )}
                 </div>
@@ -5194,7 +6188,7 @@ export default function FishboneBuilder({
                     <p className="text-sm text-gray-500 dark:text-gray-400 italic">No long-term actions defined</p>
                   ) : (
                     actionPlans.longTerm.map((item) => (
-                      <div key={item.id} className="p-3 bg-white dark:bg-gray-800 rounded-lg border border-blue-100 dark:border-blue-800">
+                      <div key={item.id} className="rounded-lg border border-blue-100 bg-white p-3 dark:border-blue-800 dark:bg-gray-800">
                         <div className="flex items-start justify-between">
                           <div className="flex-1 space-y-2">
                             {!isValidated ? (
@@ -5237,7 +6231,7 @@ export default function FishboneBuilder({
                                     />
                                   </div>
                                   {getDateError(item) && (
-                                    <span className="text-red-500 font-medium">⚠️ {getDateError(item)}</span>
+                                    <span className="font-medium text-red-500">{getDateError(item)}</span>
                                   )}
                                   <select
                                     value={item.priority}
@@ -5272,11 +6266,9 @@ export default function FishboneBuilder({
                           {!isValidated && (
                             <button
                               onClick={() => removeActionItem('longTerm', item.id)}
-                              className="text-blue-400 hover:text-blue-600 ml-2"
+                              className="ml-2 text-xs font-medium text-blue-700 hover:text-blue-800 dark:text-blue-200"
                             >
-                              <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
-                              </svg>
+                              Remove
                             </button>
                           )}
                         </div>
@@ -5293,7 +6285,6 @@ export default function FishboneBuilder({
           {/* Empty State for Corrective Actions Tab */}
           {totalCauses === 0 && (
             <div className="flex flex-col items-center justify-center py-16 text-center">
-              <div className="text-6xl mb-4 opacity-30">📋</div>
               <h3 className="text-lg font-medium text-gray-500 dark:text-gray-400 mb-2">
                 No Causes to Address Yet
               </h3>
@@ -5316,8 +6307,7 @@ export default function FishboneBuilder({
         <>
           <div className="mt-4 space-y-6">
             <div className="flex items-center justify-between">
-              <h3 className="text-lg font-semibold text-gray-900 dark:text-white flex items-center space-x-2">
-                <span>🛡️</span>
+              <h3 className="flex items-center space-x-2 text-lg font-semibold text-gray-900 dark:text-white">
                 <span>Preventive Controls</span>
                 {isValidated && (
                   <span className="text-xs px-2 py-0.5 bg-green-100 dark:bg-green-800 text-green-700 dark:text-green-300 rounded-full">
@@ -5329,34 +6319,26 @@ export default function FishboneBuilder({
                 {!isValidated && (
                   <button
                     onClick={addPreventiveControl}
-                    className="flex items-center gap-2 px-3 py-1.5 bg-purple-600 text-white text-sm rounded-lg hover:bg-purple-700 transition-colors"
+                    className="rounded-lg bg-blue-600 px-3 py-1.5 text-sm text-white transition-colors hover:bg-blue-700"
                   >
-                    <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 4v16m8-8H4" />
-                    </svg>
                     Add Control
                   </button>
                 )}
               </div>
             </div>
 
-            {/* AI Generate Controls Info */}
+            {/* Generate Controls Info */}
             {preventiveControls.length === 0 && !isValidated && (
-              <div className="p-4 bg-purple-50 dark:bg-purple-900/20 border border-purple-200 dark:border-purple-700 rounded-lg">
+              <div className="rounded-lg border border-blue-200 bg-blue-50 p-4 dark:border-blue-800 dark:bg-blue-900/20">
                 <div className="flex items-start gap-3">
-                  <div className="w-10 h-10 bg-purple-500 rounded-full flex items-center justify-center flex-shrink-0">
-                    <svg className="w-5 h-5 text-white" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M13 10V3L4 14h7v7l9-11h-7z" />
-                    </svg>
-                  </div>
                   <div>
-                    <h4 className="font-medium text-purple-800 dark:text-purple-200">Generate with AI</h4>
-                    <p className="text-sm text-purple-600 dark:text-purple-400 mt-1">
-                      Go to the "Corrective Actions" tab and click "Generate with AI" to automatically create both corrective actions and preventive controls based on your analyzed root causes.
+                    <h4 className="font-medium text-blue-800 dark:text-blue-200">Generate Controls</h4>
+                    <p className="mt-1 text-sm text-blue-700 dark:text-blue-200">
+                      Go to the "Corrective Actions" tab and click "Generate" to automatically create both corrective actions and preventive controls based on your analyzed root causes.
                     </p>
                     <button
                       onClick={() => setActiveTab('actions')}
-                      className="mt-3 px-3 py-1.5 bg-purple-600 text-white text-sm rounded-lg hover:bg-purple-700 transition-colors"
+                      className="mt-3 rounded-lg bg-blue-600 px-3 py-1.5 text-sm text-white transition-colors hover:bg-blue-700"
                     >
                       Go to Corrective Actions
                     </button>
@@ -5366,30 +6348,30 @@ export default function FishboneBuilder({
             )}
 
             {/* Preventive Controls List */}
-            <div className="p-4 bg-purple-50 dark:bg-purple-900/20 border border-purple-200 dark:border-purple-700 rounded-lg">
-              <p className="text-sm text-purple-700 dark:text-purple-300 mb-4">
+            <div className="rounded-lg border border-blue-200 bg-blue-50 p-4 dark:border-blue-800 dark:bg-blue-900/20">
+              <p className="mb-4 text-sm text-blue-800 dark:text-blue-200">
                 Preventive controls are systemic measures to prevent similar incidents from occurring in the future.
               </p>
               
               <div className="space-y-4">
                 {preventiveControls.length === 0 ? (
-                  <p className="text-sm text-gray-500 dark:text-gray-400 italic">No preventive controls defined yet. Click "Add Control" or generate them with AI from the Corrective Actions tab.</p>
+                  <p className="text-sm text-gray-500 dark:text-gray-400 italic">No preventive controls defined yet. Click "Add Control" or use Generate from the Corrective Actions tab.</p>
                 ) : (
                   preventiveControls.map((control) => (
-                    <div key={control.id} className="p-4 bg-white dark:bg-gray-800 rounded-lg border border-purple-100 dark:border-purple-800">
+                    <div key={control.id} className="rounded-lg border border-blue-100 bg-white p-4 dark:border-blue-800 dark:bg-gray-800">
                       <div className="flex items-start justify-between gap-4">
                         <div className="flex-1 space-y-3">
                           {/* Control Type Badge */}
                           <div className="flex items-center gap-2 mb-2">
                             <span className={`px-2 py-0.5 rounded text-xs font-medium ${getControlTypeColor(control.type)}`}>
-                              {getControlTypeIcon(control.type)} {control.type.charAt(0).toUpperCase() + control.type.slice(1)}
+                              {control.type.charAt(0).toUpperCase() + control.type.slice(1)}
                             </span>
                             <span className={`px-2 py-0.5 rounded text-xs ${
-                              control.status === 'implemented' 
-                                ? 'bg-green-100 text-green-700 dark:bg-green-800 dark:text-green-300' 
-                                : control.status === 'in-progress' 
-                                  ? 'bg-amber-100 text-amber-700 dark:bg-amber-800 dark:text-amber-300'
-                                  : 'bg-gray-100 text-gray-700 dark:bg-gray-700 dark:text-gray-300'
+                              control.status === 'implemented'
+                                ? 'bg-blue-100 text-blue-700 dark:bg-blue-900/50 dark:text-blue-200'
+                                : control.status === 'in-progress'
+                                  ? 'bg-blue-100 text-blue-700 dark:bg-blue-900/50 dark:text-blue-200'
+                                  : 'bg-blue-100 text-blue-700 dark:bg-blue-900/50 dark:text-blue-200'
                             }`}>
                               {control.status}
                             </span>
@@ -5401,7 +6383,7 @@ export default function FishboneBuilder({
                               type="text"
                               value={control.control}
                               onChange={(e) => updatePreventiveControl(control.id, 'control', e.target.value)}
-                              className="w-full text-sm font-medium text-gray-900 dark:text-white bg-transparent border-b border-transparent hover:border-gray-300 dark:hover:border-gray-600 focus:border-purple-500 focus:outline-none"
+                              className="w-full border-b border-transparent bg-transparent text-sm font-medium text-gray-900 hover:border-gray-300 focus:border-blue-500 focus:outline-none dark:text-white dark:hover:border-gray-600"
                               placeholder="Control name (e.g., Weekly equipment inspection checklist)"
                             />
                           ) : (
@@ -5414,7 +6396,7 @@ export default function FishboneBuilder({
                               value={control.description}
                               onChange={(e) => updatePreventiveControl(control.id, 'description', e.target.value)}
                               rows={2}
-                              className="w-full text-sm text-gray-600 dark:text-gray-300 bg-gray-50 dark:bg-gray-700 rounded p-2 border border-gray-200 dark:border-gray-600 focus:border-purple-500 focus:outline-none"
+                              className="w-full rounded border border-gray-200 bg-gray-50 p-2 text-sm text-gray-600 focus:border-blue-500 focus:outline-none dark:border-gray-600 dark:bg-gray-700 dark:text-gray-300"
                               placeholder="Describe how this control prevents recurrence..."
                             />
                           ) : (
@@ -5486,11 +6468,9 @@ export default function FishboneBuilder({
                         {!isValidated && (
                           <button
                             onClick={() => removePreventiveControl(control.id)}
-                            className="text-purple-400 hover:text-purple-600"
+                            className="text-xs font-medium text-blue-700 hover:text-blue-800 dark:text-blue-200"
                           >
-                            <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
-                            </svg>
+                            Remove
                           </button>
                         )}
                       </div>
@@ -5505,91 +6485,29 @@ export default function FishboneBuilder({
 
       {/* Action Buttons */}
       {!isValidated ? (
-        <div className="flex items-center justify-between mt-6">
-          {/* Left side - All Causes Analyzed indicator with action buttons */}
-          <div className="flex items-center gap-4">
-            {allCausesAnalyzed() && (
-              <>
-                <div className="flex items-center gap-2 px-4 py-2 bg-emerald-100 dark:bg-emerald-900/30 rounded-lg border border-emerald-300 dark:border-emerald-600">
-                  <div className="w-6 h-6 bg-emerald-500 rounded-full flex items-center justify-center">
-                    <svg className="w-4 h-4 text-white" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 13l4 4L19 7" />
-                    </svg>
-                  </div>
-                  <span className="text-sm font-medium text-emerald-700 dark:text-emerald-300">All Causes Analyzed! 🎉</span>
-                </div>
-                {/* Create Manually Button */}
-                <button
-                  onClick={startManualCorrectiveActions}
-                  disabled={generatingCorrectiveActions}
-                  className="flex items-center gap-2 px-4 py-2 bg-white dark:bg-gray-800 rounded-lg border-2 border-emerald-300 dark:border-emerald-600 hover:border-emerald-400 dark:hover:border-emerald-500 hover:shadow-md transition-all"
-                >
-                  <svg className="w-5 h-5 text-emerald-600 dark:text-emerald-400" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M11 5H6a2 2 0 00-2 2v11a2 2 0 002 2h11a2 2 0 002-2v-5m-1.414-9.414a2 2 0 112.828 2.828L11.828 15H9v-2.828l8.586-8.586z" />
-                  </svg>
-                  <span className="text-sm font-medium text-gray-900 dark:text-white">Create Manually</span>
-                </button>
-                {/* Generate with AI Button */}
-                <button
-                  onClick={generateAICorrectiveActions}
-                  disabled={generatingCorrectiveActions}
-                  className="flex items-center gap-2 px-4 py-2 bg-gradient-to-r from-violet-500 to-purple-600 hover:from-violet-600 hover:to-purple-700 rounded-lg hover:shadow-lg transition-all"
-                >
-                  {generatingCorrectiveActions ? (
-                    <svg className="w-5 h-5 text-white animate-spin" fill="none" viewBox="0 0 24 24">
-                      <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
-                      <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z" />
-                    </svg>
-                  ) : (
-                    <svg className="w-5 h-5 text-white" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M13 10V3L4 14h7v7l9-11h-7z" />
-                    </svg>
-                  )}
-                  <span className="text-sm font-medium text-white">Generate with AI</span>
-                </button>
-              </>
-            )}
-          </div>
-          {/* Right side - Action buttons */}
-          <div className="flex space-x-4">
+        showLocalSaveControls && (
+          <div className="mt-6 flex justify-end">
             <button
-              onClick={handleSave}
+              onClick={() => handleSave()}
               disabled={saving}
               className="px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 disabled:opacity-50 transition-colors"
             >
               {saving ? 'Saving...' : 'Save Progress'}
             </button>
-            {rootCauseText && totalCauses >= 3 && (
-              <button
-                onClick={() => {
-                  setValidationStatement(rootCauseText);
-                  setShowValidateModal(true);
-                }}
-                className="px-4 py-2 bg-green-600 text-white rounded-lg hover:bg-green-700 transition-colors"
-              >
-                Complete & Validate
-              </button>
-            )}
           </div>
-        </div>
+        )
       ) : (
         /* Re-open button for validated RCAs */
         onReopen && (
           <div className="flex justify-end space-x-4 mt-6">
-            <div className="flex items-center gap-3 text-sm text-green-600 dark:text-green-400">
-              <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z" />
-              </svg>
+            <div className="flex items-center gap-3 text-sm text-blue-600 dark:text-blue-300">
               <span>This RCA has been validated and locked</span>
             </div>
             <button
               onClick={handleReopen}
               disabled={saving}
-              className="px-4 py-2 bg-amber-600 text-white rounded-lg hover:bg-amber-700 disabled:opacity-50 transition-colors flex items-center gap-2"
+              className="px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 disabled:opacity-50 transition-colors"
             >
-              <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M8 11V7a4 4 0 118 0m-4 8v2m-6 4h12a2 2 0 002-2v-6a2 2 0 00-2-2H6a2 2 0 00-2 2v6a2 2 0 002 2z" />
-              </svg>
               {saving ? 'Re-opening...' : 'Re-open for Editing'}
             </button>
           </div>
@@ -5643,6 +6561,43 @@ export default function FishboneBuilder({
                   <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15" />
                 </svg>
                 <span>Apply Revision</span>
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {pendingMethodChange && (
+        <div className="fixed inset-0 z-[70] flex items-center justify-center bg-transparent px-4">
+          <div className="w-full max-w-md rounded-lg border border-blue-200 bg-white shadow-2xl dark:border-blue-800 dark:bg-gray-900">
+            <div className="border-b border-gray-200 px-4 py-3 dark:border-gray-700">
+              <h3 className="text-sm font-semibold text-gray-900 dark:text-white">
+                Switch Methodology?
+              </h3>
+              <p className="mt-1 text-xs text-gray-500 dark:text-gray-400">
+                You are switching from {currentMethod === 'FIVE_WHYS' ? '5 Whys' : 'Fishbone'} to {pendingMethodChange === 'FIVE_WHYS' ? '5 Whys' : 'Fishbone'}.
+              </p>
+            </div>
+            <div className="px-4 py-4">
+              <p className="text-sm text-gray-700 dark:text-gray-200">
+                All entered causes and analysis will be lost if you continue.
+              </p>
+            </div>
+            <div className="flex justify-end gap-2 border-t border-gray-200 px-4 py-3 dark:border-gray-700">
+              <button
+                type="button"
+                onClick={() => setPendingMethodChange(null)}
+                className="rounded-md border border-gray-300 px-3 py-1.5 text-xs font-medium text-gray-700 transition-colors hover:bg-gray-50 dark:border-gray-600 dark:text-gray-200 dark:hover:bg-gray-800"
+              >
+                Cancel
+              </button>
+              <button
+                type="button"
+                onClick={confirmMethodChange}
+                disabled={savingMethod}
+                className="rounded-md bg-blue-600 px-3 py-1.5 text-xs font-medium text-white transition-colors hover:bg-blue-700 disabled:opacity-50"
+              >
+                Proceed
               </button>
             </div>
           </div>

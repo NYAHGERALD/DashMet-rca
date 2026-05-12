@@ -230,8 +230,7 @@ router.post('/get-token', authenticate, async (req: AuthRequest, res: Response) 
       });
     }
 
-    // Create a meeting token for the user
-    // Build token properties including profile picture if available
+    // Create a meeting token for the user.
     const tokenProperties: any = {
       room_name: roomName,
       user_name: `${user?.firstName} ${user?.lastName}`,
@@ -241,11 +240,6 @@ router.post('/get-token', authenticate, async (req: AuthRequest, res: Response) 
       start_audio_off: false,
       exp: Math.floor(Date.now() / 1000) + 3600 * 4, // Token expires in 4 hours
     };
-
-    // Add profile picture if user has one
-    if ((user as any)?.profilePicture) {
-      tokenProperties.user_picture = (user as any).profilePicture;
-    }
 
     const response = await fetch(`${DAILY_API_URL}/meeting-tokens`, {
       method: 'POST',
@@ -266,9 +260,10 @@ router.post('/get-token', authenticate, async (req: AuthRequest, res: Response) 
         roomName,
         error: errorData
       });
+      const dailyErrorMessage = (errorData as any).info || (errorData as any).error || 'Unknown error';
       return res.status(response.status).json({
         success: false,
-        error: `Failed to generate meeting token: ${(errorData as any).error || (errorData as any).info || 'Unknown error'}`,
+        error: `Failed to generate meeting token: ${dailyErrorMessage}`,
       });
     }
 

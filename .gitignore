@@ -114,6 +114,8 @@ dev-output.log
 
 # SQL backup files  
 *.sql
+!backend/prisma/migrations/20260509132000_add_enterprise_rca_fishbone_board_link/migration.sql
+!backend/prisma/migrations/20260512183000_add_event_mobile_push_preferences/migration.sql
 !backend/prisma/migrations/20260503212500_add_login_trusted_devices/migration.sql
 !backend/prisma/migrations/20260505090000_add_mobile_push_notifications/migration.sql
 render_backup.sql

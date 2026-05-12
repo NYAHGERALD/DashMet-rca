@@ -1170,16 +1170,18 @@ export default function LswNotificationSettings() {
           {/* Legacy Quiet Hours */}
           <div className="border-t border-gray-200 dark:border-gray-600 pt-4 mt-4">
             <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">Quick Quiet Hours <span className="text-xs font-normal text-gray-500">(simple)</span></label>
-            <p className="text-xs text-gray-500 dark:text-gray-400 mb-3">A simple quiet window. For advanced scheduling, use Do Not Disturb above.</p>
+            <p className="text-xs text-gray-500 dark:text-gray-400 mb-3">
+              A simple quiet window. It only pauses alerts when Do Not Disturb is enabled above.
+            </p>
             <div className="flex items-center gap-3">
               <div>
                 <label className="block text-xs text-gray-500 dark:text-gray-400 mb-1">From</label>
-                <input type="time" value={prefs.quietHoursStart || ''} onChange={(e) => updateField('quietHoursStart', e.target.value || null)} disabled={!isAnyChannelEnabled} className="px-3 py-2 text-sm border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-800 text-gray-900 dark:text-white focus:ring-2 focus:ring-primary-500" />
+                <input type="time" value={prefs.quietHoursStart || ''} onChange={(e) => updateField('quietHoursStart', e.target.value || null)} disabled={!isAnyChannelEnabled || !prefs.dndEnabled} className="px-3 py-2 text-sm border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-800 text-gray-900 dark:text-white focus:ring-2 focus:ring-primary-500 disabled:opacity-60 disabled:cursor-not-allowed" />
               </div>
               <span className="text-gray-400 mt-5">→</span>
               <div>
                 <label className="block text-xs text-gray-500 dark:text-gray-400 mb-1">To</label>
-                <input type="time" value={prefs.quietHoursEnd || ''} onChange={(e) => updateField('quietHoursEnd', e.target.value || null)} disabled={!isAnyChannelEnabled} className="px-3 py-2 text-sm border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-800 text-gray-900 dark:text-white focus:ring-2 focus:ring-primary-500" />
+                <input type="time" value={prefs.quietHoursEnd || ''} onChange={(e) => updateField('quietHoursEnd', e.target.value || null)} disabled={!isAnyChannelEnabled || !prefs.dndEnabled} className="px-3 py-2 text-sm border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-800 text-gray-900 dark:text-white focus:ring-2 focus:ring-primary-500 disabled:opacity-60 disabled:cursor-not-allowed" />
               </div>
               {(prefs.quietHoursStart || prefs.quietHoursEnd) && (
                 <button onClick={() => { updateField('quietHoursStart', null); updateField('quietHoursEnd', null); }} className="mt-5 text-xs text-red-500 hover:text-red-600">Clear</button>

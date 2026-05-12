@@ -10,6 +10,10 @@ import { adminStorage } from '../config/firebase-admin';
 import { generateIncidentSummary } from '../services/aiService';
 import { triageIncident, applyTriageToIncident } from '../services/triageService';
 import { notifyIncidentSubmitted, notifyIncidentAssignment, notifyIncidentStatusChange } from '../services/notificationService';
+import {
+  notifyIncidentCreatedPushSubscribers,
+  notifyIncidentTeamInvitePushRecipients,
+} from '../services/incidentPushNotificationService';
 import { logAuditFromRequest } from '../services/auditService';
 import { createStatusUpdateMessage } from './chatRoutes';
 import * as fs from 'fs';
@@ -838,6 +842,20 @@ router.post('/', requirePrivilege('incidents.create'), async (req, res) => {
     });
   }
 
+  const invitedParticipantIds = isTeamIncident && Array.isArray(participants)
+    ? participants.map((p: any) => p.userId).filter(Boolean)
+    : [];
+
+  if (invitedParticipantIds.length > 0) {
+    notifyIncidentTeamInvitePushRecipients({
+      incidentId: incident.id,
+      invitedUserIds: invitedParticipantIds,
+      actor: user,
+    })
+      .then(result => console.log(`[IncidentPush] Team invites=${result.successCount}/${result.failureCount}`))
+      .catch(err => console.error('[IncidentPush] Team invite push error:', err.message));
+  }
+
   // Audit log: Incident created
   await logAuditFromRequest(req as AuthRequest, 'CREATE', 'Incident', incident.id, {
     incidentNumber: incident.incidentNumber,
@@ -846,6 +864,10 @@ router.post('/', requirePrivilege('incidents.create'), async (req, res) => {
     visibility: incident.visibility,
     severity: incident.severity,
   });
+
+  notifyIncidentCreatedPushSubscribers(incident.id, user)
+    .then(result => console.log(`[IncidentPush] Created=${result.successCount}/${result.failureCount}`))
+    .catch(err => console.error('[IncidentPush] Created push error:', err.message));
 
   res.status(201).json({
     success: true,

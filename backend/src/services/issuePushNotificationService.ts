@@ -132,6 +132,9 @@ async function getIssuePushRecipients(event: IssuePushEvent, organizationId?: st
       lastName: true,
       role: true,
       organizationId: true,
+      LswNotificationPreference: {
+        select: { mobileSoundEnabled: true },
+      },
     },
   });
 
@@ -164,7 +167,7 @@ export async function notifyIssuePushSubscribers(options: IssuePushOptions) {
         return sendPushNotificationToUser(recipient.id, {
           title: message.title,
           body: message.body,
-          sound: 'default',
+          sound: recipient.LswNotificationPreference?.mobileSoundEnabled === false ? null : 'default',
           interruptionLevel: 'time-sensitive',
           ttl: 3600,
           data: {

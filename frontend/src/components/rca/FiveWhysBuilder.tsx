@@ -1,6 +1,6 @@
 'use client';
 
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import api from '@/lib/api';
 import { useToast } from '@/components/ui/Toast';
 import LoadingState from '@/components/ui/LoadingState';
@@ -78,14 +78,27 @@ interface AIValidationResult {
   canProceed: boolean;
 }
 
+type RCAMethod = 'FIVE_WHYS' | 'FISHBONE';
+
 interface FiveWhysBuilderProps {
   rcaId: string;
   data: FiveWhysData;
   isValidated: boolean;
+  activeTab?: FiveWhysBuilderTab;
+  onTabChange?: (tab: FiveWhysBuilderTab) => void;
+  hideInternalTabs?: boolean;
+  sectionTitle?: string;
+  currentMethod?: RCAMethod;
+  savingMethod?: boolean;
+  autoSaveEnabled?: boolean;
+  saveRequestToken?: number;
+  showLocalSaveControls?: boolean;
+  onChangeMethod?: (method: RCAMethod) => void;
   onSave: (data: FiveWhysData) => Promise<void>;
   onValidate: (rootCauseStatement: string) => Promise<void>;
 }
 
+type FiveWhysBuilderTab = 'analysis' | 'actions' | 'controls';
 type AIWorkflowStep = 'idle' | 'awaiting_first_why' | 'validating' | 'validation_feedback' | 'generating_remaining' | 'complete';
 
 // Default control types as fallback
@@ -101,6 +114,16 @@ export default function FiveWhysBuilder({
   rcaId,
   data,
   isValidated,
+  activeTab: controlledActiveTab,
+  onTabChange,
+  hideInternalTabs = false,
+  sectionTitle = '5 Whys Analysis',
+  currentMethod = 'FIVE_WHYS',
+  savingMethod = false,
+  autoSaveEnabled = false,
+  saveRequestToken = 0,
+  showLocalSaveControls = true,
+  onChangeMethod,
   onSave,
   onValidate,
 }: FiveWhysBuilderProps) {
@@ -112,6 +135,9 @@ export default function FiveWhysBuilder({
   const [showValidateModal, setShowValidateModal] = useState(false);
   const [validationStatement, setValidationStatement] = useState(rootCause);
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
+  const autoSaveTimerRef = useRef<NodeJS.Timeout | null>(null);
+  const autoSaveReadyRef = useRef(false);
+  const handledSaveRequestRef = useRef(saveRequestToken);
   
   // AI Workflow State
   const [aiWorkflowStep, setAiWorkflowStep] = useState<AIWorkflowStep>('idle');
@@ -148,7 +174,10 @@ export default function FiveWhysBuilder({
   const [controlTypeOptions, setControlTypeOptions] = useState<Array<{ value: string; label: string }>>(DEFAULT_CONTROL_TYPES);
 
   // Tab Navigation State
-  const [activeTab, setActiveTab] = useState<'analysis' | 'actions' | 'controls'>('analysis');
+  const [internalActiveTab, setInternalActiveTab] = useState<FiveWhysBuilderTab>('analysis');
+  const activeTab = controlledActiveTab || internalActiveTab;
+  const setActiveTab = onTabChange || setInternalActiveTab;
+  const [pendingMethodChange, setPendingMethodChange] = useState<RCAMethod | null>(null);
 
   // Fetch control type options from the API
   useEffect(() => {
@@ -344,20 +373,58 @@ export default function FiveWhysBuilder({
     }
   };
 
-  const handleSave = async () => {
+  const handleSave = async (options?: { silent?: boolean }) => {
     setSaving(true);
     setErrorMessage(null);
     try {
       await onSave({ steps, rootCause, actionPlans, preventiveControls });
-      showToast('Progress saved successfully', 'success');
+      if (!options?.silent) {
+        showToast('Progress saved successfully', 'success');
+      }
     } catch (err: any) {
       console.error('Failed to save:', err);
       setErrorMessage(err.response?.data?.error || err.message || 'Failed to save. Please try again.');
-      showToast('Failed to save progress', 'error');
+      if (!options?.silent) {
+        showToast('Failed to save progress', 'error');
+      }
     } finally {
       setSaving(false);
     }
   };
+
+  useEffect(() => {
+    if (!saveRequestToken || handledSaveRequestRef.current === saveRequestToken) {
+      return;
+    }
+    handledSaveRequestRef.current = saveRequestToken;
+    handleSave();
+  }, [saveRequestToken]);
+
+  useEffect(() => {
+    if (autoSaveTimerRef.current) {
+      clearTimeout(autoSaveTimerRef.current);
+    }
+
+    if (!autoSaveEnabled || isValidated) {
+      autoSaveReadyRef.current = false;
+      return;
+    }
+
+    if (!autoSaveReadyRef.current) {
+      autoSaveReadyRef.current = true;
+      return;
+    }
+
+    autoSaveTimerRef.current = setTimeout(() => {
+      handleSave({ silent: true });
+    }, 1500);
+
+    return () => {
+      if (autoSaveTimerRef.current) {
+        clearTimeout(autoSaveTimerRef.current);
+      }
+    };
+  }, [autoSaveEnabled, isValidated, steps, rootCause, actionPlans, preventiveControls]);
 
   const handleValidate = async () => {
     if (!validationStatement.trim()) return;
@@ -555,6 +622,32 @@ export default function FiveWhysBuilder({
   };
 
   const depth = getDepthIndicator();
+  const hasEnteredAnalysis = (
+    steps.some((step) => Boolean(step.answer?.trim()) || Boolean(step.evidence?.length) || Boolean(step.aiSuggestion?.trim())) ||
+    Boolean(rootCause.trim()) ||
+    actionPlans.immediate.length > 0 ||
+    actionPlans.shortTerm.length > 0 ||
+    actionPlans.longTerm.length > 0 ||
+    preventiveControls.length > 0
+  );
+
+  const requestMethodChange = (method: RCAMethod) => {
+    if (!onChangeMethod || method === currentMethod || savingMethod) return;
+
+    if (hasEnteredAnalysis) {
+      setPendingMethodChange(method);
+      return;
+    }
+
+    onChangeMethod(method);
+  };
+
+  const confirmMethodChange = () => {
+    if (!pendingMethodChange || !onChangeMethod) return;
+    const nextMethod = pendingMethodChange;
+    setPendingMethodChange(null);
+    onChangeMethod(nextMethod);
+  };
 
   return (
     <div className="p-6">
@@ -578,16 +671,48 @@ export default function FiveWhysBuilder({
         </div>
       )}
 
-      <div className="flex items-center justify-between mb-6">
+      <div className="flex flex-col gap-3 mb-6 sm:flex-row sm:items-center sm:justify-between">
         <h2 className="text-lg font-semibold text-gray-900 dark:text-white">
-          5 Whys Analysis
+          {sectionTitle}
         </h2>
-        <div className="flex items-center space-x-3">
-          {!isValidated && (
+        <div className="flex flex-wrap items-center gap-3">
+          {!isValidated && onChangeMethod && activeTab === 'analysis' && (
+            <fieldset className="inline-flex items-center gap-1 rounded-full border border-gray-200 bg-white p-1 shadow-sm dark:border-gray-700 dark:bg-gray-900">
+              <legend className="sr-only">Root cause analysis method</legend>
+              {[
+                { value: 'FIVE_WHYS' as const, label: '5 Whys' },
+                { value: 'FISHBONE' as const, label: 'Fishbone' },
+              ].map((option) => {
+                const selected = currentMethod === option.value;
+                return (
+                  <label
+                    key={option.value}
+                    className={`inline-flex cursor-pointer items-center gap-1.5 rounded-full px-3 py-1.5 text-xs font-medium transition-colors ${
+                      selected
+                        ? 'bg-blue-600 text-white shadow-sm'
+                        : 'text-gray-600 hover:bg-gray-50 dark:text-gray-300 dark:hover:bg-gray-800'
+                    } ${savingMethod ? 'cursor-not-allowed opacity-60' : ''}`}
+                  >
+                    <input
+                      type="radio"
+                      name={`rca-method-${rcaId}`}
+                      value={option.value}
+                      checked={selected}
+                      disabled={savingMethod}
+                      onChange={() => requestMethodChange(option.value)}
+                      className="h-3.5 w-3.5 accent-blue-600"
+                    />
+                    <span>{option.label}</span>
+                  </label>
+                );
+              })}
+            </fieldset>
+          )}
+          {!isValidated && activeTab === 'analysis' && (
             <button
               onClick={startAIWorkflow}
               disabled={showAIWorkflowPanel}
-              className="px-4 py-2 bg-gradient-to-r from-purple-600 to-indigo-600 text-white rounded-lg hover:from-purple-700 hover:to-indigo-700 disabled:opacity-50 transition-all flex items-center space-x-2 shadow-lg"
+              className="px-4 py-2 bg-gradient-to-r from-purple-600 to-indigo-600 text-white rounded-lg hover:from-purple-700 hover:to-indigo-700 disabled:opacity-50 transition-all flex items-center space-x-2 shadow-lg text-sm"
             >
               <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
                 <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M13 10V3L4 14h7v7l9-11h-7z" />
@@ -595,17 +720,34 @@ export default function FiveWhysBuilder({
               <span>🤖 AI-Assisted Analysis</span>
             </button>
           )}
-          <span className={`px-3 py-1 rounded-full text-xs font-medium ${
+          {activeTab === 'analysis' && (
+            <span className={`px-3 py-1 rounded-full text-xs font-medium ${
             depth.color === 'red' ? 'bg-red-100 text-red-800 dark:bg-red-900 dark:text-red-200' :
             depth.color === 'yellow' ? 'bg-yellow-100 text-yellow-800 dark:bg-yellow-900 dark:text-yellow-200' :
             'bg-green-100 text-green-800 dark:bg-green-900 dark:text-green-200'
-          }`}>
-            {depth.text}
-          </span>
+            }`}>
+              {depth.text}
+            </span>
+          )}
         </div>
       </div>
 
       {/* Tab Navigation */}
+      {hideInternalTabs ? (
+        activeTab === 'analysis' && (
+          <div className="mb-6 border-b border-gray-200 dark:border-gray-700">
+            <div className="inline-flex items-center space-x-2 rounded-t-lg border-x border-t-2 border-blue-500 bg-white px-6 py-3 -mb-px text-sm font-medium text-blue-600 dark:bg-gray-800 dark:text-blue-400">
+              <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M8.228 9c.549-1.165 2.03-2 3.772-2 2.21 0 4 1.343 4 3 0 1.4-1.278 2.575-3.006 2.907-.542.104-.994.54-.994 1.093m0 3h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
+              </svg>
+              <span>5 Whys Analysis</span>
+              <span className="px-2 py-0.5 text-xs rounded-full bg-blue-100 dark:bg-blue-900/50 text-blue-600 dark:text-blue-400">
+                {steps.filter(s => s.answer?.trim()).length}/{steps.length}
+              </span>
+            </div>
+          </div>
+        )
+      ) : (
       <div className="mb-6 border-b border-gray-200 dark:border-gray-700">
         <nav className="flex space-x-1" aria-label="Tabs">
           <button
@@ -662,6 +804,7 @@ export default function FiveWhysBuilder({
           </button>
         </nav>
       </div>
+      )}
 
       {/* Analysis Tab Content */}
       {activeTab === 'analysis' && (
@@ -1760,13 +1903,15 @@ export default function FiveWhysBuilder({
       {/* Action Buttons */}
       {!isValidated && (
         <div className="flex justify-end space-x-4 mt-6">
-          <button
-            onClick={handleSave}
-            disabled={saving}
-            className="px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 disabled:opacity-50 transition-colors"
-          >
-            {saving ? 'Saving...' : 'Save Progress'}
-          </button>
+          {showLocalSaveControls && (
+            <button
+              onClick={() => handleSave()}
+              disabled={saving}
+              className="px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 disabled:opacity-50 transition-colors"
+            >
+              {saving ? 'Saving...' : 'Save Progress'}
+            </button>
+          )}
           {rootCause && steps.length >= 3 && (
             <button
               onClick={() => {
@@ -1778,6 +1923,43 @@ export default function FiveWhysBuilder({
               Complete & Validate
             </button>
           )}
+        </div>
+      )}
+
+      {pendingMethodChange && (
+        <div className="fixed inset-0 z-[70] flex items-center justify-center bg-transparent px-4">
+          <div className="w-full max-w-md rounded-lg border border-blue-200 bg-white shadow-2xl dark:border-blue-800 dark:bg-gray-900">
+            <div className="border-b border-gray-200 px-4 py-3 dark:border-gray-700">
+              <h3 className="text-sm font-semibold text-gray-900 dark:text-white">
+                Switch Methodology?
+              </h3>
+              <p className="mt-1 text-xs text-gray-500 dark:text-gray-400">
+                You are switching from {currentMethod === 'FIVE_WHYS' ? '5 Whys' : 'Fishbone'} to {pendingMethodChange === 'FIVE_WHYS' ? '5 Whys' : 'Fishbone'}.
+              </p>
+            </div>
+            <div className="px-4 py-4">
+              <p className="text-sm text-gray-700 dark:text-gray-200">
+                All entered causes and analysis will be lost if you continue.
+              </p>
+            </div>
+            <div className="flex justify-end gap-2 border-t border-gray-200 px-4 py-3 dark:border-gray-700">
+              <button
+                type="button"
+                onClick={() => setPendingMethodChange(null)}
+                className="rounded-md border border-gray-300 px-3 py-1.5 text-xs font-medium text-gray-700 transition-colors hover:bg-gray-50 dark:border-gray-600 dark:text-gray-200 dark:hover:bg-gray-800"
+              >
+                Cancel
+              </button>
+              <button
+                type="button"
+                onClick={confirmMethodChange}
+                disabled={savingMethod}
+                className="rounded-md bg-blue-600 px-3 py-1.5 text-xs font-medium text-white transition-colors hover:bg-blue-700 disabled:opacity-50"
+              >
+                Proceed
+              </button>
+            </div>
+          </div>
         </div>
       )}
 

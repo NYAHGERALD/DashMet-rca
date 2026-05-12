@@ -37,6 +37,20 @@ const isMobileDevice = () => {
     (window.innerWidth <= 768);
 };
 
+const getCallErrorMessage = (err: unknown) => {
+  const responseData = (err as { response?: { data?: { error?: unknown; message?: unknown } } })?.response?.data;
+  if (typeof responseData?.error === 'string' && responseData.error.trim()) {
+    return responseData.error;
+  }
+  if (typeof responseData?.message === 'string' && responseData.message.trim()) {
+    return responseData.message;
+  }
+  if (err instanceof Error && err.message.trim()) {
+    return err.message;
+  }
+  return 'Failed to start video call';
+};
+
 export default function VideoCall({ incidentId, rcaId, onClose, roomUrl: initialRoomUrl, roomName: initialRoomName, onRoomCreated, onMinimize, onScreenShareChange }: VideoCallProps) {
   const callFrameRef = useRef<DailyCall | null>(null);
   const containerRef = useRef<HTMLDivElement>(null);
@@ -69,7 +83,25 @@ export default function VideoCall({ incidentId, rcaId, onClose, roomUrl: initial
   const initializingRef = useRef(false);  // Prevent double init
   const connectionTimeoutRef = useRef<NodeJS.Timeout | null>(null);
   const stateTimeoutRef = useRef<NodeJS.Timeout | null>(null);
+  const isLoadingRef = useRef(isLoading);
+  const connectionStateRef = useRef<ConnectionState>(connectionState);
+  const retryCountRef = useRef(retryCount);
   const MAX_RETRIES = 2;
+
+  const setCallLoading = useCallback((loading: boolean) => {
+    isLoadingRef.current = loading;
+    setIsLoading(loading);
+  }, []);
+
+  const transitionToState = useCallback((state: ConnectionState) => {
+    connectionStateRef.current = state;
+    setConnectionState(state);
+  }, []);
+
+  const updateScreenShareState = useCallback((sharing: boolean) => {
+    setIsScreenSharing(sharing);
+    onScreenShareChange?.(sharing);
+  }, [onScreenShareChange]);
 
   // Detect mobile on mount
   useEffect(() => {
@@ -104,16 +136,21 @@ export default function VideoCall({ incidentId, rcaId, onClose, roomUrl: initial
 
   // Auto-fallback to popup after failed attempts
   const handleConnectionFailure = useCallback((reason: string) => {
-    console.log('📹 Connection failure:', reason, 'Retry count:', retryCount);
+    const currentRetryCount = retryCountRef.current;
+    console.log('📹 Connection failure:', reason, 'Retry count:', currentRetryCount);
     
-    if (retryCount < MAX_RETRIES) {
+    if (currentRetryCount < MAX_RETRIES) {
       // Auto-retry with exponential backoff
-      const delay = Math.pow(2, retryCount) * 1000; // 1s, 2s, 4s
+      const delay = Math.pow(2, currentRetryCount) * 1000; // 1s, 2s, 4s
       console.log(`📹 Auto-retrying in ${delay}ms...`);
       setLoadingStatus(`Connection issue, retrying in ${delay / 1000}s...`);
       
       setTimeout(() => {
-        setRetryCount(prev => prev + 1);
+        setRetryCount(prev => {
+          const next = prev + 1;
+          retryCountRef.current = next;
+          return next;
+        });
         initializingRef.current = false;
         if (callFrameRef.current) {
           try {
@@ -123,16 +160,16 @@ export default function VideoCall({ incidentId, rcaId, onClose, roomUrl: initial
           }
           callFrameRef.current = null;
         }
-        setConnectionState('idle');
+        transitionToState('idle');
         setShouldRetry(true); // Trigger retry via state
       }, delay);
     } else {
       // Max retries reached, show popup fallback option
       setShowPopupFallback(true);
       setError(reason);
-      setIsLoading(false);
+      setCallLoading(false);
     }
-  }, [retryCount]);
+  }, [setCallLoading, transitionToState]);
 
   // Set a state-specific timeout - if we don't progress past a state, fail
   const setStateTimeout = useCallback((state: ConnectionState, timeoutMs: number) => {
@@ -141,12 +178,12 @@ export default function VideoCall({ incidentId, rcaId, onClose, roomUrl: initial
     }
     
     stateTimeoutRef.current = setTimeout(() => {
-      if (connectionState === state && isLoading) {
+      if (connectionStateRef.current === state && isLoadingRef.current) {
         console.log(`📹 Stuck in state '${state}' for ${timeoutMs}ms`);
         handleConnectionFailure(`Connection stalled at: ${state}. Please check your network and try again.`);
       }
     }, timeoutMs);
-  }, [connectionState, isLoading, handleConnectionFailure]);
+  }, [handleConnectionFailure]);
 
   // Create or join room
   const initializeCall = useCallback(async () => {
@@ -158,14 +195,14 @@ export default function VideoCall({ incidentId, rcaId, onClose, roomUrl: initial
     initializingRef.current = true;
     
     try {
-      setIsLoading(true);
+      setCallLoading(true);
       setError(null);
       clearAllTimeouts();
       
       console.log('📹 [VideoCall] initializeCall called with roomUrl:', roomUrl, 'roomName:', roomName);
 
       // Step 1: Check device availability (non-blocking, just informational)
-      setConnectionState('checking-devices');
+      transitionToState('checking-devices');
       setLoadingStatus('Checking device availability...');
       const devices = await checkDeviceAvailability();
       console.log('📹 Devices available:', devices);
@@ -178,7 +215,7 @@ export default function VideoCall({ incidentId, rcaId, onClose, roomUrl: initial
 
       // If no room URL provided, create a new room
       if (!url) {
-        setConnectionState('creating-room');
+        transitionToState('creating-room');
         setStateTimeout('creating-room', 15000); // 15s to create room
         console.log('📹 [VideoCall] No roomUrl provided, creating new room...');
         setLoadingStatus('Creating video room...');
@@ -222,7 +259,7 @@ export default function VideoCall({ incidentId, rcaId, onClose, roomUrl: initial
         throw new Error('Room name not available. Please try again.');
       }
 
-      setConnectionState('getting-token');
+      transitionToState('getting-token');
       setStateTimeout('getting-token', 15000); // 15s to get token
       setLoadingStatus('Getting access token...');
       console.log('📹 [VideoCall] Requesting token for room:', name);
@@ -238,7 +275,7 @@ export default function VideoCall({ incidentId, rcaId, onClose, roomUrl: initial
       const meetingToken = tokenResponse.data.token;
       setToken(meetingToken);
       
-      setConnectionState('connecting');
+      transitionToState('connecting');
       setStateTimeout('connecting', 20000); // 20s to connect
       setLoadingStatus('Connecting to video call...');
 
@@ -265,8 +302,8 @@ export default function VideoCall({ incidentId, rcaId, onClose, roomUrl: initial
           // Desktop popup mode
           window.open(mobileUrl, 'DailyVideoCall', 'width=1200,height=800,menubar=no,toolbar=no');
         }
-        setIsLoading(false);
-        setConnectionState('connected');
+        setCallLoading(false);
+        transitionToState('connected');
         clearAllTimeouts();
         return;
       }
@@ -299,7 +336,7 @@ export default function VideoCall({ incidentId, rcaId, onClose, roomUrl: initial
         // Set up event listeners
         callFrameRef.current.on('joining-meeting', () => {
           console.log('📹 Joining meeting...');
-          setConnectionState('joining');
+          transitionToState('joining');
           setLoadingStatus('Joining meeting...');
           // Clear connecting timeout, set joining timeout
           if (stateTimeoutRef.current) clearTimeout(stateTimeoutRef.current);
@@ -308,10 +345,11 @@ export default function VideoCall({ incidentId, rcaId, onClose, roomUrl: initial
 
         callFrameRef.current.on('joined-meeting', () => {
           console.log('📹 Successfully joined meeting!');
-          setConnectionState('connected');
+          transitionToState('connected');
           setLoadingStatus('Connected!');
-          setIsLoading(false);
+          setCallLoading(false);
           clearAllTimeouts();
+          retryCountRef.current = 0;
           setRetryCount(0); // Reset retry count on success
           updateParticipants();
         });
@@ -327,38 +365,25 @@ export default function VideoCall({ incidentId, rcaId, onClose, roomUrl: initial
         callFrameRef.current.on('participant-updated', (event: any) => {
           updateParticipants();
           
-          // Check if the local participant started screen sharing
-          // Auto-minimize to prevent recursive mirror effect
+          // Check if the local participant started screen sharing.
+          // The UI switches to presenter mode instead of showing a recursive preview.
           if (event?.participant?.local && event?.participant?.screen) {
-            console.log('📹 Local screen sharing detected, auto-minimizing to prevent mirror effect');
-            setIsScreenSharing(true);
-            onScreenShareChange?.(true);
-            // Auto-minimize the call window when screen sharing starts
-            if (onMinimize) {
-              onMinimize();
-            }
+            console.log('📹 Local screen sharing detected, entering presenter mode');
+            updateScreenShareState(true);
           } else if (event?.participant?.local && !event?.participant?.screen) {
-            setIsScreenSharing(false);
-            onScreenShareChange?.(false);
+            updateScreenShareState(false);
           }
         });
 
         // Listen for screen share start/stop events
         callFrameRef.current.on('local-screen-share-started', () => {
           console.log('📹 Local screen share started');
-          setIsScreenSharing(true);
-          onScreenShareChange?.(true);
-          // Auto-minimize to prevent mirror effect
-          if (onMinimize) {
-            console.log('📹 Auto-minimizing call to prevent screen share mirror effect');
-            onMinimize();
-          }
+          updateScreenShareState(true);
         });
 
         callFrameRef.current.on('local-screen-share-stopped', () => {
           console.log('📹 Local screen share stopped');
-          setIsScreenSharing(false);
-          onScreenShareChange?.(false);
+          updateScreenShareState(false);
         });
 
         callFrameRef.current.on('error', (e) => {
@@ -439,7 +464,17 @@ export default function VideoCall({ incidentId, rcaId, onClose, roomUrl: initial
             startVideoOff: true,
             startAudioOff: true,
           });
-          console.log('📹 Join request completed successfully');
+          const stateAfterJoin = callFrameRef.current?.meetingState();
+          console.log('📹 Join request completed successfully. Meeting state:', stateAfterJoin);
+          if (stateAfterJoin === 'joined-meeting') {
+            transitionToState('connected');
+            setLoadingStatus('Connected!');
+            setCallLoading(false);
+            clearAllTimeouts();
+            retryCountRef.current = 0;
+            setRetryCount(0);
+            updateParticipants();
+          }
         } catch (joinError: any) {
           console.error('📹 Join failed with error:', joinError);
           throw new Error(`Failed to join call: ${joinError?.message || joinError}`);
@@ -447,10 +482,10 @@ export default function VideoCall({ incidentId, rcaId, onClose, roomUrl: initial
       }
     } catch (err) {
       console.error('Error initializing call:', err);
-      handleConnectionFailure(err instanceof Error ? err.message : 'Failed to start video call');
+      handleConnectionFailure(getCallErrorMessage(err));
       initializingRef.current = false;
     }
-  }, [incidentId, rcaId, roomUrl, roomName, onClose, onRoomCreated, clearAllTimeouts, checkDeviceAvailability, setStateTimeout, handleConnectionFailure, usePopupMode, isMobile]);
+  }, [incidentId, rcaId, roomUrl, roomName, onClose, onRoomCreated, clearAllTimeouts, checkDeviceAvailability, setStateTimeout, handleConnectionFailure, usePopupMode, isMobile, setCallLoading, transitionToState, updateScreenShareState]);
 
   const updateParticipants = useCallback(() => {
     if (callFrameRef.current) {
@@ -508,8 +543,8 @@ export default function VideoCall({ incidentId, rcaId, onClose, roomUrl: initial
   const toggleScreenShare = async () => {
     if (callFrameRef.current) {
       if (isScreenSharing) {
-        callFrameRef.current.stopScreenShare();
-        setIsScreenSharing(false);
+        await callFrameRef.current.stopScreenShare();
+        updateScreenShareState(false);
       } else {
         // Check if screen sharing is supported (not available on mobile)
         if (!navigator.mediaDevices?.getDisplayMedia) {
@@ -518,7 +553,7 @@ export default function VideoCall({ incidentId, rcaId, onClose, roomUrl: initial
         }
         try {
           await callFrameRef.current.startScreenShare();
-          setIsScreenSharing(true);
+          updateScreenShareState(true);
         } catch (error: any) {
           console.error('Screen share error:', error);
           if (error.message?.includes('getDisplayMedia') || error.name === 'NotAllowedError') {
@@ -729,24 +764,38 @@ export default function VideoCall({ incidentId, rcaId, onClose, roomUrl: initial
     }
   };
 
+  const getTokenizedRoomUrl = useCallback(() => {
+    if (!roomUrl || !token) return null;
+    return `${roomUrl}?t=${encodeURIComponent(token)}`;
+  }, [roomUrl, token]);
+
   // Open in popup window (fallback mode)
   const openInPopup = useCallback(() => {
-    if (roomUrl) {
-      const popupUrl = token ? `${roomUrl}?t=${token}` : roomUrl;
-      window.open(popupUrl, 'DailyVideoCall', 'width=1200,height=800,menubar=no,toolbar=no');
+    const popupUrl = getTokenizedRoomUrl();
+    if (!popupUrl) {
+      setShowPopupFallback(false);
+      setError('Unable to open the Daily room because the access token was not created. Please retry the call.');
+      return;
     }
-  }, [roomUrl, token]);
+    window.open(popupUrl, 'DailyVideoCall', 'width=1200,height=800,menubar=no,toolbar=no');
+  }, [getTokenizedRoomUrl]);
+
+  const openIncidentChat = useCallback(() => {
+    window.dispatchEvent(new CustomEvent('dashmet:open-incident-chat', {
+      detail: { incidentId, tab: 'chat' },
+    }));
+  }, [incidentId]);
 
   // Auto-open popup if showPopupFallback is set and we have a room URL
   useEffect(() => {
-    if (showPopupFallback && roomUrl && token) {
+    if (showPopupFallback && getTokenizedRoomUrl()) {
       // Auto-open popup after a brief delay
       const timer = setTimeout(() => {
         openInPopup();
       }, 500);
       return () => clearTimeout(timer);
     }
-  }, [showPopupFallback, roomUrl, token, openInPopup]);
+  }, [showPopupFallback, getTokenizedRoomUrl, openInPopup]);
 
   if (error) {
     return (
@@ -764,14 +813,15 @@ export default function VideoCall({ incidentId, rcaId, onClose, roomUrl: initial
             <p className="text-gray-600 dark:text-gray-400 mb-4 whitespace-pre-line text-xs sm:text-sm">{error}</p>
             
             {/* Mobile-specific message */}
-            {isMobile && roomUrl && (
+            {isMobile && roomUrl && token && (
               <div className="mb-4 p-4 bg-blue-50 dark:bg-blue-900/20 border border-blue-200 dark:border-blue-800 rounded-lg">
                 <p className="text-sm text-blue-800 dark:text-blue-300 mb-3 font-medium">
                   📱 Mobile users: Tap below to join the call
                 </p>
                 <button
                   onClick={() => {
-                    const callUrl = token ? `${roomUrl}?t=${token}` : roomUrl;
+                    const callUrl = getTokenizedRoomUrl();
+                    if (!callUrl) return;
                     window.location.href = callUrl;
                   }}
                   className="w-full px-4 py-4 bg-green-600 text-white rounded-lg hover:bg-green-700 text-base font-semibold transition-colors shadow-lg"
@@ -782,7 +832,7 @@ export default function VideoCall({ incidentId, rcaId, onClose, roomUrl: initial
             )}
             
             {/* Show popup fallback prominently when auto-retry exhausted */}
-            {showPopupFallback && roomUrl && !isMobile && (
+            {showPopupFallback && roomUrl && token && !isMobile && (
               <div className="mb-4 p-4 bg-green-50 dark:bg-green-900/20 border border-green-200 dark:border-green-800 rounded-lg">
                 <p className="text-sm text-green-800 dark:text-green-300 mb-3 font-medium">
                   ✨ The call is opening in a popup window...
@@ -799,7 +849,7 @@ export default function VideoCall({ incidentId, rcaId, onClose, roomUrl: initial
               </div>
             )}
             
-            {roomUrl && !showPopupFallback && !isMobile && (
+            {roomUrl && token && !showPopupFallback && !isMobile && (
               <div className="mb-4 p-3 bg-gray-100 dark:bg-gray-700 rounded-lg">
                 <p className="text-xs text-gray-500 dark:text-gray-400 mb-2">Alternative options:</p>
                 <div className="flex flex-col space-y-2">
@@ -810,7 +860,10 @@ export default function VideoCall({ incidentId, rcaId, onClose, roomUrl: initial
                     Open in Popup Window
                   </button>
                   <button
-                    onClick={() => window.open(roomUrl, '_blank')}
+                    onClick={() => {
+                      const callUrl = getTokenizedRoomUrl();
+                      if (callUrl) window.open(callUrl, '_blank');
+                    }}
                     className="text-blue-600 dark:text-blue-400 text-sm underline hover:no-underline"
                   >
                     Open in New Tab →
@@ -823,9 +876,10 @@ export default function VideoCall({ incidentId, rcaId, onClose, roomUrl: initial
                 onClick={() => {
                   setError(null);
                   setShowPopupFallback(false);
+                  retryCountRef.current = 0;
                   setRetryCount(0);
-                  setConnectionState('idle');
-                  setIsLoading(true);
+                  transitionToState('idle');
+                  setCallLoading(true);
                   initializingRef.current = false;
                   if (callFrameRef.current) {
                     try {
@@ -854,10 +908,12 @@ export default function VideoCall({ incidentId, rcaId, onClose, roomUrl: initial
     );
   }
 
+  const isPresenterMode = isScreenSharing && connectionState === 'connected' && !isLoading;
+
   return (
-    <div className="fixed inset-0 bg-black/90 flex flex-col z-50">
+    <div className={isPresenterMode ? 'fixed inset-0 z-50 pointer-events-none' : 'fixed inset-0 bg-black/90 flex flex-col z-50'}>
       {/* Header */}
-      <div className="bg-gray-900 px-2 sm:px-4 py-2 sm:py-3 flex items-center justify-between">
+      <div className={isPresenterMode ? 'hidden' : 'bg-gray-900 px-2 sm:px-4 py-2 sm:py-3 flex items-center justify-between'}>
         <div className="flex items-center space-x-2 sm:space-x-4 min-w-0">
           <div className="flex items-center space-x-1.5 sm:space-x-2">
             <div className="w-2 h-2 sm:w-3 sm:h-3 bg-green-500 rounded-full animate-pulse flex-shrink-0"></div>
@@ -971,10 +1027,10 @@ export default function VideoCall({ incidentId, rcaId, onClose, roomUrl: initial
       </div>
 
       {/* Main Content Area */}
-      <div className="flex-1 flex overflow-hidden">
+      <div className={isPresenterMode ? 'fixed -left-[10000px] top-0 h-[720px] w-[1280px] overflow-hidden opacity-0 pointer-events-none' : 'flex-1 flex overflow-hidden'}>
         {/* Video Container */}
-        <div className="flex-1 relative">
-          {isLoading && (
+        <div className={isPresenterMode ? 'relative h-full w-full' : 'flex-1 relative'}>
+          {!isPresenterMode && isLoading && (
             <div className="absolute inset-0 flex items-center justify-center bg-gray-900">
               <div className="text-center max-w-md px-4">
                 <div className="w-12 h-12 border-4 border-blue-500 border-t-transparent rounded-full animate-spin mx-auto mb-4"></div>
@@ -986,6 +1042,19 @@ export default function VideoCall({ incidentId, rcaId, onClose, roomUrl: initial
                 )}
                 <p className="text-gray-400 text-sm">Your camera & microphone will be OFF initially</p>
                 <p className="text-gray-500 text-xs mt-1">You can enable them after connecting</p>
+                {roomUrl && token && (connectionState === 'connecting' || connectionState === 'joining') && (
+                  <div className="mt-4">
+                    <button
+                      onClick={openInPopup}
+                      className="px-4 py-2 rounded-lg bg-blue-600 text-white text-sm font-medium hover:bg-blue-700 transition-colors"
+                    >
+                      Open in Daily Tab
+                    </button>
+                    <p className="text-gray-500 text-xs mt-2">
+                      Use this if the embedded call is blocked by the browser.
+                    </p>
+                  </div>
+                )}
                 
                 {/* Connection state indicator */}
                 <div className="mt-4 flex justify-center space-x-1">
@@ -1011,7 +1080,7 @@ export default function VideoCall({ incidentId, rcaId, onClose, roomUrl: initial
         </div>
 
         {/* Transcription Panel */}
-        {showTranscriptPanel && (
+        {!isPresenterMode && showTranscriptPanel && (
           <TranscriptionPanel
             incidentId={incidentId}
             roomName={roomName || ''}
@@ -1025,7 +1094,7 @@ export default function VideoCall({ incidentId, rcaId, onClose, roomUrl: initial
       </div>
 
       {/* Evidence Spotlight Panel - Floating overlay */}
-      {showSpotlightPanel && roomName && userId && (
+      {!isPresenterMode && showSpotlightPanel && roomName && userId && (
         <EvidenceSpotlightPanel
           incidentId={incidentId}
           roomName={roomName}
@@ -1037,7 +1106,7 @@ export default function VideoCall({ incidentId, rcaId, onClose, roomUrl: initial
       )}
 
       {/* Controls */}
-      <div className="bg-gray-900 px-2 sm:px-4 py-2 sm:py-4">
+      <div className={isPresenterMode ? 'hidden' : 'bg-gray-900 px-2 sm:px-4 py-2 sm:py-4'}>
         <div className="flex items-center justify-center space-x-2 sm:space-x-4">
           {/* Mute Button */}
           <button
@@ -1111,10 +1180,111 @@ export default function VideoCall({ incidentId, rcaId, onClose, roomUrl: initial
         </div>
       </div>
 
+      {isPresenterMode && (
+        <div className="fixed bottom-3 left-1/2 z-50 max-w-[calc(100vw-1rem)] -translate-x-1/2 pointer-events-auto sm:bottom-4">
+          <div className="inline-flex items-center gap-1.5 rounded-md border border-slate-700 bg-slate-950/95 px-2 py-1.5 text-white shadow-2xl backdrop-blur">
+            <div className="inline-flex h-8 items-center gap-1.5 rounded-md bg-slate-900 px-2 text-xs font-medium text-slate-200" title="Screen sharing active">
+              <span className="h-2 w-2 rounded-full bg-green-400"></span>
+              <svg className="h-4 w-4 text-blue-300" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9.75 17L9 20l-1 1h8l-1-1-.75-3M3 13h18M5 17h14a2 2 0 002-2V5a2 2 0 00-2-2H5a2 2 0 00-2 2v10a2 2 0 002 2z" />
+              </svg>
+              <span className="hidden sm:inline">Sharing</span>
+            </div>
+
+            <div className="inline-flex h-8 items-center gap-1 rounded-md border border-slate-700 px-2 text-xs text-slate-300" title={`${participants.length} participants`}>
+              <svg className="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M17 20h5v-2a4 4 0 00-3-3.87M9 20H4v-2a4 4 0 013-3.87m10-4.13a3 3 0 11-6 0 3 3 0 016 0zM9 10a3 3 0 11-6 0 3 3 0 016 0z" />
+              </svg>
+              <span>{participants.length}</span>
+            </div>
+
+            {roomName && userId && (
+              <MeetingRecorder
+                incidentId={incidentId}
+                roomName={roomName}
+                userId={userId}
+                compact
+              />
+            )}
+
+            <button
+              onClick={openIncidentChat}
+              className="inline-flex h-8 w-8 items-center justify-center rounded-md bg-slate-800 text-slate-200 transition-colors hover:bg-slate-700"
+              title="Open chat"
+              aria-label="Open chat"
+            >
+              <svg className="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M21 12a8.5 8.5 0 01-9 8.48 9.5 9.5 0 01-4.42-1.34L3 20l1.08-4.03A8.49 8.49 0 1121 12z" />
+              </svg>
+            </button>
+
+            <button
+              onClick={toggleMute}
+              className={`inline-flex h-8 w-8 items-center justify-center rounded-md transition-colors ${
+                isMuted
+                  ? 'bg-red-600 text-white hover:bg-red-700'
+                  : 'bg-slate-800 text-white hover:bg-slate-700'
+              }`}
+              title={isMuted ? 'Unmute' : 'Mute'}
+              aria-label={isMuted ? 'Unmute' : 'Mute'}
+            >
+              <svg className="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                {isMuted ? (
+                  <>
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5.586 15H4a1 1 0 01-1-1v-4a1 1 0 011-1h1.586l4.707-4.707C10.923 3.663 12 4.109 12 5v14c0 .891-1.077 1.337-1.707.707L5.586 15z" />
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M17 14l2-2m0 0l2-2m-2 2l-2-2m2 2l2 2" />
+                  </>
+                ) : (
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 11a7 7 0 01-7 7m0 0a7 7 0 01-7-7m7 7v4m0 0H8m4 0h4m-4-8a3 3 0 01-3-3V5a3 3 0 116 0v6a3 3 0 01-3 3z" />
+                )}
+              </svg>
+            </button>
+
+            <button
+              onClick={toggleVideo}
+              className={`inline-flex h-8 w-8 items-center justify-center rounded-md transition-colors ${
+                isVideoOff
+                  ? 'bg-red-600 text-white hover:bg-red-700'
+                  : 'bg-slate-800 text-white hover:bg-slate-700'
+              }`}
+              title={isVideoOff ? 'Turn on camera' : 'Turn off camera'}
+              aria-label={isVideoOff ? 'Turn on camera' : 'Turn off camera'}
+            >
+              <svg className="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 10l4.553-2.276A1 1 0 0121 8.618v6.764a1 1 0 01-1.447.894L15 14M5 18h8a2 2 0 002-2V8a2 2 0 00-2-2H5a2 2 0 00-2 2v8a2 2 0 002 2z" />
+                {isVideoOff && <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M17 14l2-2m0 0l2-2m-2 2l-2-2m2 2l2 2" />}
+              </svg>
+            </button>
+
+            <button
+              onClick={toggleScreenShare}
+              className="inline-flex h-8 w-8 items-center justify-center rounded-md bg-blue-600 text-white transition-colors hover:bg-blue-700"
+              title="Stop sharing"
+              aria-label="Stop sharing"
+            >
+              <svg className="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
+              </svg>
+            </button>
+
+            <button
+              onClick={leaveCall}
+              className="inline-flex h-8 w-8 items-center justify-center rounded-md bg-slate-800 text-slate-200 transition-colors hover:bg-slate-700"
+              title="Leave call"
+              aria-label="Leave call"
+            >
+              <svg className="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M16 8l2-2m0 0l2-2m-2 2l-2-2m2 2l2 2M5 3a2 2 0 00-2 2v1c0 8.284 6.716 15 15 15h1a2 2 0 002-2v-3.28a1 1 0 00-.684-.948l-4.493-1.498a1 1 0 00-1.21.502l-1.13 2.257a11.042 11.042 0 01-5.516-5.517l2.257-1.128a1 1 0 00.502-1.21L9.228 3.683A1 1 0 008.279 3H5z" />
+              </svg>
+            </button>
+          </div>
+        </div>
+      )}
+
       {/* Recording History Modal */}
       <RecordingHistory
         incidentId={incidentId}
-        isOpen={showRecordingHistory}
+        isOpen={showRecordingHistory && !isPresenterMode}
         onClose={() => setShowRecordingHistory(false)}
         currentRoomName={roomName || undefined}
       />

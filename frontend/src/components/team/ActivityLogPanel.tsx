@@ -21,6 +21,7 @@ import {
   ClipboardCheck,
   Sparkles,
   FileUp,
+  History,
 } from 'lucide-react';
 import { format, formatDistanceToNow } from 'date-fns';
 
@@ -40,6 +41,19 @@ interface ActivityItem {
 interface ActivityLogPanelProps {
   incidentId: string;
   className?: string;
+  versionHistory?: VersionHistoryItem[];
+}
+
+interface VersionHistoryItem {
+  id: string;
+  versionNumber: number | string;
+  createdAt: string;
+  changeReason?: string | null;
+  createdBy?: {
+    firstName?: string | null;
+    lastName?: string | null;
+    email?: string | null;
+  } | null;
 }
 
 const categoryColors: Record<string, { bg: string; text: string; border: string }> = {
@@ -48,6 +62,7 @@ const categoryColors: Record<string, { bg: string; text: string; border: string 
   rca: { bg: 'bg-amber-50 dark:bg-amber-900/30', text: 'text-amber-700 dark:text-amber-400', border: 'border-amber-200 dark:border-amber-800' },
   capa: { bg: 'bg-green-50 dark:bg-green-900/30', text: 'text-green-700 dark:text-green-400', border: 'border-green-200 dark:border-green-800' },
   evidence: { bg: 'bg-gray-50 dark:bg-gray-800', text: 'text-gray-700 dark:text-gray-400', border: 'border-gray-200 dark:border-gray-700' },
+  version: { bg: 'bg-indigo-50 dark:bg-indigo-900/30', text: 'text-indigo-700 dark:text-indigo-400', border: 'border-indigo-200 dark:border-indigo-800' },
 };
 
 const getActivityIcon = (type: string, category: string) => {
@@ -88,7 +103,7 @@ const getActivityIcon = (type: string, category: string) => {
   }
 };
 
-export default function ActivityLogPanel({ incidentId, className = '' }: ActivityLogPanelProps) {
+export default function ActivityLogPanel({ incidentId, className = '', versionHistory = [] }: ActivityLogPanelProps) {
   const [activities, setActivities] = useState<ActivityItem[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -117,9 +132,14 @@ export default function ActivityLogPanel({ incidentId, className = '' }: Activit
     }
   };
 
-  const filteredActivities = filterCategory === 'all' 
-    ? activities 
-    : activities.filter(a => a.category === filterCategory);
+  const activityCategories = ['all', 'incident', 'team', 'rca', 'capa', 'evidence', 'version'];
+  const isVersionFilter = filterCategory === 'version';
+  const filteredActivities = filterCategory === 'all'
+    ? activities
+    : isVersionFilter
+      ? []
+      : activities.filter(a => a.category === filterCategory);
+  const versionColors = categoryColors.version;
 
   const formatTimestamp = (timestamp: string) => {
     const date = new Date(timestamp);
@@ -170,7 +190,7 @@ export default function ActivityLogPanel({ incidentId, className = '' }: Activit
           </button>
         </div>
         <div className="flex flex-wrap gap-1">
-          {['all', 'incident', 'team', 'rca', 'capa', 'evidence'].map((cat) => (
+          {activityCategories.map((cat) => (
             <button
               key={cat}
               onClick={() => setFilterCategory(cat)}
@@ -180,7 +200,7 @@ export default function ActivityLogPanel({ incidentId, className = '' }: Activit
                   : 'bg-gray-100 dark:bg-gray-700 text-gray-600 dark:text-gray-300 hover:bg-gray-200 dark:hover:bg-gray-600'
               }`}
             >
-              {cat === 'all' ? 'All' : cat.charAt(0).toUpperCase() + cat.slice(1)}
+              {cat === 'all' ? 'All' : cat === 'version' ? 'Version' : cat.charAt(0).toUpperCase() + cat.slice(1)}
             </button>
           ))}
         </div>
@@ -188,7 +208,72 @@ export default function ActivityLogPanel({ incidentId, className = '' }: Activit
 
       {/* Activity list */}
       <div className="flex-1 overflow-y-auto px-4 py-3">
-        {filteredActivities.length === 0 ? (
+        {isVersionFilter ? (
+          versionHistory.length === 0 ? (
+            <div className="flex flex-col items-center justify-center py-12 text-gray-400 dark:text-gray-500">
+              <History className="w-10 h-10 mb-3 opacity-50" />
+              <p className="text-sm">No version history found</p>
+              <button
+                onClick={() => setFilterCategory('all')}
+                className="mt-2 text-xs text-blue-500 hover:text-blue-600 dark:text-blue-400 dark:hover:text-blue-300"
+              >
+                Show all activities
+              </button>
+            </div>
+          ) : (
+            <div className="relative">
+              <div className="absolute left-3 top-0 bottom-0 w-0.5 bg-gray-200 dark:bg-gray-700" />
+              <div className="space-y-4">
+                {versionHistory.map((version) => {
+                  const authorName = [
+                    version.createdBy?.firstName,
+                    version.createdBy?.lastName,
+                  ].filter(Boolean).join(' ');
+
+                  return (
+                    <div key={version.id} className="relative pl-8">
+                      <div className={`absolute left-1 w-5 h-5 rounded-full flex items-center justify-center ${versionColors.bg} ${versionColors.border} border-2`}>
+                        <span className={versionColors.text}>
+                          <History className="w-4 h-4" />
+                        </span>
+                      </div>
+                      <div className={`bg-white dark:bg-gray-800 rounded-lg border ${versionColors.border} p-3 shadow-sm hover:shadow-md transition-shadow`}>
+                        <div className="flex items-start justify-between gap-2">
+                          <div className="flex-1 min-w-0">
+                            <p className="text-sm text-gray-800 dark:text-gray-200 font-medium leading-tight">
+                              Version v{version.versionNumber}
+                            </p>
+                            {version.changeReason && (
+                              <p className="text-xs text-gray-500 dark:text-gray-400 mt-1">
+                                {version.changeReason}
+                              </p>
+                            )}
+                            {authorName && (
+                              <p className="text-xs text-gray-500 dark:text-gray-400 mt-1">
+                                by {authorName}
+                              </p>
+                            )}
+                          </div>
+                          <span className={`px-2 py-0.5 text-[10px] font-medium rounded-full ${versionColors.bg} ${versionColors.text} whitespace-nowrap`}>
+                            VERSION
+                          </span>
+                        </div>
+                        <div className="flex items-center gap-2 mt-2 text-[10px] text-gray-400 dark:text-gray-500">
+                          <Clock className="w-3 h-3" />
+                          <span title={formatTimestamp(version.createdAt)}>
+                            {formatRelativeTime(version.createdAt)}
+                          </span>
+                          <span className="text-gray-300 dark:text-gray-600">•</span>
+                          <span>{formatTimestamp(version.createdAt)}</span>
+                        </div>
+                      </div>
+                    </div>
+                  );
+                })}
+              </div>
+            </div>
+          )
+        ) : filteredActivities.length === 0 ? (
           <div className="flex flex-col items-center justify-center py-12 text-gray-400 dark:text-gray-500">
             <Clock className="w-10 h-10 mb-3 opacity-50" />
             <p className="text-sm">No activities found</p>
@@ -289,8 +374,16 @@ export default function ActivityLogPanel({ incidentId, className = '' }: Activit
       {/* Footer with stats */}
       <div className="px-4 py-2 border-t border-gray-200 dark:border-gray-700 bg-gray-50 dark:bg-gray-800/50">
         <div className="flex items-center justify-between text-xs text-gray-500 dark:text-gray-400">
-          <span>{filteredActivities.length} activities</span>
-          {activities.length > 0 && (
+          <span>
+            {isVersionFilter
+              ? `${versionHistory.length} version${versionHistory.length !== 1 ? 's' : ''}`
+              : `${filteredActivities.length} activities`}
+          </span>
+          {isVersionFilter && versionHistory.length > 0 ? (
+            <span>
+              Latest {formatRelativeTime(versionHistory[0].createdAt)}
+            </span>
+          ) : activities.length > 0 && (
             <span>
               Started {formatRelativeTime(activities[0].timestamp)}
             </span>

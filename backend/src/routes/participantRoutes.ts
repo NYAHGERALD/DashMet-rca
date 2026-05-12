@@ -4,6 +4,7 @@ import { prisma } from '../utils/prisma';
 import { ValidationError, NotFoundError } from '../middleware/errorHandler';
 import { ParticipantRole } from '@prisma/client';
 import { websocketService } from '../services/websocketService';
+import { notifyIncidentTeamInvitePushRecipients } from '../services/incidentPushNotificationService';
 import { v4 as uuidv4 } from 'uuid';
 
 const router = Router();
@@ -324,6 +325,16 @@ router.post('/:incidentId', async (req, res) => {
     if (systemMessage) {
       websocketService.emitToIncident(incidentId, 'chat:message', systemMessage);
     }
+  }
+
+  if (allInvitedUserIds.length > 0) {
+    notifyIncidentTeamInvitePushRecipients({
+      incidentId,
+      invitedUserIds: allInvitedUserIds,
+      actor: user,
+    })
+      .then(result => console.log(`[IncidentPush] Team invites=${result.successCount}/${result.failureCount}`))
+      .catch(err => console.error('[IncidentPush] Team invite push error:', err.message));
   }
 
   res.status(201).json({

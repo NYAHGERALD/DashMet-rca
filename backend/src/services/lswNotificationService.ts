@@ -878,38 +878,43 @@ async function logSentNotifications(userId: string, alerts: LswAlertItem[], chan
 // ─────────────────────────────────────────────────────────────────────────────
 
 function isInQuietHours(prefs: LswNotificationPreference, now: Date): boolean {
+  const dndEnabled = Boolean((prefs as any).dndEnabled);
+
+  // The DND toggle is the master switch for both advanced DND schedules and
+  // the simple quiet-hours window. Saved quiet times must not mute alerts when
+  // the user has turned "Pause during quiet hours" off.
+  if (!dndEnabled) return false;
+
   const localNow = getZonedParts(now, getSafeTimeZone(prefs.timezone));
   const currentDay = DAY_COLUMNS_SUNDAY_FIRST[localNow.weekdayIndex];
   const currentMinutes = localNow.hour * 60 + localNow.minute;
 
   // Check DND schedule first (more comprehensive)
-  if ((prefs as any).dndEnabled) {
-    const dndDays: string[] = typeof (prefs as any).dndDays === 'string'
-      ? JSON.parse((prefs as any).dndDays)
-      : ((prefs as any).dndDays || []);
+  const dndDays: string[] = typeof (prefs as any).dndDays === 'string'
+    ? JSON.parse((prefs as any).dndDays)
+    : ((prefs as any).dndDays || []);
 
-    if ((prefs as any).dndMode === 'custom' && (prefs as any).dndCustomSlots) {
-      // Custom slots: check each { day, startTime, endTime }
-      const slots = typeof (prefs as any).dndCustomSlots === 'string'
-        ? JSON.parse((prefs as any).dndCustomSlots)
-        : (prefs as any).dndCustomSlots;
-      for (const slot of (slots || [])) {
-        if (slot.day === currentDay) {
-          if (isTimeInWindow(currentMinutes, slot.startTime, slot.endTime)) return true;
-        }
+  if ((prefs as any).dndMode === 'custom' && (prefs as any).dndCustomSlots) {
+    // Custom slots: check each { day, startTime, endTime }
+    const slots = typeof (prefs as any).dndCustomSlots === 'string'
+      ? JSON.parse((prefs as any).dndCustomSlots)
+      : (prefs as any).dndCustomSlots;
+    for (const slot of (slots || [])) {
+      if (slot.day === currentDay) {
+        if (isTimeInWindow(currentMinutes, slot.startTime, slot.endTime)) return true;
       }
-    } else {
-      // Scheduled mode
-      if (dndDays.includes(currentDay)) {
-        if ((prefs as any).dndAllDay) return true;
-        const start = (prefs as any).dndStartTime;
-        const end = (prefs as any).dndEndTime;
-        if (start && end && isTimeInWindow(currentMinutes, start, end)) return true;
-      }
+    }
+  } else {
+    // Scheduled mode
+    if (dndDays.includes(currentDay)) {
+      if ((prefs as any).dndAllDay) return true;
+      const start = (prefs as any).dndStartTime;
+      const end = (prefs as any).dndEndTime;
+      if (start && end && isTimeInWindow(currentMinutes, start, end)) return true;
     }
   }
 
-  // Legacy quiet hours check
+  // Simple quiet-hours window, used by the mobile settings screen.
   if (!prefs.quietHoursStart || !prefs.quietHoursEnd) return false;
   return isTimeInWindow(currentMinutes, prefs.quietHoursStart, prefs.quietHoursEnd);
 }

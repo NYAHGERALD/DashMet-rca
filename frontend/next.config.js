@@ -62,7 +62,10 @@ const nextConfig = {
           { key: 'X-Frame-Options', value: 'DENY' },
           { key: 'X-Content-Type-Options', value: 'nosniff' },
           { key: 'Referrer-Policy', value: 'strict-origin-when-cross-origin' },
-          { key: 'Permissions-Policy', value: 'camera=(self), microphone=(), geolocation=(), payment=()' },
+          {
+            key: 'Permissions-Policy',
+            value: 'camera=(self "https://*.daily.co"), microphone=(self "https://*.daily.co"), geolocation=(), payment=()',
+          },
           { key: 'X-DNS-Prefetch-Control', value: 'on' },
           {
             key: 'Strict-Transport-Security',
@@ -76,9 +79,9 @@ const nextConfig = {
               "style-src 'self' 'unsafe-inline' https://fonts.googleapis.com",
               "font-src 'self' https://fonts.gstatic.com",
               "img-src 'self' data: blob: https://firebasestorage.googleapis.com https://storage.googleapis.com https://*.googleusercontent.com",
-              `connect-src 'self' ${backendOrigin} ${wsOrigin} https://*.googleapis.com`,
+              `connect-src 'self' ${backendOrigin} ${wsOrigin} https://*.googleapis.com https://*.daily.co wss://*.daily.co`,
               "media-src 'self' blob:",
-              "frame-src 'self'",
+              "frame-src 'self' https://*.daily.co",
               "object-src 'none'",
               "base-uri 'self'",
               "form-action 'self'",

@@ -10,6 +10,7 @@ import { UserRole } from '@prisma/client';
 import { prisma } from '../utils/prisma';
 import rcaService from '../services/rcaService';
 import { websocketService } from '../services/websocketService';
+import { syncRcaFishboneBoard } from '../services/rcaFishboneBoardService';
 import { 
   generateAIFiveWhysAnalysis, 
   generateAIFishboneAnalysis,
@@ -407,7 +408,7 @@ router.post('/incidents/:incidentId/comments', async (req: AuthRequest, res: Res
 router.patch('/:rcaId/method', requirePrivilege('rca.edit'), async (req: AuthRequest, res: Response) => {
   try {
     const { rcaId } = req.params;
-    const { method } = req.body;
+    const { method, start } = req.body;
     const userId = req.user!.id;
     const user = req.user!;
 
@@ -420,7 +421,11 @@ router.patch('/:rcaId/method', requirePrivilege('rca.edit'), async (req: AuthReq
       });
     }
 
-    const analysis = await rcaService.updateRCAMethod(rcaId, method as 'FIVE_WHYS' | 'FISHBONE');
+    const analysis = await rcaService.updateRCAMethod(
+      rcaId,
+      method as 'FIVE_WHYS' | 'FISHBONE',
+      { start: Boolean(start) }
+    );
 
     // Get incidentId for WebSocket broadcast
     const rcaWithIncident = await prisma.rCAAnalysis.findUnique({
@@ -793,6 +798,14 @@ router.patch('/:rcaId/fishbone', async (req: AuthRequest, res: Response) => {
     }
 
     const analysis = await rcaService.updateFishbone(rcaId, userId, fishboneData, changeReason);
+    let fishboneBoard = null;
+
+    try {
+      const synced = await syncRcaFishboneBoard(rcaId, userId, fishboneData, 'FISHBONE_SAVE');
+      fishboneBoard = synced.board;
+    } catch (syncError) {
+      console.error('Failed to sync RCA fishbone whiteboard:', syncError);
+    }
 
     // Get RCA with incident to emit WebSocket event
     const rcaWithIncident = await prisma.rCAAnalysis.findUnique({
@@ -817,12 +830,42 @@ router.patch('/:rcaId/fishbone', async (req: AuthRequest, res: Response) => {
     res.json({
       success: true,
       data: analysis,
+      fishboneBoard,
       message: 'Fishbone data updated successfully',
     });
   } catch (error: any) {
     res.status(500).json({
       success: false,
       error: error.message,
+    });
+  }
+});
+
+/**
+ * POST /api/rca/:rcaId/fishbone/whiteboard
+ * Create or update the linked whiteboard fishbone snapshot
+ */
+router.post('/:rcaId/fishbone/whiteboard', async (req: AuthRequest, res: Response) => {
+  try {
+    const { rcaId } = req.params;
+    const userId = req.user!.id;
+    const { fishboneData } = req.body || {};
+    const result = await syncRcaFishboneBoard(rcaId, userId, fishboneData, 'FISHBONE_WHITEBOARD_OPEN');
+
+    res.json({
+      success: true,
+      data: {
+        board: result.board,
+        link: result.link,
+        syncEventId: result.syncEventId,
+      },
+      message: 'Fishbone whiteboard synced successfully',
+    });
+  } catch (error: any) {
+    console.error('Sync fishbone whiteboard error:', error);
+    res.status(500).json({
+      success: false,
+      error: error.message || 'Failed to sync fishbone whiteboard',
     });
   }
 });
@@ -1736,6 +1779,171 @@ router.post('/:rcaId/ai/validate-five-whys', async (req: AuthRequest, res: Respo
 });
 
 /**
+ * POST /api/rca/:rcaId/ai/validate-five-whys-step
+ * Validate one manual 5 Whys answer against incident context, evidence, and previous answers
+ */
+router.post('/:rcaId/ai/validate-five-whys-step', async (req: AuthRequest, res: Response) => {
+  try {
+    const { rcaId } = req.params;
+    const { causeText, categoryName, problem, stepNumber, question, answer, previousSteps } = req.body;
+
+    if (!causeText || !problem || !stepNumber || !question || !answer) {
+      return res.status(400).json({
+        success: false,
+        error: 'Cause text, problem, step number, question, and answer are required',
+      });
+    }
+
+    const rca = await rcaService.getRCAAnalysis(rcaId);
+
+    if (!rca) {
+      return res.status(404).json({
+        success: false,
+        error: 'RCA analysis not found',
+      });
+    }
+
+    const incidentContext = buildIncidentContextFromRCA(rca);
+    const rcaEvidence = Array.isArray((rca as any).Evidence)
+      ? (rca as any).Evidence.map((e: any) => ({
+        fileName: e.fileName,
+        type: e.type,
+        transcription: e.transcription,
+      }))
+      : [];
+    const evidence = [
+      ...(incidentContext.evidence || []),
+      ...rcaEvidence,
+    ].filter((item, index, all) => (
+      item.fileName && all.findIndex(other => other.fileName === item.fileName && other.type === item.type) === index
+    ));
+
+    const { validateFiveWhysStepAnswer } = await import('../services/aiService');
+    const validation = await validateFiveWhysStepAnswer({
+      causeText,
+      categoryName: categoryName || 'Unknown',
+      problem,
+      stepNumber: Number(stepNumber),
+      question,
+      answer,
+      previousSteps: Array.isArray(previousSteps) ? previousSteps : [],
+      incidentDescription: incidentContext.description,
+      incidentType: incidentContext.type,
+      evidence,
+    });
+
+    res.json({
+      success: true,
+      data: validation,
+    });
+  } catch (error: any) {
+    console.error('Validate 5 Whys step answer error:', error);
+    res.status(500).json({
+      success: false,
+      error: error.message,
+    });
+  }
+});
+
+/**
+ * POST /api/rca/:rcaId/ai/validate-fishbone-root-causes
+ * Review analyzed Fishbone causes and identify which final root causes are most likely to resolve the problem
+ */
+router.post('/:rcaId/ai/validate-fishbone-root-causes', async (req: AuthRequest, res: Response) => {
+  try {
+    const { rcaId } = req.params;
+    const { problem, causes } = req.body;
+
+    if (!problem || !Array.isArray(causes) || causes.length === 0) {
+      return res.status(400).json({
+        success: false,
+        error: 'Problem statement and Fishbone causes are required',
+      });
+    }
+
+    const rca = await rcaService.getRCAAnalysis(rcaId);
+
+    if (!rca) {
+      return res.status(404).json({
+        success: false,
+        error: 'RCA analysis not found',
+      });
+    }
+
+    const causeInputs = causes
+      .filter((cause: any) => cause?.causeId && cause?.causeText)
+      .map((cause: any) => ({
+        causeId: String(cause.causeId),
+        categoryName: String(cause.categoryName || 'Unknown'),
+        causeText: String(cause.causeText),
+        rootCause: cause.rootCause ? String(cause.rootCause) : '',
+        fiveWhysSteps: Array.isArray(cause.fiveWhysSteps) ? cause.fiveWhysSteps : [],
+      }));
+
+    const causeIds = causeInputs.map((cause: any) => cause.causeId);
+    const savedAnalyses = await prisma.fiveWhysAnalysis.findMany({
+      where: {
+        rcaAnalysisId: rcaId,
+        causeId: { in: causeIds },
+      },
+      include: {
+        steps: {
+          orderBy: { stepNumber: 'asc' },
+        },
+      },
+    });
+
+    const savedAnalysisByCauseId = new Map(savedAnalyses.map(analysis => [analysis.causeId, analysis]));
+    const analyzedCauses = causeInputs
+      .map((cause: any) => {
+        const savedAnalysis = savedAnalysisByCauseId.get(cause.causeId);
+        const savedSteps = savedAnalysis?.steps?.map(step => ({
+          stepNumber: step.stepNumber,
+          question: step.question,
+          answer: step.answer || '',
+        })) || [];
+        const stepFiveAnswer = savedSteps.find(step => step.stepNumber === 5)?.answer?.trim() || '';
+        const rootCause = cause.rootCause || savedAnalysis?.rootCause || stepFiveAnswer;
+
+        return {
+          causeId: cause.causeId,
+          categoryName: cause.categoryName || savedAnalysis?.categoryName || 'Unknown',
+          causeText: cause.causeText || savedAnalysis?.causeText || '',
+          rootCause,
+          fiveWhysSteps: cause.fiveWhysSteps?.length ? cause.fiveWhysSteps : savedSteps,
+        };
+      })
+      .filter((cause: any) => cause.rootCause && cause.rootCause.trim());
+
+    if (analyzedCauses.length === 0) {
+      return res.status(400).json({
+        success: false,
+        error: 'At least one analyzed cause with a final root cause is required',
+      });
+    }
+
+    const incidentContext = buildIncidentContextFromRCA(rca);
+    const { validateFishboneRootCauseSelections } = await import('../services/aiService');
+    const validation = await validateFishboneRootCauseSelections({
+      problem,
+      analyzedCauses,
+      incidentContext,
+    });
+
+    res.json({
+      success: true,
+      data: validation,
+    });
+  } catch (error: any) {
+    console.error('Validate Fishbone root causes error:', error);
+    res.status(500).json({
+      success: false,
+      error: error.message,
+    });
+  }
+});
+
+/**
  * POST /api/rca/:rcaId/ai/five-whys-suggestion
  * Get AI suggestion for next 5 Whys step
  */
@@ -2196,7 +2404,7 @@ router.post('/:rcaId/versions/:versionId/restore', async (req: AuthRequest, res:
 router.post('/:rcaId/ai/generate-corrective-actions', async (req: AuthRequest, res: Response) => {
   try {
     const { rcaId } = req.params;
-    const { problem, analyzedCauses, existingActions } = req.body;
+    const { problem, analyzedCauses, existingActions, existingPreventiveControls } = req.body;
 
     if (!problem || !analyzedCauses || analyzedCauses.length === 0) {
       return res.status(400).json({
@@ -2215,21 +2423,77 @@ router.post('/:rcaId/ai/generate-corrective-actions', async (req: AuthRequest, r
       });
     }
 
-    const incidentContext = {
-      description: rca.Incident?.description || '',
-      type: rca.Incident?.type || '',
-      severity: rca.Incident?.severity || 'MEDIUM',
-      categoryName: rca.Incident?.Category?.name,
-      facilityName: rca.Incident?.Facility?.name,
-    };
+    const causeInputs = analyzedCauses
+      .filter((cause: any) => cause?.causeText)
+      .map((cause: any) => ({
+        causeId: cause.causeId ? String(cause.causeId) : '',
+        categoryName: String(cause.categoryName || 'Unknown'),
+        causeText: String(cause.causeText || ''),
+        rootCause: cause.rootCause ? String(cause.rootCause) : '',
+        fiveWhysSteps: Array.isArray(cause.fiveWhysSteps) ? cause.fiveWhysSteps : [],
+        resolutionClassification: cause.resolutionClassification ? String(cause.resolutionClassification) : '',
+        resolutionReason: cause.resolutionReason ? String(cause.resolutionReason) : '',
+        implementationImpact: cause.implementationImpact ? String(cause.implementationImpact) : '',
+      }));
+
+    const causeIds = causeInputs.map((cause: any) => cause.causeId).filter(Boolean);
+    const savedAnalyses = causeIds.length > 0
+      ? await prisma.fiveWhysAnalysis.findMany({
+          where: {
+            rcaAnalysisId: rcaId,
+            causeId: { in: causeIds },
+          },
+          include: {
+            steps: {
+              orderBy: { stepNumber: 'asc' },
+            },
+          },
+        })
+      : [];
+
+    const savedAnalysisByCauseId = new Map(savedAnalyses.map(analysis => [analysis.causeId, analysis]));
+    const enrichedCauses = causeInputs
+      .map((cause: any) => {
+        const savedAnalysis = savedAnalysisByCauseId.get(cause.causeId);
+        const savedSteps = savedAnalysis?.steps?.map(step => ({
+          stepNumber: step.stepNumber,
+          question: step.question,
+          answer: step.answer || '',
+        })) || [];
+        const stepFiveAnswer = savedSteps.find(step => step.stepNumber === 5)?.answer?.trim() || '';
+        const rootCause = savedAnalysis?.rootCause || stepFiveAnswer || cause.rootCause;
+
+        return {
+          causeId: cause.causeId,
+          categoryName: cause.categoryName || savedAnalysis?.categoryName || 'Unknown',
+          causeText: cause.causeText || savedAnalysis?.causeText || '',
+          rootCause,
+          fiveWhysSteps: savedSteps.length ? savedSteps : cause.fiveWhysSteps,
+          resolutionClassification: cause.resolutionClassification,
+          resolutionReason: cause.resolutionReason,
+          implementationImpact: cause.implementationImpact,
+        };
+      })
+      .filter((cause: any) => cause.rootCause && cause.rootCause.trim())
+      .filter((cause: any) => cause.resolutionClassification !== 'unlikely');
+
+    if (enrichedCauses.length === 0) {
+      return res.status(400).json({
+        success: false,
+        error: 'At least one likely analyzed root cause is required',
+      });
+    }
+
+    const incidentContext = buildIncidentContextFromRCA(rca);
 
     // Generate corrective actions and preventive controls using AI
     const { generateCorrectiveActions } = await import('../services/aiService');
     const result = await generateCorrectiveActions(
       problem,
-      analyzedCauses,
+      enrichedCauses,
       incidentContext,
-      existingActions
+      existingActions,
+      Array.isArray(existingPreventiveControls) ? existingPreventiveControls : []
     );
 
     res.json({
