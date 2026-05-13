@@ -49,7 +49,9 @@ export function PolicyModalShell({
           </div>
 
           <div className="p-6 overflow-auto max-h-[calc(100vh-10rem)]">
-            <div className="prose prose-invert max-w-none prose-headings:text-white prose-p:text-gray-200 prose-strong:text-white prose-li:text-gray-200">{children}</div>
+            <div className="prose prose-invert max-w-none text-white [&_*]:!text-white [&_a]:underline [&_a]:decoration-white/60 [&_a:hover]:decoration-white [&_hr]:!border-white/20 [&_blockquote]:!border-white/30">
+              {children}
+            </div>
           </div>
         </div>
       </div>
