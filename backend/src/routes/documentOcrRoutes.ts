@@ -1,5 +1,11 @@
 import { Router, Request, Response } from 'express';
+import path from 'path';
 import OpenAI from 'openai';
+import mammoth from 'mammoth';
+import { v4 as uuidv4 } from 'uuid';
+import { adminStorage } from '../config/firebase-admin';
+import { upload } from '../middleware/upload';
+import { sanitizeForPrompt, wrapUserContent } from '../utils/promptSanitizer';
 
 const router = Router();
 
@@ -44,6 +50,210 @@ interface ProcessDocumentRequest {
   images: string[]; // Array of base64 encoded images
   documentType: string;
   sourceLanguage: string;
+}
+
+interface CleanedDocumentResult {
+  generatedTitle?: string;
+  cleanedText: string;
+  corrections: string[];
+  keyPoints: string[];
+  mentionedNames: string[];
+  mentionedDates: string[];
+  summary: string;
+  confidence?: number;
+}
+
+function parseJsonContent<T>(content: string, fallback: T): T {
+  try {
+    const jsonContent = content.replace(/```json\n?/g, '').replace(/```\n?/g, '').trim();
+    return JSON.parse(jsonContent) as T;
+  } catch {
+    return fallback;
+  }
+}
+
+function decodeXmlEntities(value: string): string {
+  return value
+    .replace(/&amp;/g, '&')
+    .replace(/&lt;/g, '<')
+    .replace(/&gt;/g, '>')
+    .replace(/&quot;/g, '"')
+    .replace(/&apos;/g, "'")
+    .replace(/&#(\d+);/g, (_, code) => String.fromCharCode(Number(code)));
+}
+
+async function uploadWizardSourceFile(file: Express.Multer.File, organizationId?: string, userId?: string) {
+  const bucket = adminStorage.bucket();
+  const extension = path.extname(file.originalname) || '';
+  const orgSegment = sanitizeForPrompt(organizationId || 'unassigned', { maxLength: 80, context: 'wizard-doc-org' }).replace(/[^a-zA-Z0-9_-]/g, '_');
+  const storagePath = `hr-wizard-documents/${orgSegment}/${uuidv4()}${extension}`;
+  const firebaseFile = bucket.file(storagePath);
+
+  await firebaseFile.save(file.buffer, {
+    metadata: {
+      contentType: file.mimetype,
+      metadata: {
+        originalName: file.originalname,
+        uploadedBy: userId || '',
+        organizationId: organizationId || '',
+        source: 'guided-resolution-wizard',
+      },
+    },
+  });
+
+  await firebaseFile.makePublic();
+  return `https://storage.googleapis.com/${bucket.name}/${storagePath}`;
+}
+
+async function extractPdfText(buffer: Buffer): Promise<{ text: string; pageCount?: number }> {
+  try {
+    // Lazy-load the v1 legacy entrypoint to avoid pdfjs DOM dependencies in Node.
+    // eslint-disable-next-line @typescript-eslint/no-var-requires
+    const pdfParse: any = require('pdf-parse/lib/pdf-parse.js');
+    const result = await pdfParse(buffer);
+    return {
+      text: (result.text || '').trim(),
+      pageCount: result.numpages,
+    };
+  } catch (err: any) {
+    console.error('Document OCR PDF parse failed:', err.message);
+    return { text: '' };
+  }
+}
+
+async function extractDocxText(buffer: Buffer): Promise<string> {
+  try {
+    const result = await mammoth.extractRawText({ buffer });
+    return (result.value || '').trim();
+  } catch {
+    return '';
+  }
+}
+
+async function extractPptxText(buffer: Buffer): Promise<string> {
+  try {
+    // eslint-disable-next-line @typescript-eslint/no-var-requires
+    const JSZip = require('jszip');
+    const zip = await JSZip.loadAsync(buffer);
+    const chunks: string[] = [];
+    const slideFiles = Object.keys(zip.files)
+      .filter(name => /^ppt\/slides\/slide\d+\.xml$/i.test(name) || /^ppt\/notesSlides\/notesSlide\d+\.xml$/i.test(name))
+      .sort((a, b) => a.localeCompare(b, undefined, { numeric: true }));
+
+    for (const fileName of slideFiles) {
+      const xml = await zip.files[fileName].async('string');
+      const textRuns = Array.from(xml.matchAll(/<a:t>([\s\S]*?)<\/a:t>/g) as Iterable<RegExpMatchArray>)
+        .map(match => decodeXmlEntities(match[1]));
+      const slideText = textRuns.join(' ').replace(/\s+/g, ' ').trim();
+      if (slideText) chunks.push(`${fileName.includes('notesSlides') ? 'Notes' : 'Slide'} ${chunks.length + 1}: ${slideText}`);
+    }
+
+    return chunks.join('\n\n').trim();
+  } catch (err: any) {
+    console.error('Document OCR PPTX parse failed:', err.message);
+    return '';
+  }
+}
+
+function extractReadableBinaryText(buffer: Buffer): string {
+  return buffer
+    .toString('latin1')
+    .replace(/[^\x09\x0A\x0D\x20-\x7E]+/g, ' ')
+    .replace(/\s+/g, ' ')
+    .trim();
+}
+
+async function extractUploadedDocumentText(file: Express.Multer.File): Promise<{ text: string; pageCount: number }> {
+  const ext = path.extname(file.originalname).toLowerCase();
+  const mime = file.mimetype;
+
+  if (mime === 'text/plain' || ext === '.txt' || ext === '.md') {
+    return { text: file.buffer.toString('utf8').trim(), pageCount: 1 };
+  }
+
+  if (mime === 'application/pdf' || ext === '.pdf') {
+    const result = await extractPdfText(file.buffer);
+    return { text: result.text, pageCount: result.pageCount || 1 };
+  }
+
+  if (mime === 'application/vnd.openxmlformats-officedocument.wordprocessingml.document' || ext === '.docx') {
+    return { text: await extractDocxText(file.buffer), pageCount: 1 };
+  }
+
+  if (mime === 'application/vnd.openxmlformats-officedocument.presentationml.presentation' || ext === '.pptx') {
+    return { text: await extractPptxText(file.buffer), pageCount: 1 };
+  }
+
+  if (mime === 'application/msword' || ext === '.doc' || mime === 'application/vnd.ms-powerpoint' || ext === '.ppt') {
+    return { text: extractReadableBinaryText(file.buffer), pageCount: 1 };
+  }
+
+  return { text: '', pageCount: 1 };
+}
+
+async function cleanEnterpriseDocumentText(
+  openai: OpenAI,
+  text: string,
+  documentType: string,
+  sourceLanguage: string,
+  sourceFileName?: string
+): Promise<CleanedDocumentResult> {
+  const cleanCompletion = await openai.chat.completions.create({
+    model: 'gpt-4o',
+    messages: [
+      {
+        role: 'system',
+        content: `You are an enterprise employee-relations transcription specialist.
+
+Your job is to prepare a clear, professional transcription for workplace resolution documentation.
+
+Rules:
+- Preserve facts, names, dates, quotes, sequence, and meaning.
+- Correct obvious OCR, spelling, grammar, and punctuation errors only when context supports the correction.
+- Do not add allegations, conclusions, intent, blame, or discipline recommendations.
+- Keep the tone neutral, readable, and appropriate for HR review.
+- If the source is informal, rewrite only enough to make it clear while preserving the employee's meaning.
+- Identify key people, dates, and factual points that may matter for policy review.
+- Create a short practical title if the source file or text does not already provide one.
+
+Return valid JSON only:
+{
+  "generatedTitle": "short title",
+  "cleanedText": "professional transcription in clear paragraphs",
+  "corrections": ["important correction or clarification made"],
+  "keyPoints": ["fact preserved from the source"],
+  "mentionedNames": ["name"],
+  "mentionedDates": ["date"],
+  "summary": "2-3 sentence neutral summary",
+  "confidence": 0.0
+}`
+      },
+      {
+        role: 'user',
+        content: `Document type: ${sanitizeForPrompt(documentType || 'complaint', { maxLength: 80, context: 'wizard-document-type' })}
+Source language: ${sanitizeForPrompt(sourceLanguage || 'English', { maxLength: 80, context: 'wizard-document-language' })}
+Source file: ${sanitizeForPrompt(sourceFileName || 'Uploaded document', { maxLength: 200, context: 'wizard-document-file' })}
+
+Raw extracted text:
+${wrapUserContent(sanitizeForPrompt(text, { maxLength: 16000, context: 'wizard-document-text' }), 'uploaded_document_text')}`
+      }
+    ],
+    max_tokens: 4096,
+    temperature: 0.15,
+    response_format: { type: 'json_object' }
+  });
+
+  const content = cleanCompletion.choices[0]?.message?.content || '{}';
+  return parseJsonContent<CleanedDocumentResult>(content, {
+    generatedTitle: sourceFileName ? path.basename(sourceFileName, path.extname(sourceFileName)) : 'Uploaded complaint',
+    cleanedText: text,
+    corrections: [],
+    keyPoints: [],
+    mentionedNames: [],
+    mentionedDates: [],
+    summary: '',
+    confidence: 0.75,
+  });
 }
 
 /**
@@ -521,29 +731,28 @@ Return JSON: {"extractedText": "...", "isHandwritten": true/false, "confidence":
       messages: [
         {
           role: 'system',
-          content: `Clean and structure this ${documentType} text. Fix OCR errors contextually. Make sentences grammatically correct.
-Return JSON: {"cleanedText": "...", "corrections": [], "keyPoints": [], "mentionedNames": [], "mentionedDates": [], "summary": "..."}`
+          content: `Clean and structure this ${documentType} text for enterprise workplace documentation.
+Preserve the original meaning, facts, names, dates, sequence, and quotes. Fix OCR, spelling, punctuation, and grammar only when context supports the correction. Do not add blame, conclusions, or discipline recommendations.
+Return JSON: {"generatedTitle": "short practical title", "cleanedText": "...", "corrections": [], "keyPoints": [], "mentionedNames": [], "mentionedDates": [], "summary": "..."}`
         },
-        { role: 'user', content: textToClean }
+        { role: 'user', content: wrapUserContent(sanitizeForPrompt(textToClean, { maxLength: 16000, context: 'ocr-clean-text' }), 'ocr_extracted_text') }
       ],
       max_tokens: 4096,
-      temperature: 0.2
+      temperature: 0.15,
+      response_format: { type: 'json_object' }
     });
     
     const cleanContent = cleanCompletion.choices[0]?.message?.content || '';
-    let cleanedResult = {
+    const cleanedResult = parseJsonContent<CleanedDocumentResult>(cleanContent, {
+      generatedTitle: '',
       cleanedText: cleanContent,
-      corrections: [] as string[],
-      keyPoints: [] as string[],
-      mentionedNames: [] as string[],
-      mentionedDates: [] as string[],
-      summary: ''
-    };
-    
-    try {
-      let jsonContent = cleanContent.replace(/```json\n?/g, '').replace(/```\n?/g, '');
-      cleanedResult = JSON.parse(jsonContent.trim());
-    } catch {}
+      corrections: [],
+      keyPoints: [],
+      mentionedNames: [],
+      mentionedDates: [],
+      summary: '',
+      confidence: totalConfidence / images.length
+    });
     
     // Return complete result
     return res.json({
@@ -551,6 +760,7 @@ Return JSON: {"cleanedText": "...", "corrections": [], "keyPoints": [], "mention
       data: {
         originalText: allExtractedText,
         translatedText,
+        generatedTitle: cleanedResult.generatedTitle,
         cleanedText: cleanedResult.cleanedText,
         detectedLanguage: sourceLanguage,
         isHandwritten,
@@ -569,6 +779,174 @@ Return JSON: {"cleanedText": "...", "corrections": [], "keyPoints": [], "mention
     return res.status(500).json({ 
       error: 'Failed to process document',
       message: error.message || 'An error occurred during document processing'
+    });
+  }
+});
+
+/**
+ * Store a wizard source file without transcription.
+ * POST /api/document-ocr/upload-source
+ */
+router.post('/upload-source', upload.single('file'), async (req: Request, res: Response) => {
+  try {
+    if (!req.file) {
+      return res.status(400).json({ error: 'A source file is required' });
+    }
+
+    const fileUrl = await uploadWizardSourceFile(
+      req.file,
+      String(req.body.organizationId || ''),
+      String(req.body.userId || '')
+    );
+
+    return res.json({
+      success: true,
+      data: {
+        sourceFileUrl: fileUrl,
+        sourceFileName: req.file.originalname,
+        sourceFileType: req.file.mimetype,
+        sourceFileSize: req.file.size,
+      }
+    });
+  } catch (error: any) {
+    console.error('Document source upload error:', error);
+    return res.status(500).json({
+      error: 'Failed to upload source file',
+      message: error.message || 'An error occurred while saving the uploaded file'
+    });
+  }
+});
+
+/**
+ * Process uploaded typed documents for the guided resolution wizard.
+ * POST /api/document-ocr/process-file
+ */
+router.post('/process-file', upload.single('file'), async (req: Request, res: Response) => {
+  try {
+    if (!req.file) {
+      return res.status(400).json({ error: 'A document file is required' });
+    }
+
+    const openai = getOpenAIClient();
+    if (!openai) {
+      return res.status(503).json({
+        error: 'AI service unavailable',
+        message: 'OpenAI API key not configured. Please contact your administrator.'
+      });
+    }
+
+    const documentType = String(req.body.documentType || 'complaint');
+    const sourceLanguage = String(req.body.sourceLanguage || 'English');
+    const sourceFileUrl = await uploadWizardSourceFile(
+      req.file,
+      String(req.body.organizationId || ''),
+      String(req.body.userId || '')
+    );
+
+    let originalText = '';
+    let detectedLanguage = sourceLanguage;
+    let isHandwritten = false;
+    let extractionConfidence = 0.75;
+    let pageCount = 1;
+
+    if (req.file.mimetype.startsWith('image/')) {
+      const imageBase64 = req.file.buffer.toString('base64');
+      const extractCompletion = await openai.chat.completions.create({
+        model: 'gpt-4o',
+        messages: [
+          {
+            role: 'system',
+            content: `You are an expert OCR system for workplace complaints and employee relations documents.
+Extract every readable word from the image. Pay close attention to handwriting. Preserve names, dates, times, quoted words, and line breaks where useful.
+Return JSON: {"extractedText": "...", "isHandwritten": true/false, "detectedLanguage": "English", "confidence": 0.0}`
+          },
+          {
+            role: 'user',
+            content: [
+              { type: 'text', text: `Extract the text from this uploaded workplace ${documentType}. Expected language: ${sourceLanguage}.` },
+              { type: 'image_url', image_url: { url: `data:${req.file.mimetype};base64,${imageBase64}`, detail: 'high' } }
+            ]
+          }
+        ],
+        max_tokens: 4096,
+        temperature: 0.1,
+        response_format: { type: 'json_object' }
+      });
+
+      const extracted = parseJsonContent<any>(extractCompletion.choices[0]?.message?.content || '{}', {});
+      originalText = String(extracted.extractedText || '');
+      detectedLanguage = String(extracted.detectedLanguage || sourceLanguage);
+      isHandwritten = Boolean(extracted.isHandwritten);
+      extractionConfidence = Number(extracted.confidence || 0.75);
+    } else {
+      const extracted = await extractUploadedDocumentText(req.file);
+      originalText = extracted.text;
+      pageCount = extracted.pageCount;
+    }
+
+    if (!originalText || originalText.trim().length < 5) {
+      return res.status(422).json({
+        error: 'No readable text found',
+        message: 'The file was saved, but DashMet could not read enough text from it. For scanned PDFs, upload a clear image or photo of the handwritten complaint.',
+        data: {
+          sourceFileUrl,
+          sourceFileName: req.file.originalname,
+          sourceFileType: req.file.mimetype,
+        }
+      });
+    }
+
+    let translatedText: string | null = null;
+    let textForCleaning = originalText;
+    if (sourceLanguage.toLowerCase() !== 'english' && !isLanguageMatch(detectedLanguage, 'English')) {
+      const translateCompletion = await openai.chat.completions.create({
+        model: 'gpt-4o',
+        messages: [
+          { role: 'system', content: `Translate this workplace document from ${sourceLanguage} to English. Preserve names, dates, quotes, and workplace terminology. Return only the translation.` },
+          { role: 'user', content: wrapUserContent(sanitizeForPrompt(originalText, { maxLength: 16000, context: 'wizard-file-translation' }), 'document_to_translate') }
+        ],
+        max_tokens: 4096,
+        temperature: 0.1
+      });
+      translatedText = translateCompletion.choices[0]?.message?.content || null;
+      textForCleaning = translatedText || originalText;
+    }
+
+    const cleanedResult = await cleanEnterpriseDocumentText(
+      openai,
+      textForCleaning,
+      documentType,
+      sourceLanguage,
+      req.file.originalname
+    );
+
+    return res.json({
+      success: true,
+      data: {
+        originalText,
+        translatedText,
+        generatedTitle: cleanedResult.generatedTitle,
+        cleanedText: cleanedResult.cleanedText,
+        detectedLanguage,
+        isHandwritten,
+        keyPoints: cleanedResult.keyPoints || [],
+        mentionedNames: cleanedResult.mentionedNames || [],
+        mentionedDates: cleanedResult.mentionedDates || [],
+        summary: cleanedResult.summary || '',
+        corrections: cleanedResult.corrections || [],
+        pageCount,
+        confidence: cleanedResult.confidence || extractionConfidence,
+        sourceFileUrl,
+        sourceFileName: req.file.originalname,
+        sourceFileType: req.file.mimetype,
+        sourceFileSize: req.file.size,
+      }
+    });
+  } catch (error: any) {
+    console.error('Wizard file processing error:', error);
+    return res.status(500).json({
+      error: 'Failed to process uploaded document',
+      message: error.message || 'An error occurred while transcribing the uploaded document'
     });
   }
 });

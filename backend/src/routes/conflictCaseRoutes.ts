@@ -55,6 +55,8 @@ function decryptCaseData(caseData: any): any {
   if (decrypted.approvedEmployeeNames) decrypted.approvedEmployeeNames = decrypt(decrypted.approvedEmployeeNames);
   if (decrypted.policyMatches) decrypted.policyMatches = decrypt(decrypted.policyMatches);
   if (decrypted.policyMatchingResult) decrypted.policyMatchingResult = decrypt(decrypted.policyMatchingResult);
+  if (decrypted.guidedReview) decrypted.guidedReview = decrypt(decrypted.guidedReview);
+  if (decrypted.guidedActionPlan) decrypted.guidedActionPlan = decrypt(decrypted.guidedActionPlan);
   if (decrypted.supervisorNotes) decrypted.supervisorNotes = decrypt(decrypted.supervisorNotes);
   
   // Decrypt case closure fields
@@ -155,6 +157,8 @@ router.post('/', async (req: Request, res: Response) => {
       fullGeneratedDocumentResultJson,
       policyMatchesJson,
       policyMatches,
+      guidedReviewJson,
+      guidedActionPlanJson,
       supervisorNotes,
       finalDecision,
       activePolicyId,
@@ -250,6 +254,8 @@ router.post('/', async (req: Request, res: Response) => {
         generatedDocument: (generatedDocument || generatedActionDocJson) ? encrypt(JSON.stringify(generatedDocument || generatedActionDocJson)) : null,
         fullGeneratedDocumentResult: fullGeneratedDocumentResultJson ? encrypt(JSON.stringify(fullGeneratedDocumentResultJson)) : null,
         policyMatches: (policyMatches || policyMatchesJson) ? encrypt(JSON.stringify(policyMatches || policyMatchesJson)) : null,
+        guidedReview: guidedReviewJson ? encrypt(JSON.stringify(guidedReviewJson)) : null,
+        guidedActionPlan: guidedActionPlanJson ? encrypt(JSON.stringify(guidedActionPlanJson)) : null,
         supervisorNotes: supervisorNotes ? encrypt(supervisorNotes) : null,
         activePolicyId: validatedPolicyId,
         createdBy: creatorId,
@@ -310,12 +316,29 @@ router.post('/', async (req: Request, res: Response) => {
       
       for (const doc of documents) {
         const mappedDocType = docTypeMap[doc.type?.toLowerCase()] || doc.type?.toUpperCase() || 'OTHER';
+        const originalText = doc.originalText || doc.content || doc.extractedText || null;
+        const originalImageUrls = Array.isArray(doc.originalImageUrls)
+          ? doc.originalImageUrls
+          : doc.sourceFileUrl
+            ? [doc.sourceFileUrl]
+            : doc.url
+              ? [doc.url]
+              : [];
+        const processedImageUrls = Array.isArray(doc.processedImageUrls) ? doc.processedImageUrls : [];
+
         await prisma.conflictCaseDocument.create({
           data: {
             caseId: conflictCase.id,
             type: mappedDocType as any,
-            originalText: doc.content ? encrypt(doc.content) : (doc.extractedText ? encrypt(doc.extractedText) : null),
-            originalImageUrls: doc.url ? encrypt(JSON.stringify([doc.url])) : null,
+            originalText: originalText ? encrypt(originalText) : null,
+            cleanedText: doc.cleanedText ? encrypt(doc.cleanedText) : null,
+            translatedText: doc.translatedText ? encrypt(doc.translatedText) : null,
+            originalImageUrls: originalImageUrls.length ? encrypt(JSON.stringify(originalImageUrls)) : null,
+            processedImageUrls: processedImageUrls.length ? encrypt(JSON.stringify(processedImageUrls)) : null,
+            detectedLanguage: doc.detectedLanguage || null,
+            isHandwritten: Boolean(doc.isHandwritten),
+            pageCount: doc.pageCount || 1,
+            submittedBy: doc.submittedBy ? encrypt(doc.submittedBy) : null,
           },
         });
       }
@@ -575,6 +598,8 @@ router.patch('/:id', async (req: Request, res: Response, next) => {
       approvedEmployeeNamesJson, // Array of employee names whose documents have been approved
       policyMatchesJson,
       policyMatchingResultJson, // Full policy matching result for UI restoration
+      guidedReviewJson,
+      guidedActionPlanJson,
       supervisorNotes,
       finalDecision,
       involvedEmployeesJson, // Array of employees to update
@@ -706,6 +731,14 @@ router.patch('/:id', async (req: Request, res: Response, next) => {
     if (policyMatchingResultJson !== undefined) {
       updateData.policyMatchingResult = encrypt(JSON.stringify(policyMatchingResultJson));
       changes.policyMatchingResult = 'updated';
+    }
+    if (guidedReviewJson !== undefined) {
+      updateData.guidedReview = guidedReviewJson ? encrypt(JSON.stringify(guidedReviewJson)) : null;
+      changes.guidedReview = 'updated';
+    }
+    if (guidedActionPlanJson !== undefined) {
+      updateData.guidedActionPlan = guidedActionPlanJson ? encrypt(JSON.stringify(guidedActionPlanJson)) : null;
+      changes.guidedActionPlan = 'updated';
     }
     if (supervisorNotes !== undefined) {
       updateData.supervisorNotes = encrypt(supervisorNotes);

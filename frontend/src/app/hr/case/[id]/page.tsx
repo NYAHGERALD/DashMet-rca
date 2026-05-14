@@ -83,9 +83,13 @@ import {
   Recommendation,
   EmployeeRecommendationGroup,
   GeneratedActionDocument,
+  GuidedActionPlan,
+  GuidedReviewAnswers,
+  GuidedRiskKey,
   DocumentEdit,
   ReviewComment,
   CaseStatus,
+  CaseType,
   ActionType,
   DocumentType,
   fetchCase,
@@ -117,6 +121,7 @@ import {
   runComparison,
   runPolicyMatching,
   runDecisionSupport,
+  runGuidedActionPlan,
   generateActionDocument,
   getStatusColor,
   getStatusLabel,
@@ -162,6 +167,46 @@ function SectionCard({ title, icon: Icon, children, actions, collapsible, defaul
   );
 }
 
+const GUIDED_RISK_OPTIONS: Array<{ key: GuidedRiskKey; label: string; description: string }> = [
+  { key: 'safety_complaint', label: 'Safety policy complaint', description: 'Conduct may involve refusal, bypass, or failure to follow safety rules.' },
+  { key: 'harassment_or_discrimination', label: 'Harassment or discrimination', description: 'Facts may involve protected class, harassment, bias, or hostile conduct.' },
+  { key: 'retaliation_concern', label: 'Retaliation concern', description: 'Action could appear connected to a report, complaint, or protected activity.' },
+  { key: 'medical_or_accommodation', label: 'Medical or accommodation', description: 'Facts may involve injury, disability, medical restriction, or accommodation.' },
+  { key: 'protected_concerted_activity', label: 'Protected workplace activity', description: 'Facts may involve group concerns about working conditions or labor rights.' },
+  { key: 'wage_hour_or_leave', label: 'Wage, hour, or leave', description: 'Facts may involve timekeeping, leave, scheduling, or pay protections.' },
+  { key: 'none', label: 'No sensitive risk identified', description: 'No HR-sensitive risk flag has been identified from the available facts.' },
+];
+
+const DEFAULT_GUIDED_REVIEW: GuidedReviewAnswers = {
+  behaviorSummary: '',
+  policyTrainingStatus: 'unknown',
+  repeatedBehaviorStatus: 'unknown',
+  safetyImpactStatus: 'unknown',
+  employeeResponseStatus: 'needed',
+  riskFlags: [],
+  supervisorDecisionNotes: '',
+};
+
+function parseSavedJson<T>(value: unknown): T | null {
+  if (!value) return null;
+  if (typeof value === 'object') return value as T;
+  try {
+    return JSON.parse(String(value)) as T;
+  } catch {
+    return null;
+  }
+}
+
+function toDocxEmployee(employee: InvolvedEmployee | null | undefined): { name?: string; role?: string; department?: string; employeeFileNo?: string } | null {
+  if (!employee) return null;
+  return {
+    name: employee.name || undefined,
+    role: employee.role || undefined,
+    department: employee.department || undefined,
+    employeeFileNo: employee.employeeFileNo || undefined,
+  };
+}
+
 // ─── OVERVIEW TAB ─────────────────────────────────────────────────────────────
 
 function OverviewTab({ caseData, onUpdate, userId }: {
@@ -177,7 +222,7 @@ function OverviewTab({ caseData, onUpdate, userId }: {
 
   // Editable case fields
   const [isEditing, setIsEditing] = useState(false);
-  const [editType, setEditType] = useState(caseData.type || 'conflict');
+  const [editType, setEditType] = useState<CaseType>(caseData.type || 'CONFLICT');
   const [editIncidentDate, setEditIncidentDate] = useState(caseData.incidentDate ? caseData.incidentDate.split('T')[0] : '');
   const [editLocation, setEditLocation] = useState(caseData.location || '');
   const [editDepartment, setEditDepartment] = useState(caseData.department || '');
@@ -205,7 +250,7 @@ function OverviewTab({ caseData, onUpdate, userId }: {
 
   const handleCancelEdit = () => {
     setIsEditing(false);
-    setEditType(caseData.type || 'conflict');
+    setEditType(caseData.type || 'CONFLICT');
     setEditIncidentDate(caseData.incidentDate ? caseData.incidentDate.split('T')[0] : '');
     setEditLocation(caseData.location || '');
     setEditDepartment(caseData.department || '');
@@ -273,11 +318,11 @@ function OverviewTab({ caseData, onUpdate, userId }: {
             <div className="grid md:grid-cols-2 lg:grid-cols-3 gap-4">
               <div>
                 <label className="block text-xs font-medium text-gray-500 dark:text-gray-400 uppercase tracking-wide mb-1.5">Case Type</label>
-                <select value={editType} onChange={e => setEditType(e.target.value)} title="Case type" className="w-full px-3 py-2.5 rounded-lg border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-700 text-sm text-gray-900 dark:text-white focus:ring-2 focus:ring-blue-500">
-                  <option value="conflict">Workplace Conflict</option>
-                  <option value="conduct">Conduct Issue</option>
-                  <option value="safety">Safety Concern</option>
-                  <option value="other">Other</option>
+                <select value={editType} onChange={e => setEditType(e.target.value as CaseType)} title="Case type" className="w-full px-3 py-2.5 rounded-lg border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-700 text-sm text-gray-900 dark:text-white focus:ring-2 focus:ring-blue-500">
+                  <option value="CONFLICT">Workplace Conflict</option>
+                  <option value="CONDUCT">Conduct Issue</option>
+                  <option value="SAFETY">Safety Concern</option>
+                  <option value="OTHER">Other</option>
                 </select>
               </div>
               <div>
@@ -1611,7 +1656,7 @@ function DocumentsTab({ caseData, onUpdate, userId, userName }: {
                           else if (reviewTab === 'translated') text = ocrResult.translatedText || 'No translation';
                           else if (reviewTab === 'cleaned') text = editedCleanedText || ocrResult.cleanedText || 'No cleaned text';
 
-                          if (!isReading || reviewTab === 'images') return text;
+                          if (!isReading) return text;
 
                           const words = text.split(/(\s+)/);
                           return words.map((segment, i) => {
@@ -2264,6 +2309,12 @@ function AnalysisTab({ caseData, onUpdate, userId }: {
   const [commentSectionId, setCommentSectionId] = useState<string | null>(null);
   const [commentText, setCommentText] = useState('');
   const [addingComment, setAddingComment] = useState(false);
+  const [guidedReview, setGuidedReview] = useState<GuidedReviewAnswers>(DEFAULT_GUIDED_REVIEW);
+  const [guidedActionPlan, setGuidedActionPlan] = useState<GuidedActionPlan | null>(null);
+  const [guidedSaving, setGuidedSaving] = useState(false);
+  const [guidedGenerating, setGuidedGenerating] = useState(false);
+  const [guidedSavedAt, setGuidedSavedAt] = useState<string | null>(null);
+  const [guidedError, setGuidedError] = useState('');
 
   const DOC_GEN_STEPS = [
     { label: 'Analyzing case details', icon: '📋' },
@@ -2614,6 +2665,16 @@ function AnalysisTab({ caseData, onUpdate, userId }: {
     if (caseData.policyMatches) try { setPolicyResult(JSON.parse(caseData.policyMatches)); } catch {}
     if (caseData.recommendationResult) try { setRecommendationResult(JSON.parse(caseData.recommendationResult)); } catch {}
     if (caseData.recommendations) try { setRecommendationResult(JSON.parse(caseData.recommendations)); } catch {}
+    const savedGuidedReview = parseSavedJson<GuidedReviewAnswers>(caseData.guidedReview);
+    if (savedGuidedReview) {
+      setGuidedReview({ ...DEFAULT_GUIDED_REVIEW, ...savedGuidedReview, riskFlags: savedGuidedReview.riskFlags || [] });
+      setGuidedSavedAt(savedGuidedReview.updatedAt || null);
+    } else {
+      setGuidedReview(DEFAULT_GUIDED_REVIEW);
+      setGuidedSavedAt(null);
+    }
+    const savedGuidedPlan = parseSavedJson<GuidedActionPlan>(caseData.guidedActionPlan);
+    setGuidedActionPlan(savedGuidedPlan);
     if (caseData.selectedAction) setSelectedRecommendation(caseData.selectedAction);
     // Load generated document if exists
     const rawDoc = caseData.fullGeneratedDocumentResult || caseData.generatedDocument;
@@ -2787,7 +2848,15 @@ function AnalysisTab({ caseData, onUpdate, userId }: {
     }, 4000);
     try {
       const allSections: any[] = [];
-      policies.forEach(p => {
+      const activePolicies = policies.filter(p => p.status === 'ACTIVE');
+      if (activePolicies.length === 0) {
+        setError('No active policies available. Activate one or more workplace policies before running policy matching.');
+        setStep(0);
+        setPolicyAnalyzing(false);
+        if (policyStepTimerRef.current) clearInterval(policyStepTimerRef.current);
+        return;
+      }
+      activePolicies.forEach(p => {
         // Backend returns sections as a decrypted JSON string — parse it like iOS does
         let parsed: any[] | null = null;
         if (p.sections) {
@@ -2798,12 +2867,21 @@ function AnalysisTab({ caseData, onUpdate, userId }: {
           }
         }
         if (parsed && Array.isArray(parsed) && parsed.length > 0) {
-          allSections.push(...parsed);
+          allSections.push(...parsed.map((section, index) => ({
+            ...section,
+            id: `${p.id}:${section.id || section.sectionNumber || index}`,
+            sectionNumber: section.sectionNumber || `${index + 1}`,
+            title: section.title || section.type || 'Policy section',
+            content: section.content || '',
+            type: section.type || 'general',
+            policyName: p.name,
+            policyVersion: p.version,
+          })));
         } else if (p.originalText) {
-          allSections.push({ id: p.id, sectionNumber: '1', title: p.name, content: p.originalText, type: 'general', keywords: [] });
+          allSections.push({ id: `${p.id}:full-policy`, sectionNumber: '1', title: p.name, content: p.originalText, type: 'general', keywords: [], policyName: p.name, policyVersion: p.version });
         }
       });
-      if (allSections.length === 0) { setError('No policy sections available. Please add policies first.'); setStep(0); setPolicyAnalyzing(false); if (policyStepTimerRef.current) clearInterval(policyStepTimerRef.current); return; }
+      if (allSections.length === 0) { setError('No active policy sections available. Add sections to one or more active policies first.'); setStep(0); setPolicyAnalyzing(false); if (policyStepTimerRef.current) clearInterval(policyStepTimerRef.current); return; }
       const result = await runPolicyMatching({
         caseDetails: { caseType: caseData.type, incidentDate: caseData.incidentDate || '', location: caseData.location || '', department: caseData.department || '' },
         complaintA: { employeeName: complainantA?.name || 'Party A', text: complaintA?.cleanedText || complaintA?.originalText || '' },
@@ -2861,6 +2939,105 @@ function AnalysisTab({ caseData, onUpdate, userId }: {
     } finally {
       await finishSteps(recommendationStepRef.current, RECOMMENDATION_ANALYSIS_STEPS.length, (s) => { recommendationStepRef.current = s; setRecommendationAnalysisStep(s); }, recommendationStepTimerRef);
       setStep(0); setRecommendationAnalyzing(false);
+    }
+  };
+
+  const updateGuidedReviewField = <K extends keyof GuidedReviewAnswers>(field: K, value: GuidedReviewAnswers[K]) => {
+    setGuidedReview(prev => ({ ...prev, [field]: value }));
+    setGuidedError('');
+  };
+
+  const toggleGuidedRisk = (key: GuidedRiskKey) => {
+    setGuidedReview(prev => {
+      const selected = prev.riskFlags || [];
+      const isSelected = selected.includes(key);
+      let next = isSelected ? selected.filter(item => item !== key) : [...selected, key];
+      if (key === 'none' && !isSelected) next = ['none'];
+      if (key !== 'none') next = next.filter(item => item !== 'none');
+      return { ...prev, riskFlags: next };
+    });
+    setGuidedError('');
+  };
+
+  const handleSaveGuidedReview = async (showSaved = true): Promise<GuidedReviewAnswers> => {
+    const payload: GuidedReviewAnswers = {
+      ...guidedReview,
+      behaviorSummary: guidedReview.behaviorSummary.trim(),
+      supervisorDecisionNotes: guidedReview.supervisorDecisionNotes.trim(),
+      updatedAt: new Date().toISOString(),
+    };
+    setGuidedSaving(true);
+    setGuidedError('');
+    try {
+      await updateCase(caseData.id, { guidedReviewJson: payload, userId });
+      setGuidedReview(payload);
+      setGuidedSavedAt(payload.updatedAt || null);
+      if (showSaved) onUpdate();
+      return payload;
+    } catch (err: any) {
+      const message = err?.response?.data?.error || err?.message || 'Unable to save guided review';
+      setGuidedError(message);
+      throw err;
+    } finally {
+      setGuidedSaving(false);
+    }
+  };
+
+  const handleGenerateGuidedActionPlan = async () => {
+    if (!guidedReview.behaviorSummary.trim()) {
+      setGuidedError('Describe the conduct or concern before generating the HR action plan.');
+      return;
+    }
+
+    setGuidedGenerating(true);
+    setGuidedError('');
+    try {
+      const savedReview = await handleSaveGuidedReview(false);
+      const result = await runGuidedActionPlan({
+        caseDetails: {
+          caseNumber: caseData.caseNumber,
+          caseType: caseData.type,
+          incidentDate: caseData.incidentDate || '',
+          location: caseData.location || '',
+          department: caseData.department || '',
+          shift: caseData.shift || '',
+        },
+        complaintA: complaintA ? {
+          employeeName: complainantA?.name || 'Party A',
+          text: complaintA.cleanedText || complaintA.originalText || '',
+        } : undefined,
+        complaintB: complaintB ? {
+          employeeName: complainantB?.name || 'Party B',
+          text: complaintB.cleanedText || complaintB.originalText || '',
+        } : undefined,
+        analysisResult: comparisonResult ? {
+          contradictions: comparisonResult.contradictions,
+          agreementPoints: comparisonResult.agreementPoints,
+          missingDetails: comparisonResult.missingDetails,
+          neutralSummary: comparisonResult.neutralSummary,
+          emotionalLanguage: comparisonResult.emotionalLanguage,
+        } : undefined,
+        policyMatches: policyResult?.matches?.map(m => ({
+          sectionTitle: m.sectionTitle,
+          relevanceExplanation: m.relevanceExplanation,
+          matchConfidence: m.matchConfidence,
+        })),
+        recommendations: recommendationResult?.recommendations?.map(r => ({
+          title: r.title,
+          type: r.type,
+          rationale: r.rationale,
+          riskLevel: r.riskLevel,
+          targetEmployeeNames: r.targetEmployeeNames,
+        })),
+        guidedReview: savedReview,
+      });
+      setGuidedActionPlan(result);
+      await updateCase(caseData.id, { guidedActionPlanJson: result, userId });
+      onUpdate();
+    } catch (err: any) {
+      setGuidedError(err?.response?.data?.error || err?.message || 'Unable to generate guided action plan');
+    } finally {
+      setGuidedGenerating(false);
     }
   };
 
@@ -3174,7 +3351,7 @@ function AnalysisTab({ caseData, onUpdate, userId }: {
   };
 
   // ─── Analysis Modal Content ──────────────────────────────────────────
-  const renderAnalysisModal = () => {
+	  const renderAnalysisModal = () => {
     if (!showAnalysisModal || !comparisonResult) return null;
     const modalTabs = [
       { id: 'summary' as const, label: 'Summary' },
@@ -3379,10 +3556,387 @@ function AnalysisTab({ caseData, onUpdate, userId }: {
             />
           )}
         </div>
+	    );
+	  };
+
+  const renderGuidedConductReview = () => {
+    const selectedRiskCount = (guidedReview.riskFlags || []).filter(flag => flag !== 'none').length;
+    const missingDetails = comparisonResult?.missingDetails || [];
+    const selectClass = "w-full px-3 py-2 rounded-lg border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-900 text-sm text-gray-900 dark:text-white focus:ring-2 focus:ring-blue-500 focus:border-blue-500";
+    const textareaClass = "w-full px-3 py-2 rounded-lg border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-900 text-sm text-gray-900 dark:text-white focus:ring-2 focus:ring-blue-500 focus:border-blue-500 resize-none";
+
+    return (
+      <div className="border-t-2 border-black dark:border-gray-500">
+        <div className="p-6 bg-gradient-to-br from-slate-50 via-blue-50/50 to-white dark:from-gray-900 dark:via-blue-950/20 dark:to-gray-900">
+          <div className="rounded-2xl border border-blue-200 dark:border-blue-900/50 bg-white dark:bg-gray-800 overflow-hidden shadow-sm">
+            <div className="px-5 py-4 border-b border-blue-100 dark:border-blue-900/40 bg-blue-50/70 dark:bg-blue-950/20">
+              <div className="flex items-start justify-between gap-4">
+                <div className="flex items-start gap-3">
+                  <div className="w-11 h-11 rounded-xl bg-blue-600 flex items-center justify-center flex-shrink-0">
+                    <ClipboardList className="w-5 h-5 text-white" />
+                  </div>
+                  <div>
+                    <div className="flex items-center gap-2 flex-wrap">
+                      <h3 className="text-base font-bold text-gray-900 dark:text-white">Guided Conduct Review</h3>
+                      <span className="px-2.5 py-0.5 rounded-full text-[11px] font-semibold bg-white dark:bg-gray-900 text-blue-700 dark:text-blue-300 border border-blue-200 dark:border-blue-800">
+                        HR-reviewable
+                      </span>
+                    </div>
+                    <p className="text-sm text-gray-600 dark:text-gray-300 mt-1 max-w-3xl">
+                      Document facts, identify missing information, match policy, check risk, and prepare an action plan for supervisor and HR review.
+                    </p>
+                  </div>
+                </div>
+                {guidedSavedAt && (
+                  <span className="text-[11px] text-gray-500 dark:text-gray-400 whitespace-nowrap">
+                    Saved {formatDateTime(guidedSavedAt)}
+                  </span>
+                )}
+              </div>
+              <div className="mt-3 flex items-start gap-2 rounded-xl border border-amber-200 dark:border-amber-800/50 bg-amber-50 dark:bg-amber-900/10 px-3 py-2">
+                <ShieldCheck className="w-4 h-4 text-amber-600 dark:text-amber-400 mt-0.5 flex-shrink-0" />
+                <p className="text-xs leading-relaxed text-amber-800 dark:text-amber-200">
+                  Decision support only. The supervisor and HR make the final decision after reviewing facts, policy, consistency, and business risk.
+                </p>
+              </div>
+            </div>
+
+            <div className="p-5 space-y-5">
+              {guidedError && (
+                <div className="rounded-xl border border-red-200 dark:border-red-800/50 bg-red-50 dark:bg-red-900/10 px-3 py-2 text-sm text-red-700 dark:text-red-300 flex items-start gap-2">
+                  <AlertCircle className="w-4 h-4 mt-0.5 flex-shrink-0" />
+                  <span>{guidedError}</span>
+                </div>
+              )}
+
+              <div>
+                <label className="block text-xs font-semibold uppercase tracking-wide text-gray-500 dark:text-gray-400 mb-1.5">
+                  Conduct or complaint summary
+                </label>
+                <textarea
+                  value={guidedReview.behaviorSummary}
+                  onChange={(e) => updateGuidedReviewField('behaviorSummary', e.target.value)}
+                  disabled={caseData.isLocked}
+                  rows={4}
+                  className={textareaClass}
+                  placeholder="Summarize the employee conduct, policy concern, or complaint using neutral, observable facts."
+                />
+              </div>
+
+              <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-4 gap-3">
+                <div>
+                  <label className="block text-xs font-semibold uppercase tracking-wide text-gray-500 dark:text-gray-400 mb-1.5">Policy training</label>
+                  <select
+                    value={guidedReview.policyTrainingStatus}
+                    onChange={(e) => updateGuidedReviewField('policyTrainingStatus', e.target.value as GuidedReviewAnswers['policyTrainingStatus'])}
+                    disabled={caseData.isLocked}
+                    className={selectClass}
+                  >
+                    <option value="unknown">Unknown</option>
+                    <option value="yes">Employee was trained</option>
+                    <option value="no">Training not confirmed</option>
+                  </select>
+                </div>
+                <div>
+                  <label className="block text-xs font-semibold uppercase tracking-wide text-gray-500 dark:text-gray-400 mb-1.5">Prior pattern</label>
+                  <select
+                    value={guidedReview.repeatedBehaviorStatus}
+                    onChange={(e) => updateGuidedReviewField('repeatedBehaviorStatus', e.target.value as GuidedReviewAnswers['repeatedBehaviorStatus'])}
+                    disabled={caseData.isLocked}
+                    className={selectClass}
+                  >
+                    <option value="unknown">Unknown</option>
+                    <option value="first_time">First known concern</option>
+                    <option value="repeated">Repeated or documented pattern</option>
+                  </select>
+                </div>
+                <div>
+                  <label className="block text-xs font-semibold uppercase tracking-wide text-gray-500 dark:text-gray-400 mb-1.5">Safety impact</label>
+                  <select
+                    value={guidedReview.safetyImpactStatus}
+                    onChange={(e) => updateGuidedReviewField('safetyImpactStatus', e.target.value as GuidedReviewAnswers['safetyImpactStatus'])}
+                    disabled={caseData.isLocked}
+                    className={selectClass}
+                  >
+                    <option value="unknown">Unknown</option>
+                    <option value="yes">Actual or potential safety impact</option>
+                    <option value="no">No known safety impact</option>
+                  </select>
+                </div>
+                <div>
+                  <label className="block text-xs font-semibold uppercase tracking-wide text-gray-500 dark:text-gray-400 mb-1.5">Employee response</label>
+                  <select
+                    value={guidedReview.employeeResponseStatus}
+                    onChange={(e) => updateGuidedReviewField('employeeResponseStatus', e.target.value as GuidedReviewAnswers['employeeResponseStatus'])}
+                    disabled={caseData.isLocked}
+                    className={selectClass}
+                  >
+                    <option value="needed">Response still needed</option>
+                    <option value="received">Response received</option>
+                    <option value="not_applicable">Not applicable</option>
+                  </select>
+                </div>
+              </div>
+
+              {missingDetails.length > 0 && (
+                <div className="rounded-xl border border-orange-200 dark:border-orange-800/50 bg-orange-50 dark:bg-orange-900/10 p-4">
+                  <div className="flex items-center gap-2 mb-2">
+                    <AlertTriangle className="w-4 h-4 text-orange-600 dark:text-orange-400" />
+                    <p className="text-sm font-semibold text-gray-900 dark:text-white">Missing information from the complaint analysis</p>
+                  </div>
+                  <ul className="grid grid-cols-1 md:grid-cols-2 gap-2">
+                    {missingDetails.slice(0, 6).map((item, index) => (
+                      <li key={index} className="text-sm text-gray-700 dark:text-gray-300 flex items-start gap-2">
+                        <span className="w-1.5 h-1.5 rounded-full bg-orange-500 mt-2 flex-shrink-0" />
+                        {item}
+                      </li>
+                    ))}
+                  </ul>
+                </div>
+              )}
+
+              <div>
+                <div className="flex items-center justify-between gap-3 mb-2">
+                  <label className="text-xs font-semibold uppercase tracking-wide text-gray-500 dark:text-gray-400">
+                    HR risk screen
+                  </label>
+                  <span className={`px-2.5 py-0.5 rounded-full text-[11px] font-semibold ${selectedRiskCount > 0 ? 'bg-red-100 text-red-700 dark:bg-red-900/30 dark:text-red-300' : 'bg-green-100 text-green-700 dark:bg-green-900/30 dark:text-green-300'}`}>
+                    {selectedRiskCount > 0 ? `${selectedRiskCount} risk flag${selectedRiskCount === 1 ? '' : 's'}` : 'No sensitive risk selected'}
+                  </span>
+                </div>
+                <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-2.5">
+                  {GUIDED_RISK_OPTIONS.map(option => {
+                    const selected = (guidedReview.riskFlags || []).includes(option.key);
+                    return (
+                      <button
+                        key={option.key}
+                        type="button"
+                        onClick={() => toggleGuidedRisk(option.key)}
+                        disabled={caseData.isLocked}
+                        className={`text-left rounded-xl border px-3 py-3 transition-colors disabled:opacity-60 ${
+                          selected
+                            ? option.key === 'none'
+                              ? 'border-green-300 bg-green-50 dark:border-green-800 dark:bg-green-900/10'
+                              : 'border-red-300 bg-red-50 dark:border-red-800 dark:bg-red-900/10'
+                            : 'border-gray-200 bg-white hover:bg-gray-50 dark:border-gray-700 dark:bg-gray-900 dark:hover:bg-gray-800'
+                        }`}
+                      >
+                        <div className="flex items-start gap-2">
+                          <span className={`mt-0.5 w-4 h-4 rounded border flex items-center justify-center flex-shrink-0 ${
+                            selected ? 'bg-blue-600 border-blue-600 text-white' : 'border-gray-300 dark:border-gray-600'
+                          }`}>
+                            {selected && <CheckCircle2 className="w-3 h-3" />}
+                          </span>
+                          <span>
+                            <span className="block text-sm font-semibold text-gray-900 dark:text-white">{option.label}</span>
+                            <span className="block text-xs text-gray-500 dark:text-gray-400 mt-0.5 leading-relaxed">{option.description}</span>
+                          </span>
+                        </div>
+                      </button>
+                    );
+                  })}
+                </div>
+              </div>
+
+              <div>
+                <label className="block text-xs font-semibold uppercase tracking-wide text-gray-500 dark:text-gray-400 mb-1.5">
+                  Supervisor decision notes
+                </label>
+                <textarea
+                  value={guidedReview.supervisorDecisionNotes}
+                  onChange={(e) => updateGuidedReviewField('supervisorDecisionNotes', e.target.value)}
+                  disabled={caseData.isLocked}
+                  rows={3}
+                  className={textareaClass}
+                  placeholder="Add consistency checks, witness follow-up, HR questions, or proposed next steps."
+                />
+              </div>
+
+              {!caseData.isLocked && (
+                <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3 pt-1">
+                  <button
+                    type="button"
+                    onClick={() => handleSaveGuidedReview(true)}
+                    disabled={guidedSaving || guidedGenerating}
+                    className="px-4 py-2.5 rounded-xl text-sm font-semibold text-gray-700 dark:text-gray-200 bg-gray-100 dark:bg-gray-700 hover:bg-gray-200 dark:hover:bg-gray-600 disabled:opacity-50 flex items-center justify-center gap-2"
+                  >
+                    {guidedSaving ? <Loader2 className="w-4 h-4 animate-spin" /> : <Save className="w-4 h-4" />}
+                    Save Progress
+                  </button>
+                  <button
+                    type="button"
+                    onClick={handleGenerateGuidedActionPlan}
+                    disabled={guidedGenerating || guidedSaving || !guidedReview.behaviorSummary.trim()}
+                    className="px-5 py-2.5 rounded-xl text-sm font-bold text-white bg-blue-600 hover:bg-blue-700 disabled:opacity-50 flex items-center justify-center gap-2 shadow-lg shadow-blue-600/20"
+                  >
+                    {guidedGenerating ? <Loader2 className="w-4 h-4 animate-spin" /> : <Sparkles className="w-4 h-4" />}
+                    {guidedActionPlan ? 'Regenerate HR Action Plan' : 'Generate HR Action Plan'}
+                  </button>
+                </div>
+              )}
+
+              {guidedActionPlan && (
+                <div className="mt-6 rounded-2xl border border-gray-200 dark:border-gray-700 bg-gray-50 dark:bg-gray-900/60 overflow-hidden">
+                  <div className="px-5 py-4 border-b border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-800 flex items-start justify-between gap-4">
+                    <div>
+                      <h4 className="text-base font-bold text-gray-900 dark:text-white flex items-center gap-2">
+                        <FileCheck className="w-5 h-5 text-blue-600 dark:text-blue-400" />
+                        HR Action Plan
+                      </h4>
+                      <p className="text-xs text-gray-500 dark:text-gray-400 mt-1">
+                        Generated {formatDateTime(guidedActionPlan.generatedAt)}
+                      </p>
+                    </div>
+                    <span className={`px-3 py-1 rounded-full text-[11px] font-bold whitespace-nowrap ${guidedActionPlan.hrReviewRequired ? 'bg-red-100 text-red-700 dark:bg-red-900/30 dark:text-red-300' : 'bg-green-100 text-green-700 dark:bg-green-900/30 dark:text-green-300'}`}>
+                      {guidedActionPlan.hrReviewRequired ? 'HR Review Required' : 'Supervisor Review Ready'}
+                    </span>
+                  </div>
+
+                  <div className="p-5 space-y-5">
+                    <p className="text-sm leading-relaxed text-gray-800 dark:text-gray-200">{guidedActionPlan.executiveSummary}</p>
+
+                    <div className="rounded-xl bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-700 p-4">
+                      <p className="text-sm font-semibold text-gray-900 dark:text-white mb-2">HR review reason</p>
+                      <p className="text-sm text-gray-700 dark:text-gray-300 leading-relaxed">{guidedActionPlan.hrReviewReason}</p>
+                    </div>
+
+                    <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
+                      <div className="rounded-xl bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-700 p-4">
+                        <p className="text-sm font-semibold text-gray-900 dark:text-white mb-3">Missing information</p>
+                        {guidedActionPlan.missingInformation.length > 0 ? (
+                          <ul className="space-y-2">
+                            {guidedActionPlan.missingInformation.map((item, index) => (
+                              <li key={index} className="text-sm text-gray-700 dark:text-gray-300 flex items-start gap-2">
+                                <AlertTriangle className="w-4 h-4 text-orange-500 mt-0.5 flex-shrink-0" />
+                                {item}
+                              </li>
+                            ))}
+                          </ul>
+                        ) : (
+                          <p className="text-sm text-gray-500 dark:text-gray-400">No major missing items identified.</p>
+                        )}
+                      </div>
+
+                      <div className="rounded-xl bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-700 p-4">
+                        <p className="text-sm font-semibold text-gray-900 dark:text-white mb-3">Risk review</p>
+                        {guidedActionPlan.riskFlags.length > 0 ? (
+                          <div className="space-y-3">
+                            {guidedActionPlan.riskFlags.map((flag, index) => (
+                              <div key={index} className="text-sm">
+                                <div className="flex items-center gap-2">
+                                  <Shield className={`w-4 h-4 ${flag.requiresHRReview ? 'text-red-500' : 'text-green-500'}`} />
+                                  <span className="font-semibold text-gray-900 dark:text-white">{flag.label}</span>
+                                </div>
+                                <p className="text-gray-600 dark:text-gray-400 mt-1 pl-6">{flag.whyItMatters}</p>
+                              </div>
+                            ))}
+                          </div>
+                        ) : (
+                          <p className="text-sm text-gray-500 dark:text-gray-400">No risk flags returned.</p>
+                        )}
+                      </div>
+                    </div>
+
+                    {guidedActionPlan.policyAlignment.length > 0 && (
+                      <div className="rounded-xl bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-700 p-4">
+                        <p className="text-sm font-semibold text-gray-900 dark:text-white mb-3">Policy alignment</p>
+                        <ul className="grid grid-cols-1 md:grid-cols-2 gap-2">
+                          {guidedActionPlan.policyAlignment.map((item, index) => (
+                            <li key={index} className="text-sm text-gray-700 dark:text-gray-300 flex items-start gap-2">
+                              <BookOpen className="w-4 h-4 text-purple-500 mt-0.5 flex-shrink-0" />
+                              {item}
+                            </li>
+                          ))}
+                        </ul>
+                      </div>
+                    )}
+
+                    {guidedActionPlan.recommendedDecisionOptions.length > 0 && (
+                      <div>
+                        <p className="text-sm font-semibold text-gray-900 dark:text-white mb-3">Decision options for review</p>
+                        <div className="grid grid-cols-1 lg:grid-cols-2 gap-3">
+                          {guidedActionPlan.recommendedDecisionOptions.map((option, index) => (
+                            <div key={index} className="rounded-xl bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-700 p-4">
+                              <p className="text-sm font-bold text-gray-900 dark:text-white">{option.option}</p>
+                              <p className="text-sm text-gray-600 dark:text-gray-400 mt-2 leading-relaxed">{option.useWhen}</p>
+                              {option.cautions.length > 0 && (
+                                <div className="mt-3">
+                                  <p className="text-xs font-semibold uppercase tracking-wide text-orange-600 dark:text-orange-400 mb-1.5">Cautions</p>
+                                  <ul className="space-y-1.5">
+                                    {option.cautions.map((item, cautionIndex) => (
+                                      <li key={cautionIndex} className="text-xs text-gray-600 dark:text-gray-400 flex items-start gap-1.5">
+                                        <span className="w-1.5 h-1.5 rounded-full bg-orange-500 mt-1.5 flex-shrink-0" />
+                                        {item}
+                                      </li>
+                                    ))}
+                                  </ul>
+                                </div>
+                              )}
+                              {option.nextSteps.length > 0 && (
+                                <div className="mt-3">
+                                  <p className="text-xs font-semibold uppercase tracking-wide text-blue-600 dark:text-blue-400 mb-1.5">Next steps</p>
+                                  <ul className="space-y-1.5">
+                                    {option.nextSteps.map((item, stepIndex) => (
+                                      <li key={stepIndex} className="text-xs text-gray-600 dark:text-gray-400 flex items-start gap-1.5">
+                                        <CheckCircle2 className="w-3.5 h-3.5 text-blue-500 mt-0.5 flex-shrink-0" />
+                                        {item}
+                                      </li>
+                                    ))}
+                                  </ul>
+                                </div>
+                              )}
+                            </div>
+                          ))}
+                        </div>
+                      </div>
+                    )}
+
+                    <div className="grid grid-cols-1 lg:grid-cols-3 gap-4">
+                      <div className="rounded-xl bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-700 p-4">
+                        <p className="text-sm font-semibold text-gray-900 dark:text-white mb-3">Conversation questions</p>
+                        <ul className="space-y-2">
+                          {guidedActionPlan.employeeConversationQuestions.map((item, index) => (
+                            <li key={index} className="text-sm text-gray-700 dark:text-gray-300 flex items-start gap-2">
+                              <MessageSquare className="w-4 h-4 text-blue-500 mt-0.5 flex-shrink-0" />
+                              {item}
+                            </li>
+                          ))}
+                        </ul>
+                      </div>
+                      <div className="rounded-xl bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-700 p-4">
+                        <p className="text-sm font-semibold text-gray-900 dark:text-white mb-3">Supervisor checklist</p>
+                        <ul className="space-y-2">
+                          {guidedActionPlan.supervisorChecklist.map((item, index) => (
+                            <li key={index} className="text-sm text-gray-700 dark:text-gray-300 flex items-start gap-2">
+                              <CheckCircle2 className="w-4 h-4 text-green-500 mt-0.5 flex-shrink-0" />
+                              {item}
+                            </li>
+                          ))}
+                        </ul>
+                      </div>
+                      <div className="rounded-xl bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-700 p-4">
+                        <p className="text-sm font-semibold text-gray-900 dark:text-white mb-3">Audit notes</p>
+                        <ul className="space-y-2">
+                          {guidedActionPlan.auditNotes.map((item, index) => (
+                            <li key={index} className="text-sm text-gray-700 dark:text-gray-300 flex items-start gap-2">
+                              <FileText className="w-4 h-4 text-gray-500 mt-0.5 flex-shrink-0" />
+                              {item}
+                            </li>
+                          ))}
+                        </ul>
+                      </div>
+                    </div>
+                  </div>
+                </div>
+              )}
+            </div>
+          </div>
+        </div>
+      </div>
     );
   };
 
-  return (
+	  return (
     <div className="space-y-6">
       {renderAnalysisModal()}
 
@@ -4014,9 +4568,16 @@ function AnalysisTab({ caseData, onUpdate, userId }: {
                   >
                     {/* Section number + relevance badge + delete */}
                     <div className="flex items-center justify-between w-full">
-                      <span className="text-xs font-semibold text-gray-500 dark:text-gray-400">
-                        {m.sectionNumber ? `Section ${m.sectionNumber}` : 'Policy Section'}
-                      </span>
+                      <div className="min-w-0">
+                        <span className="text-xs font-semibold text-gray-500 dark:text-gray-400">
+                          {m.sectionNumber ? `Section ${m.sectionNumber}` : 'Policy Section'}
+                        </span>
+                        {m.policyName && (
+                          <p className="text-[11px] text-blue-600 dark:text-blue-400 truncate">
+                            {m.policyName}{m.policyVersion ? ` v${m.policyVersion}` : ''}
+                          </p>
+                        )}
+                      </div>
                       <div className="flex items-center gap-2">
                         <span className={`px-2.5 py-0.5 rounded-full text-[11px] font-semibold ${badgeColor}`}>
                           {levelLabel}
@@ -4209,11 +4770,13 @@ function AnalysisTab({ caseData, onUpdate, userId }: {
           );
         })(),
         document.body
-      )}
+	      )}
 
-      <hr className="border-black dark:border-gray-500 border-t-2" />
+	      {renderGuidedConductReview()}
 
-      {/* ─── Decision Support (Recommendations) ─── */}
+	      <hr className="border-black dark:border-gray-500 border-t-2" />
+
+	      {/* ─── Decision Support (Recommendations) ─── */}
       {recommendationResult && !comparisonAnalyzing && !policyAnalyzing && !recommendationAnalyzing && (() => {
         // Build per-employee groups (backward compat: fallback to flat list grouped by target)
         const employeeGroups: EmployeeRecommendationGroup[] =
@@ -5113,7 +5676,7 @@ function AnalysisTab({ caseData, onUpdate, userId }: {
                   documentData: d,
                   sections,
                   docEdits,
-                  employee: targetEmployee || null,
+                  employee: toDocxEmployee(targetEmployee),
                   caseNumber: caseData.caseNumber,
                   department: caseData.department || '',
                   location: caseData.location || '',
@@ -5598,7 +6161,6 @@ function AnalysisTab({ caseData, onUpdate, userId }: {
       {showDocUpload && (
         <div className="fixed inset-0 z-[60] pointer-events-none">
           <div
-            ref={duDragRef}
             className="absolute bg-white dark:bg-gray-800 rounded-2xl shadow-2xl border border-gray-200 dark:border-gray-700 flex flex-col overflow-hidden pointer-events-auto"
             style={duIsMaximized
               ? { top: duBounds.top, left: duBounds.left, width: duBounds.width, height: duBounds.height, opacity: duReady ? 1 : 0, transition: 'opacity 0.15s' }
@@ -5785,7 +6347,6 @@ function AnalysisTab({ caseData, onUpdate, userId }: {
             {/* Resize handle (non-maximized) */}
             {!duIsMaximized && (
               <div
-                ref={duResizeRef}
                 className="absolute bottom-0 right-0 w-4 h-4 cursor-se-resize"
                 onMouseDown={onDuResizeStart}
               >
@@ -5796,30 +6357,68 @@ function AnalysisTab({ caseData, onUpdate, userId }: {
         </div>
       )}
 
-      {/* ─── Review Active Policy Modal (portalled, movable) ─── */}
-      {showPolicyReviewModal && typeof document !== 'undefined' && createPortal(
-        (() => {
-          const activePolicy = policies.find(p => p.status === 'ACTIVE') || policies[0];
-          const hasSections = activePolicy && activePolicy.sections && (Array.isArray(activePolicy.sections) ? activePolicy.sections.length > 0 : typeof activePolicy.sections === 'object' && Object.keys(activePolicy.sections).length > 0);
-          if (!activePolicy || !hasSections) {
-            return (
-              <div className="fixed inset-0 z-[9998] flex items-center justify-center bg-black/30">
-                <div className="bg-white dark:bg-gray-800 rounded-2xl p-8 shadow-2xl max-w-sm text-center">
-                  <p className="text-sm text-gray-600 dark:text-gray-400">No active policy with sections found.</p>
-                  <button onClick={() => setShowPolicyReviewModal(false)} className="mt-4 px-4 py-2 text-sm font-semibold text-white bg-gray-600 rounded-lg hover:bg-gray-700">Close</button>
-                </div>
-              </div>
-            );
-          }
+	      {/* ─── Review Active Policy Modal (portalled, movable) ─── */}
+	      {showPolicyReviewModal && typeof document !== 'undefined' && createPortal(
+	        (() => {
+	          type ReviewPolicySection = PolicySection & { policyName?: string; policyVersion?: string };
+	          const activePolicies = policies.filter(p => p.status === 'ACTIVE');
+	          const sectionsArray: ReviewPolicySection[] = activePolicies.flatMap(policy => {
+	            const rawSections = policy.sections;
+	            let parsed: any[] = [];
+	            if (Array.isArray(rawSections)) {
+	              parsed = rawSections;
+	            } else if (rawSections && typeof rawSections === 'string') {
+	              try {
+	                const parsedRaw = JSON.parse(rawSections);
+	                parsed = Array.isArray(parsedRaw) ? parsedRaw : Object.values(parsedRaw || {});
+	              } catch {
+	                parsed = [];
+	              }
+	            } else if (rawSections && typeof rawSections === 'object') {
+	              parsed = Object.values(rawSections);
+	            }
 
-          const rawSections = activePolicy.sections;
-          const sectionsArray: PolicySection[] = Array.isArray(rawSections)
-            ? rawSections
-            : rawSections && typeof rawSections === 'object'
-            ? Object.values(rawSections) as PolicySection[]
-            : [];
+	            if (parsed.length > 0) {
+	              return parsed.map((section, index) => ({
+	                ...section,
+	                id: `${policy.id}:${section.id || section.sectionNumber || index}`,
+	                sectionNumber: section.sectionNumber || `${index + 1}`,
+	                title: section.title || section.type || 'Policy section',
+	                content: section.content || '',
+	                type: section.type || 'general',
+	                policyName: policy.name,
+	                policyVersion: policy.version,
+	              }));
+	            }
 
-          const matchedSectionIds = new Set((policyResult?.matches || []).map(m => m.sectionId));
+	            if (policy.originalText) {
+	              return [{
+	                id: `${policy.id}:full-policy`,
+	                sectionNumber: '1',
+	                title: policy.name,
+	                content: policy.originalText,
+	                type: 'general',
+	                keywords: [],
+	                policyName: policy.name,
+	                policyVersion: policy.version,
+	              } as ReviewPolicySection];
+	            }
+
+	            return [];
+	          });
+
+	          if (activePolicies.length === 0 || sectionsArray.length === 0) {
+	            return (
+	              <div className="fixed inset-0 z-[9998] flex items-center justify-center bg-black/30">
+	                <div className="bg-white dark:bg-gray-800 rounded-2xl p-8 shadow-2xl max-w-sm text-center">
+	                  <p className="text-sm text-gray-600 dark:text-gray-400">No active policies with sections found.</p>
+	                  <button onClick={() => setShowPolicyReviewModal(false)} className="mt-4 px-4 py-2 text-sm font-semibold text-white bg-gray-600 rounded-lg hover:bg-gray-700">Close</button>
+	                </div>
+	              </div>
+	            );
+	          }
+
+	          const matchedSectionIds = new Set((policyResult?.matches || []).map(m => m.sectionId));
           const matchedSectionNumbers = new Set((policyResult?.matches || []).map(m => m.sectionNumber));
           // Build confidence lookup by sectionId and sectionNumber
           const matchConfidenceById = new Map<string, number>();
@@ -5918,11 +6517,13 @@ function AnalysisTab({ caseData, onUpdate, userId }: {
               const selectedNumbers = new Set(selectedSections.map(s => s.sectionNumber));
               const aiMatches = (result.matches || [])
                 .filter(m => selectedIds.has(m.sectionId) || selectedNumbers.has(m.sectionNumber))
-                .map(m => ({
-                  ...m,
-                  // Use section content for display, not the type/category
-                  sectionTitle: sectionsArray.find(s => s.id === m.sectionId)?.content || m.sectionTitle,
-                }));
+	                .map(m => ({
+	                  ...m,
+	                  // Use section content for display, not the type/category
+	                  sectionTitle: sectionsArray.find(s => s.id === m.sectionId)?.content || m.sectionTitle,
+	                  policyName: sectionsArray.find(s => s.id === m.sectionId)?.policyName || m.policyName,
+	                  policyVersion: sectionsArray.find(s => s.id === m.sectionId)?.policyVersion || m.policyVersion,
+	                }));
 
               // For sections AI didn't return (below threshold), create low-confidence entries
               const returnedIds = new Set(aiMatches.map(m => m.sectionId));
@@ -5931,8 +6532,10 @@ function AnalysisTab({ caseData, onUpdate, userId }: {
                 if (!returnedIds.has(s.id) && !returnedNumbers.has(s.sectionNumber)) {
                   aiMatches.push({
                     sectionId: s.id,
-                    sectionNumber: s.sectionNumber,
-                    sectionTitle: s.content,
+	                    sectionNumber: s.sectionNumber,
+	                    policyName: s.policyName,
+	                    policyVersion: s.policyVersion,
+	                    sectionTitle: s.content,
                     relevanceExplanation: 'This section does not appear to be directly relevant to the behaviors described in the complaint statements or witness accounts for this case.',
                     matchConfidence: 0.2,
                     keyPhrases: [],
@@ -5944,9 +6547,11 @@ function AnalysisTab({ caseData, onUpdate, userId }: {
             } catch (err: any) {
               // On error, create fallback entries so user can still decide
               const fallbackMatches: PolicyMatch[] = selectedSections.map(s => ({
-                sectionId: s.id,
-                sectionNumber: s.sectionNumber,
-                sectionTitle: s.content,
+	                sectionId: s.id,
+	                sectionNumber: s.sectionNumber,
+	                policyName: s.policyName,
+	                policyVersion: s.policyVersion,
+	                sectionTitle: s.content,
                 relevanceExplanation: 'AI analysis could not be completed. You may still add this section based on your professional judgment.',
                 matchConfidence: 0.5,
                 keyPhrases: [],
@@ -6027,11 +6632,13 @@ function AnalysisTab({ caseData, onUpdate, userId }: {
                   className="flex items-center justify-between px-5 py-3 bg-gray-50 dark:bg-gray-900 border-b border-gray-200 dark:border-gray-700 cursor-move select-none"
                   onMouseDown={onPrDragStart}
                 >
-                  <div className="flex items-center gap-2">
-                    <GripHorizontal className="w-4 h-4 text-gray-400" />
-                    <h3 className="text-sm font-bold text-gray-900 dark:text-white">{activePolicy.name}</h3>
-                    <span className="text-xs text-gray-500 dark:text-gray-400">v{activePolicy.version}</span>
-                  </div>
+	                  <div className="flex items-center gap-2">
+	                    <GripHorizontal className="w-4 h-4 text-gray-400" />
+	                    <h3 className="text-sm font-bold text-gray-900 dark:text-white">Active Policies</h3>
+	                    <span className="text-xs text-gray-500 dark:text-gray-400">
+	                      {activePolicies.length} polic{activePolicies.length === 1 ? 'y' : 'ies'} • {sectionsArray.length} sections
+	                    </span>
+	                  </div>
                   <div className="flex items-center gap-2">
                     {policyReviewSelected.size > 0 && !prValidating && !prShowResults && (
                       <button
@@ -6144,9 +6751,14 @@ function AnalysisTab({ caseData, onUpdate, userId }: {
                                 )}
                               </div>
                             </td>
-                            <td className="px-3 py-3">
-                              <p className="text-xs font-semibold text-gray-900 dark:text-white">{section.title}</p>
-                            </td>
+	                            <td className="px-3 py-3">
+	                              <p className="text-xs font-semibold text-gray-900 dark:text-white">{section.title}</p>
+	                              {section.policyName && (
+	                                <p className="mt-0.5 text-[10px] font-medium text-blue-600 dark:text-blue-400">
+	                                  {section.policyName}{section.policyVersion ? ` v${section.policyVersion}` : ''}
+	                                </p>
+	                              )}
+	                            </td>
                             <td className="px-3 py-3">
                               <p className="text-[11px] text-gray-700 dark:text-gray-300 line-clamp-3">{section.content}</p>
                             </td>
@@ -6276,7 +6888,9 @@ function AnalysisTab({ caseData, onUpdate, userId }: {
                             <div className="flex items-center justify-between">
                               <div className="flex items-center gap-2">
                                 {!isRelevant && <AlertTriangle className="w-4 h-4 text-red-500 flex-shrink-0" />}
-                                <span className="text-xs font-semibold text-gray-500 dark:text-gray-400">Section {m.sectionNumber}</span>
+	                                <span className="text-xs font-semibold text-gray-500 dark:text-gray-400">
+	                                  Section {m.sectionNumber}{m.policyName ? ` • ${m.policyName}${m.policyVersion ? ` v${m.policyVersion}` : ''}` : ''}
+	                                </span>
                               </div>
                               <div className="flex items-center gap-2">
                                 <span className={`px-2.5 py-0.5 rounded-full text-[11px] font-semibold ${badgeColor}`}>{levelLabel}</span>
@@ -6553,7 +7167,7 @@ function ActionsTab({ caseData, onUpdate, userId, onSwitchTab }: {
                       documentData: docData,
                       sections: docSections,
                       docEdits: [],
-                      employee: targetEmployee ? { name: targetEmployee.name, role: targetEmployee.role, department: targetEmployee.department, employeeFileNo: targetEmployee.employeeFileNo } : null,
+	                      employee: toDocxEmployee(targetEmployee),
                       caseNumber: caseData.caseNumber,
                       department: caseData.department || '',
                       location: caseData.location || '',
@@ -7723,7 +8337,7 @@ function CaseDetailContent() {
     setSendingCode(true);
     setVerifyError('');
     try {
-      const { maskedEmail: email } = await sendReopenCode(caseData.id, user.id || user.uid);
+	      const { maskedEmail: email } = await sendReopenCode(caseData.id, user.id);
       setMaskedEmail(email);
       setCodeSentAt(Date.now());
       setVerifyCode(['', '', '', '', '', '']);
@@ -7745,7 +8359,7 @@ function CaseDetailContent() {
     setVerifyError('');
     try {
       await verifyReopenCode(caseData.id, {
-        userId: user.id || user.uid,
+	        userId: user.id,
         code,
         reason: 'Case re-opened via email verification',
       });
@@ -7762,7 +8376,7 @@ function CaseDetailContent() {
     setSendingCode(true);
     setVerifyError('');
     try {
-      const { maskedEmail: email } = await sendReopenCode(caseData.id, user.id || user.uid);
+	      const { maskedEmail: email } = await sendReopenCode(caseData.id, user.id);
       setMaskedEmail(email);
       setCodeSentAt(Date.now());
       setVerifyCode(['', '', '', '', '', '']);

@@ -118,6 +118,7 @@ dev-output.log
 !backend/prisma/migrations/20260512183000_add_event_mobile_push_preferences/migration.sql
 !backend/prisma/migrations/20260503212500_add_login_trusted_devices/migration.sql
 !backend/prisma/migrations/20260505090000_add_mobile_push_notifications/migration.sql
+!backend/prisma/migrations/20260513161500_add_guided_conduct_review/migration.sql
 render_backup.sql
 
 # Build outputs

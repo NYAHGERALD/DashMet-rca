@@ -2907,6 +2907,8 @@ model ConflictCase {
   recommendations      String? @db.Text // Encrypted JSON
   policyMatchingResult String? @db.Text // Encrypted JSON - Full policy matching result for UI
   recommendationResult String? @db.Text // Encrypted JSON - Full recommendation result for UI
+  guidedReview         String? @db.Text // Encrypted JSON - Guided supervisor fact/risk review
+  guidedActionPlan     String? @db.Text // Encrypted JSON - HR-reviewable guided action plan
 
   // Selected Action
   selectedAction              RecommendedActionType?

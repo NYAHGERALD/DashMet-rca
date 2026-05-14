@@ -31,6 +31,8 @@ interface PolicySection {
   title: string;
   content: string;
   type: string;
+  policyName?: string;
+  policyVersion?: string;
   keywords?: string[];
   firstProgression?: string;
   secondProgression?: string;
@@ -68,6 +70,8 @@ interface PolicyMatchRequest {
 interface PolicyMatchResult {
   sectionId: string;
   sectionNumber: string;
+  policyName?: string;
+  policyVersion?: string;
   sectionTitle: string;
   relevanceExplanation: string;
   matchConfidence: number;
@@ -131,7 +135,8 @@ Summary: ${sanitizeForPrompt(summary.substring(0, 500), { maxLength: 500, contex
 
     // Format policy sections for the prompt
     const policySectionsText = policySections.map(section => {
-      let sectionText = `[Section ${section.sectionNumber}] (ID: ${section.id})
+      let sectionText = `Policy Document: ${sanitizeForPrompt(section.policyName || 'Workplace policy', { maxLength: 180, context: 'policy-name' })}${section.policyVersion ? ` v${sanitizeForPrompt(section.policyVersion, { maxLength: 40, context: 'policy-version' })}` : ''}
+[Section ${section.sectionNumber}] (ID: ${section.id})
 Category: ${section.title}
 Policy: ${section.content.substring(0, 800)}${section.content.length > 800 ? '...' : ''}
 Type: ${section.type}`;
@@ -206,6 +211,8 @@ Respond in JSON format:
     {
       "sectionId": "the section's ID (use the exact ID provided in parentheses after the section number)",
       "sectionNumber": "the section number (e.g., '3.2')",
+      "policyName": "the Policy Document name provided for the matched section",
+      "policyVersion": "the Policy Document version if provided",
       "sectionTitle": "the actual policy text from the Policy field (e.g. 'Fighting or attempting to provoke a fight on company property'), NOT the category name",
       "relevanceExplanation": "A 2-3 sentence professional explanation of why this section may be relevant. Use ${safeNameA} and ${safeNameB}'s names. Focus on behaviors described, not accusations. Start with 'This section may be relevant because...'",
       "matchConfidence": 0.85,
@@ -263,6 +270,8 @@ QUALITY STANDARDS:
           return {
             sectionId: m.sectionId || '',
             sectionNumber: m.sectionNumber || '',
+            policyName: originalSection?.policyName || m.policyName || '',
+            policyVersion: originalSection?.policyVersion || m.policyVersion || '',
             sectionTitle: resolvedTitle,
             relevanceExplanation: m.relevanceExplanation || '',
             matchConfidence: Math.min(1, Math.max(0, m.matchConfidence || 0)),

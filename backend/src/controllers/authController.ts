@@ -294,10 +294,8 @@ const verifyLoginTrustedDevice = async (
     const candidateHash = hashTrustedDeviceToken(parsedCredential.deviceId, parsedCredential.token);
     const userAgentHash = hashTrustedDeviceUserAgent(req.get('user-agent'));
     const tokenMatches = safeTokenHashEquals(trustedDevice.tokenHash, candidateHash);
-    const userAgentMatches =
-      !trustedDevice.userAgentHash || trustedDevice.userAgentHash === userAgentHash;
 
-    if (!tokenMatches || !userAgentMatches) {
+    if (!tokenMatches) {
       await prisma.loginTrustedDevice.update({
         where: { id: trustedDevice.id },
         data: { revokedAt: now },
@@ -314,6 +312,7 @@ const verifyLoginTrustedDevice = async (
         lastUsedAt: now,
         ipAddress: req.ip,
         deviceInfo: getTrustedDeviceInfo(req),
+        userAgentHash: userAgentHash || trustedDevice.userAgentHash,
       },
     });
 

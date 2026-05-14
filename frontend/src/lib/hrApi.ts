@@ -25,12 +25,15 @@ export interface ConflictCase {
   location: string | null;
   department: string | null;
   shift: string | null;
+  description: string | null;
   comparisonResult: string | null;
   recommendations: string | null;
   selectedAction: string | null;
   generatedDocument: string | null;
   fullGeneratedDocumentResult: string | null;
   policyMatches: string | null;
+  guidedReview?: string | null;
+  guidedActionPlan?: string | null;
   supervisorNotes: string | null;
   activePolicyId: string | null;
   closedAt: string | null;
@@ -122,6 +125,8 @@ export interface PolicySection {
   content: string;
   type: string;
   keywords: string[];
+  policyName?: string;
+  policyVersion?: string;
   orderIndex?: number;
   firstProgression?: string | null;
   secondProgression?: string | null;
@@ -140,6 +145,88 @@ export interface DocumentEdit {
   createdAt: string;
 }
 
+export type GuidedRiskKey =
+  | 'safety_complaint'
+  | 'harassment_or_discrimination'
+  | 'retaliation_concern'
+  | 'medical_or_accommodation'
+  | 'protected_concerted_activity'
+  | 'wage_hour_or_leave'
+  | 'none';
+
+export interface GuidedReviewAnswers {
+  behaviorSummary: string;
+  policyTrainingStatus: 'yes' | 'no' | 'unknown';
+  repeatedBehaviorStatus: 'first_time' | 'repeated' | 'unknown';
+  safetyImpactStatus: 'yes' | 'no' | 'unknown';
+  employeeResponseStatus: 'received' | 'needed' | 'not_applicable';
+  riskFlags: GuidedRiskKey[];
+  supervisorDecisionNotes: string;
+  updatedAt?: string;
+}
+
+export interface GuidedActionPlan {
+  executiveSummary: string;
+  missingInformation: string[];
+  riskFlags: Array<{
+    label: string;
+    whyItMatters: string;
+    requiresHRReview: boolean;
+  }>;
+  hrReviewRequired: boolean;
+  hrReviewReason: string;
+  policyAlignment: string[];
+  recommendedDecisionOptions: Array<{
+    option: string;
+    useWhen: string;
+    example?: string;
+    cautions: string[];
+    nextSteps: string[];
+  }>;
+  employeeConversationQuestions: string[];
+  supervisorChecklist: string[];
+  auditNotes: string[];
+  generatedAt: string;
+}
+
+export type GuidedIntakeAnswerType = 'text' | 'textarea' | 'select' | 'date' | 'person' | 'document' | 'yes_no';
+export type GuidedIntakeStep = 'issue' | 'facts' | 'people' | 'documents' | 'risk' | 'guidance' | 'all';
+
+export interface GuidedIntakeQuestion {
+  id: string;
+  step: GuidedIntakeStep;
+  category: string;
+  question: string;
+  whyNeeded: string;
+  answerType: GuidedIntakeAnswerType;
+  options?: string[];
+  required: boolean;
+  policyReference?: string;
+  riskArea?: string;
+}
+
+export interface GuidedIntakeDocumentRequest {
+  title: string;
+  documentType: string;
+  whyNeeded: string;
+  required: boolean;
+}
+
+export interface GuidedIntakePlan {
+  currentStepTitle?: string;
+  currentStepPurpose?: string;
+  progressSteps?: string[];
+  summaryAssessment: string;
+  readinessScore: number;
+  readinessLabel: string;
+  questions: GuidedIntakeQuestion[];
+  missingInformation: string[];
+  recommendedDocuments: GuidedIntakeDocumentRequest[];
+  escalationSignals: string[];
+  nextBestActions: string[];
+  generatedAt: string;
+}
+
 export interface ReviewComment {
   id: string;
   caseId: string;
@@ -150,7 +237,7 @@ export interface ReviewComment {
   createdAt: string;
 }
 
-// ─── AI Analysis Models ───────────────────────────────────────────────────────
+// ─── Guided Analysis Models ───────────────────────────────────────────────────
 
 export interface SideBySideComparison {
   topic: string;
@@ -177,6 +264,8 @@ export interface ComparisonResult {
 export interface PolicyMatch {
   sectionId: string;
   sectionNumber: string;
+  policyName?: string;
+  policyVersion?: string;
   sectionTitle: string;
   relevanceExplanation: string;
   matchConfidence: number;
@@ -324,6 +413,7 @@ export async function createCase(payload: {
   creatorId: string;
   organizationId: string;
   caseType?: string;
+  status?: string;
   incidentDate?: string;
   location?: string;
   department?: string;
@@ -331,6 +421,8 @@ export async function createCase(payload: {
   description?: string;
   employeesJson?: any[];
   documentsJson?: any[];
+  guidedReviewJson?: GuidedReviewAnswers;
+  guidedActionPlanJson?: GuidedActionPlan;
   facilityId?: string;
 }): Promise<ConflictCase> {
   const { data } = await api.post('/conflict-cases', payload);
@@ -442,6 +534,7 @@ export async function removeDocument(caseId: string, documentId: string, userId?
 export interface OCRResult {
   originalText: string;
   translatedText: string | null;
+  generatedTitle?: string;
   cleanedText: string;
   detectedLanguage: string;
   isHandwritten: boolean;
@@ -452,6 +545,10 @@ export interface OCRResult {
   corrections: string[];
   pageCount: number;
   confidence: number;
+  sourceFileUrl?: string;
+  sourceFileName?: string;
+  sourceFileType?: string;
+  sourceFileSize?: number;
 }
 
 export async function processDocumentOCR(payload: {
@@ -464,6 +561,49 @@ export async function processDocumentOCR(payload: {
     url: '/document-ocr/process',
     data: payload,
   }, 300000); // 5 min timeout for multi-page OCR
+  return result.data;
+}
+
+export async function uploadDocumentSource(file: File, payload: {
+  organizationId?: string;
+  userId?: string;
+}): Promise<{ sourceFileUrl: string; sourceFileName: string; sourceFileType: string; sourceFileSize: number }> {
+  const formData = new FormData();
+  formData.append('file', file);
+  if (payload.organizationId) formData.append('organizationId', payload.organizationId);
+  if (payload.userId) formData.append('userId', payload.userId);
+
+  const result = await apiWithExtendedTimeout<{
+    success: boolean;
+    data: { sourceFileUrl: string; sourceFileName: string; sourceFileType: string; sourceFileSize: number };
+  }>({
+    method: 'POST',
+    url: '/document-ocr/upload-source',
+    data: formData,
+    headers: { 'Content-Type': 'multipart/form-data' },
+  }, 120000);
+  return result.data;
+}
+
+export async function processDocumentFile(file: File, payload: {
+  documentType: string;
+  sourceLanguage?: string;
+  organizationId?: string;
+  userId?: string;
+}): Promise<OCRResult> {
+  const formData = new FormData();
+  formData.append('file', file);
+  formData.append('documentType', payload.documentType);
+  if (payload.sourceLanguage) formData.append('sourceLanguage', payload.sourceLanguage);
+  if (payload.organizationId) formData.append('organizationId', payload.organizationId);
+  if (payload.userId) formData.append('userId', payload.userId);
+
+  const result = await apiWithExtendedTimeout<{ success: boolean; data: OCRResult }>({
+    method: 'POST',
+    url: '/document-ocr/process-file',
+    data: formData,
+    headers: { 'Content-Type': 'multipart/form-data' },
+  }, 300000);
   return result.data;
 }
 
@@ -639,7 +779,7 @@ export async function deletePolicy(id: string): Promise<void> {
   await api.delete(`/conflict-cases/workplace-policies/${id}`);
 }
 
-// ─── AI Analysis Functions ────────────────────────────────────────────────────
+// ─── Guided Analysis Functions ────────────────────────────────────────────────
 
 export async function runComparison(payload: {
   complaintA: { employeeName: string; originalText: string; translatedText?: string; cleanedText?: string };
@@ -684,6 +824,65 @@ export async function runDecisionSupport(payload: {
   const result = await apiWithExtendedTimeout<{ success: boolean; data: RecommendationResult }>({
     method: 'POST',
     url: '/decision-support/recommendations',
+    data: payload,
+  }, 180000);
+  return result.data;
+}
+
+export async function runGuidedActionPlan(payload: {
+  caseDetails: { caseNumber?: string; caseType: string; incidentDate: string; location: string; department: string; shift?: string };
+  complaintA?: { employeeName: string; text: string };
+  complaintB?: { employeeName: string; text: string };
+  analysisResult?: {
+    contradictions?: string[];
+    agreementPoints?: string[];
+    missingDetails?: string[];
+    neutralSummary?: string;
+    emotionalLanguage?: string[];
+  };
+  policyMatches?: { sectionTitle: string; relevanceExplanation: string; matchConfidence: number }[];
+  policySections?: Array<{
+    policyName?: string;
+    policyVersion?: string;
+    sectionNumber?: string;
+    title?: string;
+    content?: string;
+    type?: string;
+  }>;
+  dynamicAnswers?: Record<string, string>;
+  recommendations?: { title: string; type: string; rationale?: string; riskLevel?: string; targetEmployeeNames?: string[] }[];
+  guidedReview: GuidedReviewAnswers;
+}): Promise<GuidedActionPlan> {
+  const result = await apiWithExtendedTimeout<{ success: boolean; data: GuidedActionPlan }>({
+    method: 'POST',
+    url: '/decision-support/guided-action-plan',
+    data: payload,
+  }, 180000);
+  return result.data;
+}
+
+export async function runGuidedIntakeQuestions(payload: {
+  caseDetails: { caseNumber?: string; caseType: string; incidentDate: string; location: string; department: string; shift?: string };
+  issueType?: string;
+  currentStep?: GuidedIntakeStep;
+  behaviorSummary?: string;
+  desiredOutcome?: string;
+  people?: Array<{ name: string; role?: string; department?: string; employeeId?: string; involvement?: string }>;
+  documents?: Array<{ title: string; type: string; content?: string; summary?: string; createdFrom?: string }>;
+  guidedReview?: Partial<GuidedReviewAnswers>;
+  dynamicAnswers?: Record<string, string>;
+  policySections?: Array<{
+    policyName?: string;
+    policyVersion?: string;
+    sectionNumber?: string;
+    title?: string;
+    content?: string;
+    type?: string;
+  }>;
+}): Promise<GuidedIntakePlan> {
+  const result = await apiWithExtendedTimeout<{ success: boolean; data: GuidedIntakePlan }>({
+    method: 'POST',
+    url: '/decision-support/guided-intake-questions',
     data: payload,
   }, 180000);
   return result.data;
