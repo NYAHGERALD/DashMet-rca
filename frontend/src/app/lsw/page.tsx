@@ -24,7 +24,7 @@ import {
   type LswProject, type LswProjectUpdate, type LswMeetingRail,
   type LswFollowUp, type LswKeyResultSet, type LswKeyResult,
   type LswPersonalGoal, type LswRcaTrigger, type LswDepartment,
-  type LswCalendarConfig,
+  type LswCalendarConfig, type LswBoard,
 } from '@/lib/lswApi';
 
 // Types (mapped from DB models for UI convenience)
@@ -192,6 +192,74 @@ function mapTodoFromDb(t: LswTodoItem): ToDoItem {
 
 function mapDepartmentFromDb(d: LswDepartment): { id: string; name: string } {
   return { id: d.id, name: d.name };
+}
+
+function toDateInputValue(date: Date): string {
+  const year = date.getFullYear();
+  const month = String(date.getMonth() + 1).padStart(2, '0');
+  const day = String(date.getDate()).padStart(2, '0');
+  return `${year}-${month}-${day}`;
+}
+
+function isBeforeWeekStart(dateValue: string | null | undefined, weekStart: string): boolean {
+  return Boolean(dateValue) && String(dateValue) < weekStart;
+}
+
+function shouldShowForSelectedWeek(dateValue: string | null | undefined, weekStart: string, showPastDue: boolean): boolean {
+  return showPastDue || !isBeforeWeekStart(dateValue, weekStart);
+}
+
+type LswDateBadgeTone = 'green' | 'yellow' | 'red' | 'neutral';
+
+function getLswDateBadgeTone(
+  dateValue: string | null | undefined,
+  weekStart: string,
+  weekEnd: string,
+  today: string
+): LswDateBadgeTone {
+  if (!dateValue) return 'neutral';
+
+  const value = String(dateValue).slice(0, 10);
+  if (value < today) {
+    return value >= weekStart && value <= weekEnd ? 'yellow' : 'red';
+  }
+
+  return 'green';
+}
+
+function getLswDateBadgeClass(tone: LswDateBadgeTone): string {
+  const base = 'inline-flex items-center justify-center rounded-full px-2.5 py-1 text-xs font-semibold leading-none whitespace-nowrap cursor-pointer';
+  const tones: Record<LswDateBadgeTone, string> = {
+    green: 'bg-emerald-100 text-emerald-700 dark:bg-emerald-900/30 dark:text-emerald-300',
+    yellow: 'bg-yellow-100 text-yellow-800 dark:bg-yellow-900/30 dark:text-yellow-300',
+    red: 'bg-red-100 text-red-700 dark:bg-red-900/30 dark:text-red-300',
+    neutral: 'bg-gray-100 text-gray-600 dark:bg-gray-700 dark:text-gray-300',
+  };
+  return `${base} ${tones[tone]}`;
+}
+
+function formatLswDate(dateValue: string | null | undefined, fallback = 'Set date'): string {
+  if (!dateValue) return fallback;
+  return new Date(`${String(dateValue).slice(0, 10)}T00:00:00Z`).toLocaleDateString('en-US', {
+    month: 'short',
+    day: 'numeric',
+    year: 'numeric',
+    timeZone: 'UTC',
+  });
+}
+
+function ShowPastDueToggle({ checked, onChange, count }: { checked: boolean; onChange: (checked: boolean) => void; count: number }) {
+  return (
+    <label className="flex items-center gap-2 text-xs font-semibold text-gray-600 dark:text-gray-300 cursor-pointer select-none">
+      <input
+        type="checkbox"
+        checked={checked}
+        onChange={(event) => onChange(event.target.checked)}
+        className="h-4 w-4 rounded border-gray-300 text-blue-600 focus:ring-blue-500"
+      />
+      <span>Show past due{count > 0 ? ` (${count})` : ''}</span>
+    </label>
+  );
 }
 
 // ─── Org-Aware Week Calculation ────────────────────────────────────────────
@@ -369,6 +437,9 @@ function LSWContent() {
   
   // Get week start and end dates
   const weekDates = getWeekDates(currentWeek, currentYear, calendarConfig);
+  const selectedWeekStartInput = toDateInputValue(weekDates.start);
+  const selectedWeekEndInput = toDateInputValue(weekDates.end);
+  const todayInput = toDateInputValue(new Date());
   
   // Get week offset indicator
   const weekOffset = getWeekOffsetText(currentWeek, currentYear, calendarConfig);
@@ -392,6 +463,11 @@ function LSWContent() {
   const [showDeleteModal, setShowDeleteModal] = useState(false);
   const [deleteTarget, setDeleteTarget] = useState<{ projectId: string; updateIndex: number } | null>(null);
   const [todoTab, setTodoTab] = useState<'today' | 'thisWeek'>('today');
+  const [showPastDueFollowUps, setShowPastDueFollowUps] = useState(false);
+  const [showPastDueTriggers, setShowPastDueTriggers] = useState(false);
+  const [showPastDueFrequencyTasks, setShowPastDueFrequencyTasks] = useState(false);
+  const [showPastDueRails, setShowPastDueRails] = useState(false);
+  const [showPastDueGoals, setShowPastDueGoals] = useState(false);
   
   // Inline project editing state
   const [editingProjectId, setEditingProjectId] = useState<string | null>(null);
@@ -534,7 +610,7 @@ function LSWContent() {
     try {
       const created = await createLswFollowUp({
         task: '',
-        dueDate: new Date().toISOString().split('T')[0],
+        dueDate: selectedWeekStartInput,
         responsibleName: '',
         comments: '',
       });
@@ -592,7 +668,7 @@ function LSWContent() {
     try {
       const created = await createLswRcaTrigger({
         trigger: '',
-        eventDate: undefined,
+        eventDate: selectedWeekStartInput,
         comments: undefined,
       });
       const mapped = mapTriggerFromDb(created);
@@ -649,10 +725,8 @@ function LSWContent() {
       const created = await createLswFrequencyTask({
         task: '',
         minutes: 60,
-        dueDate: new Date().toISOString().split('T')[0],
+        dueDate: selectedWeekStartInput,
         frequency: FREQ_UI_TO_DB[frequency],
-        weekNumber: currentWeek,
-        year: currentYear,
       });
       const mapped = mapFreqTaskFromDb(created);
       setFrequencyTasks(prev => {
@@ -1028,6 +1102,7 @@ function LSWContent() {
       }
 
       setDepartments([{ id: 'all', name: 'All Departments' }, ...data.departments.map(mapDepartmentFromDb)]);
+      setSelectedDepartment(data.board?.departmentId || 'all');
       setDailyTasks(data.dailyTasks.map(mapDailyTaskFromDb));
       setTodoItems(data.todoItems.map(mapTodoFromDb));
       setFrequencyTasks(data.frequencyTasks.map(mapFreqTaskFromDb));
@@ -1477,9 +1552,7 @@ function LSWContent() {
     try {
       const created = await createLswMeetingRail({
         rail: '',
-        dueDate: new Date().toISOString().split('T')[0],
-        weekNumber: currentWeek,
-        year: currentYear,
+        dueDate: selectedWeekStartInput,
       });
       const mapped = mapMeetingRailFromDb(created);
       setMeetingRails(prev => {
@@ -1532,7 +1605,7 @@ function LSWContent() {
     try {
       const created = await createLswPersonalGoal({
         objective: '',
-        dueDate: new Date().toISOString().split('T')[0],
+        dueDate: selectedWeekStartInput,
         progress: 0,
       });
       const mapped = mapGoalFromDb(created);
@@ -1823,6 +1896,17 @@ function LSWContent() {
     return Math.round((completed / todoItems.length) * 100);
   };
 
+  const pastDueFollowUpCount = followUps.filter(item => isBeforeWeekStart(item.dueDate, selectedWeekStartInput)).length;
+  const visibleFollowUps = followUps.filter(item => shouldShowForSelectedWeek(item.dueDate, selectedWeekStartInput, showPastDueFollowUps));
+  const pastDueTriggerCount = rcaTriggers.filter(item => isBeforeWeekStart(item.eventDate, selectedWeekStartInput)).length;
+  const visibleRcaTriggers = rcaTriggers.filter(item => shouldShowForSelectedWeek(item.eventDate, selectedWeekStartInput, showPastDueTriggers));
+  const pastDueFrequencyTaskCount = frequencyTasks.filter(item => isBeforeWeekStart(item.dueDate, selectedWeekStartInput)).length;
+  const visibleFrequencyTasks = frequencyTasks.filter(item => shouldShowForSelectedWeek(item.dueDate, selectedWeekStartInput, showPastDueFrequencyTasks));
+  const pastDueRailCount = meetingRails.filter(item => isBeforeWeekStart(item.dueDate, selectedWeekStartInput)).length;
+  const visibleMeetingRails = meetingRails.filter(item => shouldShowForSelectedWeek(item.dueDate, selectedWeekStartInput, showPastDueRails));
+  const pastDueGoalCount = personalGoals.filter(item => isBeforeWeekStart(item.dueDate, selectedWeekStartInput)).length;
+  const visiblePersonalGoals = personalGoals.filter(item => shouldShowForSelectedWeek(item.dueDate, selectedWeekStartInput, showPastDueGoals));
+
   if (!user) return null;
 
   if (isLoading) {
@@ -1910,7 +1994,13 @@ function LSWContent() {
                 <label className="text-sm font-medium text-gray-600 dark:text-gray-400">Department:</label>
                 <select
                   value={selectedDepartment}
-                  onChange={(e) => setSelectedDepartment(e.target.value)}
+                  onChange={(e) => {
+                    const nextDepartment = e.target.value;
+                    setSelectedDepartment(nextDepartment);
+                    updateLswBoard(currentWeek, currentYear, {
+                      departmentId: nextDepartment === 'all' ? null : nextDepartment,
+                    } as Partial<LswBoard>).catch((err) => console.error('Failed to save LSW department preference:', err));
+                  }}
                   className="px-4 py-2 text-sm font-medium bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-700 rounded-lg shadow-sm focus:ring-2 focus:ring-emerald-500 focus:border-transparent cursor-pointer min-w-[180px]"
                 >
                   {departments.map(dept => (
@@ -1956,7 +2046,13 @@ function LSWContent() {
                     departments.find(d => d.id === selectedDepartment)?.name || '';
 
                   // Kick off the real export in parallel
-                  const exportPromise = exportLswReport(currentWeek, currentYear, weekStart, departmentNameForExport)
+                  const exportPromise = exportLswReport(currentWeek, currentYear, weekStart, departmentNameForExport, {
+                    includePastDueFollowUps: showPastDueFollowUps,
+                    includePastDueTriggers: showPastDueTriggers,
+                    includePastDueFrequencyTasks: showPastDueFrequencyTasks,
+                    includePastDueRails: showPastDueRails,
+                    includePastDueGoals: showPastDueGoals,
+                  })
                     .then((blob) => ({ ok: true as const, blob }))
                     .catch((err) => ({ ok: false as const, err }));
 
@@ -2818,11 +2914,12 @@ function LSWContent() {
             <hr className="border-t border-black dark:border-gray-500 m-0" />
             {/* Follow Ups */}
             <div className="bg-white/80 dark:bg-gray-800/80 backdrop-blur-sm overflow-hidden">
-              <div className="px-5 py-4 bg-gradient-to-r from-amber-500/10 to-orange-500/10 dark:from-amber-500/20 dark:to-orange-500/20 border-b border-gray-200/50 dark:border-gray-700/50">
+              <div className="px-5 py-4 bg-gradient-to-r from-amber-500/10 to-orange-500/10 dark:from-amber-500/20 dark:to-orange-500/20 border-b border-gray-200/50 dark:border-gray-700/50 flex items-center justify-between gap-3">
                 <h2 className="text-lg font-semibold text-gray-800 dark:text-white flex items-center gap-2">
                   <span className="text-xl">🔔</span>
                   Follow Ups
                 </h2>
+                <ShowPastDueToggle checked={showPastDueFollowUps} onChange={setShowPastDueFollowUps} count={pastDueFollowUpCount} />
               </div>
               <div className="overflow-x-auto">
                 <table className="w-full">
@@ -2836,7 +2933,7 @@ function LSWContent() {
                     </tr>
                   </thead>
                   <tbody className="divide-y divide-gray-200 dark:divide-gray-700">
-                    {followUps.map((followUp) => (
+                    {visibleFollowUps.map((followUp) => (
                       <tr key={followUp.id} className="hover:bg-gray-50 dark:hover:bg-gray-800/50 transition-colors group">
                         <td className="pl-2 py-3">
                           <button
@@ -2885,15 +2982,9 @@ function LSWContent() {
                           ) : (
                             <span
                               onClick={() => handleStartFollowUpEdit(followUp)}
-                              className={`inline-block px-2 py-1 rounded-full text-xs font-medium cursor-pointer ${
-                                new Date(followUp.dueDate + 'T00:00:00Z') < new Date()
-                                  ? 'bg-red-100 text-red-700 dark:bg-red-900/30 dark:text-red-400'
-                                  : new Date(followUp.dueDate + 'T00:00:00Z') < new Date(Date.now() + 3 * 24 * 60 * 60 * 1000)
-                                  ? 'bg-amber-100 text-amber-700 dark:bg-amber-900/30 dark:text-amber-400'
-                                  : 'bg-gray-100 text-gray-700 dark:bg-gray-700 dark:text-gray-300'
-                              } whitespace-nowrap`}
+                              className={getLswDateBadgeClass(getLswDateBadgeTone(followUp.dueDate, selectedWeekStartInput, selectedWeekEndInput, todayInput))}
                             >
-                              {followUp.dueDate ? new Date(followUp.dueDate + 'T00:00:00Z').toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric', timeZone: 'UTC' }) : 'Set date'}
+                              {formatLswDate(followUp.dueDate)}
                             </span>
                           )}
                         </td>
@@ -2969,11 +3060,12 @@ function LSWContent() {
             <hr className="border-t border-black dark:border-gray-500 m-0" />
             {/* RCA Triggers */}
             <div className="bg-white/80 dark:bg-gray-800/80 backdrop-blur-sm overflow-hidden">
-              <div className="px-5 py-4 bg-gradient-to-r from-red-500/10 to-rose-500/10 dark:from-red-500/20 dark:to-rose-500/20 border-b border-gray-200/50 dark:border-gray-700/50">
+              <div className="px-5 py-4 bg-gradient-to-r from-red-500/10 to-rose-500/10 dark:from-red-500/20 dark:to-rose-500/20 border-b border-gray-200/50 dark:border-gray-700/50 flex items-center justify-between gap-3">
                 <h2 className="text-lg font-semibold text-gray-800 dark:text-white flex items-center gap-2">
                   <span className="text-xl">⚠️</span>
                   Plant Specific Cause RCA Triggers
                 </h2>
+                <ShowPastDueToggle checked={showPastDueTriggers} onChange={setShowPastDueTriggers} count={pastDueTriggerCount} />
               </div>
               <div className="overflow-x-auto">
                 <table className="w-full table-fixed">
@@ -2986,7 +3078,7 @@ function LSWContent() {
                     </tr>
                   </thead>
                   <tbody className="divide-y divide-gray-200 dark:divide-gray-700">
-                    {rcaTriggers.map((trigger) => (
+                    {visibleRcaTriggers.map((trigger) => (
                       <tr key={trigger.id} className="hover:bg-gray-50 dark:hover:bg-gray-800/50 transition-colors group">
                         {/* Action buttons: delete + add row */}
                         <td className="pl-2 py-2">
@@ -3047,12 +3139,9 @@ function LSWContent() {
                           ) : (
                             <span
                               onClick={() => handleStartTriggerEdit(trigger)}
-                              className="block w-full px-2 py-1 text-sm text-gray-600 dark:text-gray-400 cursor-pointer border border-transparent hover:border-gray-300 dark:hover:border-gray-600 rounded transition-colors"
+                              className={getLswDateBadgeClass(getLswDateBadgeTone(trigger.eventDate, selectedWeekStartInput, selectedWeekEndInput, todayInput))}
                             >
-                              {trigger.eventDate 
-                                ? new Date(trigger.eventDate + 'T00:00:00Z').toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric', timeZone: 'UTC' })
-                                : <span className="text-gray-400 italic">Set date...</span>
-                              }
+                              {formatLswDate(trigger.eventDate, 'Set date')}
                             </span>
                           )}
                         </td>
@@ -3106,16 +3195,17 @@ function LSWContent() {
             <hr className="border-t border-black dark:border-gray-500 m-0" />
             {/* Tasks by Frequency */}
             <div className="bg-white/80 dark:bg-gray-800/80 backdrop-blur-sm overflow-hidden">
-              <div className="px-5 py-4 bg-gradient-to-r from-violet-500/10 to-purple-500/10 dark:from-violet-500/20 dark:to-purple-500/20 border-b border-gray-200/50 dark:border-gray-700/50 flex items-center justify-between">
+              <div className="px-5 py-4 bg-gradient-to-r from-violet-500/10 to-purple-500/10 dark:from-violet-500/20 dark:to-purple-500/20 border-b border-gray-200/50 dark:border-gray-700/50 flex items-center justify-between gap-3">
                 <h2 className="text-lg font-semibold text-gray-800 dark:text-white flex items-center gap-2">
                   <span className="text-xl">📆</span>
                   Scheduled Tasks/Meetings
                 </h2>
+                <ShowPastDueToggle checked={showPastDueFrequencyTasks} onChange={setShowPastDueFrequencyTasks} count={pastDueFrequencyTaskCount} />
               </div>
               <div className="divide-y divide-gray-200 dark:divide-gray-700">
                 {(['biweekly', 'monthly', 'quarterly', 'annually'] as const).map(freq => {
                   const label = freq === 'biweekly' ? 'Bi-Weekly' : freq === 'monthly' ? 'Monthly' : freq === 'quarterly' ? 'Quarterly' : 'Annually';
-                  const tasksForFreq = frequencyTasks.filter(t => t.frequency === freq);
+                  const tasksForFreq = visibleFrequencyTasks.filter(t => t.frequency === freq);
                   return (
                     <div key={freq} className="py-3">
                       <div className="flex items-center justify-between px-4 py-2 bg-blue-100 dark:bg-blue-900/50">
@@ -3185,8 +3275,11 @@ function LSWContent() {
                                     className="w-full bg-transparent border-b border-blue-400 focus:outline-none text-xs px-0"
                                   />
                                 ) : (
-                                  <span onClick={() => handleStartFreqTaskEdit(task, 'dueDate')} className="cursor-pointer">
-                                    {new Date(task.dueDate + 'T00:00:00Z').toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric', timeZone: 'UTC' })}
+                                  <span
+                                    onClick={() => handleStartFreqTaskEdit(task, 'dueDate')}
+                                    className={getLswDateBadgeClass(getLswDateBadgeTone(task.dueDate, selectedWeekStartInput, selectedWeekEndInput, todayInput))}
+                                  >
+                                    {formatLswDate(task.dueDate)}
                                   </span>
                                 )}
                               </td>
@@ -3431,14 +3524,15 @@ function LSWContent() {
             <hr className="border-t border-black dark:border-gray-500 m-0" />
             {/* Meeting Rails */}
             <div className="bg-white/80 dark:bg-gray-800/80 backdrop-blur-sm overflow-hidden">
-              <div className="px-5 py-4 bg-gradient-to-r from-purple-500/10 to-pink-500/10 dark:from-purple-500/20 dark:to-pink-500/20 border-b border-gray-200/50 dark:border-gray-700/50">
+              <div className="px-5 py-4 bg-gradient-to-r from-purple-500/10 to-pink-500/10 dark:from-purple-500/20 dark:to-pink-500/20 border-b border-gray-200/50 dark:border-gray-700/50 flex items-center justify-between gap-3">
                 <h2 className="text-lg font-semibold text-gray-800 dark:text-white flex items-center gap-2">
                   <span className="text-xl">🚂</span>
                   Level 1, 2 & 3 Meeting Rails
                 </h2>
+                <ShowPastDueToggle checked={showPastDueRails} onChange={setShowPastDueRails} count={pastDueRailCount} />
               </div>
               <div className="divide-y divide-gray-200 dark:divide-gray-700">
-                {meetingRails.map((rail) => {
+                {visibleMeetingRails.map((rail) => {
                   const isRailEditing = editingRailId === rail.id;
                   return (
                   <div
@@ -3495,10 +3589,10 @@ function LSWContent() {
                           />
                         ) : (
                           <span
-                            className="text-xs text-gray-500 dark:text-gray-400 cursor-pointer whitespace-nowrap"
+                            className={getLswDateBadgeClass(getLswDateBadgeTone(rail.dueDate, selectedWeekStartInput, selectedWeekEndInput, todayInput))}
                             onClick={() => handleStartRailEdit(rail, 'dueDate')}
                           >
-                            {new Date(rail.dueDate + 'T00:00:00Z').toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric', timeZone: 'UTC' })}
+                            {formatLswDate(rail.dueDate)}
                           </span>
                         )}
                         <button
@@ -3587,14 +3681,15 @@ function LSWContent() {
             <hr className="border-t border-black dark:border-gray-500 m-0" />
             {/* Personal Objectives/Goals */}
             <div className="bg-white/80 dark:bg-gray-800/80 backdrop-blur-sm overflow-hidden">
-              <div className="px-5 py-4 bg-gradient-to-r from-rose-500/10 to-pink-500/10 dark:from-rose-500/20 dark:to-pink-500/20 border-b border-gray-200/50 dark:border-gray-700/50">
+              <div className="px-5 py-4 bg-gradient-to-r from-rose-500/10 to-pink-500/10 dark:from-rose-500/20 dark:to-pink-500/20 border-b border-gray-200/50 dark:border-gray-700/50 flex items-center justify-between gap-3">
                 <h2 className="text-lg font-semibold text-gray-800 dark:text-white flex items-center gap-2">
                   <span className="text-xl">🎯</span>
                   Personal Objectives/Goals
                 </h2>
+                <ShowPastDueToggle checked={showPastDueGoals} onChange={setShowPastDueGoals} count={pastDueGoalCount} />
               </div>
               <div className="divide-y divide-gray-200 dark:divide-gray-700">
-                {personalGoals.map((goal) => {
+                {visiblePersonalGoals.map((goal) => {
                   const isGoalEditing = editingGoalInlineId === goal.id;
                   return (
                   <div 
@@ -3635,10 +3730,10 @@ function LSWContent() {
                           />
                         ) : (
                           <span
-                            className="text-xs text-gray-500 dark:text-gray-400 whitespace-nowrap cursor-pointer"
+                            className={getLswDateBadgeClass(getLswDateBadgeTone(goal.dueDate, selectedWeekStartInput, selectedWeekEndInput, todayInput))}
                             onClick={() => handleStartGoalEdit(goal, 'dueDate')}
                           >
-                            {new Date(goal.dueDate + 'T00:00:00Z').toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric', timeZone: 'UTC' })}
+                            {formatLswDate(goal.dueDate)}
                           </span>
                         )}
                         <button

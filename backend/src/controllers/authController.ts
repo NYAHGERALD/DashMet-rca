@@ -108,6 +108,14 @@ const generateTokens = (userId: string) => {
 
 type LoginAuditResult = 'success' | 'failed';
 type LockoutTier = 'standard' | 'elevated';
+type TrustedDeviceTransport = 'web_cookie' | 'mobile_token';
+type TrustedDeviceFailureReason =
+  | 'not_present'
+  | 'invalid_format'
+  | 'not_found_or_expired'
+  | 'token_mismatch'
+  | 'service_unavailable'
+  | 'check_failed';
 type RefreshReuseContext = {
   userId: string;
   organizationId?: string | null;
@@ -115,11 +123,16 @@ type RefreshReuseContext = {
 type TrustedDeviceVerification = {
   trusted: boolean;
   deviceId?: string;
+  transport?: TrustedDeviceTransport;
+  reason?: TrustedDeviceFailureReason;
+  clearClientStorage?: boolean;
 };
 
 type RememberedTrustedDevice = {
   deviceId: string;
   trustedDeviceToken: string;
+  expiresAt: Date;
+  transport: TrustedDeviceTransport;
 };
 
 type FailedLoginAttemptState = {
@@ -257,6 +270,20 @@ const safeTokenHashEquals = (storedHash: string, candidateHash: string): boolean
   );
 };
 
+const buildTrustedDeviceResponse = (
+  verification: TrustedDeviceVerification,
+  rememberedDevice?: RememberedTrustedDevice
+) => ({
+  trusted: verification.trusted,
+  used: verification.trusted,
+  remembered: Boolean(rememberedDevice?.deviceId),
+  transport: rememberedDevice?.transport || verification.transport,
+  reason: verification.trusted ? undefined : verification.reason,
+  clearClientStorage: Boolean(verification.clearClientStorage),
+  expiresAt: rememberedDevice?.expiresAt.toISOString(),
+  expiresInDays: rememberedDevice ? ORG_LOGIN_TRUSTED_DEVICE_DAYS : undefined,
+});
+
 const verifyLoginTrustedDevice = async (
   req: AuthRequest,
   res: Response,
@@ -265,13 +292,26 @@ const verifyLoginTrustedDevice = async (
 ): Promise<TrustedDeviceVerification> => {
   const rawTrustedCookie = getCookie(req, TRUSTED_DEVICE_COOKIE_NAME);
   const parsedCookie = parseTrustedDeviceCookie(rawTrustedCookie);
-  const parsedMobileCredential = isMobileTrustedDeviceClient(req)
-    ? parseTrustedDeviceCredential(getMobileTrustedDeviceToken(req))
-    : null;
-  const parsedCredential = parsedCookie || parsedMobileCredential;
+  const rawMobileCredential = isMobileTrustedDeviceClient(req)
+    ? getMobileTrustedDeviceToken(req)
+    : undefined;
+  const parsedMobileCredential = parseTrustedDeviceCredential(rawMobileCredential);
+  const parsedCredential = parsedMobileCredential || parsedCookie;
+  const transport: TrustedDeviceTransport | undefined = parsedMobileCredential
+    ? 'mobile_token'
+    : parsedCookie
+      ? 'web_cookie'
+      : undefined;
 
   if (!parsedCredential) {
-    return { trusted: false };
+    if (rawTrustedCookie && !parsedCookie) {
+      clearTrustedDeviceCookie(res);
+    }
+    return {
+      trusted: false,
+      reason: rawTrustedCookie || rawMobileCredential ? 'invalid_format' : 'not_present',
+      clearClientStorage: Boolean(rawMobileCredential),
+    };
   }
 
   try {
@@ -285,10 +325,15 @@ const verifyLoginTrustedDevice = async (
     });
 
     if (!trustedDevice) {
-      if (parsedCookie) {
+      if (transport === 'web_cookie') {
         clearTrustedDeviceCookie(res);
       }
-      return { trusted: false };
+      return {
+        trusted: false,
+        transport,
+        reason: 'not_found_or_expired',
+        clearClientStorage: transport === 'mobile_token',
+      };
     }
 
     const candidateHash = hashTrustedDeviceToken(parsedCredential.deviceId, parsedCredential.token);
@@ -300,10 +345,15 @@ const verifyLoginTrustedDevice = async (
         where: { id: trustedDevice.id },
         data: { revokedAt: now },
       });
-      if (parsedCookie) {
+      if (transport === 'web_cookie') {
         clearTrustedDeviceCookie(res);
       }
-      return { trusted: false };
+      return {
+        trusted: false,
+        transport,
+        reason: 'token_mismatch',
+        clearClientStorage: transport === 'mobile_token',
+      };
     }
 
     await prisma.loginTrustedDevice.update({
@@ -316,20 +366,20 @@ const verifyLoginTrustedDevice = async (
       },
     });
 
-    return { trusted: true, deviceId: trustedDevice.id };
+    return { trusted: true, deviceId: trustedDevice.id, transport };
   } catch (error) {
     if (isMissingTrustedDeviceTableError(error)) {
       logger.warn('Trusted-device table unavailable; requiring email verification', {
         userId: user.id,
       });
-      return { trusted: false };
+      return { trusted: false, transport, reason: 'service_unavailable' };
     }
 
     logger.warn('Trusted-device check failed; requiring email verification', {
       userId: user.id,
       error: error instanceof Error ? error.message : String(error),
     });
-    return { trusted: false };
+    return { trusted: false, transport, reason: 'check_failed' };
   }
 };
 
@@ -394,7 +444,12 @@ const rememberLoginTrustedDevice = async (
       TRUSTED_DEVICE_COOKIE_MAX_AGE_SECONDS
     );
 
-    return { deviceId, trustedDeviceToken };
+    return {
+      deviceId,
+      trustedDeviceToken,
+      expiresAt,
+      transport: isMobileClient ? 'mobile_token' : 'web_cookie',
+    };
   } catch (error) {
     logger.warn('Unable to remember trusted device; login will continue without device trust', {
       userId: user.id,
@@ -638,6 +693,9 @@ async function logLoginAuditEvent(
     remainingLockoutSeconds?: number;
     mfaSatisfiedBy?: 'not_required' | 'email_otp' | 'trusted_device';
     trustedDeviceId?: string;
+    trustedDeviceReason?: TrustedDeviceFailureReason;
+    trustedDeviceTransport?: TrustedDeviceTransport;
+    trustedDeviceRemembered?: boolean;
   } = {}
 ) {
   if (!user.organizationId) {
@@ -664,6 +722,11 @@ async function logLoginAuditEvent(
         : {}),
       ...(options.mfaSatisfiedBy ? { mfaSatisfiedBy: options.mfaSatisfiedBy } : {}),
       ...(options.trustedDeviceId ? { trustedDeviceId: options.trustedDeviceId } : {}),
+      ...(options.trustedDeviceReason ? { trustedDeviceReason: options.trustedDeviceReason } : {}),
+      ...(options.trustedDeviceTransport ? { trustedDeviceTransport: options.trustedDeviceTransport } : {}),
+      ...(typeof options.trustedDeviceRemembered === 'boolean'
+        ? { trustedDeviceRemembered: options.trustedDeviceRemembered }
+        : {}),
     },
     ipAddress: getClientIp(req),
     userAgent: req.headers['user-agent'],
@@ -926,6 +989,7 @@ export const login = async (req: AuthRequest, res: Response) => {
           requiresMfa: true,
           mfaMethod: 'email_otp',
           rateLimited: true,
+          trustedDevice: buildTrustedDeviceResponse(trustedDevice),
         });
         return;
       }
@@ -950,6 +1014,8 @@ export const login = async (req: AuthRequest, res: Response) => {
 
       await logLoginAuditEvent(req, user, 'failed', {
         reason: 'mfa_challenge_issued',
+        trustedDeviceReason: trustedDevice.reason,
+        trustedDeviceTransport: trustedDevice.transport,
       });
 
       res.status(200).json({
@@ -957,6 +1023,7 @@ export const login = async (req: AuthRequest, res: Response) => {
         requiresMfa: true,
         mfaMethod: 'email_otp',
         message: LOGIN_MFA_REQUIRED_EMAIL_OTP_MESSAGE,
+        trustedDevice: buildTrustedDeviceResponse(trustedDevice),
       });
       return;
     }
@@ -993,6 +1060,7 @@ export const login = async (req: AuthRequest, res: Response) => {
         error: 'Invalid verification code',
         requiresMfa: true,
         mfaMethod: 'email_otp',
+        trustedDevice: buildTrustedDeviceResponse(trustedDevice),
         mfaAttemptsRemaining: verification.attemptsRemaining,
         locked: failedAttempt.shouldLockAccount,
         remainingMinutes: failedAttempt.shouldLockAccount
@@ -1046,6 +1114,9 @@ export const login = async (req: AuthRequest, res: Response) => {
         ? 'trusted_device'
         : 'email_otp',
     trustedDeviceId: trustedDevice.deviceId || rememberedDevice?.deviceId,
+    trustedDeviceReason: trustedDevice.reason,
+    trustedDeviceTransport: rememberedDevice?.transport || trustedDevice.transport,
+    trustedDeviceRemembered: Boolean(rememberedDevice?.deviceId),
   });
 
   res.json({
@@ -1053,6 +1124,7 @@ export const login = async (req: AuthRequest, res: Response) => {
     requiresMfa: false,
     trustedDeviceUsed: trustedDevice.trusted,
     trustedDeviceRemembered: Boolean(rememberedDevice?.deviceId),
+    trustedDevice: buildTrustedDeviceResponse(trustedDevice, rememberedDevice),
     data: {
       ...buildMobileSessionPayload(req, accessToken, refreshToken),
       trustedDeviceToken:
@@ -1071,6 +1143,21 @@ export const login = async (req: AuthRequest, res: Response) => {
         timezone: user.timezone,
       },
     },
+  });
+};
+
+export const getLoginTrustedDeviceStatus = async (req: AuthRequest, res: Response) => {
+  const trustedDevice = await verifyLoginTrustedDevice(
+    req,
+    res,
+    { id: req.user!.id },
+    new Date()
+  );
+
+  res.set('Cache-Control', 'no-store');
+  res.json({
+    success: true,
+    trustedDevice: buildTrustedDeviceResponse(trustedDevice),
   });
 };
 

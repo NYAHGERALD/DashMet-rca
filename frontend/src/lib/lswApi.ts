@@ -135,6 +135,8 @@ export interface LswBoard {
   id: string;
   weekNumber: number;
   year: number;
+  facilityId: string | null;
+  departmentId: string | null;
   todoTab: string | null;
 }
 
@@ -246,7 +248,6 @@ export async function deleteLswTodoItem(id: string) {
 export async function createLswFrequencyTask(data: {
   task: string; minutes?: number; dueDate: string;
   frequency: 'BIWEEKLY' | 'MONTHLY' | 'QUARTERLY' | 'ANNUALLY';
-  weekNumber?: number; year?: number;
 }) {
   const res = await api.post('/lsw/frequency-tasks', data);
   return res.data.data as LswFrequencyTask;
@@ -302,7 +303,7 @@ export async function deleteLswProjectUpdate(updateId: string) {
 }
 
 // Meeting Rails
-export async function createLswMeetingRail(data: { rail: string; dueDate: string; weekNumber?: number; year?: number }) {
+export async function createLswMeetingRail(data: { rail: string; dueDate: string }) {
   const res = await api.post('/lsw/meeting-rails', data);
   return res.data.data as LswMeetingRail;
 }
@@ -465,9 +466,29 @@ export async function deleteLswEarlyCompletionLog(dailyTaskId: string, dayKey: s
 
 // ─── Export ───────────────────────────────────────────────────────────────────
 
-export async function exportLswReport(weekNumber: number, year: number, weekStart: string, department?: string): Promise<Blob> {
+export interface LswExportOptions {
+  includePastDueFollowUps?: boolean;
+  includePastDueTriggers?: boolean;
+  includePastDueFrequencyTasks?: boolean;
+  includePastDueRails?: boolean;
+  includePastDueGoals?: boolean;
+}
+
+export async function exportLswReport(
+  weekNumber: number,
+  year: number,
+  weekStart: string,
+  department?: string,
+  options: LswExportOptions = {}
+): Promise<Blob> {
   const res = await api.get('/lsw/export', {
-    params: { weekNumber, year, weekStart, department },
+    params: {
+      weekNumber,
+      year,
+      weekStart,
+      department,
+      ...options,
+    },
     responseType: 'blob',
   });
   return res.data;

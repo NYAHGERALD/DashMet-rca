@@ -17,6 +17,7 @@ import {
   KeyRound
 } from 'lucide-react';
 import api from '@/lib/api';
+import { assertWebTrustedDeviceRemembered } from '@/lib/trustedDevice';
 import SupportModal from '@/components/support/SupportModal';
 import {
   fetchPublicPlatformBranding,
@@ -180,6 +181,8 @@ export default function HomePage() {
       if (!response.data?.success) {
         throw new Error(response.data?.error || 'Unable to sign in');
       }
+
+      await assertWebTrustedDeviceRemembered(requiresMfa && rememberDevice, response.data);
 
       const refreshedUser = await refreshUser();
       if (!refreshedUser) {

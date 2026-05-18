@@ -4,6 +4,14 @@ import lswService from './lswService';
 
 const TEMPLATE_PATH = path.join(__dirname, '../../assets/templates/LSW_TEMPLATE.xlsx');
 
+interface LswExportIncludePastDue {
+  followUps?: boolean;
+  triggers?: boolean;
+  frequencyTasks?: boolean;
+  rails?: boolean;
+  goals?: boolean;
+}
+
 // ─── BASE TEMPLATE ROW COUNTS PER BLOCK ────────────────────────────────────
 // Blocks have side-by-side sections that share row ranges. When data exceeds
 // the base capacity we insert additional rows via duplicateRow (preserves
@@ -47,7 +55,8 @@ export async function generateLswExcelReport(
   year: number,
   userName: string,
   weekStartDate: string,
-  department?: string
+  department?: string,
+  includePastDue: LswExportIncludePastDue = {}
 ): Promise<ExcelJS.Buffer> {
   const workbook = new ExcelJS.Workbook();
   await workbook.xlsx.readFile(TEMPLATE_PATH);
@@ -60,13 +69,18 @@ export async function generateLswExcelReport(
   // Prepare data arrays
   const dailyTasks = data.dailyTasks || [];
   const todoItems = (data.todoItems || []).filter((t: any) => t.isActive !== false);
-  const freqTasks = data.frequencyTasks || [];
+  const freqTasks = filterBySelectedWeek(data.frequencyTasks || [], 'dueDate', weekStartDate, !!includePastDue.frequencyTasks);
   const projects = data.projects || [];
-  const meetingRails = data.meetingRails || [];
-  const followUps = (data.followUps || []).filter((f: any) => f.isActive !== false);
+  const meetingRails = filterBySelectedWeek(data.meetingRails || [], 'dueDate', weekStartDate, !!includePastDue.rails);
+  const followUps = filterBySelectedWeek(
+    (data.followUps || []).filter((f: any) => f.isActive !== false),
+    'dueDate',
+    weekStartDate,
+    !!includePastDue.followUps
+  );
   const keyResultSets = data.keyResultSets || [];
-  const rcaTriggers = data.rcaTriggers || [];
-  const personalGoals = data.personalGoals || [];
+  const rcaTriggers = filterBySelectedWeek(data.rcaTriggers || [], 'eventDate', weekStartDate, !!includePastDue.triggers);
+  const personalGoals = filterBySelectedWeek(data.personalGoals || [], 'dueDate', weekStartDate, !!includePastDue.goals);
 
   const biweekly = freqTasks.filter((t: any) => t.frequency === 'BIWEEKLY');
   const monthly = freqTasks.filter((t: any) => t.frequency === 'MONTHLY');
@@ -101,8 +115,11 @@ export async function generateLswExcelReport(
 
   // ═══════════════════════════════════════════════════════════════════════════
   // STEP 2 — Insert extra rows BOTTOM-UP (keeps upstream row numbers stable).
-  // duplicateRow copies styles + merged cells from the source row.
+  // ExcelJS does not reliably shift merged cells when rows are duplicated. We
+  // clear the template merges first, duplicate the styled rows, then rebuild the
+  // exact merge layout for every shifted/expanded section.
   // ═══════════════════════════════════════════════════════════════════════════
+  clearWorksheetMerges(ws);
   if (extra4 > 0) ws.duplicateRow(39, extra4, true);
   if (extra3 > 0) ws.duplicateRow(32, extra3, true);
   if (extra2 > 0) ws.duplicateRow(22, extra2, true);
@@ -133,6 +150,8 @@ export async function generateLswExcelReport(
     goals: { start: 35 + extra1 + extra2 + extra3, end: 39 + extra1 + extra2 + extra3 + extra4 },
   };
 
+  applyLswTemplateMerges(ws, extra1, extra2, extra3, extra4);
+
   // ═══════════════════════════════════════════════════════════════════════════
   // STEP 4 — Fill sections (no caps; all rows are available)
   // ═══════════════════════════════════════════════════════════════════════════
@@ -157,18 +176,12 @@ export async function generateLswExcelReport(
   // ─── TO-DO ITEMS (cols L-M) ───
   fillRange(R.todo.start, R.todo.end, todoItems, (todo, row) => {
     setCheckboxCell(ws, `L${row}`, todo.completed);
-    const cell = ws.getCell(`M${row}`);
-    cell.value = sanitizeText(todo.task || '');
-    const ea = cell.alignment || {};
-    cell.alignment = { ...ea, wrapText: true };
-    const ef = cell.font || {};
-    cell.font = { ...ef, strike: !!todo.completed, bold: false, size: 11 };
+    setCellValue(ws, `M${row}`, todo.task || '');
+    setCellStrike(ws, `M${row}`, !!todo.completed);
   }, (row) => {
     setCheckboxCell(ws, `L${row}`, false);
-    const cell = ws.getCell(`M${row}`);
-    cell.value = '';
-    const ef = cell.font || {};
-    cell.font = { ...ef, strike: false, bold: false, size: 11 };
+    setCellValue(ws, `M${row}`, '');
+    setCellStrike(ws, `M${row}`, false);
   });
 
   // ─── FREQUENCY TASKS (cols O-Q) ───
@@ -198,10 +211,14 @@ export async function generateLswExcelReport(
     setCheckboxCell(ws, `O${row}`, rail.completed);
     setCellValue(ws, `P${row}`, rail.rail || '');
     setCellNoWrap(ws, `Q${row}`, formatDate(rail.dueDate));
+    setCellStrike(ws, `P${row}`, !!rail.completed);
+    setCellStrike(ws, `Q${row}`, !!rail.completed);
   }, (row) => {
     setCheckboxCell(ws, `O${row}`, false);
     setCellValue(ws, `P${row}`, '');
     setCellValue(ws, `Q${row}`, '');
+    setCellStrike(ws, `P${row}`, false);
+    setCellStrike(ws, `Q${row}`, false);
   });
 
   // ─── FOLLOW-UPS (cols A-M) ───
@@ -243,11 +260,13 @@ export async function generateLswExcelReport(
 
   // ─── RCA TRIGGERS (cols A-M) ───
   fillRange(R.rca.start, R.rca.end, rcaTriggers, (trigger: any, row: number) => {
-    setCellValue(ws, `A${row}`, trigger.trigger || '');
+    setCheckboxCell(ws, `A${row}`, false);
+    setCellValue(ws, `B${row}`, trigger.trigger || '');
     setCellNoWrap(ws, `C${row}`, formatDate(trigger.eventDate));
     setCellValue(ws, `G${row}`, trigger.comments || '');
   }, (row: number) => {
-    setCellValue(ws, `A${row}`, '');
+    setCheckboxCell(ws, `A${row}`, false);
+    setCellValue(ws, `B${row}`, '');
     setCellValue(ws, `C${row}`, '');
     setCellValue(ws, `G${row}`, '');
   });
@@ -298,6 +317,7 @@ export async function generateLswExcelReport(
   // Rewrite every existing border edge with a single uniform style so all
   // visible lines share the same weight/color across the whole sheet.
   normalizeBorders(ws);
+  applyLswSectionGridBorders(ws, R);
 
   const buffer = await workbook.xlsx.writeBuffer();
   return buffer;
@@ -306,6 +326,125 @@ export async function generateLswExcelReport(
 // ═══════════════════════════════════════════════════════════════════════════
 // HELPERS
 // ═══════════════════════════════════════════════════════════════════════════
+
+function toDateKey(value: any): string {
+  if (!value) return '';
+  if (value instanceof Date) return value.toISOString().slice(0, 10);
+  if (typeof value === 'string') {
+    const trimmed = value.trim();
+    if (/^\d{4}-\d{2}-\d{2}/.test(trimmed)) return trimmed.slice(0, 10);
+  }
+  const parsed = new Date(value);
+  return isNaN(parsed.getTime()) ? '' : parsed.toISOString().slice(0, 10);
+}
+
+function filterBySelectedWeek<T extends Record<string, any>>(
+  items: T[],
+  dateField: keyof T,
+  weekStartDate: string,
+  includePastDue: boolean
+): T[] {
+  if (includePastDue || !weekStartDate) return items;
+
+  return items.filter((item) => {
+    const dateKey = toDateKey(item[dateField]);
+    return !dateKey || dateKey >= weekStartDate;
+  });
+}
+
+function colLetter(index: number): string {
+  let n = index;
+  let result = '';
+  while (n > 0) {
+    const remainder = (n - 1) % 26;
+    result = String.fromCharCode(65 + remainder) + result;
+    n = Math.floor((n - 1) / 26);
+  }
+  return result;
+}
+
+function mergeRef(top: number, left: number, bottom: number, right: number): string {
+  return `${colLetter(left)}${top}:${colLetter(right)}${bottom}`;
+}
+
+function getWorksheetMergeRefs(ws: ExcelJS.Worksheet): string[] {
+  const merges = ((ws as any)._merges || {}) as Record<string, { top: number; left: number; bottom: number; right: number }>;
+  return Object.values(merges).map((merge) => mergeRef(merge.top, merge.left, merge.bottom, merge.right));
+}
+
+function clearWorksheetMerges(ws: ExcelJS.Worksheet): void {
+  for (const ref of getWorksheetMergeRefs(ws)) {
+    ws.unMergeCells(ref);
+  }
+}
+
+function mergeCells(ws: ExcelJS.Worksheet, startCell: string, endCell: string): void {
+  if (startCell === endCell) return;
+  ws.mergeCells(`${startCell}:${endCell}`);
+}
+
+function mergeRowSegments(ws: ExcelJS.Worksheet, row: number, segments: Array<[string, string]>): void {
+  for (const [startCol, endCol] of segments) {
+    mergeCells(ws, `${startCol}${row}`, `${endCol}${row}`);
+  }
+}
+
+function mergeRowRangeSegments(
+  ws: ExcelJS.Worksheet,
+  startRow: number,
+  endRow: number,
+  segments: Array<[string, string]>
+): void {
+  for (let row = startRow; row <= endRow; row++) {
+    mergeRowSegments(ws, row, segments);
+  }
+}
+
+function applyLswTemplateMerges(
+  ws: ExcelJS.Worksheet,
+  extra1: number,
+  extra2: number,
+  extra3: number,
+  extra4: number
+): void {
+  const block2Shift = extra1;
+  const block3Shift = extra1 + extra2;
+  const block4Shift = extra1 + extra2 + extra3;
+  const totalShift = extra1 + extra2 + extra3 + extra4;
+
+  // Block 1: daily / to-do / frequency
+  mergeCells(ws, 'K1', `K${16 + extra1}`);
+  mergeCells(ws, 'L1', 'M1');
+  mergeCells(ws, 'N1', `N${16 + extra1}`);
+  for (const row of [2, 5, 9, 13]) {
+    mergeRowSegments(ws, row, [['O', 'Q']]);
+  }
+
+  // Block 2: projects and meeting rails
+  mergeRowSegments(ws, 17 + block2Shift, [['A', 'Q']]);
+  mergeRowSegments(ws, 18 + block2Shift, [['B', 'M'], ['P', 'Q']]);
+  mergeRowSegments(ws, 19 + block2Shift, [['B', 'F'], ['G', 'M']]);
+  mergeRowRangeSegments(ws, 20 + block2Shift, 22 + block2Shift + extra2, [['B', 'F'], ['G', 'M']]);
+  mergeRowSegments(ws, 23 + block3Shift, [['A', 'M'], ['O', 'Q']]);
+
+  // Block 3: follow-ups and key results
+  mergeRowSegments(ws, 24 + block3Shift, [['B', 'M'], ['P', 'Q']]);
+  mergeRowSegments(ws, 25 + block3Shift, [['C', 'E'], ['F', 'I'], ['J', 'M']]);
+  mergeRowRangeSegments(ws, 26 + block3Shift, 32 + block3Shift + extra3, [['C', 'E'], ['F', 'I'], ['J', 'M']]);
+
+  // Block 4: RCA triggers and personal goals
+  mergeRowSegments(ws, 33 + block4Shift, [['B', 'M'], ['P', 'Q']]);
+  mergeRowSegments(ws, 34 + block4Shift, [['C', 'F'], ['G', 'M']]);
+  mergeRowRangeSegments(ws, 35 + block4Shift, 39 + block4Shift + extra4, [['C', 'F'], ['G', 'M']]);
+
+  // Center divider for blocks 2-4.
+  mergeCells(ws, `N${18 + block2Shift}`, `N${39 + totalShift}`);
+
+  // Info block
+  for (const row of [43 + totalShift, 44 + totalShift, 45 + totalShift]) {
+    mergeRowSegments(ws, row, [['C', 'F'], ['G', 'M']]);
+  }
+}
 
 /**
  * Fill a row range with items. All items are written (no cap). Any rows
@@ -366,6 +505,30 @@ function setCellNoWrap(ws: ExcelJS.Worksheet, cellRef: string, value: any): void
   cell.alignment = { ...ea, wrapText: false };
 }
 
+function setCellStrike(ws: ExcelJS.Worksheet, cellRef: string, strike: boolean): void {
+  const cell = ws.getCell(cellRef);
+  const existingFont = cell.font || {};
+  if (strike) {
+    const value = cell.value;
+    const text = value == null
+      ? ''
+      : typeof value === 'object' && (value as any).richText
+      ? (value as any).richText.map((part: any) => part.text).join('')
+      : String(value);
+    cell.value = {
+      richText: [
+        {
+          text,
+          font: { ...existingFont, strike: true, bold: false, size: 11 },
+        },
+      ],
+    };
+    return;
+  }
+
+  cell.font = { ...existingFont, strike: false, bold: false, size: 11 };
+}
+
 function setCellPlain(ws: ExcelJS.Worksheet, cellRef: string, value: any): void {
   const cell = ws.getCell(cellRef);
   const v = sanitizeText(value);
@@ -418,8 +581,7 @@ function setCheckboxCell(ws: ExcelJS.Worksheet, cellRef: string, value: any): vo
     type: 'list',
     allowBlank: false,
     formulae: ['"☑,☐"'],
-    showDropDown: false,
-  };
+  } as ExcelJS.DataValidation;
   const ea = cell.alignment || {};
   cell.alignment = { ...ea, horizontal: 'center', vertical: 'middle' };
   unboldCell(cell);
@@ -569,6 +731,61 @@ function autoSizeRowHeight(ws: ExcelJS.Worksheet, rowNum: number, wrapCols: stri
     model.height = finalHeight;
     model.customHeight = true;
   }
+}
+
+const LSW_GRID_BORDER: Partial<ExcelJS.Border> = {
+  style: 'thin',
+  color: { argb: 'FF000000' },
+};
+
+function setCellBorderEdges(ws: ExcelJS.Worksheet, cellRef: string, edges: Array<keyof ExcelJS.Borders>): void {
+  const cell = ws.getCell(cellRef);
+  const border: Partial<ExcelJS.Borders> = { ...(cell.border || {}) };
+  for (const edge of edges) {
+    if (edge === 'diagonal') continue;
+    border[edge] = { ...LSW_GRID_BORDER } as ExcelJS.Border;
+  }
+  cell.border = border as ExcelJS.Borders;
+}
+
+function applyLogicalSegmentBorder(ws: ExcelJS.Worksheet, row: number, startCol: string, endCol: string): void {
+  const start = colLetterToIndex(startCol);
+  const end = colLetterToIndex(endCol);
+
+  for (let col = start; col <= end; col++) {
+    const letter = colLetter(col);
+    const edges: Array<keyof ExcelJS.Borders> = ['top', 'bottom'];
+    if (col === start) edges.push('left');
+    if (col === end) edges.push('right');
+    setCellBorderEdges(ws, `${letter}${row}`, edges);
+  }
+}
+
+function applySegmentGridBorders(
+  ws: ExcelJS.Worksheet,
+  startRow: number,
+  endRow: number,
+  segments: Array<[string, string]>
+): void {
+  for (let row = startRow; row <= endRow; row++) {
+    for (const [startCol, endCol] of segments) {
+      applyLogicalSegmentBorder(ws, row, startCol, endCol);
+    }
+  }
+}
+
+function applyLswSectionGridBorders(ws: ExcelJS.Worksheet, ranges: {
+  projects: { start: number; end: number };
+  rails: { start: number; end: number };
+  followUps: { start: number; end: number };
+  rca: { start: number; end: number };
+  goals: { start: number; end: number };
+}): void {
+  applySegmentGridBorders(ws, ranges.projects.start - 1, ranges.projects.end, [['A', 'A'], ['B', 'F'], ['G', 'M']]);
+  applySegmentGridBorders(ws, ranges.rails.start - 1, ranges.rails.end, [['O', 'O'], ['P', 'P'], ['Q', 'Q']]);
+  applySegmentGridBorders(ws, ranges.followUps.start - 1, ranges.followUps.end, [['A', 'A'], ['B', 'B'], ['C', 'E'], ['F', 'I'], ['J', 'M']]);
+  applySegmentGridBorders(ws, ranges.rca.start - 1, ranges.rca.end, [['A', 'A'], ['B', 'B'], ['C', 'F'], ['G', 'M']]);
+  applySegmentGridBorders(ws, ranges.goals.start - 1, ranges.goals.end, [['O', 'O'], ['P', 'P'], ['Q', 'Q']]);
 }
 
 /**

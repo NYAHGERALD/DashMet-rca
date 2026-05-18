@@ -53,6 +53,14 @@ router.post(
   asyncHandler(authController.login)
 );
 
+// GET /api/auth/login/trusted-device-status - Confirm current login trusted-device credential
+router.get(
+  '/login/trusted-device-status',
+  requireAjaxRequest,
+  authenticate,
+  asyncHandler(authController.getLoginTrustedDeviceStatus)
+);
+
 // GET /api/auth/csrf - Issue a fresh CSRF token for same-session API retries
 router.get('/csrf', (_req, res) => {
   const csrfToken = setCsrfCookie(res);

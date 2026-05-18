@@ -7,6 +7,7 @@ import Link from 'next/link';
 import Image from 'next/image';
 import { useAuth } from '@/components/providers/AuthProvider';
 import api from '@/lib/api';
+import { assertWebTrustedDeviceRemembered } from '@/lib/trustedDevice';
 import { Eye, EyeOff, KeyRound } from 'lucide-react';
 import { fetchPublicPlatformBranding, getEmailLogoUrl, getLoginBackgroundUrl } from '@/lib/platformBranding';
 
@@ -196,6 +197,8 @@ export default function LoginPage() {
       if (!response.data?.success) {
         throw new Error(response.data?.error || 'Unable to sign in');
       }
+
+      await assertWebTrustedDeviceRemembered(requiresMfa && rememberDevice, response.data);
 
       const refreshedUser = await refreshUser();
       if (!refreshedUser) {

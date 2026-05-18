@@ -173,7 +173,7 @@ export async function deleteTodoItem(id: string, userId: string) {
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
-// Frequency Tasks (Scheduled Tasks/Meetings) — Period-based storage
+// Frequency Tasks (Scheduled Tasks/Meetings) — standing carry-over records
 // ─────────────────────────────────────────────────────────────────────────────
 
 // Utility: Get the Monday date of a given ISO week
@@ -212,20 +212,10 @@ export function computePeriodKey(frequency: string, weekNumber: number, year: nu
   }
 }
 
-export async function getFrequencyTasks(userId: string, weekNumber?: number, year?: number) {
-  const allTasks = await prisma.lswFrequencyTask.findMany({
+export async function getFrequencyTasks(userId: string, _weekNumber?: number, _year?: number) {
+  return prisma.lswFrequencyTask.findMany({
     where: { userId, isActive: true },
     orderBy: [{ frequency: 'asc' }, { dueDate: 'asc' }],
-  });
-
-  // If no week/year provided, return all (backward compat)
-  if (!weekNumber || !year) return allTasks;
-
-  // Filter by period key — each task's frequency determines its period
-  return allTasks.filter((task: any) => {
-    if (!task.periodKey) return true; // Legacy tasks without periodKey show always
-    const expectedKey = computePeriodKey(task.frequency, weekNumber, year);
-    return task.periodKey === expectedKey;
   });
 }
 
@@ -235,16 +225,12 @@ export async function createFrequencyTask(data: {
   frequency: LswFrequency; sortOrder?: number;
   weekNumber?: number; year?: number;
 }) {
-  const { weekNumber, year, ...createData } = data;
-  const periodKey = weekNumber && year
-    ? computePeriodKey(data.frequency, weekNumber, year)
-    : undefined;
+  const { weekNumber: _weekNumber, year: _year, ...createData } = data;
 
   return prisma.lswFrequencyTask.create({
     data: {
       ...createData,
       dueDate: new Date(data.dueDate),
-      ...(periodKey ? { periodKey } : {}),
     },
   });
 }
@@ -269,12 +255,8 @@ export async function deleteFrequencyTask(id: string, userId: string) {
 // ─────────────────────────────────────────────────────────────────────────────
 // Projects & Updates
 // ─────────────────────────────────────────────────────────────────────────────
-export async function getProjects(userId: string, weekNumber?: number, year?: number) {
+export async function getProjects(userId: string, _weekNumber?: number, _year?: number) {
   const where: any = { userId, isActive: true };
-  if (weekNumber !== undefined && year !== undefined) {
-    where.weekNumber = weekNumber;
-    where.year = year;
-  }
   return prisma.lswProject.findMany({
     where,
     include: { updates: { orderBy: { sortOrder: 'asc' } } },
@@ -291,7 +273,7 @@ export async function createProject(data: {
   initialUpdateText?: string;
   weekNumber?: number; year?: number;
 }) {
-  const { initialUpdateText, ...projectData } = data;
+  const { initialUpdateText, weekNumber: _weekNumber, year: _year, ...projectData } = data;
   return prisma.lswProject.create({
     data: {
       ...projectData,
@@ -364,14 +346,10 @@ export async function deleteProjectUpdate(id: string) {
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
-// Meeting Rails — Per-week storage
+// Meeting Rails — standing carry-over records
 // ─────────────────────────────────────────────────────────────────────────────
-export async function getMeetingRails(userId: string, weekNumber?: number, year?: number) {
+export async function getMeetingRails(userId: string, _weekNumber?: number, _year?: number) {
   const where: any = { userId, isActive: true };
-  if (weekNumber !== undefined && year !== undefined) {
-    where.weekNumber = weekNumber;
-    where.year = year;
-  }
   return prisma.lswMeetingRail.findMany({
     where,
     orderBy: [{ sortOrder: 'asc' }, { dueDate: 'asc' }],
@@ -383,8 +361,9 @@ export async function createMeetingRail(data: {
   rail: string; dueDate: string;
   weekNumber?: number; year?: number; sortOrder?: number;
 }) {
+  const { weekNumber: _weekNumber, year: _year, ...createData } = data;
   return prisma.lswMeetingRail.create({
-    data: { ...data, dueDate: new Date(data.dueDate) },
+    data: { ...createData, dueDate: new Date(data.dueDate) },
   });
 }
 
@@ -413,12 +392,8 @@ export async function deleteMeetingRail(id: string, userId: string) {
 // ─────────────────────────────────────────────────────────────────────────────
 // Follow Ups
 // ─────────────────────────────────────────────────────────────────────────────
-export async function getFollowUps(userId: string, weekNumber?: number, year?: number) {
+export async function getFollowUps(userId: string, _weekNumber?: number, _year?: number) {
   const where: any = { userId, isActive: true };
-  if (weekNumber !== undefined && year !== undefined) {
-    where.weekNumber = weekNumber;
-    where.year = year;
-  }
   return prisma.lswFollowUp.findMany({
     where,
     include: { responsibleUser: { select: { id: true, firstName: true, lastName: true, email: true } } },
@@ -433,8 +408,9 @@ export async function createFollowUp(data: {
   comments?: string; sortOrder?: number;
   weekNumber?: number; year?: number;
 }) {
+  const { weekNumber: _weekNumber, year: _year, ...createData } = data;
   return prisma.lswFollowUp.create({
-    data: { ...data, dueDate: new Date(data.dueDate) },
+    data: { ...createData, dueDate: new Date(data.dueDate) },
     include: { responsibleUser: { select: { id: true, firstName: true, lastName: true, email: true } } },
   });
 }
@@ -525,12 +501,8 @@ export async function deleteKeyResult(id: string) {
 // ─────────────────────────────────────────────────────────────────────────────
 // Personal Goals
 // ─────────────────────────────────────────────────────────────────────────────
-export async function getPersonalGoals(userId: string, weekNumber?: number, year?: number) {
+export async function getPersonalGoals(userId: string, _weekNumber?: number, _year?: number) {
   const where: any = { userId, isActive: true };
-  if (weekNumber !== undefined && year !== undefined) {
-    where.weekNumber = weekNumber;
-    where.year = year;
-  }
   return prisma.lswPersonalGoal.findMany({
     where,
     orderBy: [{ sortOrder: 'asc' }, { dueDate: 'asc' }],
@@ -542,8 +514,9 @@ export async function createPersonalGoal(data: {
   objective: string; dueDate: string; progress?: number; sortOrder?: number;
   weekNumber?: number; year?: number;
 }) {
+  const { weekNumber: _weekNumber, year: _year, ...createData } = data;
   return prisma.lswPersonalGoal.create({
-    data: { ...data, dueDate: new Date(data.dueDate) },
+    data: { ...createData, dueDate: new Date(data.dueDate) },
   });
 }
 
@@ -567,12 +540,8 @@ export async function deletePersonalGoal(id: string, userId: string) {
 // ─────────────────────────────────────────────────────────────────────────────
 // RCA Triggers
 // ─────────────────────────────────────────────────────────────────────────────
-export async function getRcaTriggers(userId: string, organizationId: string, weekNumber?: number, year?: number) {
+export async function getRcaTriggers(userId: string, organizationId: string, _weekNumber?: number, _year?: number) {
   const where: any = { userId, organizationId, isActive: true };
-  if (weekNumber !== undefined && year !== undefined) {
-    where.weekNumber = weekNumber;
-    where.year = year;
-  }
   return prisma.lswRcaTrigger.findMany({
     where,
     orderBy: [{ sortOrder: 'asc' }, { createdAt: 'asc' }],
@@ -584,9 +553,10 @@ export async function createRcaTrigger(data: {
   trigger: string; eventDate?: string; comments?: string; sortOrder?: number;
   weekNumber?: number; year?: number;
 }) {
+  const { weekNumber: _weekNumber, year: _year, ...createData } = data;
   return prisma.lswRcaTrigger.create({
     data: {
-      ...data,
+      ...createData,
       eventDate: data.eventDate ? new Date(data.eventDate) : null,
     },
   });

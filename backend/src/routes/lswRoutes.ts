@@ -719,6 +719,14 @@ router.get('/export', async (req: AuthRequest, res: Response) => {
     const year = parseInt(req.query.year as string);
     const weekStart = (req.query.weekStart as string) || '';
     const department = (req.query.department as string) || '';
+    const isTrueQuery = (value: unknown) => value === true || value === 'true';
+    const includePastDue = {
+      followUps: isTrueQuery(req.query.includePastDueFollowUps),
+      triggers: isTrueQuery(req.query.includePastDueTriggers),
+      frequencyTasks: isTrueQuery(req.query.includePastDueFrequencyTasks),
+      rails: isTrueQuery(req.query.includePastDueRails),
+      goals: isTrueQuery(req.query.includePastDueGoals),
+    };
 
     if (!weekNumber || !year || !organizationId) {
       return res.status(400).json({ success: false, error: 'weekNumber, year, and organizationId are required' });
@@ -734,6 +742,7 @@ router.get('/export', async (req: AuthRequest, res: Response) => {
       userName,
       weekStart,
       department,
+      includePastDue,
     );
 
     const filename = `LSW_Report_Week${weekNumber}_${year}.xlsx`;
