@@ -1,11 +1,8 @@
 // Phase 0.2: App Layout Structure
 
 import type { Metadata, Viewport } from 'next';
-import { Inter } from 'next/font/google';
 import '@/styles/globals.css';
 import { Providers } from '@/components/providers/Providers';
-
-const inter = Inter({ subsets: ['latin'] });
 
 export const metadata: Metadata = {
   title: 'DashMet Operations Intelligence',
@@ -96,7 +93,7 @@ export default function RootLayout({
           `
         }} />
       </head>
-      <body className={`${inter.className} bg-gray-50 dark:bg-gray-900`}>
+      <body className="font-sans bg-gray-50 dark:bg-gray-900">
         <Providers>
           {children}
         </Providers>

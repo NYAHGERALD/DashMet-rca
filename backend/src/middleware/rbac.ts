@@ -289,6 +289,7 @@ const DEFAULT_PRIVILEGES: Record<string, UserRole[]> = {
   'nav.safety_assessment': ['SUPERVISOR', 'QA_FOOD_SAFETY', 'QUALITY_CONTROL_MANAGER', 'MAINTENANCE_ENGINEERING', 'SAFETY_SECURITY_MANAGER', 'CI_MANAGER', 'ADMIN', 'SYSTEM_ADMIN'],
   'nav.hr': ['SUPERVISOR', 'QA_FOOD_SAFETY', 'QUALITY_CONTROL_MANAGER', 'MAINTENANCE_ENGINEERING', 'SAFETY_SECURITY_MANAGER', 'CI_MANAGER', 'ADMIN', 'SYSTEM_ADMIN'],
   'nav.bakery_metrics': ['OPERATOR', 'SUPERVISOR', 'QA_FOOD_SAFETY', 'QUALITY_CONTROL_MANAGER', 'MAINTENANCE_ENGINEERING', 'SAFETY_SECURITY_MANAGER', 'CI_MANAGER', 'ADMIN', 'SYSTEM_ADMIN'],
+  'nav.production_eos': ['OPERATOR', 'SUPERVISOR', 'QA_FOOD_SAFETY', 'QUALITY_CONTROL_MANAGER', 'MAINTENANCE_ENGINEERING', 'SAFETY_SECURITY_MANAGER', 'CI_MANAGER', 'ADMIN', 'SYSTEM_ADMIN'],
   'nav.lsw': ['OPERATOR', 'SUPERVISOR', 'QA_FOOD_SAFETY', 'QUALITY_CONTROL_MANAGER', 'MAINTENANCE_ENGINEERING', 'SAFETY_SECURITY_MANAGER', 'CI_MANAGER', 'ADMIN', 'SYSTEM_ADMIN'],
   'nav.vacation': ['OPERATOR', 'SUPERVISOR', 'QA_FOOD_SAFETY', 'QUALITY_CONTROL_MANAGER', 'MAINTENANCE_ENGINEERING', 'SAFETY_SECURITY_MANAGER', 'CI_MANAGER', 'ADMIN', 'SYSTEM_ADMIN'],
   'nav.meetings': ['OPERATOR', 'SUPERVISOR', 'QA_FOOD_SAFETY', 'QUALITY_CONTROL_MANAGER', 'MAINTENANCE_ENGINEERING', 'SAFETY_SECURITY_MANAGER', 'CI_MANAGER', 'ADMIN', 'SYSTEM_ADMIN'],
@@ -314,6 +315,7 @@ const DEFAULT_PRIVILEGES: Record<string, UserRole[]> = {
   'nav.admin_enterprise': ['ADMIN', 'SYSTEM_ADMIN'],
   'nav.admin_calendar': ['ADMIN', 'SYSTEM_ADMIN'],
   'nav.admin_bakery_settings': ['ADMIN', 'SYSTEM_ADMIN'],
+  'nav.admin_production_eos_reference': ['ADMIN', 'SYSTEM_ADMIN'],
   'nav.support_inbox': ['QUALITY_CONTROL_MANAGER', 'ADMIN', 'SYSTEM_ADMIN'],
 };
 
@@ -460,6 +462,8 @@ const API_ROUTE_TO_NAV_KEY: Record<string, string> = {
   '/api/safety-assessment': 'nav.safety_assessment',
   '/api/hr': 'nav.hr',
   '/api/bakery-metrics': 'nav.bakery_metrics',
+  '/api/production-eos/admin': 'nav.admin_production_eos_reference',
+  '/api/production-eos': 'nav.production_eos',
   '/api/lsw': 'nav.lsw',
   '/api/vacation': 'nav.vacation',
   '/api/meetings': 'nav.meetings',

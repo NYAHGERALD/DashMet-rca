@@ -21,6 +21,116 @@ const getOrgFilter = (req: any) => {
   return { organizationId: user.organizationId };
 };
 
+const normalizeLineNumber = (value: unknown) => String(value ?? '').replace(/\D/g, '');
+
+const normalizeTimeValue = (value: unknown) => {
+  const text = String(value ?? '').trim();
+  return /^([01]\d|2[0-3]):[0-5]\d$/.test(text) ? text : null;
+};
+
+const lineNumberLabel = (lineNumber: string) => `Line ${lineNumber}`;
+
+const toBoolean = (value: unknown) => value === true || value === 'true';
+
+const cleanLineName = (name: unknown) => String(name || '').trim().replace(/\s+/g, ' ');
+
+const lineNamePrefix = (name: string, lineNumber: string) => {
+  const label = lineNumberLabel(lineNumber).replace(/\s+/g, '\\s+');
+  return cleanLineName(String(name || '').replace(new RegExp(`\\s+${label}$`, 'i'), ''));
+};
+
+const buildLineName = (name: unknown, lineNumber: string) => {
+  const prefix = lineNumber ? lineNamePrefix(String(name || ''), lineNumber) : cleanLineName(name);
+  if (!prefix || !lineNumber) return '';
+  return `${prefix} ${lineNumberLabel(lineNumber)}`;
+};
+
+const buildPlainLineName = (name: unknown) => cleanLineName(name);
+
+const normalizeLineScheduledStartTimes = (value: unknown) => {
+  if (value === undefined) return undefined;
+  if (!Array.isArray(value)) return [];
+
+  const seenShiftIds = new Set<string>();
+  const rows: Array<{ shiftId: string; scheduledStartTime: string }> = [];
+
+  value.forEach((entry: any) => {
+    const shiftId = String(entry?.shiftId || '').trim();
+    const timeValue = String(entry?.scheduledStartTime || '').trim();
+    if (!shiftId && !timeValue) return;
+    if (!shiftId || !timeValue) {
+      throw new ValidationError('Each scheduled start needs both a shift and a start time');
+    }
+
+    const scheduledStartTime = normalizeTimeValue(timeValue);
+    if (!scheduledStartTime) {
+      throw new ValidationError('Scheduled start time must use HH:mm format');
+    }
+    if (seenShiftIds.has(shiftId)) {
+      throw new ValidationError('Each shift can only have one scheduled start time for a line');
+    }
+
+    seenShiftIds.add(shiftId);
+    rows.push({ shiftId, scheduledStartTime });
+  });
+
+  return rows;
+};
+
+const assertAccessibleShiftIds = async (req: any, shiftIds: string[]) => {
+  const uniqueShiftIds = Array.from(new Set(shiftIds));
+  if (!uniqueShiftIds.length) return;
+
+  const user = req.user;
+  const count = await prisma.shift.count({
+    where: {
+      id: { in: uniqueShiftIds },
+      ...(user.role === 'SYSTEM_ADMIN' ? {} : { Facility: { organizationId: user.organizationId } }),
+    },
+  });
+
+  if (count !== uniqueShiftIds.length) {
+    throw new ValidationError('Select valid shifts from your organization');
+  }
+};
+
+const shiftSequenceNumber = (shift: any) => {
+  const name = String(shift?.name || '').toLowerCase();
+  if (/\b(first|1st)\b/.test(name)) return 1;
+  if (/\b(second|2nd)\b/.test(name)) return 2;
+  if (/\b(third|3rd)\b/.test(name)) return 3;
+  const numericMatch = name.match(/\bshift\s*(\d+)\b/) || name.match(/\b(\d+)\s*shift\b/);
+  return numericMatch ? Number(numericMatch[1]) : null;
+};
+
+const minutesFromStoredTime = (value: unknown) => {
+  const match = String(value || '').match(/^(\d{1,2}):(\d{2})/);
+  if (!match) return Number.MAX_SAFE_INTEGER;
+  return Number(match[1]) * 60 + Number(match[2]);
+};
+
+const compareShiftSchedules = (a: any, b: any) => {
+  const aShift = a?.Shift;
+  const bShift = b?.Shift;
+  const aNumber = shiftSequenceNumber(aShift);
+  const bNumber = shiftSequenceNumber(bShift);
+
+  if (aNumber !== null || bNumber !== null) {
+    if (aNumber === null) return 1;
+    if (bNumber === null) return -1;
+    if (aNumber !== bNumber) return aNumber - bNumber;
+  }
+
+  const startDiff = minutesFromStoredTime(aShift?.startTime) - minutesFromStoredTime(bShift?.startTime);
+  if (startDiff !== 0) return startDiff;
+  return String(aShift?.name || '').localeCompare(String(bShift?.name || ''));
+};
+
+const withOrderedLineScheduledStarts = (line: any) => ({
+  ...line,
+  LineScheduledStartTime: [...(line.LineScheduledStartTime || [])].sort(compareShiftSchedules),
+});
+
 // ============= FACILITIES =============
 
 // GET /api/facilities - List facilities (filtered by user's organization)
@@ -261,6 +371,7 @@ router.get('/facilities/lines', async (req: any, res) => {
       id: true,
       name: true,
       lineNumber: true,
+      scheduledStartTime: true,
       description: true,
       areaId: true,
       Area: {
@@ -278,13 +389,28 @@ router.get('/facilities/lines', async (req: any, res) => {
           },
         },
       },
+      LineScheduledStartTime: {
+        select: {
+          id: true,
+          shiftId: true,
+          scheduledStartTime: true,
+          Shift: {
+            select: {
+              id: true,
+              name: true,
+              startTime: true,
+              endTime: true,
+            },
+          },
+        },
+      },
     },
     orderBy: { name: 'asc' },
   });
 
   res.json({
     success: true,
-    data: { lines },
+    data: { lines: lines.map(withOrderedLineScheduledStarts) },
   });
 });
 
@@ -316,20 +442,39 @@ router.get('/facilities/lines/:id', async (req, res) => {
 // POST /api/facilities/lines - Create line
 // Requires ADMIN role
 router.post('/facilities/lines', requireMinimumRole(UserRole.ADMIN), async (req, res) => {
-  const { name, lineNumber, areaId, description } = req.body;
+  const { name, lineNumber, lineNumberNotApplicable, scheduledStartTime, scheduledStartTimes, areaId, description } = req.body;
+  const numberNotApplicable = toBoolean(lineNumberNotApplicable);
+  const cleanLineNumber = numberNotApplicable ? null : normalizeLineNumber(lineNumber);
+  const finalName = numberNotApplicable ? buildPlainLineName(name) : buildLineName(name, cleanLineNumber || '');
+  const cleanScheduledStartTime = normalizeTimeValue(scheduledStartTime);
+  const lineScheduledStartTimes = normalizeLineScheduledStartTimes(scheduledStartTimes);
 
-  if (!name || !areaId) {
-    throw new ValidationError('Name and area ID are required');
+  if (!finalName || (!numberNotApplicable && !cleanLineNumber) || !areaId) {
+    throw new ValidationError('Line name, area ID, and either a numeric line number or Not Applicable are required');
   }
+
+  await assertAccessibleShiftIds(req, lineScheduledStartTimes?.map((row) => row.shiftId) || []);
 
   const line = await prisma.line.create({
     data: {
       id: uuidv4(),
       updatedAt: new Date(),
-      name,
-      lineNumber,
+      name: finalName,
+      lineNumber: cleanLineNumber,
+      scheduledStartTime: cleanScheduledStartTime,
       areaId,
       description,
+      ...(lineScheduledStartTimes?.length
+        ? {
+          LineScheduledStartTime: {
+            create: lineScheduledStartTimes.map((row) => ({
+              id: uuidv4(),
+              shiftId: row.shiftId,
+              scheduledStartTime: row.scheduledStartTime,
+            })),
+          },
+        }
+        : {}),
     },
     include: {
       Area: {
@@ -338,6 +483,18 @@ router.post('/facilities/lines', requireMinimumRole(UserRole.ADMIN), async (req,
           name: true,
           Facility: {
             select: { id: true, name: true },
+          },
+        },
+      },
+      LineScheduledStartTime: {
+        include: {
+          Shift: {
+            select: {
+              id: true,
+              name: true,
+              startTime: true,
+              endTime: true,
+            },
           },
         },
       },
@@ -354,15 +511,78 @@ router.post('/facilities/lines', requireMinimumRole(UserRole.ADMIN), async (req,
 // Requires ADMIN role
 router.patch('/facilities/lines/:id', requireMinimumRole(UserRole.ADMIN), async (req, res) => {
   const { id } = req.params;
-  const { name, lineNumber, description } = req.body;
+  const { name, lineNumber, lineNumberNotApplicable, scheduledStartTime, scheduledStartTimes, description } = req.body;
+  const existing = await prisma.line.findUnique({ where: { id } });
 
-  const line = await prisma.line.update({
-    where: { id },
-    data: {
-      ...(name && { name }),
-      ...(lineNumber !== undefined && { lineNumber }),
-      ...(description !== undefined && { description }),
-    },
+  if (!existing) {
+    throw new ValidationError('Line not found');
+  }
+
+  const existingLineNumber = normalizeLineNumber(existing.lineNumber);
+  const sourceName = name !== undefined ? name : lineNamePrefix(existing.name, existingLineNumber);
+  const numberNotApplicable = lineNumberNotApplicable !== undefined
+    ? toBoolean(lineNumberNotApplicable)
+    : !existingLineNumber;
+  const cleanLineNumber = numberNotApplicable
+    ? null
+    : lineNumber !== undefined
+      ? normalizeLineNumber(lineNumber)
+      : existingLineNumber;
+  const finalName = name !== undefined || lineNumber !== undefined || lineNumberNotApplicable !== undefined
+    ? numberNotApplicable
+      ? buildPlainLineName(sourceName)
+      : buildLineName(sourceName, cleanLineNumber || '')
+    : undefined;
+
+  if ((name !== undefined || lineNumber !== undefined || lineNumberNotApplicable !== undefined) && (!finalName || (!numberNotApplicable && !cleanLineNumber))) {
+    throw new ValidationError('Line name and either a numeric line number or Not Applicable are required');
+  }
+
+  const lineScheduledStartTimes = normalizeLineScheduledStartTimes(scheduledStartTimes);
+  await assertAccessibleShiftIds(req, lineScheduledStartTimes?.map((row) => row.shiftId) || []);
+
+  const line = await prisma.$transaction(async (tx) => {
+    await tx.line.update({
+      where: { id },
+      data: {
+        ...(finalName !== undefined && { name: finalName }),
+        ...((name !== undefined || lineNumber !== undefined || lineNumberNotApplicable !== undefined) && { lineNumber: cleanLineNumber }),
+        ...(scheduledStartTime !== undefined && { scheduledStartTime: normalizeTimeValue(scheduledStartTime) }),
+        ...(description !== undefined && { description }),
+      },
+    });
+
+    if (lineScheduledStartTimes !== undefined) {
+      await tx.lineScheduledStartTime.deleteMany({ where: { lineId: id } });
+      if (lineScheduledStartTimes.length) {
+        await tx.lineScheduledStartTime.createMany({
+          data: lineScheduledStartTimes.map((row) => ({
+            id: uuidv4(),
+            lineId: id,
+            shiftId: row.shiftId,
+            scheduledStartTime: row.scheduledStartTime,
+          })),
+        });
+      }
+    }
+
+    return tx.line.findUnique({
+      where: { id },
+      include: {
+        LineScheduledStartTime: {
+          include: {
+            Shift: {
+              select: {
+                id: true,
+                name: true,
+                startTime: true,
+                endTime: true,
+              },
+            },
+          },
+        },
+      },
+    });
   });
 
   res.json({

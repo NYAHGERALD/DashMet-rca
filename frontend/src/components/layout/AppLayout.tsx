@@ -55,6 +55,7 @@ import {
   UserPlus,
   Menu,
   X,
+  Database,
 } from 'lucide-react';
 
 interface AppLayoutProps {
@@ -86,6 +87,7 @@ const PATH_TO_NAV_KEY: Record<string, string> = {
   '/workplace-safety': NAV_PRIVILEGES.SAFETY_ASSESSMENT,
   '/hr': NAV_PRIVILEGES.HR,
   '/bakery-metrics': NAV_PRIVILEGES.BAKERY_METRICS,
+  '/production-eos': NAV_PRIVILEGES.PRODUCTION_EOS,
   '/lsw': NAV_PRIVILEGES.LSW,
   '/vacation': NAV_PRIVILEGES.VACATION,
   '/meetings': NAV_PRIVILEGES.MEETINGS,
@@ -107,6 +109,7 @@ const PATH_TO_NAV_KEY: Record<string, string> = {
   '/admin/enterprise': NAV_PRIVILEGES.ADMIN_ENTERPRISE,
   '/admin/calendar-config': NAV_PRIVILEGES.ADMIN_CALENDAR,
   '/admin/bakery-settings': NAV_PRIVILEGES.ADMIN_BAKERY_SETTINGS,
+  '/admin/production-eos-reference': NAV_PRIVILEGES.ADMIN_PRODUCTION_EOS_REFERENCE,
   '/support-inbox': NAV_PRIVILEGES.SUPPORT_INBOX,
 };
 
@@ -230,6 +233,7 @@ export default function AppLayout({ children }: AppLayoutProps) {
     { href: '/admin/enterprise', icon: <Shield size={18} strokeWidth={1.8} />, label: t('nav.enterprise'), show: hasNavAccess(NAV_PRIVILEGES.ADMIN_ENTERPRISE) },
     { href: '/admin/calendar-config', icon: <CalendarDays size={18} strokeWidth={1.8} />, label: 'Calendar Year Config', show: hasNavAccess(NAV_PRIVILEGES.ADMIN_CALENDAR) },
     { href: '/admin/bakery-settings', icon: <Wheat size={18} strokeWidth={1.8} />, label: 'Bakery KPI Settings', show: hasNavAccess(NAV_PRIVILEGES.ADMIN_BAKERY_SETTINGS) },
+    { href: '/admin/production-eos-reference', icon: <Database size={18} strokeWidth={1.8} />, label: 'Production EOS Data', show: hasNavAccess(NAV_PRIVILEGES.ADMIN_PRODUCTION_EOS_REFERENCE) },
     { href: '/support-inbox', icon: <MailOpen size={18} strokeWidth={1.8} />, label: 'Support Inbox', show: hasNavAccess(NAV_PRIVILEGES.SUPPORT_INBOX) },
   ];
   const qcManagementLinks: AppNavLink[] = [
@@ -475,6 +479,7 @@ export default function AppLayout({ children }: AppLayoutProps) {
             { href: '/workplace-safety', icon: <ShieldCheck size={18} strokeWidth={1.8} />, label: 'Safety Assessment', show: hasNavAccess(NAV_PRIVILEGES.SAFETY_ASSESSMENT), group: 'Safety & Compliance' },
             { href: '/hr', icon: <Gavel size={18} strokeWidth={1.8} />, label: 'Conflict Resolution', show: hasNavAccess(NAV_PRIVILEGES.HR), group: 'Safety & Compliance' },
             { href: '/bakery-metrics', icon: <PieChart size={18} strokeWidth={1.8} />, label: 'Bakery Metrics', show: hasNavAccess(NAV_PRIVILEGES.BAKERY_METRICS), group: 'Operations' },
+            { href: '/production-eos', icon: <Factory size={18} strokeWidth={1.8} />, label: 'Production EOS', show: hasNavAccess(NAV_PRIVILEGES.PRODUCTION_EOS), group: 'Operations' },
             { href: '/lsw', icon: <ClipboardEdit size={18} strokeWidth={1.8} />, label: 'LSW', show: hasNavAccess(NAV_PRIVILEGES.LSW), group: 'Operations' },
             { href: '/vacation', icon: <Palmtree size={18} strokeWidth={1.8} />, label: 'Vacation Hub', show: hasNavAccess(NAV_PRIVILEGES.VACATION), group: 'Operations' },
             { href: '/meetings', icon: <Mic size={18} strokeWidth={1.8} />, label: 'Meeting Intelligence', show: hasNavAccess(NAV_PRIVILEGES.MEETINGS), group: 'Operations' },
@@ -574,6 +579,7 @@ export default function AppLayout({ children }: AppLayoutProps) {
                     { href: '/workplace-safety', icon: <ShieldCheck size={18} strokeWidth={1.8} />, label: 'Safety Assessment', show: hasNavAccess(NAV_PRIVILEGES.SAFETY_ASSESSMENT) },
                     { href: '/hr', icon: <Gavel size={18} strokeWidth={1.8} />, label: 'Conflict Resolution', show: hasNavAccess(NAV_PRIVILEGES.HR) },
                     { href: '/bakery-metrics', icon: <PieChart size={18} strokeWidth={1.8} />, label: 'Bakery Metrics', show: hasNavAccess(NAV_PRIVILEGES.BAKERY_METRICS) },
+                    { href: '/production-eos', icon: <Factory size={18} strokeWidth={1.8} />, label: 'Production EOS', show: hasNavAccess(NAV_PRIVILEGES.PRODUCTION_EOS) },
                     { href: '/lsw', icon: <ClipboardEdit size={18} strokeWidth={1.8} />, label: 'LSW', show: hasNavAccess(NAV_PRIVILEGES.LSW) },
                     { href: '/vacation', icon: <Palmtree size={18} strokeWidth={1.8} />, label: 'Vacation Hub', show: hasNavAccess(NAV_PRIVILEGES.VACATION) },
                     { href: '/meetings', icon: <Mic size={18} strokeWidth={1.8} />, label: 'Meeting Intelligence', show: hasNavAccess(NAV_PRIVILEGES.MEETINGS) },

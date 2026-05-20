@@ -160,6 +160,10 @@ router.use('/invitations', rateLimiter, invitationRoutes);
 import bakeryMetricsRoutes from './bakeryMetricsRoutes';
 router.use('/bakery-metrics', rateLimiter, promptInjectionDetector, bakeryMetricsRoutes);
 
+// Production End of Shift reports - authenticated in route file
+import productionEosRoutes from './productionEosRoutes';
+router.use('/production-eos', rateLimiter, productionEosRoutes);
+
 // System Admin Dashboard routes (SYSTEM_ADMIN only)
 // Defined before root-mounted facility/department routes so retired public
 // auth paths return 410 instead of being intercepted as authenticated routes.

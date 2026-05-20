@@ -873,19 +873,21 @@ model KnowledgeArticle {
 }
 
 model Line {
-  id           String         @id @default(uuid())
-  name         String
-  description  String?
-  machineIds   String[]
-  areaId       String
-  createdAt    DateTime       @default(now())
-  updatedAt    DateTime       @updatedAt
-  lineNumber   String?
-  Incident     Incident[]
-  Area         Area           @relation(fields: [areaId], references: [id], onDelete: Cascade)
-  ShiftLine    ShiftLine[]
-  Equipment    Equipment[]
-  MachineIssue MachineIssue[]
+  id                     String                   @id @default(uuid())
+  name                   String
+  description            String?
+  machineIds             String[]
+  areaId                 String
+  createdAt              DateTime                 @default(now())
+  updatedAt              DateTime                 @updatedAt
+  lineNumber             String?
+  scheduledStartTime     String?                  @db.VarChar(20)
+  Incident               Incident[]
+  Area                   Area                     @relation(fields: [areaId], references: [id], onDelete: Cascade)
+  ShiftLine              ShiftLine[]
+  LineScheduledStartTime LineScheduledStartTime[]
+  Equipment              Equipment[]
+  MachineIssue           MachineIssue[]
 
   @@index([areaId])
 }
@@ -1429,18 +1431,19 @@ model LoginTrustedDevice {
 }
 
 model Shift {
-  id           String         @id @default(uuid())
-  name         String
-  startTime    String
-  endTime      String
-  facilityId   String?
-  createdAt    DateTime       @default(now())
-  updatedAt    DateTime       @updatedAt
-  lineId       String?
-  Incident     Incident[]
-  Facility     Facility?      @relation(fields: [facilityId], references: [id], onDelete: Cascade)
-  ShiftLine    ShiftLine[]
-  MachineIssue MachineIssue[]
+  id                     String                   @id @default(uuid())
+  name                   String
+  startTime              String
+  endTime                String
+  facilityId             String?
+  createdAt              DateTime                 @default(now())
+  updatedAt              DateTime                 @updatedAt
+  lineId                 String?
+  Incident               Incident[]
+  Facility               Facility?                @relation(fields: [facilityId], references: [id], onDelete: Cascade)
+  ShiftLine              ShiftLine[]
+  LineScheduledStartTime LineScheduledStartTime[]
+  MachineIssue           MachineIssue[]
 
   @@index([facilityId])
   @@index([lineId])
@@ -1457,6 +1460,22 @@ model ShiftLine {
   @@unique([shiftId, lineId])
   @@index([lineId])
   @@index([shiftId])
+}
+
+model LineScheduledStartTime {
+  id                 String   @id @default(uuid())
+  lineId             String
+  shiftId            String
+  scheduledStartTime String   @db.VarChar(20)
+  createdAt          DateTime @default(now())
+  updatedAt          DateTime @updatedAt
+  Line               Line     @relation(fields: [lineId], references: [id], onDelete: Cascade)
+  Shift              Shift    @relation(fields: [shiftId], references: [id], onDelete: Cascade)
+
+  @@unique([lineId, shiftId])
+  @@index([lineId])
+  @@index([shiftId])
+  @@map("line_scheduled_start_times")
 }
 
 model SupportRequest {
@@ -4104,6 +4123,129 @@ model BakeryAiInsightLog {
   @@index([userId])
   @@index([createdAt])
   @@map("bakery_ai_insight_logs")
+}
+
+// ═══════════════════════════════════════════════════════════════════════════════
+// PRODUCTION END OF SHIFT REPORTS
+// Replaces the End of Shift Report workbook with backend-owned reports,
+// reference data, and calculation snapshots.
+// ═══════════════════════════════════════════════════════════════════════════════
+
+model ProductionEosRateReference {
+  id                         String   @id @default(uuid())
+  organizationId             String?
+  sourceRowNumber            Int?
+  itemNo                     String   @db.VarChar(80)
+  description                String   @db.Text
+  totalAssemblyHeadcount     Decimal? @db.Decimal(14, 3)
+  totalPackHeadcount         Decimal? @db.Decimal(14, 3)
+  temporaryAssemblyHeadcount Decimal? @db.Decimal(14, 3)
+  temporaryPackHeadcount     Decimal? @db.Decimal(14, 3)
+  weightPerCaseLb            Decimal? @db.Decimal(14, 3)
+  isActive                   Boolean  @default(true)
+  createdByUserId            String?
+  updatedByUserId            String?
+  createdAt                  DateTime @default(now())
+  updatedAt                  DateTime @updatedAt
+
+  @@unique([organizationId, itemNo])
+  @@index([organizationId])
+  @@index([itemNo])
+  @@index([isActive])
+  @@map("production_eos_rate_references")
+}
+
+model ProductionEosReport {
+  id                 String    @id @default(uuid())
+  organizationId     String
+  reportDate         DateTime  @db.Date
+  dayOfWeek          String    @db.VarChar(20)
+  shiftId            String?
+  shiftKey           String    @db.VarChar(80)
+  shiftNameSnapshot  String    @db.VarChar(120)
+  reportedByUserId   String?
+  reportedByName     String    @db.VarChar(255)
+  status             String    @default("DRAFT") @db.VarChar(30)
+  safetyConcerns     String?   @db.Text
+  qualityIssues      String?   @db.Text
+  calculationVersion String    @default("excel-2026-05-15-v2") @db.VarChar(80)
+  totals             Json      @default("{}")
+  validationWarnings Json      @default("[]")
+  createdByUserId    String?
+  updatedByUserId    String?
+  submittedByUserId  String?
+  submittedAt        DateTime?
+  createdAt          DateTime  @default(now())
+  updatedAt          DateTime  @updatedAt
+
+  lines ProductionEosReportLine[]
+  notes ProductionEosReportNote[]
+
+  @@unique([organizationId, reportDate, shiftKey])
+  @@index([organizationId])
+  @@index([reportDate])
+  @@index([shiftId])
+  @@index([status])
+  @@map("production_eos_reports")
+}
+
+model ProductionEosReportLine {
+  id                      String   @id @default(uuid())
+  reportId                String
+  section                 String   @db.VarChar(40)
+  rowKey                  String   @db.VarChar(80)
+  sortOrder               Int
+  location                String   @db.VarChar(120)
+  lineGroup               String?  @db.VarChar(80)
+  stationType             String?  @db.VarChar(40)
+  pairedAssemblyRowKey    String?  @db.VarChar(80)
+  itemNo                  String?  @db.VarChar(80)
+  itemDescriptionSnapshot String?  @db.Text
+  casesScheduled          Decimal? @db.Decimal(14, 3)
+  casesProduced           Decimal? @db.Decimal(14, 3)
+  actualStartTime         String?  @db.VarChar(20)
+  actualEndTime           String?  @db.VarChar(20)
+  downMinutes             Decimal? @db.Decimal(14, 3)
+  downtimeComment         String?  @db.Text
+  wasteLbs                Decimal? @db.Decimal(14, 3)
+  actualHeadcount         Decimal? @db.Decimal(14, 3)
+  scheduledStartTime      String?  @db.VarChar(20)
+  lbsScheduled            Decimal? @db.Decimal(14, 3)
+  lbsProduced             Decimal? @db.Decimal(14, 3)
+  attainmentPct           Decimal? @db.Decimal(10, 4)
+  totalMinutes            Decimal? @db.Decimal(14, 3)
+  lateStartMinutes        Decimal? @db.Decimal(14, 3)
+  wastePct                Decimal? @db.Decimal(10, 4)
+  standardHeadcount       Decimal? @db.Decimal(14, 3)
+  headcountPct            Decimal? @db.Decimal(10, 4)
+  calculatedValues        Json     @default("{}")
+  validationWarnings      Json     @default("[]")
+  createdAt               DateTime @default(now())
+  updatedAt               DateTime @updatedAt
+
+  report ProductionEosReport @relation(fields: [reportId], references: [id], onDelete: Cascade)
+
+  @@unique([reportId, rowKey])
+  @@index([reportId])
+  @@index([section])
+  @@index([itemNo])
+  @@map("production_eos_report_lines")
+}
+
+model ProductionEosReportNote {
+  id        String   @id @default(uuid())
+  reportId  String
+  lineGroup String   @db.VarChar(80)
+  notes     String?  @db.Text
+  sortOrder Int      @default(0)
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  report ProductionEosReport @relation(fields: [reportId], references: [id], onDelete: Cascade)
+
+  @@unique([reportId, lineGroup])
+  @@index([reportId])
+  @@map("production_eos_report_notes")
 }
 
 // ==================== VACATION MANAGEMENT ====================

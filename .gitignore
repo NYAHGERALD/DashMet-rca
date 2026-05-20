@@ -119,6 +119,9 @@ dev-output.log
 !backend/prisma/migrations/20260503212500_add_login_trusted_devices/migration.sql
 !backend/prisma/migrations/20260505090000_add_mobile_push_notifications/migration.sql
 !backend/prisma/migrations/20260513161500_add_guided_conduct_review/migration.sql
+!backend/prisma/migrations/20260518120000_add_production_eos/migration.sql
+!backend/prisma/migrations/20260519190000_add_line_scheduled_start_time/migration.sql
+!backend/prisma/migrations/20260519204500_add_line_shift_scheduled_start_times/migration.sql
 render_backup.sql
 
 # Build outputs

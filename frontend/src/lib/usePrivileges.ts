@@ -493,6 +493,7 @@ export const NAV_PRIVILEGES = {
   SAFETY_ASSESSMENT: 'nav.safety_assessment',
   HR: 'nav.hr',
   BAKERY_METRICS: 'nav.bakery_metrics',
+  PRODUCTION_EOS: 'nav.production_eos',
   LSW: 'nav.lsw',
   VACATION: 'nav.vacation',
   MEETINGS: 'nav.meetings',
@@ -515,6 +516,7 @@ export const NAV_PRIVILEGES = {
   ADMIN_ENTERPRISE: 'nav.admin_enterprise',
   ADMIN_CALENDAR: 'nav.admin_calendar',
   ADMIN_BAKERY_SETTINGS: 'nav.admin_bakery_settings',
+  ADMIN_PRODUCTION_EOS_REFERENCE: 'nav.admin_production_eos_reference',
   SUPPORT_INBOX: 'nav.support_inbox',
 } as const;
 

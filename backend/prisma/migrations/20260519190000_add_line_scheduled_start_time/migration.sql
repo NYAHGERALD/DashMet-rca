@@ -1,0 +1,1 @@
+ALTER TABLE "Line" ADD COLUMN IF NOT EXISTS "scheduledStartTime" VARCHAR(20);
