@@ -4168,6 +4168,7 @@ model ProductionEosReport {
   status             String    @default("DRAFT") @db.VarChar(30)
   safetyConcerns     String?   @db.Text
   qualityIssues      String?   @db.Text
+  notesAuditBaseline Json      @default("{}")
   calculationVersion String    @default("excel-2026-05-15-v2") @db.VarChar(80)
   totals             Json      @default("{}")
   validationWarnings Json      @default("[]")

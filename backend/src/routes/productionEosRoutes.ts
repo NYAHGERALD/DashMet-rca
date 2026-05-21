@@ -4,9 +4,11 @@ import { authenticate, AuthRequest } from '../middleware/auth';
 import { requireAdmin } from '../middleware/rbac';
 import { prisma } from '../utils/prisma';
 import {
+  autosaveProductionEosNotes,
   calculateProductionEosReport,
   getProductionEosReferenceData,
   getProductionEosReferenceSources,
+  getProductionEosDashboard,
   getProductionEosReportAuditTrail,
   getProductionEosReportById,
   getProductionEosTemplate,
@@ -76,6 +78,19 @@ router.post('/calculate', async (req: AuthRequest, res: Response) => {
   }
 });
 
+router.get('/dashboard', async (req: AuthRequest, res: Response) => {
+  try {
+    const dashboard = await getProductionEosDashboard(req.user!, {
+      endDate: req.query.endDate as string | undefined,
+      shiftId: req.query.shiftId as string | undefined,
+      days: req.query.days as string | undefined,
+    });
+    res.json({ success: true, dashboard });
+  } catch (error: any) {
+    handleError(res, error, 'Failed to load Production EOS dashboard');
+  }
+});
+
 router.get('/reports', async (req: AuthRequest, res: Response) => {
   try {
     const reports = await listProductionEosReports(req.user!, {
@@ -110,6 +125,15 @@ router.get('/reports/:id/audit-trail', async (req: AuthRequest, res: Response) =
     res.json({ success: true, auditTrail });
   } catch (error: any) {
     handleError(res, error, 'Failed to load Production EOS audit trail');
+  }
+});
+
+router.put('/reports/notes', async (req: AuthRequest, res: Response) => {
+  try {
+    const report = await autosaveProductionEosNotes(req.user!, req.body);
+    res.json({ success: true, report, message: report ? 'Production EOS notes saved' : 'No notes to save' });
+  } catch (error: any) {
+    handleError(res, error, 'Failed to save Production EOS notes');
   }
 });
 

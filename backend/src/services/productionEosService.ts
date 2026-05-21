@@ -45,9 +45,41 @@ export interface ProductionEosReportPayload {
   notes?: Array<{ lineGroup: string; notes?: string | null; sortOrder?: number }>;
 }
 
+export interface ProductionEosNotesPayload {
+  reportDate: string;
+  dayOfWeek?: string;
+  shiftId?: string | null;
+  shiftName?: string | null;
+  reportedByUserId?: string | null;
+  reportedByName?: string | null;
+  safetyConcerns?: string | null;
+  qualityIssues?: string | null;
+  notes?: Array<{ lineGroup: string; notes?: string | null; sortOrder?: number }>;
+}
+
 type SaveProductionEosReportOptions = {
   targetReportId?: string | null;
   editSubmitted?: boolean;
+};
+
+type DashboardMetricAccumulator = {
+  reportsCount: number;
+  submittedCount: number;
+  draftCount: number;
+  casesScheduled: number;
+  casesProduced: number;
+  lbsScheduled: number;
+  lbsProduced: number;
+  wasteLbs: number;
+  lateStartMinutes: number;
+  totalMinutes: number;
+  downMinutes: number;
+  standardHeadcount: number;
+  actualHeadcount: number;
+  noteCount: number;
+  safetyCount: number;
+  qualityCount: number;
+  reportIds: Set<string>;
 };
 
 type AuthUser = {
@@ -83,6 +115,9 @@ const REPORT_AUDIT_FIELDS = [
   ['shiftNameSnapshot', 'Shift'],
   ['reportedByName', 'Reported by'],
   ['status', 'Status'],
+] as const;
+
+const REPORT_NOTE_AUDIT_FIELDS = [
   ['safetyConcerns', 'Safety concerns/incidents'],
   ['qualityIssues', 'Quality issues/holds'],
 ] as const;
@@ -102,6 +137,8 @@ const LINE_AUDIT_FIELDS = [
 const NOTE_AUDIT_FIELDS = [
   ['notes', 'Notes'],
 ] as const;
+
+const NOTE_TEXT_AUDIT_FIELDS = new Set(['safetyConcerns', 'qualityIssues', 'notes']);
 
 const DEFAULT_ROW_TEMPLATE = [
   { suffix: 'kitchen', sortOrder: 10, location: 'Kitchen', lineGroup: 'Kitchen', stationType: 'KITCHEN', expectedArea: 'kitchen' },
@@ -320,6 +357,87 @@ function average(values: Array<number | null>) {
 
 function sum(values: Array<number | null>) {
   return values.reduce<number>((total, value) => total + (value || 0), 0);
+}
+
+function dashboardAccumulator(): DashboardMetricAccumulator {
+  return {
+    reportsCount: 0,
+    submittedCount: 0,
+    draftCount: 0,
+    casesScheduled: 0,
+    casesProduced: 0,
+    lbsScheduled: 0,
+    lbsProduced: 0,
+    wasteLbs: 0,
+    lateStartMinutes: 0,
+    totalMinutes: 0,
+    downMinutes: 0,
+    standardHeadcount: 0,
+    actualHeadcount: 0,
+    noteCount: 0,
+    safetyCount: 0,
+    qualityCount: 0,
+    reportIds: new Set<string>(),
+  };
+}
+
+function addDashboardLine(acc: DashboardMetricAccumulator, line: any) {
+  acc.casesScheduled += toNumber(line.casesScheduled) || 0;
+  acc.casesProduced += toNumber(line.casesProduced) || 0;
+  acc.lbsScheduled += toNumber(line.lbsScheduled) || 0;
+  acc.lbsProduced += toNumber(line.lbsProduced) || 0;
+  acc.wasteLbs += toNumber(line.wasteLbs) || 0;
+  acc.lateStartMinutes += toNumber(line.lateStartMinutes) || 0;
+  acc.totalMinutes += toNumber(line.totalMinutes) || 0;
+  acc.downMinutes += toNumber(line.downMinutes) || 0;
+  acc.standardHeadcount += toNumber(line.standardHeadcount) || 0;
+  acc.actualHeadcount += toNumber(line.actualHeadcount) || 0;
+}
+
+function addDashboardReport(acc: DashboardMetricAccumulator, report: any) {
+  if (!acc.reportIds.has(report.id)) {
+    acc.reportIds.add(report.id);
+    acc.reportsCount += 1;
+    if (report.status === 'SUBMITTED') acc.submittedCount += 1;
+    if (report.status === 'DRAFT') acc.draftCount += 1;
+    if (report.safetyConcerns?.trim()) acc.safetyCount += 1;
+    if (report.qualityIssues?.trim()) acc.qualityCount += 1;
+    acc.noteCount += (report.notes || []).filter((note: any) => note.notes?.trim()).length;
+  }
+}
+
+function dashboardMetrics(acc: DashboardMetricAccumulator) {
+  return {
+    reportsCount: acc.reportsCount,
+    submittedCount: acc.submittedCount,
+    draftCount: acc.draftCount,
+    casesScheduled: round(acc.casesScheduled, 3) || 0,
+    casesProduced: round(acc.casesProduced, 3) || 0,
+    lbsScheduled: round(acc.lbsScheduled, 3) || 0,
+    lbsProduced: round(acc.lbsProduced, 3) || 0,
+    wasteLbs: round(acc.wasteLbs, 3) || 0,
+    attainmentPct: round(safeDiv(acc.casesProduced, acc.casesScheduled)) || null,
+    wastePct: round(safeDiv(acc.wasteLbs, acc.lbsProduced)) || null,
+    lateStartMinutes: round(acc.lateStartMinutes, 3) || 0,
+    totalMinutes: round(acc.totalMinutes, 3) || 0,
+    downMinutes: round(acc.downMinutes, 3) || 0,
+    standardHeadcount: round(acc.standardHeadcount, 3) || 0,
+    actualHeadcount: round(acc.actualHeadcount, 3) || 0,
+    headcountPct: round(safeDiv(acc.actualHeadcount, acc.standardHeadcount)) || null,
+    noteCount: acc.noteCount,
+    safetyCount: acc.safetyCount,
+    qualityCount: acc.qualityCount,
+  };
+}
+
+function dashboardDateKey(value: Date) {
+  return value.toISOString().slice(0, 10);
+}
+
+function dashboardDays(value?: string) {
+  const parsed = Number(value);
+  if (!Number.isFinite(parsed)) return 30;
+  return Math.max(7, Math.min(180, Math.trunc(parsed)));
 }
 
 function applyDerivedLineLocation(line: ProductionEosLineInput) {
@@ -741,10 +859,24 @@ function dateOnlyForAudit(value: any) {
   return text.includes('T') ? text.slice(0, 10) : text;
 }
 
+function normalizeNoteTextForAudit(value: any) {
+  const normalized = blankNormalized(value);
+  if (normalized === null) return '';
+  return String(normalized).trim().replace(/\s+/g, ' ');
+}
+
+function hasNoteAuditText(value: any) {
+  return normalizeNoteTextForAudit(value).length > 0;
+}
+
 function auditFieldValuesEqual(field: string, a: any, b: any) {
   const left = blankNormalized(a);
   const right = blankNormalized(b);
   if (left === null && right === null) return true;
+
+  if (NOTE_TEXT_AUDIT_FIELDS.has(field)) {
+    return normalizeNoteTextForAudit(left) === normalizeNoteTextForAudit(right);
+  }
 
   if (field === 'reportDate') {
     return dateOnlyForAudit(left) === dateOnlyForAudit(right);
@@ -770,6 +902,16 @@ function diffFields(source: Record<string, any>, target: Record<string, any>, fi
       currentValue: auditValue(target?.[field]),
     }))
     .filter((change) => !auditFieldValuesEqual(change.field, source?.[change.field], target?.[change.field]));
+}
+
+function suppressInitialNoteTextChange(change: { field: string; previousValue: any; currentValue: any }) {
+  return NOTE_TEXT_AUDIT_FIELDS.has(change.field)
+    && !hasNoteAuditText(change.previousValue)
+    && hasNoteAuditText(change.currentValue);
+}
+
+function meaningfulAuditFieldChanges<T extends { field: string; previousValue: any; currentValue: any }>(changes: T[]): T[] {
+  return changes.filter((change) => !suppressInitialNoteTextChange(change));
 }
 
 function reportSnapshotFromExisting(report: any) {
@@ -852,6 +994,67 @@ function reportSnapshotFromCalculation(calculation: any, payload: ProductionEosR
   };
 }
 
+function normalizedNotesForAuditBaseline(notes: any[] = []) {
+  return notes
+    .filter((note) => String(note.lineGroup || '').trim())
+    .map((note, index) => ({
+      lineGroup: String(note.lineGroup).trim(),
+      notes: note.notes || null,
+      sortOrder: note.sortOrder ?? index,
+    }))
+    .sort((a, b) => {
+      const sortDelta = Number(a.sortOrder || 0) - Number(b.sortOrder || 0);
+      return sortDelta || a.lineGroup.localeCompare(b.lineGroup);
+    });
+}
+
+function notesAuditBaselineFromSnapshot(snapshot: ReturnType<typeof reportSnapshotFromCalculation>) {
+  return {
+    version: 1,
+    safetyConcerns: snapshot.report.safetyConcerns || null,
+    qualityIssues: snapshot.report.qualityIssues || null,
+    notes: normalizedNotesForAuditBaseline(snapshot.notes),
+  };
+}
+
+function safeNotesAuditBaseline(value: any) {
+  if (!value || typeof value !== 'object' || Array.isArray(value) || value.version !== 1) return null;
+  return {
+    safetyConcerns: value.safetyConcerns || null,
+    qualityIssues: value.qualityIssues || null,
+    notes: normalizedNotesForAuditBaseline(Array.isArray(value.notes) ? value.notes : []),
+  };
+}
+
+function reportSnapshotWithNotesAuditBaseline(report: any) {
+  const snapshot = reportSnapshotFromExisting(report);
+  if (!snapshot) return null;
+
+  const baseline = safeNotesAuditBaseline(report.notesAuditBaseline);
+  if (!baseline) return snapshot;
+
+  return {
+    ...snapshot,
+    report: {
+      ...snapshot.report,
+      safetyConcerns: baseline.safetyConcerns,
+      qualityIssues: baseline.qualityIssues,
+    },
+    notes: baseline.notes,
+  };
+}
+
+function productionEosNotesContentChanged(
+  before: ReturnType<typeof reportSnapshotFromExisting>,
+  after: ReturnType<typeof reportSnapshotFromCalculation>,
+) {
+  if (!before) return true;
+  return Boolean(
+    diffFields(before.report, after.report, REPORT_NOTE_AUDIT_FIELDS).length
+    || diffRows(before.notes, after.notes, 'lineGroup', NOTE_AUDIT_FIELDS).length,
+  );
+}
+
 function diffRows(beforeRows: any[], afterRows: any[], keyField: string, fields: readonly (readonly [string, string])[]) {
   const beforeMap = new Map(beforeRows.map((row) => [row[keyField], row]));
   const afterMap = new Map(afterRows.map((row) => [row[keyField], row]));
@@ -909,9 +1112,33 @@ function buildProductionEosAuditChanges(args: {
   before: ReturnType<typeof reportSnapshotFromExisting> | null;
   after: ReturnType<typeof reportSnapshotFromCalculation>;
 }) {
-  const reportChanges = args.before ? diffFields(args.before.report, args.after.report, REPORT_AUDIT_FIELDS) : [];
+  const reportChanges = args.before
+    ? meaningfulAuditFieldChanges(diffFields(args.before.report, args.after.report, REPORT_AUDIT_FIELDS))
+    : [];
   const lineChanges = args.before ? diffRows(args.before.lines, args.after.lines, 'rowKey', LINE_AUDIT_FIELDS) : [];
-  const noteChanges = args.before ? diffRows(args.before.notes, args.after.notes, 'lineGroup', NOTE_AUDIT_FIELDS) : [];
+  const reportNoteChanges = args.before
+    ? meaningfulAuditFieldChanges(diffFields(args.before.report, args.after.report, REPORT_NOTE_AUDIT_FIELDS))
+      .map((change) => ({
+        key: `report-note-${change.field}`,
+        changeType: 'UPDATED',
+        section: null,
+        location: change.label,
+        fields: [{
+          ...change,
+          field: 'notes',
+          label: 'Notes',
+        }],
+      }))
+    : [];
+  const lineNoteChanges = args.before
+    ? diffRows(args.before.notes, args.after.notes, 'lineGroup', NOTE_AUDIT_FIELDS)
+      .map((row) => ({
+        ...row,
+        fields: meaningfulAuditFieldChanges(row.fields),
+      }))
+      .filter((row) => row.fields.length > 0)
+    : [];
+  const noteChanges = [...reportNoteChanges, ...lineNoteChanges];
   const lineFieldChangeCount = lineChanges.reduce((total, row) => total + row.fields.length, 0);
   const noteFieldChangeCount = noteChanges.reduce((total, row) => total + row.fields.length, 0);
 
@@ -944,6 +1171,205 @@ function buildProductionEosAuditChanges(args: {
     lineChanges,
     noteChanges,
   };
+}
+
+function normalizeProductionEosNotes(notes: ProductionEosNotesPayload['notes']) {
+  return (notes || [])
+    .filter((note) => String(note.lineGroup || '').trim())
+    .map((note, index) => ({
+      lineGroup: String(note.lineGroup).trim(),
+      notes: note.notes?.trim() ? note.notes : null,
+      sortOrder: note.sortOrder ?? index,
+    }));
+}
+
+function notesPayloadHasContent(payload: ProductionEosNotesPayload) {
+  return Boolean(
+    payload.safetyConcerns?.trim()
+    || payload.qualityIssues?.trim()
+    || normalizeProductionEosNotes(payload.notes).some((note) => Boolean(note.notes?.trim())),
+  );
+}
+
+async function findProductionEosShiftForNotes(user: AuthUser, shiftId: string) {
+  const productionLineReferences = await getProductionLineReferences(user);
+  const productionLineIds = productionLineReferences.map((line) => line.id);
+  const productionShiftRelationWhere = productionLineIds.length
+    ? {
+      OR: [
+        { lineId: { in: productionLineIds } },
+        { ShiftLine: { some: { lineId: { in: productionLineIds } } } },
+        { LineScheduledStartTime: { some: { lineId: { in: productionLineIds } } } },
+      ],
+    }
+    : { id: '__no_production_line_shift__' };
+
+  return prisma.shift.findFirst({
+    where: {
+      id: shiftId,
+      ...(user.role === 'SYSTEM_ADMIN' ? {} : { Facility: { organizationId: user.organizationId } }),
+      ...productionShiftRelationWhere,
+    },
+    select: { id: true, name: true, startTime: true, endTime: true },
+  });
+}
+
+function emptyNotesReportSnapshot(args: {
+  reportDate: Date;
+  dayOfWeek: string;
+  shiftId: string | null;
+  shiftKey: string;
+  shiftName: string;
+  reporterName: string;
+}) {
+  return {
+    report: {
+      reportDate: args.reportDate,
+      dayOfWeek: args.dayOfWeek,
+      shiftId: args.shiftId,
+      shiftKey: args.shiftKey,
+      shiftNameSnapshot: args.shiftName,
+      reportedByName: args.reporterName,
+      status: 'DRAFT',
+      safetyConcerns: null,
+      qualityIssues: null,
+      totals: {},
+      validationWarnings: [],
+    },
+    lines: [],
+    notes: [],
+  };
+}
+
+export async function autosaveProductionEosNotes(user: AuthUser, payload: ProductionEosNotesPayload) {
+  const organizationId = user.organizationId;
+  const reportDateValue = payload.reportDate;
+  const derivedDayOfWeek = dayNameFromDate(reportDateValue);
+  const dayOfWeek = payload.dayOfWeek || derivedDayOfWeek;
+
+  if (!reportDateValue || !payload.shiftId) {
+    const error: any = new Error('Select a Production date and shift before saving notes.');
+    error.statusCode = 400;
+    throw error;
+  }
+
+  const shift = await findProductionEosShiftForNotes(user, payload.shiftId);
+  if (!shift) {
+    const error: any = new Error('Select a Production shift before saving notes.');
+    error.statusCode = 400;
+    throw error;
+  }
+
+  const reportDate = new Date(`${reportDateValue}T00:00:00`);
+  const shiftName = shift.name || payload.shiftName || 'Unassigned Shift';
+  const shiftKey = normalizeShiftKey(shiftName);
+  const reporterName = payload.reportedByName || auditUserName(user);
+  const normalizedNotes = normalizeProductionEosNotes(payload.notes);
+  const safetyConcerns = payload.safetyConcerns?.trim() ? payload.safetyConcerns : null;
+  const qualityIssues = payload.qualityIssues?.trim() ? payload.qualityIssues : null;
+  const hasContent = notesPayloadHasContent(payload);
+
+  const existing = await prisma.productionEosReport.findUnique({
+    where: {
+      organizationId_reportDate_shiftKey: {
+        organizationId,
+        reportDate,
+        shiftKey,
+      },
+    },
+    include: {
+      lines: { orderBy: { sortOrder: 'asc' } },
+      notes: { orderBy: { sortOrder: 'asc' } },
+    },
+  });
+
+  if (!existing && !hasContent) {
+    return null;
+  }
+
+  const beforeSnapshot = existing
+    ? reportSnapshotFromExisting(existing)
+    : emptyNotesReportSnapshot({
+      reportDate,
+      dayOfWeek,
+      shiftId: shift.id,
+      shiftKey,
+      shiftName,
+      reporterName,
+    });
+  const afterSnapshot = {
+    report: {
+      reportDate,
+      dayOfWeek,
+      shiftId: shift.id,
+      shiftKey,
+      shiftNameSnapshot: shiftName,
+      reportedByName: existing?.reportedByName || reporterName,
+      status: existing?.status || 'DRAFT',
+      safetyConcerns,
+      qualityIssues,
+      totals: existing?.totals || {},
+      validationWarnings: existing?.validationWarnings || [],
+    },
+    lines: beforeSnapshot?.lines || [],
+    notes: normalizedNotes,
+  };
+  if (existing && !productionEosNotesContentChanged(beforeSnapshot, afterSnapshot)) {
+    return getProductionEosReportById(user, existing.id);
+  }
+
+  const report = await prisma.$transaction(async (tx) => {
+    const saved = existing
+      ? await tx.productionEosReport.update({
+        where: { id: existing.id },
+        data: {
+          dayOfWeek,
+          shiftId: shift.id,
+          shiftKey,
+          shiftNameSnapshot: shiftName,
+          safetyConcerns,
+          qualityIssues,
+          updatedByUserId: user.id,
+        },
+      })
+      : await tx.productionEosReport.create({
+        data: {
+          organizationId,
+          reportDate,
+          dayOfWeek,
+          shiftId: shift.id,
+          shiftKey,
+          shiftNameSnapshot: shiftName,
+          reportedByUserId: payload.reportedByUserId || user.id,
+          reportedByName: reporterName,
+          status: 'DRAFT',
+          safetyConcerns,
+          qualityIssues,
+          calculationVersion: PRODUCTION_EOS_CALC_VERSION,
+          notesAuditBaseline: notesAuditBaselineFromSnapshot(afterSnapshot),
+          totals: {},
+          validationWarnings: [],
+          createdByUserId: user.id,
+          updatedByUserId: user.id,
+        },
+      });
+
+    await tx.productionEosReportNote.deleteMany({ where: { reportId: saved.id } });
+    if (normalizedNotes.length) {
+      await tx.productionEosReportNote.createMany({
+        data: normalizedNotes.map((note) => ({
+          reportId: saved.id,
+          lineGroup: note.lineGroup,
+          notes: note.notes,
+          sortOrder: note.sortOrder,
+        })),
+      });
+    }
+
+    return saved;
+  });
+
+  return getProductionEosReportById(user, report.id);
 }
 
 export async function saveProductionEosReport(user: AuthUser, payload: ProductionEosReportPayload, submit = false, options: SaveProductionEosReportOptions = {}) {
@@ -997,7 +1423,9 @@ export async function saveProductionEosReport(user: AuthUser, payload: Productio
 
   const reporterName = payload.reportedByName || calculation.reportedByName;
   const status = submit ? 'SUBMITTED' : existing?.status === 'SUBMITTED' ? 'SUBMITTED' : 'DRAFT';
-  const beforeSnapshot = reportSnapshotFromExisting(existing);
+  const beforeSnapshot = existing
+    ? reportSnapshotWithNotesAuditBaseline(existing)
+    : null;
   const afterSnapshot = reportSnapshotFromCalculation(calculation, payload, status, reporterName);
   const eventType = !existing
     ? (submit ? 'REPORT_CREATED_AND_SUBMITTED' : 'DRAFT_CREATED')
@@ -1028,6 +1456,7 @@ export async function saveProductionEosReport(user: AuthUser, payload: Productio
           status,
           safetyConcerns: payload.safetyConcerns || null,
           qualityIssues: payload.qualityIssues || null,
+          notesAuditBaseline: notesAuditBaselineFromSnapshot(afterSnapshot),
           calculationVersion: PRODUCTION_EOS_CALC_VERSION,
           totals: { ...calculation.totals, bySection: calculation.totalsBySection },
           validationWarnings: calculation.validationWarnings,
@@ -1048,6 +1477,7 @@ export async function saveProductionEosReport(user: AuthUser, payload: Productio
           status,
           safetyConcerns: payload.safetyConcerns || null,
           qualityIssues: payload.qualityIssues || null,
+          notesAuditBaseline: notesAuditBaselineFromSnapshot(afterSnapshot),
           calculationVersion: PRODUCTION_EOS_CALC_VERSION,
           totals: { ...calculation.totals, bySection: calculation.totalsBySection },
           validationWarnings: calculation.validationWarnings,
@@ -1113,7 +1543,7 @@ export async function getProductionEosReportAuditTrail(user: AuthUser, reportId:
   });
   if (!report) return null;
 
-  return prisma.auditLog.findMany({
+  const entries = await prisma.auditLog.findMany({
     where: {
       entity: REPORT_AUDIT_ENTITY,
       entityId: report.id,
@@ -1127,11 +1557,17 @@ export async function getProductionEosReportAuditTrail(user: AuthUser, reportId:
           lastName: true,
           email: true,
           role: true,
+          profilePicture: true,
         },
       },
     },
     orderBy: { createdAt: 'desc' },
     take: 250,
+  });
+
+  return entries.filter((entry) => {
+    const changes = entry.changes as any;
+    return !['NOTES_AUTOSAVED', 'NOTES_CREATED'].includes(String(changes?.eventType || ''));
   });
 }
 
@@ -1157,6 +1593,182 @@ export async function listProductionEosReports(user: AuthUser, filters: { date?:
     orderBy: [{ reportDate: 'desc' }, { updatedAt: 'desc' }],
     take: 100,
   });
+}
+
+export async function getProductionEosDashboard(
+  user: AuthUser,
+  filters: { endDate?: string; shiftId?: string; days?: string } = {},
+) {
+  const endDateValue = filters.endDate || new Date().toISOString().slice(0, 10);
+  const days = dashboardDays(filters.days);
+  const endDate = new Date(`${endDateValue}T00:00:00`);
+  const startDate = new Date(endDate);
+  startDate.setDate(startDate.getDate() - (days - 1));
+
+  const reports = await prisma.productionEosReport.findMany({
+    where: {
+      ...(user.role === 'SYSTEM_ADMIN' ? {} : { organizationId: user.organizationId }),
+      reportDate: {
+        gte: startDate,
+        lte: endDate,
+      },
+      ...(filters.shiftId ? { shiftId: filters.shiftId } : {}),
+    },
+    include: {
+      lines: { orderBy: { sortOrder: 'asc' } },
+      notes: { orderBy: { sortOrder: 'asc' } },
+    },
+    orderBy: [{ reportDate: 'asc' }, { updatedAt: 'asc' }],
+  });
+
+  const overall = dashboardAccumulator();
+  const byDate = new Map<string, DashboardMetricAccumulator>();
+  const bySection = new Map<string, DashboardMetricAccumulator>();
+  const byLine = new Map<string, DashboardMetricAccumulator & { location: string; section: string; lineGroup: string | null }>();
+  const byShift = new Map<string, DashboardMetricAccumulator & { shiftId: string | null; shiftName: string }>();
+  const itemMix = new Map<string, DashboardMetricAccumulator & { itemNo: string; description: string }>();
+
+  for (let index = 0; index < days; index += 1) {
+    const date = new Date(startDate);
+    date.setDate(startDate.getDate() + index);
+    byDate.set(dashboardDateKey(date), dashboardAccumulator());
+  }
+
+  reports.forEach((report) => {
+    addDashboardReport(overall, report);
+
+    const dateKey = dashboardDateKey(report.reportDate);
+    const dateAcc = byDate.get(dateKey) || dashboardAccumulator();
+    addDashboardReport(dateAcc, report);
+    byDate.set(dateKey, dateAcc);
+
+    const shiftKey = report.shiftId || report.shiftNameSnapshot || 'Unassigned';
+    if (!byShift.has(shiftKey)) {
+      byShift.set(shiftKey, {
+        ...dashboardAccumulator(),
+        shiftId: report.shiftId || null,
+        shiftName: report.shiftNameSnapshot || 'Unassigned Shift',
+      });
+    }
+    const shiftAcc = byShift.get(shiftKey)!;
+    addDashboardReport(shiftAcc, report);
+
+    (report.lines || []).forEach((line) => {
+      addDashboardLine(overall, line);
+      addDashboardLine(dateAcc, line);
+      addDashboardLine(shiftAcc, line);
+
+      const sectionKey = String(line.section || 'UNASSIGNED');
+      if (!bySection.has(sectionKey)) bySection.set(sectionKey, dashboardAccumulator());
+      const sectionAcc = bySection.get(sectionKey)!;
+      addDashboardReport(sectionAcc, report);
+      addDashboardLine(sectionAcc, line);
+
+      const lineKey = `${sectionKey}:${line.location || line.rowKey}`;
+      if (!byLine.has(lineKey)) {
+        byLine.set(lineKey, {
+          ...dashboardAccumulator(),
+          location: line.location || line.rowKey,
+          section: sectionKey,
+          lineGroup: line.lineGroup || null,
+        });
+      }
+      const lineAcc = byLine.get(lineKey)!;
+      addDashboardReport(lineAcc, report);
+      addDashboardLine(lineAcc, line);
+
+      if (line.itemNo) {
+        const itemKey = String(line.itemNo);
+        if (!itemMix.has(itemKey)) {
+          itemMix.set(itemKey, {
+            ...dashboardAccumulator(),
+            itemNo: itemKey,
+            description: line.itemDescriptionSnapshot || 'No description',
+          });
+        }
+        const itemAcc = itemMix.get(itemKey)!;
+        addDashboardReport(itemAcc, report);
+        addDashboardLine(itemAcc, line);
+      }
+    });
+  });
+
+  const sectionOrder: Record<string, number> = { PRODUCTION: 1, CHANGEOVER: 2, REWORK: 3 };
+  const trend = Array.from(byDate.entries()).map(([date, acc]) => ({
+    date,
+    ...dashboardMetrics(acc),
+  }));
+  const sectionMix = Array.from(bySection.entries())
+    .map(([section, acc]) => ({ section, ...dashboardMetrics(acc) }))
+    .sort((a, b) => (sectionOrder[a.section] || 99) - (sectionOrder[b.section] || 99));
+  const linePerformance = Array.from(byLine.values())
+    .map((acc) => ({
+      location: acc.location,
+      section: acc.section,
+      lineGroup: acc.lineGroup,
+      ...dashboardMetrics(acc),
+    }))
+    .sort((a, b) => b.lbsProduced - a.lbsProduced);
+  const shiftPerformance = Array.from(byShift.values())
+    .map((acc) => ({
+      shiftId: acc.shiftId,
+      shiftName: acc.shiftName,
+      ...dashboardMetrics(acc),
+    }))
+    .sort((a, b) => b.lbsProduced - a.lbsProduced);
+  const itemPerformance = Array.from(itemMix.values())
+    .map((acc) => ({
+      itemNo: acc.itemNo,
+      description: acc.description,
+      ...dashboardMetrics(acc),
+    }))
+    .sort((a, b) => b.lbsProduced - a.lbsProduced)
+    .slice(0, 12);
+
+  const wasteDrivers = [...linePerformance]
+    .filter((row) => row.wasteLbs > 0)
+    .sort((a, b) => b.wasteLbs - a.wasteLbs)
+    .slice(0, 8);
+  const lateStartDrivers = [...linePerformance]
+    .filter((row) => row.lateStartMinutes > 0)
+    .sort((a, b) => b.lateStartMinutes - a.lateStartMinutes)
+    .slice(0, 8);
+  const attainmentWatchlist = [...linePerformance]
+    .filter((row) => row.casesScheduled > 0 && row.attainmentPct !== null)
+    .sort((a, b) => (a.attainmentPct || 0) - (b.attainmentPct || 0))
+    .slice(0, 8);
+  const recentReports = [...reports]
+    .sort((a, b) => b.updatedAt.getTime() - a.updatedAt.getTime())
+    .slice(0, 8)
+    .map((report) => ({
+      id: report.id,
+      reportDate: dashboardDateKey(report.reportDate),
+      dayOfWeek: report.dayOfWeek,
+      shiftName: report.shiftNameSnapshot,
+      reportedByName: report.reportedByName,
+      status: report.status,
+      updatedAt: report.updatedAt,
+      submittedAt: report.submittedAt,
+    }));
+
+  return {
+    range: {
+      startDate: dashboardDateKey(startDate),
+      endDate: dashboardDateKey(endDate),
+      days,
+      shiftId: filters.shiftId || null,
+    },
+    summary: dashboardMetrics(overall),
+    trend,
+    sectionMix,
+    linePerformance,
+    shiftPerformance,
+    itemPerformance,
+    wasteDrivers,
+    lateStartDrivers,
+    attainmentWatchlist,
+    recentReports,
+  };
 }
 
 export async function getProductionEosReportById(user: AuthUser, id: string) {
