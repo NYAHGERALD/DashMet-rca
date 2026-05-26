@@ -18,6 +18,7 @@ import {
   ArrowUpRight,
   Users,
   TrendingUp,
+  ArrowLeft,
   ChevronRight,
   X,
   Calendar,
@@ -46,9 +47,11 @@ import {
   Sparkles,
   Lock,
   FileBarChart,
+  FileCheck2,
   XCircle,
   Maximize2,
   Minimize2,
+  ClipboardList,
 } from 'lucide-react';
 import {
   ConflictCase,
@@ -61,8 +64,11 @@ import {
   ShiftOption,
   OCRResult,
   GuidedActionPlan,
+  GuidedIntakeAnswerFeedback,
+  GuidedIntakeInformationAccount,
   GuidedIntakePlan,
   GuidedIntakeQuestion,
+  GuidedIntakeResponseQualityFinding,
   GuidedIntakeStep,
   GuidedReviewAnswers,
   GuidedRiskKey,
@@ -89,6 +95,46 @@ import {
   formatDate,
   formatDateTime,
 } from '@/lib/hrApi';
+import { DashDatePicker } from '@/components/ui/DashDateTimeFields';
+
+const cleanShiftName = (name?: string | null) => (
+  (name || '')
+    .replace(/\s*\([^)]*\d{1,2}:\d{2}[^)]*\)\s*/g, ' ')
+    .replace(/\s+\d{1,2}:\d{2}\s*(?:AM|PM)?\s*[-–]\s*\d{1,2}:\d{2}\s*(?:AM|PM)?/gi, ' ')
+    .replace(/\s+/g, ' ')
+    .trim()
+);
+
+const shiftLabel = (shift: ShiftOption) => cleanShiftName(shift.name) || shift.name || 'Unnamed shift';
+
+const normalizeWizardText = (value?: string | null) => (value || '').replace(/\s+/g, ' ').trim();
+const wizardFeedbackKey = (feedback: Pick<GuidedIntakeAnswerFeedback, 'question' | 'answer' | 'issue'>) => (
+  normalizeWizardText(`${feedback.question || ''}|${feedback.answer || ''}|${feedback.issue || ''}`).toLowerCase()
+);
+const needsEmployeeProvidedRecordOption = (text: string) => (
+  /\b(statement|written|complaint|response|respond|replied|reply|explanation|witness report|employee report|documentation|document|upload|attach|photo|record|handwritten|signed|employee said|employee says|employee explanation|employee reply|complainant statement|affected employee|subject of concern)\b/i.test(text)
+);
+const WIZARD_MATCH_STOP_WORDS = new Set([
+  'about', 'above', 'after', 'again', 'already', 'also', 'answer', 'because', 'before', 'being',
+  'could', 'details', 'during', 'employee', 'employees', 'given', 'have', 'include', 'known',
+  'made', 'more', 'needed', 'needs', 'provided', 'question', 'record', 'related', 'review',
+  'same', 'should', 'specific', 'status', 'that', 'their', 'there', 'these', 'this', 'those',
+  'what', 'when', 'where', 'which', 'while', 'with', 'would'
+]);
+const wizardMeaningfulTokens = (value?: string | null) => (
+  normalizeWizardText(value)
+    .toLowerCase()
+    .replace(/[^a-z0-9\s]/g, ' ')
+    .split(/\s+/)
+    .filter(token => token.length > 2 && !WIZARD_MATCH_STOP_WORDS.has(token))
+);
+const wizardTokenOverlapSatisfied = (source?: string | null, target?: string | null, minOverlap = 2) => {
+  const sourceTokens = Array.from(new Set(wizardMeaningfulTokens(source)));
+  const targetTokens = new Set(wizardMeaningfulTokens(target));
+  if (!sourceTokens.length || !targetTokens.size) return false;
+  const overlap = sourceTokens.filter(token => targetTokens.has(token)).length;
+  return overlap >= Math.min(minOverlap, sourceTokens.length);
+};
 
 // ────────────────────────────────────────────────────────────────────────────────
 // STAT CARD
@@ -290,7 +336,7 @@ function CreateCaseModal({ isOpen, onClose, onCreated, organizationId, userId }:
         <div className="sticky top-0 z-10 flex items-center justify-between px-8 py-5 bg-white dark:bg-gray-800 border-b border-gray-200 dark:border-gray-700 rounded-t-2xl">
           <div>
             <h2 className="text-xl font-bold text-gray-900 dark:text-white">New Case</h2>
-            <p className="text-sm text-gray-500 dark:text-gray-400 mt-0.5">Create a new conflict resolution case with system-assisted analysis</p>
+            <p className="text-sm text-gray-500 dark:text-gray-400 mt-0.5">Create a new workplace review case with guided support</p>
           </div>
           <button onClick={onClose} title="Close" className="p-2 rounded-lg hover:bg-gray-100 dark:hover:bg-gray-700 transition-colors">
             <X className="w-5 h-5 text-gray-500" />
@@ -394,7 +440,7 @@ function CreateCaseModal({ isOpen, onClose, onCreated, organizationId, userId }:
                 >
                   <option value="">{shiftsLoading ? 'Loading...' : !department ? 'Select Department first' : 'Select Shift'}</option>
                   {shifts.map(s => (
-                    <option key={s.id} value={s.name}>{s.name}</option>
+                    <option key={s.id} value={shiftLabel(s)}>{shiftLabel(s)}</option>
                   ))}
                 </select>
               </div>
@@ -604,8 +650,10 @@ function CreateCaseModal({ isOpen, onClose, onCreated, organizationId, userId }:
 // ────────────────────────────────────────────────────────────────────────────────
 
 type WizardIssueType = 'conduct' | 'safety' | 'conflict' | 'complaint' | 'performance' | 'attendance' | 'unsure';
-type WizardPersonRole = 'employee' | 'complainant' | 'witness' | 'supervisor' | 'hr';
-type WizardDocumentType = 'complaint' | 'witness_statement' | 'policy_note' | 'prior_record' | 'other';
+type WizardPersonRole = 'subject' | 'affected_party' | 'complainant' | 'witness' | 'supervisor' | 'hr' | 'representative' | 'employee' | 'other';
+type WizardDocumentType = 'complaint' | 'witness_statement' | 'employee_response' | 'policy_note' | 'prior_record' | 'other';
+type WizardStatementStatus = 'provided' | 'not_available' | 'not_applicable';
+type WizardFlowStage = 'narrative' | 'people' | 'documents' | 'questions' | 'readiness';
 
 interface WizardPerson {
   name: string;
@@ -619,6 +667,11 @@ interface WizardDocumentNote {
   title: string;
   type: WizardDocumentType;
   content: string;
+  personKey?: string;
+  personName?: string;
+  personInvolvement?: WizardPersonRole;
+  personRole?: string;
+  personDepartment?: string;
   originalText?: string;
   translatedText?: string | null;
   cleanedText?: string;
@@ -649,11 +702,14 @@ interface GuidedWizardDraft {
   riskFlags: GuidedRiskKey[];
   people: WizardPerson[];
   documents: WizardDocumentNote[];
+  statementStatuses: Record<string, WizardStatementStatus>;
   supervisorNotes: string;
 }
 
+const EMPTY_WIZARD_DOCUMENT_NOTE: WizardDocumentNote = { title: '', type: 'complaint', content: '' };
+
 const WIZARD_INITIAL_DRAFT: GuidedWizardDraft = {
-  issueType: '',
+  issueType: 'unsure',
   incidentDate: '',
   location: '',
   department: '',
@@ -667,6 +723,7 @@ const WIZARD_INITIAL_DRAFT: GuidedWizardDraft = {
   riskFlags: [],
   people: [],
   documents: [],
+  statementStatuses: {},
   supervisorNotes: '',
 };
 
@@ -680,35 +737,314 @@ const WIZARD_ISSUES: Array<{ key: WizardIssueType; title: string; description: s
   { key: 'unsure', title: 'I am not sure', description: 'Let the wizard guide the supervisor through a neutral intake.', caseType: 'other', icon: HelpCircle },
 ];
 
+const WIZARD_PERSON_ROLE_OPTIONS: Array<{ value: WizardPersonRole; label: string; description: string }> = [
+  { value: 'subject', label: 'Subject of concern', description: 'Employee whose conduct, performance, attendance, or action is being reviewed.' },
+  { value: 'affected_party', label: 'Affected employee', description: 'Employee directly impacted by the reported behavior or incident.' },
+  { value: 'complainant', label: 'Reporting party / complainant', description: 'Person who reported the concern, whether or not they were directly affected.' },
+  { value: 'witness', label: 'Witness', description: 'Person who saw, heard, or has relevant information.' },
+  { value: 'supervisor', label: 'Supervisor / manager', description: 'Leader involved in response, review, or decision making.' },
+  { value: 'hr', label: 'HR partner', description: 'HR team member involved in guidance or review.' },
+  { value: 'representative', label: 'Employee representative', description: 'Union steward, employee representative, translator, or support person if applicable.' },
+  { value: 'employee', label: 'Other involved employee', description: 'Employee connected to the matter but not fitting the roles above.' },
+  { value: 'other', label: 'Other person', description: 'Any other person relevant to the review.' },
+];
+
+const wizardPersonRoleLabel = (role: string) => (
+  WIZARD_PERSON_ROLE_OPTIONS.find(option => option.value === role)?.label || role || 'Role not set'
+);
+
+const GUIDED_WIZARD_ENGINE_VERSION = 'document-first-employee-records-v4';
+const GUIDED_PEOPLE_STAGE_SLOTS = new Set(['involved_people']);
+const GUIDED_DOCUMENT_STAGE_SLOTS = new Set([
+  'documentation_package',
+  'evidence_available',
+  'witness_statement_need',
+  'employee_response',
+]);
+const GUIDED_SECONDARY_REVIEW_STAGE_SLOTS = new Set([
+  'direct_observation_source',
+  'prior_history',
+  'training_acknowledgment',
+  'policy_or_standard',
+]);
+
 const resolveWizardDocumentType = (doc: WizardDocumentNote, complaintIndex: number) => {
   if (doc.type === 'complaint') {
     return complaintIndex === 0 ? 'complaint_a' : complaintIndex === 1 ? 'complaint_b' : 'other';
   }
+  if (doc.type === 'employee_response') return 'other';
   if (doc.type === 'policy_note') return 'other';
   return doc.type;
 };
 
+interface GuidedWizardStepSnapshot {
+  step: number;
+  title: string;
+  purpose: string;
+  readinessScore: number;
+  readinessLabel: string;
+  questionCount: number;
+  requiredCount: number;
+  inputFingerprint: string;
+  engineVersion: string;
+  plan: GuidedIntakePlan;
+  analyzedAt: string;
+}
+
 const WIZARD_DOCUMENT_TYPE_LABELS: Record<WizardDocumentType, string> = {
   complaint: 'Complaint',
   witness_statement: 'Witness statement',
+  employee_response: 'Employee response',
   policy_note: 'Policy note',
   prior_record: 'Prior record',
   other: 'Other',
 };
 
-type AiProgressStatus = 'pending' | 'active' | 'complete';
+const GUIDED_REVIEW_STATUS_OPTIONS = {
+  policyTrainingStatus: [
+    { value: 'unknown', label: 'Unknown' },
+    { value: 'yes', label: 'Training confirmed' },
+    { value: 'no', label: 'Training not confirmed' },
+  ],
+  repeatedBehaviorStatus: [
+    { value: 'unknown', label: 'Unknown' },
+    { value: 'first_time', label: 'No prior pattern known' },
+    { value: 'repeated', label: 'Prior pattern reported' },
+  ],
+  safetyImpactStatus: [
+    { value: 'unknown', label: 'Unknown' },
+    { value: 'yes', label: 'Safety impact reported' },
+    { value: 'no', label: 'No safety impact reported' },
+  ],
+  employeeResponseStatus: [
+    { value: 'needed', label: 'Response still needed' },
+    { value: 'received', label: 'Response received' },
+    { value: 'not_applicable', label: 'Not applicable' },
+  ],
+} as const;
 
-interface AiProgressItem {
-  label: string;
-  description: string;
-  status: AiProgressStatus;
-}
+const GUIDED_RISK_OPTIONS: Array<{ key: GuidedRiskKey; title: string; description: string }> = [
+  { key: 'safety_complaint', title: 'Safety policy complaint', description: 'Facts may involve refusal, bypass, or failure to follow safety rules.' },
+  { key: 'harassment_or_discrimination', title: 'Harassment or discrimination', description: 'Facts may involve protected class, harassment, bias, or hostile conduct.' },
+  { key: 'retaliation_concern', title: 'Retaliation concern', description: 'Action could appear connected to a report, complaint, or protected activity.' },
+  { key: 'medical_or_accommodation', title: 'Medical or accommodation', description: 'Facts may involve injury, disability, medical restriction, or accommodation.' },
+  { key: 'protected_concerted_activity', title: 'Protected workplace activity', description: 'Facts may involve group concerns about working conditions or labor rights.' },
+  { key: 'wage_hour_or_leave', title: 'Wage, hour, or leave', description: 'Facts may involve timekeeping, leave, scheduling, or pay protections.' },
+  { key: 'none', title: 'No sensitive risk identified', description: 'No HR-sensitive risk flag has been identified from the available facts.' },
+];
+
+const guidedRiskLabel = (key: GuidedRiskKey) => (
+  GUIDED_RISK_OPTIONS.find(option => option.key === key)?.title || key.replace(/_/g, ' ')
+);
 
 const readinessTone = (score: number) => {
   if (score >= 85) return 'bg-green-100 text-green-800 dark:bg-green-900/30 dark:text-green-300';
   if (score >= 65) return 'bg-blue-100 text-blue-800 dark:bg-blue-900/30 dark:text-blue-300';
   if (score >= 40) return 'bg-amber-100 text-amber-800 dark:bg-amber-900/30 dark:text-amber-300';
   return 'bg-red-100 text-red-800 dark:bg-red-900/30 dark:text-red-300';
+};
+
+const readinessLabelFromScore = (score: number) => {
+  if (score >= 100) return 'Ready for supervisor decision';
+  if (score >= 85) return 'Supervisor-ready with HR check';
+  if (score >= 65) return 'HR review likely';
+  if (score >= 35) return 'Needs facts';
+  return 'Not ready';
+};
+
+const evidenceQualityLabelFromScore = (score: number) => {
+  if (score >= 90) return 'Strong response package';
+  if (score >= 75) return 'Solid with review notes';
+  if (score >= 50) return 'Usable but needs improvement';
+  return 'Weak - improve before relying on it';
+};
+
+const qualityStatusTone = (status: string) => {
+  if (status === 'strong') return 'bg-green-50 text-green-800 border-green-200 dark:bg-green-950/25 dark:text-green-200 dark:border-green-900';
+  if (status === 'partial') return 'bg-blue-50 text-blue-800 border-blue-200 dark:bg-blue-950/25 dark:text-blue-200 dark:border-blue-900';
+  if (status === 'weak') return 'bg-amber-50 text-amber-900 border-amber-200 dark:bg-amber-950/25 dark:text-amber-100 dark:border-amber-900';
+  return 'bg-red-50 text-red-800 border-red-200 dark:bg-red-950/25 dark:text-red-200 dark:border-red-900';
+};
+
+const WIZARD_FLOW_STEPS: Array<{ stage: WizardFlowStage; title: string; description: string }> = [
+  { stage: 'narrative', title: 'Describe the issue', description: 'Opening narrative' },
+  { stage: 'people', title: 'Identify involved people', description: 'Reporting party, subject, affected employees, witnesses, and support roles' },
+  { stage: 'documents', title: 'Collect handwritten statements', description: 'Complaint, witness statements, employee responses, and records' },
+  { stage: 'questions', title: 'Complete remaining questions', description: 'Only questions not answered by source records' },
+  { stage: 'readiness', title: 'Review readiness', description: 'Score, gaps, and case creation' },
+];
+
+const wizardStageForStep = (step: number): WizardFlowStage => (
+  WIZARD_FLOW_STEPS[Math.max(0, Math.min(WIZARD_FLOW_STEPS.length - 1, step))]?.stage || 'narrative'
+);
+
+const wizardPersonKey = (person: Pick<WizardPerson, 'name' | 'involvement'>, index?: number) => (
+  `${normalizeWizardText(person.name).toLowerCase()}|${person.involvement || ''}|${typeof index === 'number' ? index : ''}`
+);
+
+const statementStatusLabel = (status?: WizardStatementStatus) => {
+  if (status === 'provided') return 'Statement received';
+  if (status === 'not_available') return 'Not available yet';
+  if (status === 'not_applicable') return 'Not applicable';
+  return 'Needs status';
+};
+
+const statementRequirementForPerson = (person: WizardPerson) => {
+  switch (person.involvement) {
+    case 'complainant':
+      return { required: true, label: 'Complaint or reporting statement' };
+    case 'affected_party':
+      return { required: true, label: 'Affected employee statement' };
+    case 'witness':
+      return { required: true, label: 'Witness statement' };
+    case 'subject':
+    case 'employee':
+      return { required: true, label: 'Employee response to the concern' };
+    case 'supervisor':
+      return { required: false, label: 'Supervisor notes if available' };
+    case 'hr':
+      return { required: false, label: 'HR notes if available' };
+    case 'representative':
+      return { required: false, label: 'Representative notes if available' };
+    default:
+      return { required: false, label: 'Supporting statement if available' };
+  }
+};
+
+const documentRequiresPersonLink = (type?: WizardDocumentType | string) => (
+  type === 'complaint' || type === 'witness_statement' || type === 'employee_response'
+);
+
+const documentTypeMatchesPersonRequirement = (doc: WizardDocumentNote, person: WizardPerson) => {
+  if (person.involvement === 'witness') return doc.type === 'witness_statement';
+  if (person.involvement === 'subject' || person.involvement === 'employee') return doc.type === 'employee_response';
+  if (person.involvement === 'complainant' || person.involvement === 'affected_party') {
+    return doc.type === 'complaint' || doc.type === 'witness_statement';
+  }
+  return documentRequiresPersonLink(doc.type);
+};
+
+const documentBelongsToPerson = (doc: WizardDocumentNote, person: WizardPerson, personKey: string) => {
+  if (doc.personKey && doc.personKey === personKey) return true;
+  const docPersonName = normalizeWizardText(doc.personName).toLowerCase();
+  const personName = normalizeWizardText(person.name).toLowerCase();
+  if (!docPersonName || !personName || docPersonName !== personName) return false;
+  return !doc.personInvolvement || doc.personInvolvement === person.involvement;
+};
+
+const documentSatisfiesPersonStatement = (doc: WizardDocumentNote, person: WizardPerson, personKey: string) => (
+  documentBelongsToPerson(doc, person, personKey) && documentTypeMatchesPersonRequirement(doc, person)
+);
+
+const wizardNameCue = (name: string) => normalizeWizardText(name).toLowerCase();
+
+const narrativeSuggestsSubjectOfConcern = (person: WizardPerson, narrative: string) => {
+  const name = wizardNameCue(person.name);
+  const text = normalizeWizardText(narrative).toLowerCase();
+  if (!name || !text) return false;
+  return [
+    `reported that ${name}`,
+    `${name} made`,
+    `${name} allegedly`,
+    `${name}'s behavior`,
+    `${name}’s behavior`,
+    `${name} behaved`,
+    `${name} said`,
+    `behavior of ${name}`,
+    `conduct of ${name}`,
+    `complaint against ${name}`,
+    `concern about ${name}`,
+    `allegation against ${name}`,
+  ].some(cue => text.includes(cue));
+};
+
+const narrativeSuggestsReportingParty = (person: WizardPerson, narrative: string) => {
+  const name = wizardNameCue(person.name);
+  const text = normalizeWizardText(narrative).toLowerCase();
+  if (!name || !text) return false;
+  return [
+    `${name} reported`,
+    `${name} complained`,
+    `${name} raised`,
+    `${name} notified`,
+    `reported by ${name}`,
+    `complaint from ${name}`,
+  ].some(cue => text.includes(cue));
+};
+
+const narrativeSuggestsWitness = (person: WizardPerson, narrative: string) => {
+  const name = wizardNameCue(person.name);
+  const text = normalizeWizardText(narrative).toLowerCase();
+  if (!name || !text) return false;
+  return [
+    `${name} witnessed`,
+    `${name} observed`,
+    `${name} saw`,
+    `${name} heard`,
+    `${name} confirmed`,
+    `witness ${name}`,
+  ].some(cue => text.includes(cue));
+};
+
+const narrativeRoleConflictForPerson = (person: WizardPerson, narrative: string) => {
+  const subjectCue = narrativeSuggestsSubjectOfConcern(person, narrative);
+  const reporterCue = narrativeSuggestsReportingParty(person, narrative);
+  const witnessCue = narrativeSuggestsWitness(person, narrative);
+
+  if (subjectCue && person.involvement !== 'subject' && person.involvement !== 'employee') {
+    return `${person.name} appears in the description as the person whose conduct may need review, but is marked as ${wizardPersonRoleLabel(person.involvement)}.`;
+  }
+  if (reporterCue && person.involvement === 'subject') {
+    return `${person.name} appears to be a reporting party in the description, but is marked as Subject of concern.`;
+  }
+  if (witnessCue && person.involvement !== 'witness' && person.involvement !== 'complainant' && person.involvement !== 'affected_party') {
+    return `${person.name} appears to have witness information, but is marked as ${wizardPersonRoleLabel(person.involvement)}.`;
+  }
+  return '';
+};
+
+const inferPersonRoleFromNarrative = (name: string, narrative: string): WizardPersonRole => {
+  const lowerName = name.toLowerCase();
+  const lowerNarrative = narrative.toLowerCase();
+  const index = lowerNarrative.indexOf(lowerName);
+  const windowText = index >= 0
+    ? lowerNarrative.slice(Math.max(0, index - 90), Math.min(lowerNarrative.length, index + lowerName.length + 90))
+    : lowerNarrative;
+  const syntheticPerson: WizardPerson = { name, role: '', department: '', employeeId: '', involvement: 'employee' };
+  if (narrativeSuggestsSubjectOfConcern(syntheticPerson, narrative) || /\b(regarding|toward|accused|alleged|subject|behavior|conduct|made comments|did)\b/.test(windowText)) return 'subject';
+  if (narrativeSuggestsWitness(syntheticPerson, narrative) || /\b(witness|saw|heard|observed|confirmed)\b/.test(windowText)) return 'witness';
+  if (narrativeSuggestsReportingParty(syntheticPerson, narrative) || /\b(reported|complainant|complaint|raised|stated|told|notified)\b/.test(windowText)) return 'complainant';
+  if (/\b(regarding|toward|accused|alleged|subject|behavior|conduct|made comments|did)\b/.test(windowText)) return 'subject';
+  if (/\b(affected|impacted|targeted|victim|received|experienced)\b/.test(windowText)) return 'affected_party';
+  return 'employee';
+};
+
+const extractPersonSuggestionsFromNarrative = (narrative: string): WizardPerson[] => {
+  const stopPhrases = new Set([
+    'DashMet',
+    'Guided Resolution',
+    'Human Resources',
+    'HR',
+    'Food Safety',
+    'Quality Assurance',
+    'Don Miguel',
+    'MegaMex Foods',
+  ].map(value => value.toLowerCase()));
+  const matches = Array.from(narrative.matchAll(/\b([A-Z][a-z]+(?:\s+[A-Z][a-z]+){1,2})\b/g))
+    .map(match => match[1].trim())
+    .filter(name => {
+      const normalized = name.toLowerCase();
+      if (stopPhrases.has(normalized)) return false;
+      if (/^(During|Additional|Management|Supervisor|Employee|Witness|Complaint|Case|Shift|Line|Department|Safety|Quality)\b/.test(name)) return false;
+      return name.split(/\s+/).every(part => part.length > 1);
+    });
+  return Array.from(new Set(matches)).slice(0, 8).map(name => ({
+    name,
+    role: '',
+    department: '',
+    employeeId: '',
+    involvement: inferPersonRoleFromNarrative(name, narrative),
+  }));
 };
 
 const fileToDataUrl = (file: File): Promise<string> => new Promise((resolve, reject) => {
@@ -774,8 +1110,8 @@ function GuidedResolutionWizard({ isOpen, onClose, onCaseCreated, organizationId
   const [generating, setGenerating] = useState(false);
   const [creatingCase, setCreatingCase] = useState(false);
   const [savedAt, setSavedAt] = useState<string | null>(null);
-  const [newPerson, setNewPerson] = useState<WizardPerson>({ name: '', role: '', department: '', employeeId: '', involvement: 'employee' });
-  const [newDoc, setNewDoc] = useState<WizardDocumentNote>({ title: '', type: 'complaint', content: '' });
+  const [newPerson, setNewPerson] = useState<WizardPerson>({ name: '', role: '', department: '', employeeId: '', involvement: 'subject' });
+  const [newDoc, setNewDoc] = useState<WizardDocumentNote>(EMPTY_WIZARD_DOCUMENT_NOTE);
   const [departments, setDepartments] = useState<DepartmentOption[]>([]);
   const [shifts, setShifts] = useState<ShiftOption[]>([]);
   const [dropdownsLoading, setDropdownsLoading] = useState(false);
@@ -788,12 +1124,12 @@ function GuidedResolutionWizard({ isOpen, onClose, onCaseCreated, organizationId
   const [intakePlan, setIntakePlan] = useState<GuidedIntakePlan | null>(null);
   const [intakeAnswers, setIntakeAnswers] = useState<Record<string, string>>({});
   const [intakeQuestionTextById, setIntakeQuestionTextById] = useState<Record<string, string>>({});
+  const [stepHistory, setStepHistory] = useState<GuidedWizardStepSnapshot[]>([]);
   const [intakeLoading, setIntakeLoading] = useState(false);
   const [intakeError, setIntakeError] = useState('');
   const [fieldErrors, setFieldErrors] = useState<Record<string, string>>({});
   const [aiProgressOpen, setAiProgressOpen] = useState(false);
-  const [aiProgressItems, setAiProgressItems] = useState<AiProgressItem[]>([]);
-  const [aiProgressTitle, setAiProgressTitle] = useState('Reviewing your answers');
+  const [acknowledgedAnswerFeedback, setAcknowledgedAnswerFeedback] = useState<Record<string, string>>({});
   const [wizardMaximized, setWizardMaximized] = useState(false);
   const [wizardOffset, setWizardOffset] = useState({ x: 0, y: 0 });
   const [wizardSize, setWizardSize] = useState<{ width: number; height: number } | null>(null);
@@ -810,10 +1146,11 @@ function GuidedResolutionWizard({ isOpen, onClose, onCaseCreated, organizationId
     draft.documents.length ||
     Object.values(intakeAnswers).some(answer => answer.trim())
   );
-	  const canGenerate = Boolean(draft.issueType && hasWizardContent);
-  const currentIntakeStep: GuidedIntakeStep = 'all';
-  const selectedWizardDepartment = departments.find(dept => dept.name === draft.department);
-  const policiesForGuidance = wizardPolicies.length ? wizardPolicies : policies;
+	  const canGenerate = Boolean(draft.behaviorSummary.trim() && hasWizardContent);
+  const currentWizardStage = wizardStageForStep(step);
+	  const currentIntakeStep: GuidedIntakeStep = 'all';
+	  const selectedWizardDepartment = departments.find(dept => dept.name === draft.department);
+	  const policiesForGuidance = wizardPolicies.length ? wizardPolicies : policies;
   const activePolicySections = useMemo(() => {
     return policiesForGuidance
       .filter(policy => policy.status === 'ACTIVE')
@@ -827,34 +1164,696 @@ function GuidedResolutionWizard({ isOpen, onClose, onCaseCreated, organizationId
       })))
       .filter(section => section.content?.trim());
   }, [policiesForGuidance]);
-  const currentStepQuestions = useMemo(() => {
-    return intakePlan?.questions || [];
-  }, [intakePlan]);
+  const narrativePersonSuggestions = useMemo(() => {
+    const existing = new Set(draft.people.map(person => normalizeWizardText(person.name).toLowerCase()));
+    return extractPersonSuggestionsFromNarrative(draft.behaviorSummary)
+      .filter(person => person.name && !existing.has(normalizeWizardText(person.name).toLowerCase()));
+  }, [draft.behaviorSummary, draft.people]);
+  const peopleNeedingStatementStatus = useMemo(() => (
+    draft.people
+      .map((person, index) => ({ person, index, requirement: statementRequirementForPerson(person), key: wizardPersonKey(person, index) }))
+      .filter(item => item.requirement.required)
+  ), [draft.people]);
+  const statementOwnerOptions = useMemo(() => (
+    draft.people.map((person, index) => ({
+      key: wizardPersonKey(person, index),
+      person,
+      requirement: statementRequirementForPerson(person),
+    }))
+  ), [draft.people]);
+  const providedStatementMissingLinkedDocument = useMemo(() => (
+    peopleNeedingStatementStatus.filter(({ person, key }) => (
+      draft.statementStatuses[key] === 'provided' &&
+      !draft.documents.some(doc => documentSatisfiesPersonStatement(doc, person, key))
+    ))
+  ), [draft.documents, draft.statementStatuses, peopleNeedingStatementStatus]);
+  const missingStatementStatuses = useMemo(() => (
+    peopleNeedingStatementStatus.filter(item => !draft.statementStatuses[item.key])
+  ), [draft.people, draft.statementStatuses, peopleNeedingStatementStatus]);
+  const statementStatusSummary = useMemo(() => {
+    if (!peopleNeedingStatementStatus.length) return '';
+    return peopleNeedingStatementStatus
+      .map(({ person, requirement, key }) => {
+        const linkedDocumentCount = draft.documents.filter(doc => documentSatisfiesPersonStatement(doc, person, key)).length;
+        return `${person.name} (${wizardPersonRoleLabel(person.involvement)}): ${requirement.label} - ${statementStatusLabel(draft.statementStatuses[key])}${linkedDocumentCount ? `, ${linkedDocumentCount} linked record${linkedDocumentCount === 1 ? '' : 's'}` : ''}`;
+      })
+      .join('; ');
+  }, [draft.documents, draft.statementStatuses, peopleNeedingStatementStatus]);
+	  const currentAllowedWizardSlotIds = useMemo(() => {
+    if (currentWizardStage === 'people') return GUIDED_PEOPLE_STAGE_SLOTS;
+    if (currentWizardStage === 'documents') return GUIDED_DOCUMENT_STAGE_SLOTS;
+    if (currentWizardStage === 'narrative' || currentWizardStage === 'readiness') return new Set<string>();
+	    if (!intakePlan) return null;
+	    const planSlotIds = new Set<string>(
+	      (intakePlan.questions || [])
+	        .map(question => question.slotId)
+	        .filter((slotId): slotId is string => Boolean(slotId))
+	    );
+	    const stillInSecondaryStage = Array.from(planSlotIds).some(slotId => GUIDED_SECONDARY_REVIEW_STAGE_SLOTS.has(slotId));
+	    if (stillInSecondaryStage) return GUIDED_SECONDARY_REVIEW_STAGE_SLOTS;
+	    return null;
+	  }, [currentWizardStage, intakePlan]);
+	  const guardedWizardStage = useMemo(() => {
+    if (currentWizardStage === 'people') {
+      return {
+        title: 'Identify involved people',
+        purpose: 'Review suggested names from the description, add anyone else involved, and assign each person a clear role before statements are requested.',
+      };
+    }
+    if (currentWizardStage === 'documents') {
+      return {
+        title: 'Collect handwritten statements',
+        purpose: 'Upload or enter the complaint, witness statements, employee responses, and any supporting records before deeper review questions appear.',
+      };
+    }
+    if (currentWizardStage === 'questions') {
+      return {
+        title: 'Complete remaining questions',
+        purpose: 'Review any answers found in the records, edit them if needed, and answer only the questions still missing.',
+      };
+    }
+    if (currentWizardStage === 'readiness') {
+      return {
+        title: 'Review readiness',
+        purpose: 'Review readiness, weak areas, source-backed answers, documents, and people before creating the case record.',
+      };
+    }
+	    return null;
+	  }, [currentWizardStage]);
+  const guardedPeopleQuestion = useMemo<GuidedIntakeQuestion>(() => ({
+    id: 'guided_stage_people_required',
+    slotId: 'involved_people',
+    playbookKey: intakePlan?.caseClassification?.primaryPlaybook || 'general_intake',
+    step: 'people',
+    category: 'People',
+	    question: 'Confirm everyone involved in this situation.',
+	    whyNeeded: 'Review the suggested names from the description, add anyone else involved, and identify each role before handwritten statements are requested.',
+    answerType: 'person',
+    required: true,
+  }), [intakePlan?.caseClassification?.primaryPlaybook]);
+  const peopleReviewConfirmed = useMemo(() => {
+    const answer = normalizeWizardText(intakeAnswers[guardedPeopleQuestion.id]).toLowerCase();
+    return Boolean(
+      answer &&
+      (answer.includes('no additional') || answer.includes('everyone involved has been added') || answer.includes('i confirm'))
+    );
+  }, [guardedPeopleQuestion.id, intakeAnswers]);
+  const guardedDocumentQuestion = useMemo<GuidedIntakeQuestion>(() => ({
+    id: 'guided_stage_documents_required',
+    slotId: 'documentation_package',
+    playbookKey: intakePlan?.caseClassification?.primaryPlaybook || 'general_intake',
+    step: 'documents',
+    category: 'Documentation',
+	    question: 'Add the handwritten complaint, witness statements, employee responses, and supporting records.',
+	    whyNeeded: 'The wizard reviews these source records first so it can prefill answers it finds and ask only what is still missing.',
+    answerType: 'document',
+    required: true,
+  }), [intakePlan?.caseClassification?.primaryPlaybook]);
+	  const currentStepQuestions = useMemo(() => {
+    if (currentWizardStage === 'narrative' || currentWizardStage === 'readiness') return [];
+	    const questions = intakePlan?.questions || [];
+    if (currentWizardStage === 'people') return [guardedPeopleQuestion];
+    if (currentWizardStage === 'documents') return [guardedDocumentQuestion];
+	    if (!currentAllowedWizardSlotIds) {
+      return questions.filter(question => (
+        !question.slotId ||
+        (!GUIDED_PEOPLE_STAGE_SLOTS.has(question.slotId) && !GUIDED_DOCUMENT_STAGE_SLOTS.has(question.slotId))
+      ));
+    }
+	    const filtered = questions.filter(question => question.slotId && currentAllowedWizardSlotIds.has(question.slotId));
+	    if (filtered.length) return filtered;
+	    return questions.filter(question => !question.slotId);
+	  }, [currentAllowedWizardSlotIds, currentWizardStage, guardedDocumentQuestion, guardedPeopleQuestion, intakePlan]);
+  const answerFeedbackItems = useMemo(() => (
+    (intakePlan?.answerFeedback || []).filter(feedback => !acknowledgedAnswerFeedback[wizardFeedbackKey(feedback)])
+  ), [intakePlan, acknowledgedAnswerFeedback]);
   const answeredDynamicCount = useMemo(() => Object.values(intakeAnswers).filter(answer => answer.trim()).length, [intakeAnswers]);
-  const requiredCurrentQuestions = currentStepQuestions;
+  const requiredCurrentQuestions = currentStepQuestions.filter(question => question.required);
   const missingRequiredCurrentQuestions = useMemo(
     () => requiredCurrentQuestions.filter(question => !intakeAnswers[question.id]?.trim()),
     [requiredCurrentQuestions, intakeAnswers]
   );
+  const answeredQuestionContexts = useMemo(() => (
+    currentStepQuestions
+      .map(question => ({
+        question,
+        answer: intakeAnswers[question.id]?.trim() || '',
+      }))
+      .filter(item => item.answer)
+  ), [currentStepQuestions, intakeAnswers]);
+  const isWizardItemSatisfiedLocally = useCallback((label: string) => {
+    const normalizedLabel = normalizeWizardText(label).toLowerCase();
+    if (!normalizedLabel) return false;
+    const answeredByCurrentQuestion = answeredQuestionContexts.some(({ question, answer }) => (
+      wizardTokenOverlapSatisfied(label, `${question.question} ${question.category} ${question.whyNeeded} ${answer}`)
+    ));
+    if (answeredByCurrentQuestion) return true;
+
+    if (/\b(policy|training|trained|acknowledg)/i.test(normalizedLabel) && draft.policyTrainingStatus !== 'unknown') return true;
+    if (/\b(safety|injury|hazard|near miss)\b/i.test(normalizedLabel) && draft.safetyImpactStatus !== 'unknown') return true;
+    if (/\b(people|person|individual|witness|complainant|subject|affected)\b/i.test(normalizedLabel) && draft.people.length > 0) return true;
+    if (/\b(complaint|statement|document|evidence|record|response|reply|handwritten|signed)\b/i.test(normalizedLabel) && draft.documents.length > 0) {
+      return draft.documents.some(doc => wizardTokenOverlapSatisfied(label, `${doc.title} ${doc.type} ${doc.summary || ''} ${doc.content}`));
+    }
+    return false;
+  }, [answeredQuestionContexts, draft.documents, draft.people.length, draft.policyTrainingStatus, draft.safetyImpactStatus]);
+  const activeMissingInformation = useMemo(() => {
+    const openRequired = missingRequiredCurrentQuestions.map(question => question.question);
+    if (currentWizardStage === 'people') {
+      const missingPeople = draft.people.length
+        ? []
+        : ['Add every involved person you know about, including the reporting party, subject of concern, affected employee, witnesses, supervisor, HR, representative, or other involved employee.'];
+      const unreviewedSuggestions = narrativePersonSuggestions.length
+        ? [`Review the ${narrativePersonSuggestions.length} suggested name${narrativePersonSuggestions.length === 1 ? '' : 's'} from the description and add any that belong in this review.`]
+        : [];
+      const missingConfirmation = draft.people.length > 0 && narrativePersonSuggestions.length === 0 && !peopleReviewConfirmed
+        ? ['Confirm that everyone currently known to be involved has been added before moving to handwritten statements.']
+        : [];
+      return [...missingPeople, ...unreviewedSuggestions, ...missingConfirmation].slice(0, 3);
+    }
+    if (currentWizardStage === 'documents') {
+      const missingStatuses = missingStatementStatuses.map(item => `${item.person.name} needs a statement status before deeper questions appear.`);
+      const missingDocument = providedStatementMissingLinkedDocument.map(item => (
+        `${item.person.name} is marked as statement received, but no written record is linked to that person yet.`
+      ));
+      return Array.from(new Set([...missingStatuses, ...missingDocument])).slice(0, 5);
+    }
+    if (currentWizardStage === 'narrative') {
+      return draft.behaviorSummary.trim() ? [] : ['Describe what happened before the wizard identifies people, records, and follow-up questions.'];
+    }
+    const backendUnknowns = (intakePlan?.missingInformation || []).filter(item => !isWizardItemSatisfiedLocally(item));
+    return Array.from(new Set([...openRequired, ...backendUnknowns])).slice(0, 5);
+  }, [
+    currentWizardStage,
+    draft.behaviorSummary,
+    draft.documents.length,
+    draft.people.length,
+    draft.statementStatuses,
+    intakePlan?.missingInformation,
+    isWizardItemSatisfiedLocally,
+    missingRequiredCurrentQuestions,
+    missingStatementStatuses,
+    narrativePersonSuggestions.length,
+    peopleNeedingStatementStatus,
+    peopleReviewConfirmed,
+    providedStatementMissingLinkedDocument,
+  ]);
+  const computedReadiness = useMemo(() => {
+    if (!intakePlan) return null;
+    const requiredSlots = (intakePlan.requiredInformationSlots || []).filter(slot => slot.required);
+    const locallyAnsweredSlotIds = new Set(
+      currentStepQuestions
+        .filter(question => question.required && intakeAnswers[question.id]?.trim())
+        .map(question => question.slotId)
+        .filter(Boolean)
+    );
+    const total = requiredSlots.length || currentStepQuestions.filter(question => question.required).length;
+    if (!total) {
+      return {
+        score: 100,
+        label: readinessLabelFromScore(100),
+        completed: 0,
+        total: 0,
+      };
+    }
+    const completed = requiredSlots.length
+      ? requiredSlots.filter(slot => slot.completed || locallyAnsweredSlotIds.has(slot.id) || isWizardItemSatisfiedLocally(slot.label)).length
+      : currentStepQuestions.filter(question => question.required && intakeAnswers[question.id]?.trim()).length;
+    const score = Math.max(0, Math.min(100, Math.round((completed / total) * 100)));
+    return {
+      score,
+      label: readinessLabelFromScore(score),
+      completed,
+      total,
+    };
+  }, [currentStepQuestions, intakeAnswers, intakePlan, isWizardItemSatisfiedLocally]);
+  const stageReadiness = useMemo(() => {
+    if (currentWizardStage === 'narrative') {
+      const complete = draft.behaviorSummary.trim().length > 0;
+      return {
+        score: complete ? 100 : 0,
+        label: complete ? 'Description complete' : 'Needs description',
+        completed: complete ? 1 : 0,
+        total: 1,
+      };
+    }
+    if (currentWizardStage === 'people') {
+      const remainingSuggestions = narrativePersonSuggestions.length;
+      const complete = draft.people.length > 0 && remainingSuggestions === 0 && peopleReviewConfirmed;
+      const total = Math.max(draft.people.length + remainingSuggestions + (peopleReviewConfirmed ? 0 : 1), 1);
+      const partialScore = draft.people.length ? Math.max(25, Math.round((draft.people.length / total) * 100)) : 0;
+      return {
+        score: complete ? 100 : partialScore,
+        label: complete ? 'List confirmed by user' : draft.people.length ? remainingSuggestions > 0 ? 'Review suggested people' : 'Needs final confirmation' : 'Needs involved people',
+        completed: draft.people.length,
+        total,
+      };
+    }
+    if (currentWizardStage === 'documents') {
+      const total = Math.max(peopleNeedingStatementStatus.length, 1);
+      const completedStatuses = peopleNeedingStatementStatus.filter(item => Boolean(draft.statementStatuses[item.key])).length;
+      const receivedWithoutRecord = providedStatementMissingLinkedDocument.length > 0;
+      const score = receivedWithoutRecord ? Math.min(50, Math.round((completedStatuses / total) * 100)) : Math.round((completedStatuses / total) * 100);
+      return {
+        score,
+        label: score >= 100 ? 'Statement status complete' : 'Needs statement review',
+        completed: completedStatuses,
+        total,
+      };
+    }
+    if (currentWizardStage === 'questions') {
+      const total = Math.max(requiredCurrentQuestions.length, 1);
+      const answered = requiredCurrentQuestions.filter(question => intakeAnswers[question.id]?.trim()).length;
+      const score = requiredCurrentQuestions.length ? Math.round((answered / total) * 100) : 100;
+      return {
+        score,
+        label: score >= 100 ? 'Questions complete' : `${Math.max(requiredCurrentQuestions.length - answered, 0)} required left`,
+        completed: answered,
+        total: requiredCurrentQuestions.length,
+      };
+    }
+    return computedReadiness;
+  }, [
+    computedReadiness,
+    currentWizardStage,
+    draft.behaviorSummary,
+    draft.documents.length,
+    draft.people.length,
+    draft.statementStatuses,
+    intakeAnswers,
+    narrativePersonSuggestions.length,
+    peopleNeedingStatementStatus,
+    peopleReviewConfirmed,
+    providedStatementMissingLinkedDocument.length,
+    requiredCurrentQuestions,
+  ]);
+  const reviewableSourceBackedAnswers = useMemo(() => (
+    (intakePlan?.sourceBackedAnswers || [])
+      .filter(item => item?.sourceTitle && item?.value)
+      .slice(0, 6)
+  ), [intakePlan?.sourceBackedAnswers]);
+	  const activeRecommendedDocuments = useMemo(() => {
+    if (currentWizardStage === 'people' || currentWizardStage === 'narrative') return [];
+	    const existingDocs = draft.documents;
+	    return (intakePlan?.recommendedDocuments || []).filter(doc => {
+      const docType = normalizeWizardText(doc.documentType).toLowerCase();
+      const docText = `${doc.title} ${doc.documentType} ${doc.whyNeeded}`;
+      if (docType && existingDocs.some(existing => normalizeWizardText(existing.type).toLowerCase() === docType)) return false;
+      if (existingDocs.some(existing => wizardTokenOverlapSatisfied(docText, `${existing.title} ${existing.type} ${existing.summary || ''} ${existing.content}`))) return false;
+      if (answeredQuestionContexts.some(({ question, answer }) => (
+        needsEmployeeProvidedRecordOption(`${question.question} ${question.whyNeeded}`) &&
+        wizardTokenOverlapSatisfied(docText, `${question.question} ${question.whyNeeded} ${answer}`)
+      ))) return false;
+	      return true;
+	    }).slice(0, 4);
+	  }, [answeredQuestionContexts, currentWizardStage, draft.documents, intakePlan?.recommendedDocuments]);
+  const deterministicReviewFindings = useMemo<GuidedIntakeResponseQualityFinding[]>(() => {
+    const findings: GuidedIntakeResponseQualityFinding[] = [];
+    const sourceAnswerCount = (intakePlan?.sourceBackedAnswers || []).length;
+    const normalizedNarrative = normalizeWizardText(draft.behaviorSummary).toLowerCase();
+    const allegationOrConductReview = Boolean(
+      draft.people.length &&
+      (
+        ['conduct', 'conflict', 'complaint', 'performance', 'attendance', 'unsure'].includes(draft.issueType || '') ||
+        /\b(complaint|reported that|alleged|harass|assault|threat|behavior|conduct|comment|retaliat|discriminat|hostile|warning|counsel)\b/.test(normalizedNarrative)
+      )
+    );
+
+    const addFinding = (
+      area: string,
+      finding: string,
+      improvement: string,
+      status: GuidedIntakeResponseQualityFinding['status'] = 'weak',
+      score = status === 'missing' ? 15 : status === 'weak' ? 30 : 55,
+      source?: string
+    ) => {
+      findings.push({ area, finding, improvement, status, score, source });
+    };
+
+    if (draft.documents.length > 0 && sourceAnswerCount === 0) {
+      addFinding(
+        'Employee-provided records',
+        'Records were added, but the wizard did not find any source-backed answers it can point to for the review questions.',
+        'Review the uploaded or typed records for clarity, link each record to the correct person, and add a clearer transcription if the record answers any review question.',
+        'weak',
+        25
+      );
+    }
+
+    draft.documents
+      .filter(doc => documentRequiresPersonLink(doc.type) && !doc.personKey && !doc.personName)
+      .forEach(doc => {
+        addFinding(
+          'Record ownership',
+          `${doc.title || WIZARD_DOCUMENT_TYPE_LABELS[doc.type]} is not linked to the employee who provided it.`,
+          'Select the employee who provided this complaint, witness statement, or response so the wizard can use it correctly.',
+          'weak',
+          30,
+          doc.title
+        );
+      });
+
+    providedStatementMissingLinkedDocument.forEach(({ person, requirement }) => {
+      addFinding(
+        'Statement verification',
+        `${person.name} is marked as "${statementStatusLabel('provided')}", but no ${requirement.label.toLowerCase()} is linked to that person.`,
+        `Upload, transcribe, or type ${person.name}'s ${requirement.label.toLowerCase()}, then link it to that person before relying on the review.`,
+        'missing',
+        20,
+        person.name
+      );
+    });
+
+    peopleNeedingStatementStatus
+      .filter(({ person, key }) => draft.statementStatuses[key] === 'not_available')
+      .forEach(({ person, requirement }) => {
+        addFinding(
+          'Missing employee-provided record',
+          `${person.name}'s ${requirement.label.toLowerCase()} is not available yet.`,
+          `Collect the original handwritten ${requirement.label.toLowerCase()} if available, or document why it could not be obtained before HR relies on the case file.`,
+          'partial',
+          55,
+          person.name
+        );
+      });
+
+    draft.people.forEach(person => {
+      const conflict = narrativeRoleConflictForPerson(person, draft.behaviorSummary);
+      if (conflict) {
+        addFinding(
+          'People and roles',
+          conflict,
+          'Review the person role before continuing. Role accuracy matters because it controls which statement, response, and HR review steps are required.',
+          'weak',
+          30,
+          person.name
+        );
+      }
+    });
+
+    const hasSubjectOfConcern = draft.people.some(person => person.involvement === 'subject' || person.involvement === 'employee');
+    if (allegationOrConductReview && !hasSubjectOfConcern) {
+      addFinding(
+        'People and roles',
+        'No subject of concern or responding employee is identified, even though the description appears to involve reported conduct or a workplace complaint.',
+        'Add the employee whose conduct or response is being reviewed, or document why there is no subject of concern for this matter.',
+        'missing',
+        20
+      );
+    }
+
+    const hasReportingOrAffectedParty = draft.people.some(person => person.involvement === 'complainant' || person.involvement === 'affected_party');
+    if (allegationOrConductReview && !hasReportingOrAffectedParty) {
+      addFinding(
+        'People and roles',
+        'No reporting party, complainant, or affected employee is identified for this review.',
+        'Add the person who reported the concern or the employee directly affected by the situation.',
+        'missing',
+        25
+      );
+    }
+
+    return findings.slice(0, 12);
+  }, [
+    draft.behaviorSummary,
+    draft.documents,
+    draft.issueType,
+    draft.people,
+    draft.statementStatuses,
+    intakePlan?.sourceBackedAnswers,
+    peopleNeedingStatementStatus,
+    providedStatementMissingLinkedDocument,
+  ]);
+  const evidenceQualityReview = useMemo(() => {
+    const backendScore = intakePlan?.responseStrengthScore ?? intakePlan?.alignmentScore ?? intakePlan?.readinessScore ?? computedReadiness?.score ?? 0;
+    const sourceAnswerCount = (intakePlan?.sourceBackedAnswers || []).length;
+    const nonInfoFeedback = answerFeedbackItems.filter(item => item.severity !== 'info');
+    const deterministicBlockingFindings = deterministicReviewFindings.filter(item => item.status === 'weak' || item.status === 'missing');
+    const sourceRecordFinding = deterministicReviewFindings.find(item => item.area === 'Employee-provided records');
+    let deterministicCap = 100;
+
+    if (!draft.behaviorSummary.trim()) deterministicCap = Math.min(deterministicCap, 20);
+    if (!draft.people.length) deterministicCap = Math.min(deterministicCap, 35);
+    if (missingStatementStatuses.length > 0) deterministicCap = Math.min(deterministicCap, 50);
+    if (peopleNeedingStatementStatus.length > 0 && !draft.documents.length) deterministicCap = Math.min(deterministicCap, 60);
+    if (sourceAnswerCount === 0 && draft.documents.length > 0) deterministicCap = Math.min(deterministicCap, 35);
+    if (activeMissingInformation.length > 0) deterministicCap = Math.min(deterministicCap, Math.max(25, 86 - activeMissingInformation.length * 7));
+    if (nonInfoFeedback.length > 0) deterministicCap = Math.min(deterministicCap, Math.max(20, 76 - nonInfoFeedback.length * 8));
+    if (nonInfoFeedback.some(item => item.severity === 'high_risk')) deterministicCap = Math.min(deterministicCap, 55);
+    if (deterministicBlockingFindings.length > 0) deterministicCap = Math.min(deterministicCap, Math.max(18, 72 - deterministicBlockingFindings.length * 10));
+
+    const score = Math.max(0, Math.min(100, Math.round(Math.min(backendScore, deterministicCap))));
+    const label = deterministicCap < 75
+      ? evidenceQualityLabelFromScore(score)
+      : intakePlan?.responseStrengthLabel || evidenceQualityLabelFromScore(score);
+    const documentStatus = draft.documents.length
+      ? sourceAnswerCount
+        ? 'strong'
+        : 'weak'
+      : peopleNeedingStatementStatus.length
+        ? 'missing'
+        : 'partial';
+    const responseAlignmentIssues = [
+      ...nonInfoFeedback,
+      ...deterministicReviewFindings.filter(item => ['Response alignment', 'People and roles', 'Statement verification', 'Record ownership'].includes(item.area)),
+    ];
+    const fallbackAccounting: GuidedIntakeInformationAccount[] = [
+      {
+        area: 'People and roles',
+        status: draft.people.length
+          ? deterministicReviewFindings.some(item => item.area === 'People and roles' && (item.status === 'weak' || item.status === 'missing'))
+            ? 'weak'
+            : deterministicReviewFindings.some(item => item.area === 'People and roles')
+              ? 'partial'
+              : 'strong'
+          : 'missing',
+        detail: draft.people.length
+          ? `${draft.people.length} involved person${draft.people.length === 1 ? '' : 's'} identified with review roles.`
+          : 'No involved people have been identified yet.',
+        recommendedImprovement: deterministicReviewFindings.find(item => item.area === 'People and roles')?.improvement || (draft.people.length ? undefined : 'Add the reporting party, subject of concern, affected employee, witnesses, supervisor, HR partner, or other involved people.'),
+      },
+      {
+        area: 'Employee-provided records',
+        status: documentStatus,
+        detail: draft.documents.length
+          ? `${draft.documents.length} record${draft.documents.length === 1 ? '' : 's'} added; ${sourceAnswerCount} source-backed answer${sourceAnswerCount === 1 ? '' : 's'} found for review.`
+          : 'No written complaint, witness statement, employee response, or supporting record has been added.',
+        recommendedImprovement: sourceRecordFinding?.improvement || (draft.documents.length ? undefined : 'Upload or transcribe the original employee-provided records when they exist.'),
+      },
+      {
+        area: 'Required facts',
+        status: activeMissingInformation.length ? (activeMissingInformation.length > 2 ? 'weak' : 'partial') : 'strong',
+        detail: activeMissingInformation.length
+          ? `${activeMissingInformation.length} important area${activeMissingInformation.length === 1 ? '' : 's'} still need stronger documentation or review.`
+          : 'The wizard does not see open required fact gaps from the current record.',
+        recommendedImprovement: activeMissingInformation.slice(0, 3).join('; ') || undefined,
+      },
+      {
+        area: 'Response alignment',
+        status: responseAlignmentIssues.length ? (responseAlignmentIssues.length > 2 ? 'weak' : 'partial') : 'strong',
+        detail: responseAlignmentIssues.length
+          ? `${responseAlignmentIssues.length} response, role, or source-record issue${responseAlignmentIssues.length === 1 ? '' : 's'} may weaken the case review if not corrected.`
+          : 'Responses, roles, and linked source records currently align with the review structure.',
+        recommendedImprovement: nonInfoFeedback[0]?.suggestedAction || deterministicReviewFindings.find(item => ['Response alignment', 'People and roles', 'Statement verification', 'Record ownership'].includes(item.area))?.improvement,
+      },
+    ];
+    const qualityRank: Record<GuidedIntakeInformationAccount['status'], number> = {
+      strong: 0,
+      partial: 1,
+      weak: 2,
+      missing: 3,
+    };
+    const backendAccounting = intakePlan?.informationAccounting || [];
+    const accountingByArea = new Map(
+      backendAccounting.map(item => [normalizeWizardText(item.area).toLowerCase(), item])
+    );
+    const accounting = [
+      ...fallbackAccounting.map(fallback => {
+        const backendItem = accountingByArea.get(normalizeWizardText(fallback.area).toLowerCase());
+        if (!backendItem) return fallback;
+        if (qualityRank[fallback.status] > qualityRank[backendItem.status]) {
+          return {
+            ...backendItem,
+            status: fallback.status,
+            detail: fallback.detail,
+            recommendedImprovement: fallback.recommendedImprovement || backendItem.recommendedImprovement,
+          };
+        }
+        return backendItem;
+      }),
+      ...backendAccounting.filter(item => !fallbackAccounting.some(fallback => normalizeWizardText(fallback.area).toLowerCase() === normalizeWizardText(item.area).toLowerCase())),
+    ].slice(0, 8);
+    const feedbackFindings = nonInfoFeedback.map(item => ({
+      area: item.issue || 'Response quality',
+      question: item.question,
+      score: item.severity === 'high_risk' ? 30 : 55,
+      status: item.severity === 'high_risk' ? 'weak' as const : 'partial' as const,
+      finding: item.reason,
+      improvement: item.suggestedAction,
+      source: item.answer,
+    }));
+    const findings = [
+      ...(intakePlan?.responseQualityFindings || []),
+      ...deterministicReviewFindings,
+      ...feedbackFindings,
+    ].slice(0, 10);
+    const strengths = Array.from(new Set([
+      ...(intakePlan?.strengthFactors || []),
+      draft.people.length && !deterministicReviewFindings.some(item => item.area === 'People and roles' && item.status !== 'partial') ? 'People connected to the matter have been identified with no obvious role conflict.' : '',
+      draft.documents.length && sourceAnswerCount ? 'Employee-provided records or supporting notes have been added and source-backed answers were found.' : '',
+      sourceAnswerCount ? 'The wizard found source-backed answers in uploaded or typed records.' : '',
+      !activeMissingInformation.length ? 'No open required fact gaps are currently visible.' : '',
+    ].filter(Boolean))).slice(0, 6);
+    const weaknesses = Array.from(new Set([
+      ...(intakePlan?.weaknessFactors || []),
+      ...activeMissingInformation,
+      ...missingStatementStatuses.map(item => `${item.person.name} still needs a statement status`),
+      ...deterministicReviewFindings.map(item => item.finding),
+      ...nonInfoFeedback.map(item => item.issue || item.reason),
+    ].filter(Boolean))).slice(0, 8);
+    const deterministicAssessment = deterministicReviewFindings.length
+      ? `The current review has ${deterministicReviewFindings.length} source, role, or statement issue${deterministicReviewFindings.length === 1 ? '' : 's'} that should be corrected or reviewed before relying on the case file. ${deterministicReviewFindings[0].finding}`
+      : '';
+
+    return {
+      score,
+      label,
+      accounting,
+      findings,
+      strengths,
+      weaknesses,
+      assessment: score < 75 && deterministicAssessment
+        ? deterministicAssessment
+        : intakePlan?.caseStrengthAssessment || intakePlan?.summaryAssessment || 'Review the current information before creating the case record.',
+    };
+  }, [
+    activeMissingInformation,
+    answerFeedbackItems,
+    computedReadiness?.score,
+    deterministicReviewFindings,
+    draft.behaviorSummary,
+    draft.documents.length,
+    draft.people.length,
+    intakePlan,
+    missingStatementStatuses,
+    peopleNeedingStatementStatus.length,
+  ]);
+  const displayedWizardReadiness = currentWizardStage === 'readiness'
+    ? { score: evidenceQualityReview.score, label: evidenceQualityReview.label }
+    : stageReadiness;
+  const currentStepIsComplete = Boolean(
+    (displayedWizardReadiness?.score ?? 0) >= 100 &&
+    activeMissingInformation.length === 0 &&
+    missingRequiredCurrentQuestions.length === 0 &&
+    answerFeedbackItems.length === 0
+  );
+	  const currentStepStatusMessage = useMemo(() => {
+    if (!intakePlan) return '';
+    if (activeMissingInformation.length > 0) {
+      return `${activeMissingInformation.length} item${activeMissingInformation.length === 1 ? '' : 's'} still need${activeMissingInformation.length === 1 ? 's' : ''} attention on this step.`;
+    }
+    if (missingRequiredCurrentQuestions.length > 0) {
+      return `${missingRequiredCurrentQuestions.length} required item${missingRequiredCurrentQuestions.length === 1 ? '' : 's'} still need${missingRequiredCurrentQuestions.length === 1 ? 's' : ''} a response on this step.`;
+    }
+    if (answerFeedbackItems.length > 0) {
+      return `${answerFeedbackItems.length} response${answerFeedbackItems.length === 1 ? '' : 's'} may need clarification before the wizard relies on them.`;
+    }
+    if (!currentStepIsComplete) {
+      return displayedWizardReadiness?.label || 'This step still needs review before continuing.';
+    }
+    return 'This step is complete based on the responses and records currently entered.';
+  }, [
+    activeMissingInformation.length,
+    answerFeedbackItems.length,
+    currentStepIsComplete,
+    displayedWizardReadiness?.label,
+    intakePlan,
+    missingRequiredCurrentQuestions.length,
+  ]);
+	  const buildAnalysisFingerprint = useCallback(() => {
+    const normalizedAnswers = Object.fromEntries(
+      Object.entries(intakeAnswers)
+        .map(([key, value]) => [key, normalizeWizardText(value)] as const)
+        .filter(([, value]) => value)
+        .sort(([a], [b]) => a.localeCompare(b))
+    );
+    const normalizedPeople = draft.people
+      .map(person => [
+        normalizeWizardText(person.name).toLowerCase(),
+        normalizeWizardText(person.involvement).toLowerCase(),
+        normalizeWizardText(person.role).toLowerCase(),
+        normalizeWizardText(person.department).toLowerCase(),
+        normalizeWizardText(person.employeeId).toLowerCase(),
+      ].join('|'))
+      .sort();
+	    const normalizedDocuments = draft.documents
+	      .map(doc => [
+	        normalizeWizardText(doc.title).toLowerCase(),
+        normalizeWizardText(doc.type).toLowerCase(),
+        normalizeWizardText(doc.personName).toLowerCase(),
+        normalizeWizardText(doc.personInvolvement).toLowerCase(),
+        normalizeWizardText(doc.personRole).toLowerCase(),
+        normalizeWizardText(doc.personDepartment).toLowerCase(),
+        normalizeWizardText(doc.content),
+        normalizeWizardText(doc.summary),
+	        normalizeWizardText(doc.detectedLanguage).toLowerCase(),
+	      ].join('|'))
+	      .sort();
+    const normalizedStatementStatuses = Object.fromEntries(
+      Object.entries(draft.statementStatuses)
+        .map(([key, value]) => [key, value] as const)
+        .sort(([a], [b]) => a.localeCompare(b))
+    );
+			    return JSON.stringify({
+      engineVersion: GUIDED_WIZARD_ENGINE_VERSION,
+	      issueType: draft.issueType || 'unsure',
+	      incidentDate: normalizeWizardText(draft.incidentDate),
+	      location: normalizeWizardText(draft.location).toLowerCase(),
+      department: normalizeWizardText(draft.department).toLowerCase(),
+      shift: cleanShiftName(draft.shift).toLowerCase(),
+      behaviorSummary: normalizeWizardText(draft.behaviorSummary),
+      desiredOutcome: normalizeWizardText(draft.desiredOutcome),
+      repeatedBehaviorStatus: draft.repeatedBehaviorStatus,
+      safetyImpactStatus: draft.safetyImpactStatus,
+      employeeResponseStatus: draft.employeeResponseStatus,
+      riskFlags: [...draft.riskFlags].sort(),
+	      people: normalizedPeople,
+	      documents: normalizedDocuments,
+      statementStatuses: normalizedStatementStatuses,
+	      answers: normalizedAnswers,
+	      acknowledgedAnswerFeedback: Object.keys(acknowledgedAnswerFeedback).sort(),
+	    });
+  }, [draft, intakeAnswers, acknowledgedAnswerFeedback]);
   const inputClass = "w-full min-h-[48px] px-4 py-3 rounded-xl border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-900 text-sm text-gray-900 dark:text-white placeholder-gray-400 focus:ring-2 focus:ring-blue-500 focus:border-blue-500";
   const textareaClass = `${inputClass} min-h-[180px] resize-y leading-relaxed`;
 
   useEffect(() => {
     if (!isOpen || !draftKey) return;
+    setPlan(null);
+    setIntakePlan(null);
+    setIntakeAnswers({});
+    setIntakeQuestionTextById({});
+    setStepHistory([]);
+    setAcknowledgedAnswerFeedback({});
+    setFieldErrors({});
+    setIntakeError('');
+    setError('');
+    setStep(0);
     try {
       const saved = localStorage.getItem(draftKey);
-	      if (saved) {
-	        const parsed = JSON.parse(saved);
-	        const savedDraft = { ...WIZARD_INITIAL_DRAFT, ...parsed.draft };
-	        setDraft(savedDraft);
-	        setPlan(parsed.plan || null);
-	        setIntakePlan(parsed.intakePlan || null);
-	        setIntakeAnswers(parsed.intakeAnswers || {});
-          setIntakeQuestionTextById(parsed.intakeQuestionTextById || {});
-	        setStep(savedDraft.issueType ? parsed.step || 0 : 0);
-	        setSavedAt(parsed.savedAt || null);
-	      }
-    } catch {}
+      if (saved) {
+        const parsed = JSON.parse(saved);
+        const savedDraft = { ...WIZARD_INITIAL_DRAFT, ...parsed.draft, issueType: parsed.draft?.issueType || 'unsure', shift: cleanShiftName(parsed.draft?.shift || '') };
+        setDraft(savedDraft);
+        setSavedAt(parsed.savedAt || null);
+      } else {
+        setDraft(WIZARD_INITIAL_DRAFT);
+        setSavedAt(null);
+      }
+    } catch {
+      setDraft(WIZARD_INITIAL_DRAFT);
+      setSavedAt(null);
+    }
   }, [isOpen, draftKey]);
 
   useEffect(() => {
@@ -894,6 +1893,7 @@ function GuidedResolutionWizard({ isOpen, onClose, onCaseCreated, organizationId
   useEffect(() => {
     if (!selectedWizardDepartment?.id) {
       setShifts([]);
+      setDraft(prev => prev.shift ? { ...prev, shift: '' } : prev);
       return;
     }
     const loadShifts = async () => {
@@ -901,6 +1901,8 @@ function GuidedResolutionWizard({ isOpen, onClose, onCaseCreated, organizationId
       try {
         const list = await fetchShifts({ departmentId: selectedWizardDepartment.id });
         setShifts(list);
+        const labels = list.map(shiftLabel);
+        setDraft(prev => prev.shift && !labels.includes(cleanShiftName(prev.shift)) ? { ...prev, shift: '' } : { ...prev, shift: cleanShiftName(prev.shift) });
       } catch (err) {
         console.error('Failed to load wizard shifts:', err);
       } finally {
@@ -914,11 +1916,11 @@ function GuidedResolutionWizard({ isOpen, onClose, onCaseCreated, organizationId
     if (!isOpen || !draftKey) return;
     const id = window.setTimeout(() => {
       const nextSavedAt = new Date().toISOString();
-      localStorage.setItem(draftKey, JSON.stringify({ draft, plan, intakePlan, intakeAnswers, intakeQuestionTextById, step, savedAt: nextSavedAt }));
+	      localStorage.setItem(draftKey, JSON.stringify({ draft, savedAt: nextSavedAt, engineVersion: GUIDED_WIZARD_ENGINE_VERSION }));
       setSavedAt(nextSavedAt);
     }, 450);
     return () => window.clearTimeout(id);
-  }, [draft, plan, intakePlan, intakeAnswers, intakeQuestionTextById, step, isOpen, draftKey]);
+  }, [draft, isOpen, draftKey]);
 
   useEffect(() => {
     if (!isOpen) return;
@@ -1029,9 +2031,25 @@ function GuidedResolutionWizard({ isOpen, onClose, onCaseCreated, organizationId
   };
 
 	  const updateDraft = <K extends keyof GuidedWizardDraft>(field: K, value: GuidedWizardDraft[K]) => {
-	    setDraft(prev => ({ ...prev, [field]: value }));
+	    setDraft(prev => ({ ...prev, [field]: field === 'shift' ? cleanShiftName(value as string) as GuidedWizardDraft[K] : value }));
+      setPlan(null);
 	    setError('');
 	  };
+
+    const toggleRiskFlag = (risk: GuidedRiskKey) => {
+      const current = new Set(draft.riskFlags);
+      if (risk === 'none') {
+        updateDraft('riskFlags', current.has('none') ? [] : ['none']);
+        return;
+      }
+      current.delete('none');
+      if (current.has(risk)) {
+        current.delete(risk);
+      } else {
+        current.add(risk);
+      }
+      updateDraft('riskFlags', Array.from(current) as GuidedRiskKey[]);
+    };
 
     const selectIssueType = (issueType: WizardIssueType) => {
       setDraft(prev => ({ ...prev, issueType }));
@@ -1039,75 +2057,97 @@ function GuidedResolutionWizard({ isOpen, onClose, onCaseCreated, organizationId
       setIntakePlan(null);
       setIntakeAnswers({});
       setIntakeQuestionTextById({});
+      setStepHistory([]);
+      setAcknowledgedAnswerFeedback({});
+      setStep(0);
       setError('');
       setIntakeError('');
       setFieldErrors({});
     };
 
-    const sleep = (ms: number) => new Promise(resolve => window.setTimeout(resolve, ms));
-
-    const buildAiProgressItems = (result?: GuidedIntakePlan | null): AiProgressItem[] => {
-      const fromResult = result?.progressSteps?.filter(Boolean).slice(0, 6).map(stepText => ({
-        label: stepText,
-        description: 'Completed before opening the next prompt.',
-        status: 'pending' as AiProgressStatus,
-      }));
-      if (fromResult?.length) return fromResult;
-
-      const items = [
-        {
-          label: draft.issueType ? `Reviewing ${issue?.title || 'selected workplace concern'}` : 'Interpreting the supervisor request',
-          description: draft.issueType ? 'The wizard is matching the selected concern to the right employee-relations intake path.' : 'The wizard is preparing the first question.',
-          status: 'pending' as AiProgressStatus,
-        },
-        {
-          label: activePolicySections.length ? `Checking ${activePolicySections.length} active policy sections` : 'Checking policy coverage',
-          description: activePolicySections.length ? 'The wizard is looking for policy language that may apply without inventing policy requirements.' : 'The wizard is checking whether policy support is available.',
-          status: 'pending' as AiProgressStatus,
-        },
-        {
-          label: draft.people.length ? `Reviewing ${draft.people.length} identified participant${draft.people.length === 1 ? '' : 's'}` : 'Deciding whether people details are needed',
-          description: draft.people.length ? 'The wizard is checking role, witness, employee-response, and fairness gaps.' : 'The wizard will only request people fields if they are needed for this case.',
-          status: 'pending' as AiProgressStatus,
-        },
-        {
-          label: draft.documents.length ? `Reviewing ${draft.documents.length} uploaded or typed record${draft.documents.length === 1 ? '' : 's'}` : 'Deciding whether statements or evidence are needed',
-          description: draft.documents.length ? 'The wizard is using the saved notes, statements, and transcriptions already collected.' : 'The wizard will request upload/transcription only when it helps HR review.',
-          status: 'pending' as AiProgressStatus,
-        },
-        {
-          label: 'Building the next question',
-          description: 'The next prompt is based on the answers already provided and the most important missing information.',
-          status: 'pending' as AiProgressStatus,
-        },
-      ];
-
-      return items;
+	    const saveAnalyzedStep = (nextStep: number, result: GuidedIntakePlan, inputFingerprint: string) => {
+	      const requiredCount = (result.questions || []).filter(question => question.required).length;
+      const flowStep = WIZARD_FLOW_STEPS[nextStep];
+	      const snapshot: GuidedWizardStepSnapshot = {
+	        step: nextStep,
+	        title: flowStep?.title || result.currentStepTitle || `Follow-up ${nextStep}`,
+	        purpose: flowStep?.description || result.currentStepPurpose || 'Answer the current questions before moving forward.',
+        readinessScore: result.readinessScore,
+	        readinessLabel: result.readinessLabel,
+	        questionCount: result.questions?.length || 0,
+	        requiredCount,
+	        inputFingerprint,
+        engineVersion: GUIDED_WIZARD_ENGINE_VERSION,
+	        plan: result,
+	        analyzedAt: new Date().toISOString(),
+	      };
+      setStepHistory(prev => [
+        ...prev.filter(item => item.step < nextStep),
+        snapshot,
+      ]);
     };
 
-    const animateAiProgress = async (items: AiProgressItem[]) => {
-      const prepared = items.map(item => ({ ...item, status: 'pending' as AiProgressStatus }));
-      setAiProgressItems(prepared);
-      for (let index = 0; index < prepared.length; index += 1) {
-        setAiProgressItems(current => current.map((item, itemIndex) => ({
-          ...item,
-          status: itemIndex < index ? 'complete' : itemIndex === index ? 'active' : 'pending',
-        })));
-        await sleep(420);
-        setAiProgressItems(current => current.map((item, itemIndex) => ({
-          ...item,
-          status: itemIndex <= index ? 'complete' : item.status,
-        })));
+    const goToWizardStep = (targetStep: number) => {
+      const normalizedStep = Math.max(0, targetStep);
+      setError('');
+      setIntakeError('');
+      setFieldErrors({});
+      setPlan(null);
+
+      if (normalizedStep === 0) {
+        setStep(0);
+        setIntakePlan(null);
+        return;
       }
+
+      const snapshot = stepHistory.find(item => item.step === normalizedStep);
+      if (!snapshot) return;
+      setStep(normalizedStep);
+      setIntakePlan(snapshot.plan);
+      setIntakeQuestionTextById(prev => ({
+        ...prev,
+        ...Object.fromEntries((snapshot.plan.questions || []).map(question => [question.id, question.question])),
+      }));
     };
 
 	  const continueWizard = async () => {
-	    if (!draft.issueType) {
+	    if (!draft.behaviorSummary.trim()) {
 	      setStep(0);
-	      setError('Choose what you need help with first.');
+	      setError('Describe what happened first so the wizard can ask the right follow-up questions.');
 	      return;
 	    }
-	    if (step > 0 && intakePlan && missingRequiredCurrentQuestions.length > 0) {
+
+    if (currentWizardStage === 'people' && !draft.people.length) {
+      setFieldErrors({ [guardedPeopleQuestion.id]: 'Add every involved person you know about, including the reporting party, subject of concern, affected employee, witnesses, supervisor, HR, representative, or other involved employee.' });
+      setError('Identify at least one involved person before the wizard requests handwritten statements.');
+      return;
+    }
+    if (currentWizardStage === 'people' && narrativePersonSuggestions.length > 0) {
+      setFieldErrors({ [guardedPeopleQuestion.id]: 'Review the suggested names from the description. Add each person that belongs in the review before continuing.' });
+      setError('Review all suggested people from the description before moving to handwritten statements.');
+      return;
+    }
+    if (currentWizardStage === 'people' && !peopleReviewConfirmed) {
+      setFieldErrors({ [guardedPeopleQuestion.id]: 'Confirm that everyone currently known to be involved has been added before continuing.' });
+      setError('Confirm the involved people list before the wizard requests handwritten statements.');
+      return;
+    }
+
+    if (currentWizardStage === 'documents' && missingStatementStatuses.length > 0) {
+      setFieldErrors({ [guardedDocumentQuestion.id]: 'Set the statement status for each required person before moving forward. Use Not available yet or Not applicable when the statement cannot be added now.' });
+      setError(`${missingStatementStatuses.length} required statement status${missingStatementStatuses.length === 1 ? '' : 'es'} still need${missingStatementStatuses.length === 1 ? 's' : ''} review before deeper questions appear.`);
+      return;
+    }
+    if (
+      currentWizardStage === 'documents' &&
+      providedStatementMissingLinkedDocument.length > 0
+    ) {
+      setFieldErrors({ [guardedDocumentQuestion.id]: 'A statement is marked as received, but no written record is linked to that person. Select the employee, upload/transcribe or type the record, then add it to the wizard.' });
+      setError(`Add the received handwritten statement for ${providedStatementMissingLinkedDocument.map(item => item.person.name).join(', ')} or mark the statement as not available yet before moving forward.`);
+      return;
+    }
+
+	    if (currentWizardStage === 'questions' && intakePlan && missingRequiredCurrentQuestions.length > 0) {
         setFieldErrors(Object.fromEntries(missingRequiredCurrentQuestions.map(question => [
           question.id,
           `This is required because ${question.whyNeeded || 'HR needs this before the review can move forward.'}`,
@@ -1115,24 +2155,48 @@ function GuidedResolutionWizard({ isOpen, onClose, onCaseCreated, organizationId
 	      setError(`The wizard needs ${missingRequiredCurrentQuestions.length} required answer${missingRequiredCurrentQuestions.length === 1 ? '' : 's'} before continuing. Please answer accurately to the best of your knowledge, or state that the information is unknown and needs HR review.`);
 	      return;
 	    }
-      setFieldErrors({});
-	    setError('');
-      setAiProgressTitle('Reviewing your answers');
-      setAiProgressOpen(true);
-      const firstAnimation = animateAiProgress(buildAiProgressItems());
-      const result = await runIntakeCoach('all');
-      await firstAnimation;
-      if (!result) {
-        setAiProgressOpen(false);
+
+      if (currentWizardStage === 'readiness') {
+        await createCaseFromWizard();
         return;
       }
-      if (result.progressSteps?.length) {
-        setAiProgressTitle(result.currentStepTitle || 'Next question prepared');
-        await animateAiProgress(buildAiProgressItems(result));
-      }
-      await sleep(220);
+
+      setFieldErrors({});
+	    setError('');
+      const inputFingerprint = buildAnalysisFingerprint();
+      const nextStep = Math.min(step + 1, WIZARD_FLOW_STEPS.length - 1);
+      const cachedNextStep = stepHistory.find(snapshot => snapshot.step === nextStep);
+      if (
+        cachedNextStep &&
+        cachedNextStep.inputFingerprint === inputFingerprint &&
+        cachedNextStep.engineVersion === GUIDED_WIZARD_ENGINE_VERSION
+      ) {
+	        goToWizardStep(nextStep);
+	        return;
+	      }
+      setAiProgressOpen(true);
+      const result = await runIntakeCoach('all');
       setAiProgressOpen(false);
-	    setStep(prev => prev + 1);
+      if (!result) return;
+
+      if (currentWizardStage === 'people') {
+        setIntakeAnswers(prev => ({
+          ...prev,
+          [guardedPeopleQuestion.id]: draft.people.map(person => `${person.name} (${wizardPersonRoleLabel(person.involvement)}${person.role ? `, ${person.role}` : ''}${person.department ? `, ${person.department}` : ''})`).join('; '),
+        }));
+      }
+      if (currentWizardStage === 'documents') {
+        setIntakeAnswers(prev => ({
+          ...prev,
+          [guardedDocumentQuestion.id]: [
+            draft.documents.length ? draft.documents.map(doc => `${doc.title} (${WIZARD_DOCUMENT_TYPE_LABELS[doc.type]}${doc.personName ? ` for ${doc.personName}` : ''})`).join('; ') : 'No uploaded or typed records were added in this step.',
+            statementStatusSummary ? `Statement status: ${statementStatusSummary}` : '',
+          ].filter(Boolean).join('\n'),
+        }));
+      }
+
+      saveAnalyzedStep(nextStep, result, inputFingerprint);
+	    setStep(nextStep);
 	  };
 
   const handleWizardDocumentFile = async (file: File | null) => {
@@ -1202,11 +2266,18 @@ function GuidedResolutionWizard({ isOpen, onClose, onCaseCreated, organizationId
       ...Object.entries(intakeQuestionTextById),
       ...(intakePlan?.questions || []).map(question => [question.id, question.question] as [string, string]),
     ]);
-    return Object.entries(intakeAnswers).reduce<Record<string, string>>((acc, [questionId, answer]) => {
+    const payload = Object.entries(intakeAnswers).reduce<Record<string, string>>((acc, [questionId, answer]) => {
       if (answer.trim()) acc[questionLookup.get(questionId) || questionId] = answer.trim();
       return acc;
     }, {});
-  };
+	    Object.entries(acknowledgedAnswerFeedback).forEach(([key, note]) => {
+	      payload[`Response clarification acknowledged: ${key.slice(0, 140)}`] = note;
+	    });
+    if (statementStatusSummary) {
+      payload['Handwritten statement status by involved person'] = statementStatusSummary;
+    }
+	    return payload;
+	  };
 
   const buildGuidedReview = (): GuidedReviewAnswers => ({
     behaviorSummary: draft.behaviorSummary.trim() || Object.entries(buildDynamicAnswerPayload()).map(([question, answer]) => `${question}: ${answer}`).join('\n'),
@@ -1217,18 +2288,19 @@ function GuidedResolutionWizard({ isOpen, onClose, onCaseCreated, organizationId
     riskFlags: draft.riskFlags,
     supervisorDecisionNotes: [
       draft.desiredOutcome ? `Desired outcome: ${draft.desiredOutcome}` : '',
-      draft.supervisorNotes,
-      draft.people.length ? `People identified: ${draft.people.map(p => `${p.name} (${p.involvement})`).join(', ')}` : '',
-      draft.documents.length ? `Documents or notes collected: ${draft.documents.map(d => d.title).join(', ')}` : '',
-      Object.keys(buildDynamicAnswerPayload()).length ? `Dynamic intake answers:\n${Object.entries(buildDynamicAnswerPayload()).map(([question, answer]) => `- ${question}: ${answer}`).join('\n')}` : '',
+	      draft.supervisorNotes,
+	      draft.people.length ? `People identified: ${draft.people.map(p => `${p.name} (${p.involvement})`).join(', ')}` : '',
+	      draft.documents.length ? `Documents or notes collected: ${draft.documents.map(d => d.title).join(', ')}` : '',
+      statementStatusSummary ? `Statement status: ${statementStatusSummary}` : '',
+	      Object.keys(buildDynamicAnswerPayload()).length ? `Dynamic intake answers:\n${Object.entries(buildDynamicAnswerPayload()).map(([question, answer]) => `- ${question}: ${answer}`).join('\n')}` : '',
     ].filter(Boolean).join('\n'),
     updatedAt: new Date().toISOString(),
   });
 
   const runIntakeCoach = async (stepOverride: GuidedIntakeStep = currentIntakeStep): Promise<GuidedIntakePlan | null> => {
-    if (!draft.issueType) {
+    if (!draft.behaviorSummary.trim()) {
       setStep(0);
-      setError('Choose what you need help with first so the wizard can ask relevant follow-up questions.');
+      setError('Describe what happened first so the wizard can understand the situation and ask relevant follow-up questions.');
       return null;
     }
     setIntakeLoading(true);
@@ -1242,9 +2314,9 @@ function GuidedResolutionWizard({ isOpen, onClose, onCaseCreated, organizationId
           incidentDate: draft.incidentDate || '',
           location: draft.location || '',
           department: draft.department || '',
-          shift: draft.shift || '',
+          shift: cleanShiftName(draft.shift) || '',
         },
-        issueType: draft.issueType,
+        issueType: draft.issueType || 'unsure',
         currentStep: stepOverride,
         behaviorSummary: draft.behaviorSummary,
         desiredOutcome: draft.desiredOutcome,
@@ -1252,6 +2324,10 @@ function GuidedResolutionWizard({ isOpen, onClose, onCaseCreated, organizationId
         documents: draft.documents.map(doc => ({
           title: doc.title,
           type: doc.type,
+          personName: doc.personName,
+          personInvolvement: doc.personInvolvement,
+          personRole: doc.personRole,
+          personDepartment: doc.personDepartment,
           content: doc.content,
           summary: doc.summary,
           createdFrom: doc.createdFrom,
@@ -1261,11 +2337,34 @@ function GuidedResolutionWizard({ isOpen, onClose, onCaseCreated, organizationId
         policySections: activePolicySections,
       });
       setIntakePlan(result);
-      setIntakeQuestionTextById(prev => ({
-        ...prev,
-        ...Object.fromEntries((result.questions || []).map(question => [question.id, question.question])),
-      }));
-      return result;
+	      setIntakeQuestionTextById(prev => ({
+	        ...prev,
+	        ...Object.fromEntries((result.questions || []).map(question => [question.id, question.question])),
+	      }));
+      const sourceBackedBySlot = new Map(
+        (result.sourceBackedAnswers || [])
+          .filter(item => item?.slotId && item?.value)
+          .map(item => [item.slotId, item])
+      );
+      const prefilledAnswers = Object.fromEntries(
+        (result.questions || [])
+          .map(question => {
+            const sourceAnswer = question.slotId ? sourceBackedBySlot.get(question.slotId) : null;
+            if (!sourceAnswer || intakeAnswers[question.id]?.trim()) return null;
+            const sourceNote = [
+              sourceAnswer.value,
+              '',
+              `Found in: ${sourceAnswer.sourceTitle || 'uploaded record'}`,
+              sourceAnswer.excerpt ? `Review note: ${sourceAnswer.excerpt}` : '',
+            ].filter(Boolean).join('\n');
+            return [question.id, sourceNote] as const;
+          })
+          .filter((entry): entry is readonly [string, string] => Boolean(entry))
+      );
+      if (Object.keys(prefilledAnswers).length) {
+        setIntakeAnswers(prev => ({ ...prefilledAnswers, ...prev }));
+      }
+	      return result;
     } catch (err: any) {
       setIntakeError(err?.response?.data?.error || err?.message || 'Unable to prepare dynamic intake questions.');
       setError(err?.response?.data?.error || err?.message || 'Unable to prepare dynamic intake questions.');
@@ -1275,12 +2374,13 @@ function GuidedResolutionWizard({ isOpen, onClose, onCaseCreated, organizationId
     }
   };
 
-  const generateGuidance = async () => {
+  const generateGuidance = async (planOverride?: GuidedIntakePlan) => {
     if (!canGenerate) {
-      setError('Select what kind of issue this is and describe the concern before generating guidance.');
+      setError('Describe what happened before generating guidance.');
       return;
     }
-    if (intakePlan && missingRequiredCurrentQuestions.length > 0) {
+    const guidanceSourcePlan = planOverride || intakePlan;
+    if (!planOverride && intakePlan && missingRequiredCurrentQuestions.length > 0) {
       setError('Answer the required guidance questions first, or document that the information is unknown and needs HR review.');
       return;
     }
@@ -1296,7 +2396,7 @@ function GuidedResolutionWizard({ isOpen, onClose, onCaseCreated, organizationId
           incidentDate: draft.incidentDate || '',
           location: draft.location || '',
           department: draft.department || '',
-          shift: draft.shift || '',
+          shift: cleanShiftName(draft.shift) || '',
         },
         complaintA: complaintDocs[0] ? {
           employeeName: draft.people[0]?.name || 'Reporting party',
@@ -1311,7 +2411,7 @@ function GuidedResolutionWizard({ isOpen, onClose, onCaseCreated, organizationId
         } : undefined,
         analysisResult: {
           neutralSummary: guidedReview.behaviorSummary,
-          missingDetails: intakePlan?.missingInformation || [],
+          missingDetails: guidanceSourcePlan?.missingInformation || [],
           contradictions: [],
           agreementPoints: [],
           emotionalLanguage: [],
@@ -1330,7 +2430,7 @@ function GuidedResolutionWizard({ isOpen, onClose, onCaseCreated, organizationId
 
 	  const createCaseFromWizard = async () => {
 	    if (!canGenerate) {
-	      setError('Complete the issue type and fact summary before creating a case.');
+	      setError('Complete the incident description before creating a case.');
 	      return;
 	    }
     setCreatingCase(true);
@@ -1347,21 +2447,24 @@ function GuidedResolutionWizard({ isOpen, onClose, onCaseCreated, organizationId
 	        incidentDate: draft.incidentDate ? new Date(draft.incidentDate).toISOString() : new Date().toISOString(),
 	        location: draft.location || 'Not specified',
 	        department: draft.department || 'Not specified',
-	        shift: draft.shift || undefined,
+	        shift: cleanShiftName(draft.shift) || undefined,
 	        description: review.behaviorSummary,
 	        employeesJson: draft.people.map(person => ({
 	          name: person.name,
-	          role: person.role || person.involvement,
+	          role: person.role || wizardPersonRoleLabel(person.involvement),
 	          department: person.department || draft.department || 'Not specified',
 	          employeeId: person.employeeId,
 	          isComplainant: person.involvement === 'complainant',
 	        })),
 	        documentsJson: draft.documents.map(doc => {
 	          const type = resolveWizardDocumentType(doc, doc.type === 'complaint' ? complaintIndex++ : -1);
+          const personContext = doc.personName
+            ? `Linked person: ${doc.personName} (${wizardPersonRoleLabel(doc.personInvolvement || 'other')}${doc.personRole ? `, ${doc.personRole}` : ''}${doc.personDepartment ? `, ${doc.personDepartment}` : ''})\n\n`
+            : '';
 	          return {
 	            type,
-	            content: `${doc.title}\n\n${doc.content}`,
-	            originalText: doc.originalText || `${doc.title}\n\n${doc.content}`,
+	            content: `${doc.title}\n\n${personContext}${doc.content}`,
+	            originalText: doc.originalText || `${doc.title}\n\n${personContext}${doc.content}`,
 	            cleanedText: doc.cleanedText || doc.content,
 	            translatedText: doc.translatedText || undefined,
 	            detectedLanguage: doc.detectedLanguage || undefined,
@@ -1382,6 +2485,8 @@ function GuidedResolutionWizard({ isOpen, onClose, onCaseCreated, organizationId
       setIntakePlan(null);
       setIntakeAnswers({});
       setIntakeQuestionTextById({});
+      setStepHistory([]);
+      setAcknowledgedAnswerFeedback({});
       setStep(0);
       onCaseCreated(created);
       onClose();
@@ -1399,10 +2504,12 @@ function GuidedResolutionWizard({ isOpen, onClose, onCaseCreated, organizationId
     setIntakePlan(null);
     setIntakeAnswers({});
     setIntakeQuestionTextById({});
+    setStepHistory([]);
+    setAcknowledgedAnswerFeedback({});
     setStep(0);
     setError('');
-    setNewDoc({ title: '', type: 'complaint', content: '' });
-    setNewPerson({ name: '', role: '', department: '', employeeId: '', involvement: 'employee' });
+    setNewDoc(EMPTY_WIZARD_DOCUMENT_NOTE);
+    setNewPerson({ name: '', role: '', department: '', employeeId: '', involvement: 'subject' });
     setDocMode('manual');
     setDocUploadError('');
   };
@@ -1416,6 +2523,7 @@ function GuidedResolutionWizard({ isOpen, onClose, onCaseCreated, organizationId
     const isCoreFactQuestion = questionText.includes('what happened') || questionText.includes('behavior') || questionText.includes('incident') || question.category.toLowerCase().includes('fact');
     const updateAnswer = (next: string) => {
       setIntakeAnswers(prev => ({ ...prev, [question.id]: next }));
+      setPlan(null);
       setFieldErrors(prev => {
         if (!prev[question.id]) return prev;
         const { [question.id]: _removed, ...rest } = prev;
@@ -1433,9 +2541,279 @@ function GuidedResolutionWizard({ isOpen, onClose, onCaseCreated, organizationId
       }
     };
 
+    const shouldOfferDocumentCapture = needsEmployeeProvidedRecordOption(questionText);
+    const addDocumentForQuestion = () => {
+      if (!newDoc.content.trim()) return;
+      const selectedOwner = statementOwnerOptions.find(option => option.key === newDoc.personKey);
+      if (documentRequiresPersonLink(newDoc.type) && statementOwnerOptions.length > 0 && !selectedOwner) {
+        setFieldErrors(prev => ({
+          ...prev,
+          [question.id]: 'Select the employee this complaint, witness statement, or employee response belongs to before adding it.',
+        }));
+        return;
+      }
+      const nextDoc = {
+        title: newDoc.title.trim() || 'Wizard note',
+        type: newDoc.type,
+        content: newDoc.content.trim(),
+        personKey: selectedOwner?.key,
+        personName: selectedOwner?.person.name,
+        personInvolvement: selectedOwner?.person.involvement,
+        personRole: selectedOwner?.person.role,
+        personDepartment: selectedOwner?.person.department,
+        originalText: newDoc.originalText,
+        translatedText: newDoc.translatedText,
+        cleanedText: newDoc.cleanedText || newDoc.content.trim(),
+        detectedLanguage: newDoc.detectedLanguage,
+        isHandwritten: newDoc.isHandwritten,
+        pageCount: newDoc.pageCount,
+        confidence: newDoc.confidence,
+        sourceFileName: newDoc.sourceFileName,
+        sourceFileType: newDoc.sourceFileType,
+        sourceFileUrl: newDoc.sourceFileUrl,
+        processedImageUrls: newDoc.processedImageUrls,
+        createdFrom: newDoc.createdFrom || 'manual',
+        summary: newDoc.summary,
+      };
+      const nextDocuments = [...draft.documents, nextDoc];
+      setDraft(prev => {
+        const nextStatuses = { ...prev.statementStatuses };
+        if (selectedOwner && documentSatisfiesPersonStatement(nextDoc, selectedOwner.person, selectedOwner.key)) {
+          nextStatuses[selectedOwner.key] = 'provided';
+        }
+        return { ...prev, documents: nextDocuments, statementStatuses: nextStatuses };
+      });
+      setPlan(null);
+      setIntakeAnswers(prev => ({
+        ...prev,
+        [question.id]: nextDocuments.map(doc => `${doc.title} (${doc.type}${doc.personName ? `, for ${doc.personName}` : ''}${doc.createdFrom === 'upload' ? ', uploaded and transcribed' : ''})`).join('; '),
+      }));
+      setFieldErrors(prev => {
+        const { [question.id]: _removed, ...rest } = prev;
+        return rest;
+      });
+      setNewDoc(EMPTY_WIZARD_DOCUMENT_NOTE);
+      setDocMode('manual');
+      setDocUploadError('');
+    };
+
+    const renderDocumentCapturePanel = (supplemental = false) => (
+      <div className={`space-y-3 ${supplemental ? 'mt-4 rounded-2xl border border-blue-100 dark:border-blue-900/60 bg-blue-50/50 dark:bg-blue-950/10 p-4' : ''}`}>
+        {supplemental && (
+          <div>
+            <p className="text-sm font-semibold text-gray-900 dark:text-white flex items-center gap-2">
+              <FileUp className="w-4 h-4 text-blue-600" />
+              Add written record
+            </p>
+            <p className="text-xs text-gray-500 dark:text-gray-400 mt-1">
+              Upload an employee complaint, response, witness report, photo, or related written statement when it supports this answer.
+            </p>
+          </div>
+        )}
+	        <div className="rounded-xl border border-amber-200 dark:border-amber-900/60 bg-amber-50 dark:bg-amber-950/20 px-3 py-2 text-xs text-amber-900 dark:text-amber-100 leading-relaxed">
+	          Keep the original handwritten complaint, response, witness report, or statement for HR audit documentation. Employees should write their own statement whenever possible, including in their preferred language; retain both the original handwritten record and any translated copy.
+	        </div>
+        {peopleNeedingStatementStatus.length > 0 && (
+          <div className="rounded-2xl border border-slate-200 dark:border-slate-700 bg-white dark:bg-gray-900 p-3 space-y-2">
+            <div>
+              <p className="text-xs font-bold uppercase tracking-wide text-gray-600 dark:text-gray-400">Statement checklist</p>
+              <p className="mt-1 text-xs text-gray-500 dark:text-gray-400">
+                Mark each required statement as received, not available yet, or not applicable. This keeps the review honest without forcing users to type what should come from employee records.
+              </p>
+            </div>
+            {peopleNeedingStatementStatus.map(({ person, requirement, key }) => {
+              const linkedDocuments = draft.documents.filter(doc => documentSatisfiesPersonStatement(doc, person, key));
+              return (
+              <div key={key} className="grid grid-cols-1 lg:grid-cols-[minmax(0,1fr)_220px] gap-2 rounded-xl border border-gray-100 dark:border-gray-800 bg-gray-50 dark:bg-gray-950 px-3 py-2">
+                <div>
+                  <p className="text-sm font-semibold text-gray-900 dark:text-white">{person.name}</p>
+                  <p className="text-xs text-gray-500 dark:text-gray-400">
+                    {wizardPersonRoleLabel(person.involvement)} · {requirement.label}
+                  </p>
+                  <p className={`mt-1 text-[11px] font-semibold ${linkedDocuments.length ? 'text-green-700 dark:text-green-300' : 'text-amber-700 dark:text-amber-300'}`}>
+                    {linkedDocuments.length ? `${linkedDocuments.length} linked record${linkedDocuments.length === 1 ? '' : 's'}` : 'No linked record yet'}
+                  </p>
+                </div>
+                <select
+                  value={draft.statementStatuses[key] || ''}
+                  onChange={e => {
+                    const nextStatus = e.target.value as WizardStatementStatus | '';
+                    setDraft(prev => {
+                      const nextStatuses = { ...prev.statementStatuses };
+                      if (nextStatus) nextStatuses[key] = nextStatus;
+                      else delete nextStatuses[key];
+                      return { ...prev, statementStatuses: nextStatuses };
+                    });
+                    setPlan(null);
+                    const nextSummary = peopleNeedingStatementStatus
+                      .map(item => {
+                        const status = item.key === key ? nextStatus || undefined : draft.statementStatuses[item.key];
+                        return `${item.person.name}: ${statementStatusLabel(status)}`;
+                      })
+                      .join('; ');
+                    updateAnswer(nextSummary);
+                  }}
+                  className={inputClass}
+                  title={`Statement status for ${person.name}`}
+                >
+                  <option value="">Set status</option>
+                  <option value="provided">Statement received</option>
+                  <option value="not_available">Not available yet</option>
+                  <option value="not_applicable">Not applicable</option>
+                </select>
+              </div>
+              );
+            })}
+          </div>
+        )}
+	        <div className="inline-flex rounded-xl border border-gray-200 dark:border-gray-700 bg-gray-50 dark:bg-gray-950 p-1">
+          {(['manual', 'upload'] as const).map(mode => (
+            <button
+              key={mode}
+              onClick={() => {
+                setDocMode(mode);
+                setDocUploadError('');
+              }}
+              className={`px-3 py-2 rounded-lg text-xs font-semibold transition-colors ${docMode === mode ? 'bg-blue-600 text-white shadow-sm' : 'text-gray-600 dark:text-gray-300 hover:bg-white dark:hover:bg-gray-800'}`}
+            >
+              {mode === 'manual' ? 'Type note' : 'Upload & transcribe'}
+            </button>
+          ))}
+        </div>
+        <div className="grid grid-cols-1 md:grid-cols-[1fr_220px_260px] gap-3">
+          <input value={newDoc.title} onChange={e => setNewDoc(prev => ({ ...prev, title: e.target.value }))} className={inputClass} placeholder="Title" />
+	          <select value={newDoc.type} onChange={e => setNewDoc(prev => ({ ...prev, type: e.target.value as WizardDocumentType }))} className={inputClass} title="Document type">
+	            <option value="complaint">Employee complaint</option>
+	            <option value="witness_statement">Witness statement</option>
+	            <option value="employee_response">Employee response</option>
+	            <option value="policy_note">Policy note</option>
+            <option value="prior_record">Prior record</option>
+            <option value="other">Other</option>
+          </select>
+          <select
+            value={newDoc.personKey || ''}
+            onChange={e => {
+              const selected = statementOwnerOptions.find(option => option.key === e.target.value);
+              setNewDoc(prev => ({
+                ...prev,
+                personKey: selected?.key,
+                personName: selected?.person.name,
+                personInvolvement: selected?.person.involvement,
+                personRole: selected?.person.role,
+                personDepartment: selected?.person.department,
+              }));
+            }}
+            className={inputClass}
+            title="Statement owner"
+            disabled={!statementOwnerOptions.length}
+          >
+            <option value="">{statementOwnerOptions.length ? 'Select employee' : 'Add involved people first'}</option>
+            {statementOwnerOptions.map(({ key, person, requirement }) => (
+              <option key={key} value={key}>
+                {person.name} - {wizardPersonRoleLabel(person.involvement)} - {requirement.label}
+              </option>
+            ))}
+          </select>
+        </div>
+        {documentRequiresPersonLink(newDoc.type) && statementOwnerOptions.length > 0 && !newDoc.personKey && (
+          <div className="rounded-xl border border-amber-200 dark:border-amber-900/60 bg-amber-50 dark:bg-amber-950/20 px-3 py-2 text-xs text-amber-900 dark:text-amber-100">
+            Select the employee this record belongs to so the wizard can track whose complaint, witness statement, or employee response has been received.
+          </div>
+        )}
+        {docMode === 'upload' && (
+          <div className="rounded-2xl border border-dashed border-blue-300 dark:border-blue-800 bg-blue-50/60 dark:bg-blue-900/10 p-4 space-y-3">
+            <div className="grid grid-cols-1 md:grid-cols-[1fr_180px] gap-3">
+              <label className="flex items-center justify-center gap-2 rounded-xl border border-blue-200 dark:border-blue-800 bg-white dark:bg-gray-900 px-4 py-3 text-sm font-semibold text-blue-700 dark:text-blue-300 cursor-pointer hover:bg-blue-50 dark:hover:bg-blue-900/20">
+                {docProcessing ? <Loader2 className="w-4 h-4 animate-spin" /> : <Upload className="w-4 h-4" />}
+                {docProcessing ? 'Transcribing...' : 'Choose file'}
+                <input
+                  type="file"
+                  className="hidden"
+                  accept=".pdf,.doc,.docx,.ppt,.pptx,.txt,.md,image/*"
+                  disabled={docProcessing}
+                  onChange={e => {
+                    const file = e.target.files?.[0] || null;
+                    handleWizardDocumentFile(file);
+                    e.currentTarget.value = '';
+                  }}
+                />
+              </label>
+              <select value={docSourceLanguage} onChange={e => setDocSourceLanguage(e.target.value)} className={inputClass} title="Source language" disabled={docProcessing}>
+                <option value="English">English</option>
+                <option value="Spanish">Spanish</option>
+                <option value="French">French</option>
+                <option value="Portuguese">Portuguese</option>
+                <option value="Arabic">Arabic</option>
+                <option value="Chinese">Chinese</option>
+                <option value="Other">Other</option>
+              </select>
+            </div>
+            {docUploadError && (
+              <div className="rounded-xl border border-red-200 dark:border-red-800 bg-red-50 dark:bg-red-900/20 px-3 py-2 text-xs text-red-700 dark:text-red-300">
+                {docUploadError}
+              </div>
+            )}
+            {newDoc.sourceFileName && (
+              <div className="rounded-xl border border-green-200 dark:border-green-800 bg-green-50 dark:bg-green-900/20 px-3 py-2 text-xs text-green-800 dark:text-green-300">
+                Transcribed: {newDoc.sourceFileName}
+                {typeof newDoc.confidence === 'number' ? ` - confidence ${Math.round(newDoc.confidence * 100)}%` : ''}
+                {newDoc.isHandwritten ? ' - handwriting detected' : ''}
+              </div>
+            )}
+          </div>
+        )}
+        <textarea
+          value={newDoc.content}
+          onChange={e => setNewDoc(prev => ({ ...prev, content: e.target.value, cleanedText: e.target.value }))}
+          rows={6}
+          className={textareaClass}
+          placeholder={docMode === 'upload' ? 'The transcription will appear here. Correct it before adding.' : 'Type or paste the information requested by the wizard.'}
+        />
+        <button
+          type="button"
+          onClick={addDocumentForQuestion}
+          disabled={!newDoc.content.trim() || (documentRequiresPersonLink(newDoc.type) && statementOwnerOptions.length > 0 && !newDoc.personKey)}
+          className="px-4 py-2.5 rounded-xl bg-blue-600 hover:bg-blue-700 disabled:opacity-50 text-white text-sm font-semibold flex items-center gap-2"
+        >
+          <FileUp className="w-4 h-4" /> Add to Wizard
+        </button>
+        {draft.documents.length > 0 && (
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-2">
+            {draft.documents.map((doc, index) => (
+              <div key={`${doc.title}-${index}`} className="rounded-xl border border-gray-200 dark:border-gray-700 bg-gray-50 dark:bg-gray-950 p-3">
+                <div className="flex items-start justify-between gap-3">
+                  <div>
+                    <p className="text-sm font-semibold text-gray-900 dark:text-white">{doc.title}</p>
+                    <p className="text-xs text-gray-500 dark:text-gray-400">
+                      {doc.type.replace(/_/g, ' ')}
+                      {doc.personName ? ` - linked to ${doc.personName} (${wizardPersonRoleLabel(doc.personInvolvement || 'other')})` : ''}
+                      {doc.createdFrom === 'upload' ? ' - uploaded evidence saved' : ''}
+                    </p>
+                  </div>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      const nextDocuments = draft.documents.filter((_, i) => i !== index);
+                      updateDraft('documents', nextDocuments);
+                      setPlan(null);
+                      setIntakeAnswers(prev => ({ ...prev, [question.id]: nextDocuments.map(item => `${item.title} (${item.type}${item.personName ? `, for ${item.personName}` : ''})`).join('; ') }));
+                    }}
+                    className="p-1.5 rounded-lg hover:bg-red-50 dark:hover:bg-red-900/20"
+                  >
+                    <Trash2 className="w-4 h-4 text-red-500" />
+                  </button>
+                </div>
+              </div>
+            ))}
+          </div>
+        )}
+      </div>
+    );
+
     const wrapInput = (node: ReactNode) => (
       <div className="space-y-2">
         {node}
+        {shouldOfferDocumentCapture && question.answerType !== 'document' && renderDocumentCapturePanel(true)}
         {fieldErrors[question.id] && (
           <div className="rounded-xl border border-red-200 dark:border-red-800 bg-red-50 dark:bg-red-900/20 px-4 py-3 text-sm text-red-700 dark:text-red-300 leading-relaxed">
             {fieldErrors[question.id]}
@@ -1447,7 +2825,7 @@ function GuidedResolutionWizard({ isOpen, onClose, onCaseCreated, organizationId
     const normalizedQuestion = question.question.trim().toLowerCase();
     const asksForNarrative = /^(can|could|would|will|should)\s+(you|the supervisor|the manager|the user)\s+(describe|explain|summarize|provide|list|upload|attach|enter|type|paste|identify|name)\b/.test(normalizedQuestion);
     const isYesNoPromptQuestion = !asksForNarrative && /^(have|has|had|did|do|does|is|are|was|were|can|could|will|would|should)\b/.test(normalizedQuestion);
-    const shouldUseYesNoDropdown = question.answerType === 'yes_no' || (question.answerType !== 'person' && isYesNoPromptQuestion);
+    const shouldUseYesNoDropdown = question.answerType === 'yes_no' || (question.answerType !== 'person' && question.answerType !== 'document' && isYesNoPromptQuestion);
     if (shouldUseYesNoDropdown) {
       const yesNoOptions = ['Yes', 'No', 'Unknown / needs review'];
       const selected = yesNoOptions.includes(value) ? value : '';
@@ -1484,44 +2862,65 @@ function GuidedResolutionWizard({ isOpen, onClose, onCaseCreated, organizationId
           employeeId: newPerson.employeeId.trim(),
         }];
         setDraft(prev => ({ ...prev, people: nextPeople }));
+        setPlan(null);
         setIntakeAnswers(prev => ({
           ...prev,
-          [question.id]: nextPeople.map(person => `${person.name} (${person.involvement}${person.role ? `, ${person.role}` : ''}${person.department ? `, ${person.department}` : ''})`).join('; '),
+          [question.id]: nextPeople.map(person => `${person.name} (${wizardPersonRoleLabel(person.involvement)}${person.role ? `, ${person.role}` : ''}${person.department ? `, ${person.department}` : ''})`).join('; '),
         }));
         setFieldErrors(prev => {
           const { [question.id]: _removed, ...rest } = prev;
           return rest;
         });
-        setNewPerson({ name: '', role: '', department: '', employeeId: '', involvement: 'employee' });
+        setNewPerson({ name: '', role: '', department: '', employeeId: '', involvement: 'subject' });
       };
 
       const markNoAdditionalPeople = () => {
         const answer = draft.people.length
-          ? `No additional employees, witnesses, supervisors, or HR partners identified beyond: ${draft.people.map(person => `${person.name} (${person.involvement})`).join('; ')}.`
-          : 'No employees, witnesses, supervisors, or HR partners have been identified at this time.';
+          ? `I confirm everyone involved has been added. No additional subjects of concern, affected employees, reporting parties, witnesses, supervisors, HR partners, representatives, or other involved people identified beyond: ${draft.people.map(person => `${person.name} (${wizardPersonRoleLabel(person.involvement)})`).join('; ')}.`
+          : 'No subjects of concern, affected employees, reporting parties, witnesses, supervisors, HR partners, representatives, or other involved people have been identified at this time.';
         updateAnswer(answer);
       };
 
-      const personSelection = value.toLowerCase().includes('no additional') || value.toLowerCase().startsWith('no employees')
+      const normalizedPersonAnswer = value.toLowerCase();
+      const personSelection = normalizedPersonAnswer.includes('no additional') || normalizedPersonAnswer.includes('everyone involved has been added') || normalizedPersonAnswer.startsWith('no employees')
         ? 'no'
         : value.trim()
           ? 'yes'
           : '';
-      const handlePersonSelection = (next: string) => {
-        if (next === 'no') {
-          markNoAdditionalPeople();
-          return;
+	      const handlePersonSelection = (next: string) => {
+	        if (next === 'no') {
+	          markNoAdditionalPeople();
+	          return;
         }
         if (next === 'yes') {
           const answer = draft.people.length
-            ? draft.people.map(person => `${person.name} (${person.involvement}${person.role ? `, ${person.role}` : ''}${person.department ? `, ${person.department}` : ''})`).join('; ')
+            ? draft.people.map(person => `${person.name} (${wizardPersonRoleLabel(person.involvement)}${person.role ? `, ${person.role}` : ''}${person.department ? `, ${person.department}` : ''})`).join('; ')
             : 'Yes. Additional person details will be added below.';
           updateAnswer(answer);
           return;
         }
-        updateAnswer('');
+	        updateAnswer('');
+	      };
+      const addSuggestedPerson = (person: WizardPerson) => {
+        const nextPeople = [...draft.people, {
+          ...person,
+          name: person.name.trim(),
+          role: person.role.trim(),
+          department: person.department.trim(),
+          employeeId: person.employeeId.trim(),
+        }];
+        setDraft(prev => ({ ...prev, people: nextPeople }));
+        setPlan(null);
+        setIntakeAnswers(prev => ({
+          ...prev,
+          [question.id]: nextPeople.map(item => `${item.name} (${wizardPersonRoleLabel(item.involvement)}${item.role ? `, ${item.role}` : ''}${item.department ? `, ${item.department}` : ''})`).join('; '),
+        }));
+        setFieldErrors(prev => {
+          const { [question.id]: _removed, ...rest } = prev;
+          return rest;
+        });
       };
-      const showPersonEntry = personSelection === 'yes';
+	      const showPersonEntry = personSelection === 'yes';
 
       return wrapInput(
         <div className="space-y-4">
@@ -1534,10 +2933,27 @@ function GuidedResolutionWizard({ isOpen, onClose, onCaseCreated, organizationId
             >
               <option value="">Select answer</option>
               <option value="yes">Yes, add another person</option>
-              <option value="no">No additional people</option>
+              <option value="no">No, everyone involved has been added</option>
             </select>
-          </div>
-          {showPersonEntry && (
+	          </div>
+          {narrativePersonSuggestions.length > 0 && (
+            <div className="rounded-2xl border border-blue-100 dark:border-blue-900/60 bg-blue-50/70 dark:bg-blue-950/20 p-3">
+              <p className="text-xs font-bold uppercase tracking-wide text-blue-700 dark:text-blue-300">Suggested from the description</p>
+              <div className="mt-2 flex flex-wrap gap-2">
+                {narrativePersonSuggestions.map(person => (
+                  <button
+                    type="button"
+                    key={`${person.name}-${person.involvement}`}
+                    onClick={() => addSuggestedPerson(person)}
+                    className="rounded-full border border-blue-200 dark:border-blue-800 bg-white dark:bg-gray-900 px-3 py-1.5 text-xs font-semibold text-blue-700 dark:text-blue-300 hover:bg-blue-100 dark:hover:bg-blue-900/40"
+                  >
+                    + {person.name} · {wizardPersonRoleLabel(person.involvement)}
+                  </button>
+                ))}
+              </div>
+            </div>
+          )}
+	          {showPersonEntry && (
             <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-[1.2fr_1fr_1fr_1fr_auto] gap-3">
               <input value={newPerson.name} onChange={e => setNewPerson(prev => ({ ...prev, name: e.target.value }))} className={inputClass} placeholder="Name" />
               <input value={newPerson.role} onChange={e => setNewPerson(prev => ({ ...prev, role: e.target.value }))} className={inputClass} placeholder="Role" />
@@ -1548,11 +2964,9 @@ function GuidedResolutionWizard({ isOpen, onClose, onCaseCreated, organizationId
                 ))}
               </select>
               <select value={newPerson.involvement} onChange={e => setNewPerson(prev => ({ ...prev, involvement: e.target.value as WizardPersonRole }))} className={inputClass} title="Involvement">
-                <option value="employee">Employee involved</option>
-                <option value="complainant">Complainant</option>
-                <option value="witness">Witness</option>
-                <option value="supervisor">Supervisor</option>
-                <option value="hr">HR partner</option>
+                {WIZARD_PERSON_ROLE_OPTIONS.map(option => (
+                  <option key={option.value} value={option.value}>{option.label}</option>
+                ))}
               </select>
               <button type="button" onClick={addPersonForQuestion} disabled={!newPerson.name.trim()} className="min-h-[44px] rounded-xl bg-blue-600 hover:bg-blue-700 disabled:opacity-50 text-white text-sm font-semibold flex items-center justify-center gap-2 px-4">
                 <UserPlus className="w-4 h-4" /> Add
@@ -1561,7 +2975,7 @@ function GuidedResolutionWizard({ isOpen, onClose, onCaseCreated, organizationId
           )}
           {personSelection === 'no' && (
             <div className="rounded-xl border border-green-200 dark:border-green-800 bg-green-50 dark:bg-green-900/20 px-4 py-3 text-sm text-green-800 dark:text-green-300">
-              No additional people will be requested for this question unless the guided review asks for more details later.
+              Everyone currently known to be involved is confirmed for this step. The wizard may still ask for more detail later if the records introduce another person.
             </div>
           )}
           {draft.people.length > 0 && (
@@ -1570,15 +2984,21 @@ function GuidedResolutionWizard({ isOpen, onClose, onCaseCreated, organizationId
                 <div key={`${person.name}-${index}`} className="rounded-xl border border-gray-200 dark:border-gray-700 bg-gray-50 dark:bg-gray-950 p-3 flex items-center justify-between gap-3">
                   <div>
                     <p className="text-sm font-semibold text-gray-900 dark:text-white">{person.name}</p>
-                    <p className="text-xs text-gray-500 dark:text-gray-400">{person.involvement} - {person.role || 'Role not set'} - {person.department || 'Department not set'}</p>
+                    <p className="text-xs text-gray-500 dark:text-gray-400">{wizardPersonRoleLabel(person.involvement)} - {person.role || 'Job title not set'} - {person.department || 'Department not set'}</p>
                   </div>
-                  <button
-                    type="button"
-                    onClick={() => {
-                      const nextPeople = draft.people.filter((_, i) => i !== index);
-                      updateDraft('people', nextPeople);
-                      setIntakeAnswers(prev => ({ ...prev, [question.id]: nextPeople.map(item => `${item.name} (${item.involvement})`).join('; ') }));
-                    }}
+	                  <button
+	                    type="button"
+	                    onClick={() => {
+                      const removedKey = wizardPersonKey(person, index);
+	                      const nextPeople = draft.people.filter((_, i) => i !== index);
+                      setDraft(prev => {
+                        const nextStatuses = { ...prev.statementStatuses };
+                        delete nextStatuses[removedKey];
+                        return { ...prev, people: nextPeople, statementStatuses: nextStatuses };
+                      });
+	                      setPlan(null);
+	                      setIntakeAnswers(prev => ({ ...prev, [question.id]: nextPeople.map(item => `${item.name} (${wizardPersonRoleLabel(item.involvement)})`).join('; ') }));
+	                    }}
                     className="p-1.5 rounded-lg hover:bg-red-50 dark:hover:bg-red-900/20"
                   >
                     <Trash2 className="w-4 h-4 text-red-500" />
@@ -1592,146 +3012,7 @@ function GuidedResolutionWizard({ isOpen, onClose, onCaseCreated, organizationId
     }
 
     if (question.answerType === 'document') {
-      const addDocumentForQuestion = () => {
-        if (!newDoc.content.trim()) return;
-        const nextDoc = {
-          title: newDoc.title.trim() || 'Wizard note',
-          type: newDoc.type,
-          content: newDoc.content.trim(),
-          originalText: newDoc.originalText,
-          translatedText: newDoc.translatedText,
-          cleanedText: newDoc.cleanedText || newDoc.content.trim(),
-          detectedLanguage: newDoc.detectedLanguage,
-          isHandwritten: newDoc.isHandwritten,
-          pageCount: newDoc.pageCount,
-          confidence: newDoc.confidence,
-          sourceFileName: newDoc.sourceFileName,
-          sourceFileType: newDoc.sourceFileType,
-          sourceFileUrl: newDoc.sourceFileUrl,
-          processedImageUrls: newDoc.processedImageUrls,
-          createdFrom: newDoc.createdFrom || 'manual',
-          summary: newDoc.summary,
-        };
-        const nextDocuments = [...draft.documents, nextDoc];
-        setDraft(prev => ({ ...prev, documents: nextDocuments }));
-        setIntakeAnswers(prev => ({
-          ...prev,
-          [question.id]: nextDocuments.map(doc => `${doc.title} (${doc.type}${doc.createdFrom === 'upload' ? ', uploaded and transcribed' : ''})`).join('; '),
-        }));
-        setFieldErrors(prev => {
-          const { [question.id]: _removed, ...rest } = prev;
-          return rest;
-        });
-        setNewDoc({ title: '', type: 'complaint', content: '' });
-        setDocMode('manual');
-        setDocUploadError('');
-      };
-
-      return wrapInput(
-        <div className="space-y-3">
-          <div className="inline-flex rounded-xl border border-gray-200 dark:border-gray-700 bg-gray-50 dark:bg-gray-950 p-1">
-            {(['manual', 'upload'] as const).map(mode => (
-              <button
-                key={mode}
-                onClick={() => {
-                  setDocMode(mode);
-                  setDocUploadError('');
-                }}
-                className={`px-3 py-2 rounded-lg text-xs font-semibold transition-colors ${docMode === mode ? 'bg-blue-600 text-white shadow-sm' : 'text-gray-600 dark:text-gray-300 hover:bg-white dark:hover:bg-gray-800'}`}
-              >
-                {mode === 'manual' ? 'Type note' : 'Upload & transcribe'}
-              </button>
-            ))}
-          </div>
-          <div className="grid grid-cols-1 md:grid-cols-[1fr_220px] gap-3">
-            <input value={newDoc.title} onChange={e => setNewDoc(prev => ({ ...prev, title: e.target.value }))} className={inputClass} placeholder="Title" />
-            <select value={newDoc.type} onChange={e => setNewDoc(prev => ({ ...prev, type: e.target.value as WizardDocumentType }))} className={inputClass} title="Document type">
-              <option value="complaint">Complaint</option>
-              <option value="witness_statement">Witness statement</option>
-              <option value="policy_note">Policy note</option>
-              <option value="prior_record">Prior record</option>
-              <option value="other">Other</option>
-            </select>
-          </div>
-          {docMode === 'upload' && (
-            <div className="rounded-2xl border border-dashed border-blue-300 dark:border-blue-800 bg-blue-50/60 dark:bg-blue-900/10 p-4 space-y-3">
-              <div className="grid grid-cols-1 md:grid-cols-[1fr_180px] gap-3">
-                <label className="flex items-center justify-center gap-2 rounded-xl border border-blue-200 dark:border-blue-800 bg-white dark:bg-gray-900 px-4 py-3 text-sm font-semibold text-blue-700 dark:text-blue-300 cursor-pointer hover:bg-blue-50 dark:hover:bg-blue-900/20">
-                  {docProcessing ? <Loader2 className="w-4 h-4 animate-spin" /> : <Upload className="w-4 h-4" />}
-                  {docProcessing ? 'Transcribing...' : 'Choose file'}
-                  <input
-                    type="file"
-                    className="hidden"
-                    accept=".pdf,.doc,.docx,.ppt,.pptx,.txt,.md,image/*"
-                    disabled={docProcessing}
-                    onChange={e => {
-                      const file = e.target.files?.[0] || null;
-                      handleWizardDocumentFile(file);
-                      e.currentTarget.value = '';
-                    }}
-                  />
-                </label>
-                <select value={docSourceLanguage} onChange={e => setDocSourceLanguage(e.target.value)} className={inputClass} title="Source language" disabled={docProcessing}>
-                  <option value="English">English</option>
-                  <option value="Spanish">Spanish</option>
-                  <option value="French">French</option>
-                  <option value="Portuguese">Portuguese</option>
-                  <option value="Arabic">Arabic</option>
-                  <option value="Chinese">Chinese</option>
-                  <option value="Other">Other</option>
-                </select>
-              </div>
-              {docUploadError && (
-                <div className="rounded-xl border border-red-200 dark:border-red-800 bg-red-50 dark:bg-red-900/20 px-3 py-2 text-xs text-red-700 dark:text-red-300">
-                  {docUploadError}
-                </div>
-              )}
-              {newDoc.sourceFileName && (
-                <div className="rounded-xl border border-green-200 dark:border-green-800 bg-green-50 dark:bg-green-900/20 px-3 py-2 text-xs text-green-800 dark:text-green-300">
-                  Transcribed: {newDoc.sourceFileName}
-                  {typeof newDoc.confidence === 'number' ? ` - confidence ${Math.round(newDoc.confidence * 100)}%` : ''}
-                  {newDoc.isHandwritten ? ' - handwriting detected' : ''}
-                </div>
-              )}
-            </div>
-          )}
-          <textarea
-            value={newDoc.content}
-            onChange={e => setNewDoc(prev => ({ ...prev, content: e.target.value, cleanedText: e.target.value }))}
-            rows={6}
-            className={textareaClass}
-            placeholder={docMode === 'upload' ? 'The transcription will appear here. Correct it before adding.' : 'Type or paste the information requested by the wizard.'}
-          />
-          <button type="button" onClick={addDocumentForQuestion} disabled={!newDoc.content.trim()} className="px-4 py-2.5 rounded-xl bg-blue-600 hover:bg-blue-700 disabled:opacity-50 text-white text-sm font-semibold flex items-center gap-2">
-            <FileUp className="w-4 h-4" /> Add to Wizard
-          </button>
-          {draft.documents.length > 0 && (
-            <div className="grid grid-cols-1 md:grid-cols-2 gap-2">
-              {draft.documents.map((doc, index) => (
-                <div key={`${doc.title}-${index}`} className="rounded-xl border border-gray-200 dark:border-gray-700 bg-gray-50 dark:bg-gray-950 p-3">
-                  <div className="flex items-start justify-between gap-3">
-                    <div>
-                      <p className="text-sm font-semibold text-gray-900 dark:text-white">{doc.title}</p>
-                      <p className="text-xs text-gray-500 dark:text-gray-400">{doc.type.replace(/_/g, ' ')}{doc.createdFrom === 'upload' ? ' - uploaded evidence saved' : ''}</p>
-                    </div>
-                    <button
-                      type="button"
-                      onClick={() => {
-                        const nextDocuments = draft.documents.filter((_, i) => i !== index);
-                        updateDraft('documents', nextDocuments);
-                        setIntakeAnswers(prev => ({ ...prev, [question.id]: nextDocuments.map(item => `${item.title} (${item.type})`).join('; ') }));
-                      }}
-                      className="p-1.5 rounded-lg hover:bg-red-50 dark:hover:bg-red-900/20"
-                    >
-                      <Trash2 className="w-4 h-4 text-red-500" />
-                    </button>
-                  </div>
-                </div>
-              ))}
-            </div>
-          )}
-        </div>
-      );
+      return wrapInput(renderDocumentCapturePanel());
     }
 
     if (question.answerType === 'select' || question.answerType === 'yes_no') {
@@ -1740,7 +3021,7 @@ function GuidedResolutionWizard({ isOpen, onClose, onCaseCreated, organizationId
         : isDepartmentQuestion
           ? departments.map(dept => dept.name)
           : isShiftQuestion
-            ? shifts.map(shiftOption => shiftOption.name)
+            ? shifts.map(shiftLabel)
             : question.options?.length ? question.options : ['Confirmed', 'Not confirmed', 'Unknown'];
       return wrapInput(
         <select value={value} onChange={e => updateAnswer(e.target.value)} className={inputClass} title={question.question}>
@@ -1776,8 +3057,87 @@ function GuidedResolutionWizard({ isOpen, onClose, onCaseCreated, organizationId
     );
   };
 
-  const renderInlineDynamicQuestions = (title: string) => (
-    <div className="rounded-2xl border border-indigo-200 dark:border-indigo-800 bg-gradient-to-br from-indigo-50 via-white to-sky-50 dark:from-indigo-950/25 dark:via-gray-900 dark:to-sky-950/20 p-5 space-y-5 shadow-sm">
+  const resolveFeedbackQuestionId = (feedback: GuidedIntakeAnswerFeedback) => {
+    const feedbackQuestion = normalizeWizardText(feedback.question).toLowerCase();
+    if (!feedbackQuestion) return '';
+    const exact = Object.entries(intakeQuestionTextById).find(([, question]) => normalizeWizardText(question).toLowerCase() === feedbackQuestion);
+    if (exact) return exact[0];
+    const partial = Object.entries(intakeQuestionTextById).find(([, question]) => {
+      const normalized = normalizeWizardText(question).toLowerCase();
+      return normalized.includes(feedbackQuestion) || feedbackQuestion.includes(normalized);
+    });
+    return partial?.[0] || '';
+  };
+
+  const renderAnswerFeedback = () => {
+    if (!answerFeedbackItems.length) return null;
+    return (
+      <div className="space-y-3">
+        {answerFeedbackItems.map((feedback, index) => {
+          const key = wizardFeedbackKey(feedback) || `feedback-${index}`;
+          const questionId = resolveFeedbackQuestionId(feedback);
+          const currentAnswer = questionId ? intakeAnswers[questionId] || feedback.answer || '' : feedback.answer || '';
+          return (
+            <div key={key} className="rounded-2xl border border-amber-200 dark:border-amber-900/60 bg-amber-50/80 dark:bg-amber-950/20 p-4">
+              <div className="flex flex-col lg:flex-row lg:items-start lg:justify-between gap-3">
+                <div>
+                  <p className="text-sm font-semibold text-amber-950 dark:text-amber-100 flex items-center gap-2">
+                    <AlertTriangle className="w-4 h-4" />
+                    {feedback.issue || 'Response needs clarification'}
+                  </p>
+                  {feedback.question && (
+                    <p className="mt-1 text-xs font-semibold text-gray-700 dark:text-gray-200">
+                      Question: {feedback.question}
+                    </p>
+                  )}
+                  <p className="mt-2 text-sm text-amber-900 dark:text-amber-100 leading-relaxed">{feedback.reason}</p>
+                  <p className="mt-1 text-xs text-amber-800 dark:text-amber-200 leading-relaxed">
+                    Suggested next step: {feedback.suggestedAction}
+                  </p>
+                </div>
+                <button
+                  type="button"
+                  onClick={() => setAcknowledgedAnswerFeedback(prev => ({
+                    ...prev,
+                    [key]: `Supervisor chose to continue with the current response for: ${feedback.question || feedback.issue}`,
+                  }))}
+                  className="shrink-0 rounded-xl border border-amber-300 dark:border-amber-800 bg-white/80 dark:bg-gray-900/80 px-3 py-2 text-xs font-semibold text-amber-800 dark:text-amber-100 hover:bg-white dark:hover:bg-gray-900"
+                >
+                  Continue with current response
+                </button>
+              </div>
+              {questionId ? (
+                <div className="mt-3 space-y-2">
+                  <label className="text-xs font-bold uppercase tracking-wide text-amber-900 dark:text-amber-100">Improve response</label>
+                  <textarea
+                    value={currentAnswer}
+                    onChange={e => {
+                      setIntakeAnswers(prev => ({ ...prev, [questionId]: e.target.value }));
+                      setAcknowledgedAnswerFeedback(prev => {
+                        const { [key]: _removed, ...rest } = prev;
+                        return rest;
+                      });
+                      setPlan(null);
+                    }}
+                    rows={4}
+                    className={textareaClass}
+                    placeholder="Add the specific facts, employee response, or documentation status."
+                  />
+                </div>
+              ) : (
+                <p className="mt-3 rounded-xl bg-white/70 dark:bg-gray-900/60 px-3 py-2 text-xs text-gray-600 dark:text-gray-300">
+                  Use the progress panel to return to the related step if you want to revise this answer.
+                </p>
+              )}
+            </div>
+          );
+        })}
+      </div>
+    );
+  };
+
+	  const renderInlineDynamicQuestions = (title: string) => (
+	    <div className="rounded-2xl border border-indigo-200 dark:border-indigo-800 bg-gradient-to-br from-indigo-50 via-white to-sky-50 dark:from-indigo-950/25 dark:via-gray-900 dark:to-sky-950/20 p-5 space-y-5 shadow-sm">
       <div className="flex flex-col md:flex-row md:items-center md:justify-between gap-3">
         <div>
           <p className="text-sm font-bold text-gray-900 dark:text-white flex items-center gap-2">
@@ -1785,14 +3145,14 @@ function GuidedResolutionWizard({ isOpen, onClose, onCaseCreated, organizationId
             {title}
           </p>
           <p className="text-xs text-gray-600 dark:text-gray-400 mt-1">
-            This step is opened after reviewing your prior answers, active policies, missing facts, and HR escalation risk.
+            Based on what you have shared so far, these are the next details needed for a fair review.
           </p>
         </div>
-        {intakePlan && (
-          <span className={`px-3 py-1.5 rounded-full text-xs font-semibold ${readinessTone(intakePlan.readinessScore)}`}>
-            {intakePlan.readinessScore}% · {intakePlan.readinessLabel}
-          </span>
-        )}
+	        {displayedWizardReadiness && (
+	          <span className={`px-3 py-1.5 rounded-full text-xs font-semibold ${readinessTone(displayedWizardReadiness.score)}`}>
+	            {displayedWizardReadiness.score}% · {displayedWizardReadiness.label}
+	          </span>
+	        )}
       </div>
 
       {intakePlan && (
@@ -1800,8 +3160,8 @@ function GuidedResolutionWizard({ isOpen, onClose, onCaseCreated, organizationId
           <div className="grid grid-cols-2 lg:grid-cols-4 gap-2">
             <div className="rounded-xl border border-indigo-100 dark:border-indigo-900/60 bg-white/80 dark:bg-gray-900/70 p-3">
               <p className="text-[11px] uppercase tracking-wide text-gray-500 dark:text-gray-400">Readiness</p>
-              <p className="text-sm font-bold text-gray-900 dark:text-white mt-1">{intakePlan.readinessScore}%</p>
-              <p className="text-[11px] text-gray-500 dark:text-gray-400">{intakePlan.readinessLabel}</p>
+	              <p className="text-sm font-bold text-gray-900 dark:text-white mt-1">{displayedWizardReadiness?.score ?? 0}%</p>
+	              <p className="text-[11px] text-gray-500 dark:text-gray-400">{displayedWizardReadiness?.label ?? 'Not ready'}</p>
             </div>
             <div className="rounded-xl border border-indigo-100 dark:border-indigo-900/60 bg-white/80 dark:bg-gray-900/70 p-3">
               <p className="text-[11px] uppercase tracking-wide text-gray-500 dark:text-gray-400">Questions</p>
@@ -1809,24 +3169,83 @@ function GuidedResolutionWizard({ isOpen, onClose, onCaseCreated, organizationId
               <p className="text-[11px] text-gray-500 dark:text-gray-400">{missingRequiredCurrentQuestions.length} required left</p>
             </div>
             <div className="rounded-xl border border-indigo-100 dark:border-indigo-900/60 bg-white/80 dark:bg-gray-900/70 p-3">
-              <p className="text-[11px] uppercase tracking-wide text-gray-500 dark:text-gray-400">Answers Saved</p>
+              <p className="text-[11px] uppercase tracking-wide text-gray-500 dark:text-gray-400">Answers</p>
               <p className="text-sm font-bold text-gray-900 dark:text-white mt-1">{answeredDynamicCount}</p>
-              <p className="text-[11px] text-gray-500 dark:text-gray-400">preserved in draft</p>
+              <p className="text-[11px] text-gray-500 dark:text-gray-400">saved for this review</p>
             </div>
             <div className="rounded-xl border border-indigo-100 dark:border-indigo-900/60 bg-white/80 dark:bg-gray-900/70 p-3">
-              <p className="text-[11px] uppercase tracking-wide text-gray-500 dark:text-gray-400">Policy Sections</p>
+              <p className="text-[11px] uppercase tracking-wide text-gray-500 dark:text-gray-400">Policy Guidance</p>
               <p className="text-sm font-bold text-gray-900 dark:text-white mt-1">{activePolicySections.length}</p>
               <p className="text-[11px] text-gray-500 dark:text-gray-400">available</p>
             </div>
           </div>
 
-          {intakePlan.summaryAssessment && (
-            <div className="rounded-xl border border-blue-100 dark:border-blue-900/60 bg-blue-50/80 dark:bg-blue-950/20 p-3 text-sm text-gray-800 dark:text-gray-200 leading-relaxed">
-              {intakePlan.summaryAssessment}
+          {currentStepStatusMessage && (
+            <div className={`rounded-xl border p-3 text-sm leading-relaxed ${
+              !currentStepIsComplete
+                ? 'border-amber-200 dark:border-amber-900/60 bg-amber-50/80 dark:bg-amber-950/20 text-amber-950 dark:text-amber-100'
+                : 'border-green-200 dark:border-green-800 bg-green-50/80 dark:bg-green-950/20 text-green-900 dark:text-green-200'
+            }`}>
+              {currentStepStatusMessage}
+            </div>
+          )}
+
+          {reviewableSourceBackedAnswers.length > 0 && (
+            <div className="rounded-xl border border-emerald-200 dark:border-emerald-900/60 bg-emerald-50/70 dark:bg-emerald-950/20 p-3">
+              <p className="text-xs font-bold text-emerald-900 dark:text-emerald-200 flex items-center gap-2">
+                <FileCheck2 className="w-3.5 h-3.5" />
+                Found in uploaded records
+              </p>
+              <p className="mt-1 text-xs text-emerald-800 dark:text-emerald-200 leading-relaxed">
+                These answers were found in uploaded or typed records. Review them before relying on them for the case file.
+              </p>
+              <div className="mt-3 grid grid-cols-1 lg:grid-cols-2 gap-2">
+                {reviewableSourceBackedAnswers.map(item => (
+                  <div key={`${item.slotId}-${item.sourceTitle}-${item.value}`} className="rounded-lg border border-emerald-100 dark:border-emerald-900/70 bg-white/80 dark:bg-gray-900/70 px-3 py-2">
+                    <p className="text-xs font-semibold text-gray-900 dark:text-white">{item.label}</p>
+                    <p className="mt-1 text-xs text-gray-700 dark:text-gray-200">{item.value}</p>
+                    <p className="mt-1 text-[11px] text-gray-500 dark:text-gray-400">
+                      Source: {item.sourceTitle}{item.sourceType ? ` (${item.sourceType.replace(/_/g, ' ')})` : ''}
+                    </p>
+                    {item.excerpt && <p className="mt-1 text-[11px] text-gray-500 dark:text-gray-400 line-clamp-2">{item.excerpt}</p>}
+                  </div>
+                ))}
+              </div>
+            </div>
+          )}
+
+          {(intakePlan.selectedPlaybooks?.length || intakePlan.complianceRiskGates?.length) && (
+            <div className="grid grid-cols-1 xl:grid-cols-2 gap-3">
+              {intakePlan.selectedPlaybooks?.length ? (
+                <div className="rounded-xl border border-slate-200 dark:border-slate-700 bg-white/80 dark:bg-gray-900/70 p-3">
+                  <p className="text-xs font-bold uppercase tracking-wide text-slate-500 dark:text-slate-400 mb-2">Review focus</p>
+                  <div className="flex flex-wrap gap-2">
+                    {intakePlan.selectedPlaybooks.slice(0, 4).map(playbook => (
+                      <span key={playbook.key} className="px-2.5 py-1 rounded-full bg-slate-100 dark:bg-slate-800 text-xs font-semibold text-slate-700 dark:text-slate-200">
+                        {playbook.title}
+                      </span>
+                    ))}
+                  </div>
+                </div>
+              ) : null}
+              {intakePlan.complianceRiskGates?.length ? (
+                <div className="rounded-xl border border-slate-200 dark:border-slate-700 bg-white/80 dark:bg-gray-900/70 p-3">
+                  <p className="text-xs font-bold uppercase tracking-wide text-slate-500 dark:text-slate-400 mb-2">Items to watch</p>
+                  <div className="flex flex-wrap gap-2">
+                    {intakePlan.complianceRiskGates.slice(0, 6).map(gate => (
+                      <span key={gate.key} className={`px-2.5 py-1 rounded-full text-xs font-semibold ${gate.triggered ? 'bg-red-100 text-red-700 dark:bg-red-900/30 dark:text-red-300' : 'bg-green-100 text-green-700 dark:bg-green-900/30 dark:text-green-300'}`}>
+                        {gate.triggered ? 'Review: ' : 'Clear: '}{gate.label}
+                      </span>
+                    ))}
+                  </div>
+                </div>
+              ) : null}
             </div>
           )}
         </>
       )}
+
+      {renderAnswerFeedback()}
 
       {intakeLoading ? (
         <div className="rounded-xl bg-white/80 dark:bg-gray-900/70 border border-indigo-100 dark:border-indigo-900/60 p-5 flex items-center gap-3 text-sm text-gray-700 dark:text-gray-300">
@@ -1840,7 +3259,7 @@ function GuidedResolutionWizard({ isOpen, onClose, onCaseCreated, organizationId
               <div>
                 <div className="flex flex-wrap items-center gap-2 mb-1">
                   <span className="px-2 py-0.5 rounded-full bg-indigo-100 dark:bg-indigo-900/40 text-indigo-700 dark:text-indigo-300 text-[11px] font-semibold">{question.category}</span>
-                  <span className="px-2 py-0.5 rounded-full bg-red-100 dark:bg-red-900/30 text-red-700 dark:text-red-300 text-[11px] font-semibold">Required</span>
+                  {question.required && <span className="px-2 py-0.5 rounded-full bg-red-100 dark:bg-red-900/30 text-red-700 dark:text-red-300 text-[11px] font-semibold">Required</span>}
                   {question.riskArea && <span className="px-2 py-0.5 rounded-full bg-amber-100 dark:bg-amber-900/30 text-amber-700 dark:text-amber-300 text-[11px] font-semibold">{question.riskArea}</span>}
                 </div>
                 <p className="text-base font-semibold text-gray-900 dark:text-white leading-snug">{question.question}</p>
@@ -1853,33 +3272,33 @@ function GuidedResolutionWizard({ isOpen, onClose, onCaseCreated, organizationId
         </div>
       ) : (
         <div className="rounded-xl border border-dashed border-indigo-200 dark:border-indigo-800 bg-white/70 dark:bg-gray-900/60 p-5 text-sm text-gray-600 dark:text-gray-300">
-          Click <span className="font-semibold">Continue</span>. The wizard will analyze your current answers before showing the required follow-up questions for the next step.
+          Click <span className="font-semibold">Continue</span> to review your answers and show the next helpful question.
         </div>
       )}
 
-      {intakePlan && (intakePlan.missingInformation.length > 0 || intakePlan.recommendedDocuments.length > 0) && (
+      {intakePlan && (activeMissingInformation.length > 0 || activeRecommendedDocuments.length > 0) && (
         <div className="grid grid-cols-1 lg:grid-cols-2 gap-3">
-          {intakePlan.missingInformation.length > 0 && (
+          {activeMissingInformation.length > 0 && (
             <div className="rounded-xl border border-amber-200 dark:border-amber-900/60 bg-amber-50/80 dark:bg-amber-950/20 p-3">
               <p className="text-xs font-bold text-amber-900 dark:text-amber-200 mb-2 flex items-center gap-2">
                 <AlertTriangle className="w-3.5 h-3.5" />
-                Important unknowns
+                Still needed on this step
               </p>
               <div className="space-y-1.5">
-                {intakePlan.missingInformation.slice(0, 4).map((item, index) => (
+                {activeMissingInformation.map((item, index) => (
                   <p key={index} className="text-xs text-amber-900 dark:text-amber-100">{item}</p>
                 ))}
               </div>
             </div>
           )}
-          {intakePlan.recommendedDocuments.length > 0 && (
+          {activeRecommendedDocuments.length > 0 && (
             <div className="rounded-xl border border-blue-200 dark:border-blue-900/60 bg-blue-50/80 dark:bg-blue-950/20 p-3">
               <p className="text-xs font-bold text-blue-900 dark:text-blue-200 mb-2 flex items-center gap-2">
                 <FileText className="w-3.5 h-3.5" />
-                Evidence or documents to collect
+                Evidence or documents still requested
               </p>
               <div className="space-y-1.5">
-                {intakePlan.recommendedDocuments.slice(0, 4).map((doc, index) => (
+                {activeRecommendedDocuments.map((doc, index) => (
                   <p key={index} className="text-xs text-blue-900 dark:text-blue-100">
                     <span className="font-semibold">{doc.required ? 'Required' : 'Helpful'}:</span> {doc.title} - {doc.whyNeeded}
                   </p>
@@ -1889,8 +3308,459 @@ function GuidedResolutionWizard({ isOpen, onClose, onCaseCreated, organizationId
           )}
         </div>
       )}
-    </div>
-  );
+	    </div>
+	  );
+
+	  const renderWizardReadinessReview = () => {
+	    const score = evidenceQualityReview.score;
+	    const label = evidenceQualityReview.label;
+	    const allDocuments = draft.documents.map(doc => `${doc.title} (${WIZARD_DOCUMENT_TYPE_LABELS[doc.type]}${doc.personName ? ` for ${doc.personName}` : ''})`);
+	    const allPeople = draft.people.map(person => `${person.name} (${wizardPersonRoleLabel(person.involvement)})`);
+	    const weakAreas = Array.from(new Set([
+	      ...evidenceQualityReview.weaknesses,
+	      ...activeMissingInformation,
+	      ...answerFeedbackItems.map(item => item.issue || item.question).filter(Boolean),
+	      ...missingStatementStatuses.map(item => `${item.person.name} still needs a statement status`),
+	    ])).slice(0, 8);
+	    const reviewTone = score >= 75
+	      ? 'border-emerald-200 dark:border-emerald-900/60 from-emerald-50 via-white to-blue-50 dark:from-emerald-950/20 dark:via-gray-900 dark:to-blue-950/20'
+	      : score >= 50
+	        ? 'border-amber-200 dark:border-amber-900/60 from-amber-50 via-white to-blue-50 dark:from-amber-950/20 dark:via-gray-900 dark:to-blue-950/20'
+	        : 'border-red-200 dark:border-red-900/60 from-red-50 via-white to-amber-50 dark:from-red-950/20 dark:via-gray-900 dark:to-amber-950/20';
+
+	    return (
+	      <div className={`rounded-2xl border bg-gradient-to-br p-5 space-y-5 shadow-sm ${reviewTone}`}>
+	        <div className="flex flex-col lg:flex-row lg:items-start lg:justify-between gap-3">
+	          <div>
+	            <p className="text-sm font-bold text-gray-900 dark:text-white flex items-center gap-2">
+	              <FileCheck2 className="w-4 h-4 text-emerald-600" />
+	              Review response strength before creating the case
+	            </p>
+	            <p className="mt-1 text-sm text-gray-600 dark:text-gray-300 leading-relaxed">
+	              Review what is known, how strong the responses are, and whether weak areas should be improved before this becomes the case record.
+	            </p>
+	          </div>
+	          <span className={`rounded-full px-3 py-1.5 text-xs font-semibold ${readinessTone(score)}`}>
+	            {score}% · {label}
+	          </span>
+	        </div>
+
+	        <div className={`rounded-xl border p-3 ${
+	          score >= 75
+	            ? 'border-emerald-200 dark:border-emerald-900/60 bg-emerald-50/80 dark:bg-emerald-950/20'
+	            : score >= 50
+	              ? 'border-amber-200 dark:border-amber-900/60 bg-amber-50/80 dark:bg-amber-950/20'
+	              : 'border-red-200 dark:border-red-900/60 bg-red-50/80 dark:bg-red-950/20'
+	        }`}>
+	          <div className="flex flex-col lg:flex-row lg:items-start lg:justify-between gap-3">
+	            <div>
+	              <p className="text-xs font-bold uppercase tracking-wide text-gray-600 dark:text-gray-400">AI response alignment review</p>
+	              <p className="mt-1 text-sm text-gray-800 dark:text-gray-100 leading-relaxed">{evidenceQualityReview.assessment}</p>
+	            </div>
+	            <div className="rounded-xl bg-white/80 dark:bg-gray-900/80 border border-white/70 dark:border-gray-800 px-4 py-3 min-w-[160px]">
+	              <p className="text-[11px] uppercase tracking-wide text-gray-500 dark:text-gray-400">Strength score</p>
+	              <p className="mt-1 text-2xl font-bold text-gray-950 dark:text-white">{score}%</p>
+	              <p className="mt-1 text-xs text-gray-500 dark:text-gray-400">{score < 50 ? 'Improve or involve HR before relying on this.' : 'Supervisor and HR should still review before final action.'}</p>
+	            </div>
+	          </div>
+	        </div>
+
+	        <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
+	          <div className="rounded-xl border border-white/70 dark:border-gray-800 bg-white/85 dark:bg-gray-900/80 p-3">
+	            <p className="text-[11px] uppercase tracking-wide font-bold text-gray-500 dark:text-gray-400">People</p>
+            <p className="mt-1 text-sm font-semibold text-gray-900 dark:text-white">{draft.people.length}</p>
+            <p className="mt-1 text-xs text-gray-500 dark:text-gray-400 line-clamp-3">{allPeople.join('; ') || 'No people added'}</p>
+          </div>
+          <div className="rounded-xl border border-white/70 dark:border-gray-800 bg-white/85 dark:bg-gray-900/80 p-3">
+            <p className="text-[11px] uppercase tracking-wide font-bold text-gray-500 dark:text-gray-400">Records</p>
+            <p className="mt-1 text-sm font-semibold text-gray-900 dark:text-white">{draft.documents.length}</p>
+            <p className="mt-1 text-xs text-gray-500 dark:text-gray-400 line-clamp-3">{allDocuments.join('; ') || 'No documents added'}</p>
+          </div>
+          <div className="rounded-xl border border-white/70 dark:border-gray-800 bg-white/85 dark:bg-gray-900/80 p-3">
+            <p className="text-[11px] uppercase tracking-wide font-bold text-gray-500 dark:text-gray-400">Answers</p>
+            <p className="mt-1 text-sm font-semibold text-gray-900 dark:text-white">{answeredDynamicCount}</p>
+	            <p className="mt-1 text-xs text-gray-500 dark:text-gray-400">Includes answers found in documents and answers entered by the user.</p>
+	          </div>
+	        </div>
+
+	        <div className="rounded-xl border border-slate-200 dark:border-slate-700 bg-white/85 dark:bg-gray-900/80 p-3">
+	          <p className="text-xs font-bold uppercase tracking-wide text-gray-600 dark:text-gray-400">Information reviewed</p>
+	          <div className="mt-3 grid grid-cols-1 lg:grid-cols-2 gap-2">
+	            {evidenceQualityReview.accounting.map((item, index) => (
+	              <div key={`${item.area}-${index}`} className={`rounded-xl border px-3 py-2 ${qualityStatusTone(item.status)}`}>
+	                <div className="flex items-center justify-between gap-2">
+	                  <p className="text-xs font-bold">{item.area}</p>
+	                  <span className="rounded-full bg-white/70 dark:bg-gray-950/40 px-2 py-0.5 text-[10px] font-bold uppercase">{item.status}</span>
+	                </div>
+	                <p className="mt-1 text-xs leading-relaxed">{item.detail}</p>
+	                {item.source && <p className="mt-1 text-[11px] opacity-80">Source: {item.source}</p>}
+	                {item.recommendedImprovement && <p className="mt-1 text-[11px] font-semibold">Improve: {item.recommendedImprovement}</p>}
+	              </div>
+	            ))}
+	          </div>
+	        </div>
+
+	        {statementStatusSummary && (
+	          <div className="rounded-xl border border-slate-200 dark:border-slate-700 bg-white/85 dark:bg-gray-900/80 p-3">
+	            <p className="text-xs font-bold uppercase tracking-wide text-gray-600 dark:text-gray-400">Statement status</p>
+	            <p className="mt-1 text-sm text-gray-700 dark:text-gray-200 leading-relaxed">{statementStatusSummary}</p>
+          </div>
+        )}
+
+        {reviewableSourceBackedAnswers.length > 0 && (
+          <div className="rounded-xl border border-emerald-200 dark:border-emerald-900/60 bg-emerald-50/70 dark:bg-emerald-950/20 p-3">
+            <p className="text-xs font-bold text-emerald-900 dark:text-emerald-200">Answers found in records</p>
+            <div className="mt-2 grid grid-cols-1 lg:grid-cols-2 gap-2">
+              {reviewableSourceBackedAnswers.map(item => (
+                <div key={`${item.slotId}-${item.sourceTitle}-${item.value}`} className="rounded-lg bg-white/80 dark:bg-gray-900/70 border border-emerald-100 dark:border-emerald-900/70 px-3 py-2">
+                  <p className="text-xs font-semibold text-gray-900 dark:text-white">{item.label}</p>
+                  <p className="mt-1 text-xs text-gray-700 dark:text-gray-200">{item.value}</p>
+                  <p className="mt-1 text-[11px] text-gray-500 dark:text-gray-400">Source: {item.sourceTitle}</p>
+                </div>
+              ))}
+            </div>
+	          </div>
+	        )}
+
+	        {evidenceQualityReview.findings.length > 0 && (
+	          <div className="rounded-xl border border-amber-200 dark:border-amber-900/60 bg-white/85 dark:bg-gray-900/80 p-3">
+	            <p className="text-xs font-bold text-amber-900 dark:text-amber-100 flex items-center gap-2">
+	              <AlertTriangle className="w-3.5 h-3.5" />
+	              Response quality notes
+	            </p>
+	            <div className="mt-2 space-y-2">
+	              {evidenceQualityReview.findings.map((item, index) => (
+	                <div key={`${item.area}-${index}`} className="rounded-lg border border-gray-200 dark:border-gray-800 bg-gray-50/80 dark:bg-gray-950/30 px-3 py-2">
+	                  <div className="flex flex-wrap items-center gap-2">
+	                    <span className={`rounded-full border px-2 py-0.5 text-[10px] font-bold uppercase ${qualityStatusTone(item.status)}`}>{item.status}</span>
+	                    <p className="text-xs font-bold text-gray-900 dark:text-white">{item.area}</p>
+	                    <span className="text-[11px] text-gray-500 dark:text-gray-400">{item.score}%</span>
+	                  </div>
+	                  <p className="mt-1 text-xs text-gray-700 dark:text-gray-200 leading-relaxed">{item.finding}</p>
+	                  {item.improvement && <p className="mt-1 text-xs font-semibold text-amber-900 dark:text-amber-100">Suggested improvement: {item.improvement}</p>}
+	                </div>
+	              ))}
+	            </div>
+	          </div>
+	        )}
+
+	        {(evidenceQualityReview.strengths.length > 0 || weakAreas.length > 0) && (
+	          <div className="grid grid-cols-1 lg:grid-cols-2 gap-3">
+	            <div className="rounded-xl border border-green-200 dark:border-green-900/60 bg-green-50/75 dark:bg-green-950/20 p-3">
+	              <p className="text-xs font-bold text-green-900 dark:text-green-100">What is strong enough to keep</p>
+	              {evidenceQualityReview.strengths.length ? (
+	                <ul className="mt-2 space-y-1.5">
+	                  {evidenceQualityReview.strengths.map((item, index) => (
+	                    <li key={`${item}-${index}`} className="text-xs text-green-900 dark:text-green-100 flex items-start gap-2">
+	                      <CheckCircle2 className="mt-0.5 h-3.5 w-3.5 flex-shrink-0" />
+	                      <span>{item}</span>
+	                    </li>
+	                  ))}
+	                </ul>
+	              ) : (
+	                <p className="mt-2 text-xs text-green-900 dark:text-green-100">No strong areas identified yet.</p>
+	              )}
+	            </div>
+	            <div className="rounded-xl border border-amber-200 dark:border-amber-900/60 bg-amber-50/80 dark:bg-amber-950/20 p-3">
+	              <p className="text-xs font-bold text-amber-900 dark:text-amber-100 flex items-center gap-2">
+	                <AlertTriangle className="w-3.5 h-3.5" />
+	                What to improve before relying on it
+	              </p>
+	              {weakAreas.length ? (
+	                <ul className="mt-2 space-y-1.5">
+	                  {weakAreas.map((item, index) => (
+	                    <li key={`${item}-${index}`} className="text-xs text-amber-900 dark:text-amber-100 flex items-start gap-2">
+	                      <span className="mt-1.5 h-1.5 w-1.5 rounded-full bg-amber-500 flex-shrink-0" />
+	                      <span>{item}</span>
+	                    </li>
+	                  ))}
+	                </ul>
+	              ) : (
+	                <p className="mt-2 text-xs text-amber-900 dark:text-amber-100">No improvement item is currently flagged.</p>
+	              )}
+	            </div>
+	          </div>
+	        )}
+
+	      </div>
+	    );
+	  };
+
+	  const renderGuidedReviewAndActionPlan = () => {
+    if (!plan) return null;
+    const missingItems = Array.from(new Set([...(plan.missingInformation || []), ...activeMissingInformation])).filter(Boolean);
+    const selectedRiskLabels = draft.riskFlags.length
+      ? draft.riskFlags.map(guidedRiskLabel).join(', ')
+      : 'No sensitive risk selected';
+
+    return (
+      <div className="space-y-5">
+        <section className="rounded-3xl border border-blue-200 dark:border-blue-900/60 bg-gradient-to-br from-blue-50 via-white to-indigo-50 dark:from-blue-950/25 dark:via-gray-900 dark:to-indigo-950/20 shadow-sm overflow-hidden">
+          <div className="px-5 py-4 border-b border-blue-100 dark:border-blue-900/60 flex flex-col lg:flex-row lg:items-start lg:justify-between gap-3">
+            <div className="flex items-start gap-3">
+              <div className="h-10 w-10 rounded-2xl bg-blue-600 text-white flex items-center justify-center shadow-lg shadow-blue-600/20">
+                <ClipboardList className="w-5 h-5" />
+              </div>
+              <div>
+                <div className="flex flex-wrap items-center gap-2">
+                  <h3 className="text-base font-bold text-gray-900 dark:text-white">Guided Conduct Review</h3>
+                  <span className="rounded-full bg-blue-100 dark:bg-blue-900/40 px-2.5 py-1 text-[11px] font-bold text-blue-700 dark:text-blue-300">HR-reviewable</span>
+                </div>
+                <p className="mt-1 text-sm text-gray-600 dark:text-gray-300">
+                  Review the facts collected by the wizard before saving the case record.
+                </p>
+              </div>
+            </div>
+            {savedAt && <span className="text-xs text-gray-500 dark:text-gray-400">Saved {formatDateTime(savedAt)}</span>}
+          </div>
+
+          <div className="p-5 space-y-5">
+            <div className="rounded-xl border border-amber-200 dark:border-amber-900/60 bg-amber-50 dark:bg-amber-950/20 px-4 py-3 text-xs text-amber-900 dark:text-amber-100">
+              Decision support only. Supervisors and HR make the final decision after reviewing facts, policy, consistency, and business risk.
+            </div>
+
+            <label className="block space-y-2">
+              <span className="text-xs font-bold uppercase tracking-wide text-gray-600 dark:text-gray-400">Conduct or complaint summary</span>
+              <textarea
+                value={draft.behaviorSummary}
+                onChange={e => updateDraft('behaviorSummary', e.target.value)}
+                rows={5}
+                className={textareaClass}
+                placeholder="Summarize the reported concern, observed facts, involved people, and immediate response."
+              />
+            </label>
+
+            <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-4 gap-3">
+              <label className="space-y-1.5">
+                <span className="text-xs font-bold uppercase tracking-wide text-gray-600 dark:text-gray-400">Policy training</span>
+                <select
+                  value={draft.policyTrainingStatus}
+                  onChange={e => updateDraft('policyTrainingStatus', e.target.value as GuidedReviewAnswers['policyTrainingStatus'])}
+                  className={inputClass}
+                  title="Policy training"
+                >
+                  {GUIDED_REVIEW_STATUS_OPTIONS.policyTrainingStatus.map(option => (
+                    <option key={option.value} value={option.value}>{option.label}</option>
+                  ))}
+                </select>
+              </label>
+              <label className="space-y-1.5">
+                <span className="text-xs font-bold uppercase tracking-wide text-gray-600 dark:text-gray-400">Prior pattern</span>
+                <select
+                  value={draft.repeatedBehaviorStatus}
+                  onChange={e => updateDraft('repeatedBehaviorStatus', e.target.value as GuidedReviewAnswers['repeatedBehaviorStatus'])}
+                  className={inputClass}
+                  title="Prior pattern"
+                >
+                  {GUIDED_REVIEW_STATUS_OPTIONS.repeatedBehaviorStatus.map(option => (
+                    <option key={option.value} value={option.value}>{option.label}</option>
+                  ))}
+                </select>
+              </label>
+              <label className="space-y-1.5">
+                <span className="text-xs font-bold uppercase tracking-wide text-gray-600 dark:text-gray-400">Safety impact</span>
+                <select
+                  value={draft.safetyImpactStatus}
+                  onChange={e => updateDraft('safetyImpactStatus', e.target.value as GuidedReviewAnswers['safetyImpactStatus'])}
+                  className={inputClass}
+                  title="Safety impact"
+                >
+                  {GUIDED_REVIEW_STATUS_OPTIONS.safetyImpactStatus.map(option => (
+                    <option key={option.value} value={option.value}>{option.label}</option>
+                  ))}
+                </select>
+              </label>
+              <label className="space-y-1.5">
+                <span className="text-xs font-bold uppercase tracking-wide text-gray-600 dark:text-gray-400">Employee response</span>
+                <select
+                  value={draft.employeeResponseStatus}
+                  onChange={e => updateDraft('employeeResponseStatus', e.target.value as GuidedReviewAnswers['employeeResponseStatus'])}
+                  className={inputClass}
+                  title="Employee response"
+                >
+                  {GUIDED_REVIEW_STATUS_OPTIONS.employeeResponseStatus.map(option => (
+                    <option key={option.value} value={option.value}>{option.label}</option>
+                  ))}
+                </select>
+              </label>
+            </div>
+
+            {missingItems.length > 0 && (
+              <div className="rounded-2xl border border-orange-200 dark:border-orange-900/60 bg-orange-50 dark:bg-orange-950/20 p-4">
+                <p className="text-sm font-bold text-orange-950 dark:text-orange-100 flex items-center gap-2">
+                  <AlertTriangle className="w-4 h-4" />
+                  Missing information from the complaint analysis
+                </p>
+                <ul className="mt-3 space-y-2">
+                  {missingItems.map((item, index) => (
+                    <li key={index} className="text-sm text-orange-900 dark:text-orange-100 flex items-start gap-2">
+                      <span className="mt-2 h-1.5 w-1.5 rounded-full bg-orange-500 flex-shrink-0" />
+                      <span>{item}</span>
+                    </li>
+                  ))}
+                </ul>
+              </div>
+            )}
+
+            <div>
+              <div className="mb-3 flex flex-wrap items-center justify-between gap-2">
+                <p className="text-xs font-bold uppercase tracking-wide text-gray-600 dark:text-gray-400">HR risk screen</p>
+                <span className={`rounded-full px-2.5 py-1 text-[11px] font-bold ${draft.riskFlags.length && !draft.riskFlags.includes('none') ? 'bg-red-100 text-red-700 dark:bg-red-900/30 dark:text-red-300' : 'bg-green-100 text-green-700 dark:bg-green-900/30 dark:text-green-300'}`}>
+                  {selectedRiskLabels}
+                </span>
+              </div>
+              <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-3">
+                {GUIDED_RISK_OPTIONS.map(option => {
+                  const selected = draft.riskFlags.includes(option.key);
+                  return (
+                    <button
+                      key={option.key}
+                      type="button"
+                      onClick={() => toggleRiskFlag(option.key)}
+                      className={`rounded-2xl border p-4 text-left transition-all ${
+                        selected
+                          ? 'border-blue-400 bg-blue-50 dark:border-blue-700 dark:bg-blue-950/30 shadow-sm'
+                          : 'border-gray-200 bg-white hover:border-blue-200 hover:bg-blue-50/40 dark:border-gray-700 dark:bg-gray-900 dark:hover:border-blue-800 dark:hover:bg-blue-950/20'
+                      }`}
+                    >
+                      <div className="flex items-start gap-3">
+                        <span className={`mt-0.5 h-4 w-4 rounded border flex items-center justify-center ${selected ? 'border-blue-600 bg-blue-600' : 'border-gray-300 dark:border-gray-600'}`}>
+                          {selected && <CheckCircle2 className="h-3 w-3 text-white" />}
+                        </span>
+                        <span>
+                          <span className="block text-sm font-semibold text-gray-900 dark:text-white">{option.title}</span>
+                          <span className="mt-1 block text-xs leading-relaxed text-gray-500 dark:text-gray-400">{option.description}</span>
+                        </span>
+                      </div>
+                    </button>
+                  );
+                })}
+              </div>
+            </div>
+
+            <label className="block space-y-2">
+              <span className="text-xs font-bold uppercase tracking-wide text-gray-600 dark:text-gray-400">Supervisor decision notes</span>
+              <textarea
+                value={draft.supervisorNotes}
+                onChange={e => updateDraft('supervisorNotes', e.target.value)}
+                rows={5}
+                className={textareaClass}
+                placeholder="Document supervisor observations, follow-up steps, decisions considered, HR direction received, and remaining concerns."
+              />
+            </label>
+          </div>
+        </section>
+
+        <section className="rounded-3xl border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-900 shadow-sm overflow-hidden">
+          <div className="px-5 py-4 border-b border-gray-200 dark:border-gray-700 flex flex-col lg:flex-row lg:items-center lg:justify-between gap-3">
+            <div className="flex items-start gap-3">
+              <div className="h-10 w-10 rounded-2xl bg-indigo-600 text-white flex items-center justify-center shadow-lg shadow-indigo-600/20">
+                <FileText className="w-5 h-5" />
+              </div>
+              <div>
+                <h3 className="text-base font-bold text-gray-900 dark:text-white">HR Action Plan</h3>
+                <p className="mt-1 text-sm text-gray-600 dark:text-gray-300">
+                  Use this review package to decide what should happen next and what should be preserved for the record.
+                </p>
+              </div>
+            </div>
+            <span className={`rounded-full px-3 py-1.5 text-xs font-bold ${plan.hrReviewRequired ? 'bg-red-100 text-red-700 dark:bg-red-900/30 dark:text-red-300' : 'bg-green-100 text-green-700 dark:bg-green-900/30 dark:text-green-300'}`}>
+              {plan.hrReviewRequired ? 'HR Review Required' : 'Supervisor Review Ready'}
+            </span>
+          </div>
+
+          <div className="p-5 space-y-5">
+            <div className="rounded-2xl bg-gray-50 dark:bg-gray-950 border border-gray-200 dark:border-gray-700 p-4">
+              <p className="text-sm text-gray-800 dark:text-gray-200 leading-relaxed">{plan.executiveSummary}</p>
+              {plan.hrReviewReason && (
+                <div className="mt-4 rounded-xl bg-white dark:bg-gray-900 border border-gray-200 dark:border-gray-700 p-3">
+                  <p className="text-xs font-bold uppercase tracking-wide text-gray-500 dark:text-gray-400">HR review reason</p>
+                  <p className="mt-1 text-sm text-gray-700 dark:text-gray-300 leading-relaxed">{plan.hrReviewReason}</p>
+                </div>
+              )}
+            </div>
+
+            <div className="grid grid-cols-1 xl:grid-cols-2 gap-4">
+              <WizardList title="Missing information" items={plan.missingInformation} icon={AlertTriangle} />
+              <div className="rounded-2xl border border-gray-200 dark:border-gray-700 p-4">
+                <p className="text-sm font-bold text-gray-900 dark:text-white mb-3">Risk review</p>
+                {plan.riskFlags.length > 0 ? (
+                  <div className="space-y-3">
+                    {plan.riskFlags.map((risk, index) => (
+                      <div key={`${risk.label}-${index}`} className="rounded-xl bg-gray-50 dark:bg-gray-950 border border-gray-200 dark:border-gray-700 p-3">
+                        <div className="flex items-start justify-between gap-3">
+                          <p className="text-sm font-semibold text-gray-900 dark:text-white">{risk.label}</p>
+                          <span className={`rounded-full px-2 py-0.5 text-[11px] font-bold ${risk.requiresHRReview ? 'bg-red-100 text-red-700 dark:bg-red-900/30 dark:text-red-300' : 'bg-green-100 text-green-700 dark:bg-green-900/30 dark:text-green-300'}`}>
+                            {risk.requiresHRReview ? 'HR review' : 'Monitor'}
+                          </span>
+                        </div>
+                        <p className="mt-1 text-xs text-gray-600 dark:text-gray-400 leading-relaxed">{risk.whyItMatters}</p>
+                      </div>
+                    ))}
+                  </div>
+                ) : (
+                  <p className="text-sm text-gray-500 dark:text-gray-400">No HR-sensitive risk flag has been identified from the available facts.</p>
+                )}
+              </div>
+            </div>
+
+            <WizardList title="Policy alignment" items={plan.policyAlignment} icon={BookOpen} />
+
+            <div>
+              <p className="text-sm font-bold text-gray-900 dark:text-white mb-3">Decision options for review</p>
+              {plan.recommendedDecisionOptions.length > 0 ? (
+                <div className="grid grid-cols-1 xl:grid-cols-2 gap-4">
+                  {plan.recommendedDecisionOptions.map((option, index) => (
+                    <div key={`${option.option}-${index}`} className="rounded-2xl border border-gray-200 dark:border-gray-700 p-4 bg-white dark:bg-gray-900">
+                      <p className="text-sm font-bold text-gray-900 dark:text-white">{option.option}</p>
+                      <p className="mt-2 text-sm text-gray-700 dark:text-gray-300 leading-relaxed">{option.useWhen}</p>
+                      {option.example && <p className="mt-2 text-xs text-gray-500 dark:text-gray-400 leading-relaxed">Example: {option.example}</p>}
+                      {option.cautions.length > 0 && (
+                        <div className="mt-3">
+                          <p className="text-[11px] font-bold uppercase tracking-wide text-orange-600 dark:text-orange-300">Cautions</p>
+                          <ul className="mt-1 space-y-1">
+                            {option.cautions.map((caution, cautionIndex) => (
+                              <li key={cautionIndex} className="text-xs text-gray-600 dark:text-gray-300 flex items-start gap-2">
+                                <span className="mt-1.5 h-1.5 w-1.5 rounded-full bg-orange-500 flex-shrink-0" />
+                                {caution}
+                              </li>
+                            ))}
+                          </ul>
+                        </div>
+                      )}
+                      {option.nextSteps.length > 0 && (
+                        <div className="mt-3">
+                          <p className="text-[11px] font-bold uppercase tracking-wide text-blue-600 dark:text-blue-300">Next steps</p>
+                          <ul className="mt-1 space-y-1">
+                            {option.nextSteps.map((nextStep, nextIndex) => (
+                              <li key={nextIndex} className="text-xs text-gray-600 dark:text-gray-300 flex items-start gap-2">
+                                <CheckCircle2 className="w-3.5 h-3.5 text-blue-500 mt-0.5 flex-shrink-0" />
+                                {nextStep}
+                              </li>
+                            ))}
+                          </ul>
+                        </div>
+                      )}
+                    </div>
+                  ))}
+                </div>
+              ) : (
+                <div className="rounded-2xl border border-dashed border-gray-200 dark:border-gray-700 p-4 text-sm text-gray-500 dark:text-gray-400">
+                  No decision option has been generated yet.
+                </div>
+              )}
+            </div>
+
+            <div className="grid grid-cols-1 xl:grid-cols-3 gap-4">
+              <WizardList title="Conversation questions" items={plan.employeeConversationQuestions} icon={MessageSquare} />
+              <WizardList title="Supervisor checklist" items={plan.supervisorChecklist} icon={CheckCircle2} />
+              <WizardList title="Audit notes" items={plan.auditNotes} icon={FileText} />
+            </div>
+          </div>
+        </section>
+      </div>
+    );
+  };
 
   const viewportWidth = typeof window !== 'undefined' ? window.innerWidth : 1440;
   const viewportHeight = typeof window !== 'undefined' ? window.innerHeight : 900;
@@ -1956,72 +3826,93 @@ function GuidedResolutionWizard({ isOpen, onClose, onCaseCreated, organizationId
 
         {aiProgressOpen && (
           <div className="absolute inset-x-0 top-[77px] bottom-[73px] z-30 flex items-center justify-center bg-white/95 dark:bg-gray-950/95">
-            <div className="relative w-full max-w-xl mx-6 overflow-hidden rounded-3xl border border-indigo-200 dark:border-indigo-800 bg-gradient-to-br from-white via-blue-50 to-indigo-50 dark:from-gray-900 dark:via-gray-900 dark:to-indigo-950 shadow-2xl">
+            <div className="relative w-full max-w-md mx-6 overflow-hidden rounded-3xl border border-blue-200 dark:border-blue-900 bg-white dark:bg-gray-900 shadow-2xl">
               <div className="relative p-6">
-                <div className="flex items-start gap-4">
-                  <div className="relative h-12 w-12 rounded-2xl bg-gradient-to-br from-blue-600 to-indigo-600 flex items-center justify-center shadow-lg shadow-blue-600/25">
-                    <Sparkles className="w-6 h-6 text-white" />
-                    <span className="absolute inset-0 rounded-2xl border border-white/50 animate-ping" />
+                <div className="flex items-center gap-4">
+                  <div className="h-12 w-12 rounded-2xl bg-blue-600 text-white flex items-center justify-center shadow-lg shadow-blue-600/25">
+                    <Loader2 className="w-6 h-6 animate-spin" />
                   </div>
                   <div>
-                    <p className="text-base font-bold text-gray-900 dark:text-white">{aiProgressTitle}</p>
-                    <p className="text-sm text-gray-500 dark:text-gray-400 mt-1">
-                      DashMet is preparing the next prompt inside this wizard.
+                    <p className="text-base font-bold text-gray-900 dark:text-white">Analyzing your responses</p>
+                    <p className="text-sm text-gray-500 dark:text-gray-400 mt-1 leading-relaxed">
+                      Hang tight while the wizard analyzes your responses and any documentation provided.
                     </p>
                   </div>
                 </div>
-                <div className="mt-6 space-y-3">
-                  {aiProgressItems.map((item, index) => (
-                    <div key={`${item.label}-${index}`} className={`rounded-2xl border px-4 py-3 transition-all ${
-                      item.status === 'complete'
-                        ? 'border-green-200 bg-green-50 dark:border-green-800 dark:bg-green-950/20'
-                        : item.status === 'active'
-                          ? 'border-blue-300 bg-blue-50 dark:border-blue-700 dark:bg-blue-950/30 shadow-sm'
-                          : 'border-gray-200 bg-gray-50 dark:border-gray-700 dark:bg-gray-950'
-                    }`}>
-                      <div className="flex items-start gap-3">
-                        <div className={`mt-0.5 h-6 w-6 rounded-full flex items-center justify-center ${
-                          item.status === 'complete'
-                            ? 'bg-green-600 text-white'
-                            : item.status === 'active'
-                              ? 'bg-blue-600 text-white'
-                              : 'bg-gray-200 text-gray-500 dark:bg-gray-800 dark:text-gray-400'
-                        }`}>
-                          {item.status === 'complete' ? <CheckCircle2 className="w-4 h-4" /> : item.status === 'active' ? <Loader2 className="w-4 h-4 animate-spin" /> : <span className="text-xs">{index + 1}</span>}
-                        </div>
-                        <div>
-                          <p className="text-sm font-semibold text-gray-900 dark:text-white">{item.label}</p>
-                          <p className="text-xs text-gray-500 dark:text-gray-400 mt-0.5">{item.description}</p>
-                        </div>
-                      </div>
-                    </div>
-                  ))}
+                <div className="mt-6 overflow-hidden rounded-full bg-blue-100 dark:bg-blue-950 h-2">
+                  <div className="h-full w-1/3 rounded-full bg-gradient-to-r from-blue-500 via-indigo-500 to-cyan-400" style={{ animation: 'guidedWizardProgress 1.25s ease-in-out infinite' }} />
                 </div>
+                <p className="mt-3 text-xs text-gray-500 dark:text-gray-400">
+                  Checking facts, uploaded records, people involved, and policy context before opening the next step.
+                </p>
               </div>
             </div>
+            <style jsx>{`
+              @keyframes guidedWizardProgress {
+                0% { transform: translateX(-120%); }
+                55% { transform: translateX(135%); }
+                100% { transform: translateX(300%); }
+              }
+            `}</style>
           </div>
         )}
 
-        <div className="grid grid-cols-[260px_1fr] min-h-0 flex-1">
-          <div className="border-r border-gray-200 dark:border-gray-700 bg-gradient-to-b from-gray-50 to-white dark:from-gray-900 dark:to-gray-950 p-5">
-            <div className="rounded-2xl border border-blue-100 dark:border-blue-900/60 bg-white dark:bg-gray-900 p-4 shadow-sm">
-              <p className="text-[11px] uppercase tracking-wide text-blue-600 dark:text-blue-300 font-bold">Current focus</p>
-              <h3 className="mt-2 text-base font-bold text-gray-900 dark:text-white">
-                {step === 0 ? 'Start guided intake' : intakePlan?.currentStepTitle || 'Follow-up'}
-              </h3>
-              <p className="mt-2 text-xs text-gray-500 dark:text-gray-400 leading-relaxed">
-                {step === 0
-                  ? 'Choose what you need help with. The wizard will decide what information is needed next.'
-                  : intakePlan?.currentStepPurpose || 'Answer the current questions before moving forward.'}
+        <div className="grid grid-cols-[280px_1fr] min-h-0 flex-1">
+          <div className="border-r border-gray-200 dark:border-gray-700 bg-gradient-to-b from-gray-50 to-white dark:from-gray-900 dark:to-gray-950 p-5 overflow-y-auto">
+	            <div className="rounded-2xl border border-blue-100 dark:border-blue-900/60 bg-white dark:bg-gray-900 p-4 shadow-sm">
+	              <p className="text-[11px] uppercase tracking-wide text-blue-600 dark:text-blue-300 font-bold">Current focus</p>
+	              <h3 className="mt-2 text-base font-bold text-gray-900 dark:text-white">
+	                {guardedWizardStage?.title || WIZARD_FLOW_STEPS[step]?.title || 'Guided review'}
+	              </h3>
+	              <p className="mt-2 text-xs text-gray-500 dark:text-gray-400 leading-relaxed">
+		                {guardedWizardStage?.purpose || WIZARD_FLOW_STEPS[step]?.description || 'Complete the current step before moving forward.'}
               </p>
-              {intakePlan && (
-                <div className="mt-4 space-y-2">
-                  <div className={`inline-flex px-3 py-1 rounded-full text-xs font-semibold ${readinessTone(intakePlan.readinessScore)}`}>
-                    {intakePlan.readinessScore}% · {intakePlan.readinessLabel}
-                  </div>
+	              {displayedWizardReadiness && (
+	                <div className="mt-4 space-y-2">
+	                  <div className={`inline-flex px-3 py-1 rounded-full text-xs font-semibold ${readinessTone(displayedWizardReadiness.score)}`}>
+	                    {displayedWizardReadiness.score}% · {displayedWizardReadiness.label}
+	                  </div>
                   <p className="text-xs text-gray-500 dark:text-gray-400">{answeredDynamicCount} answer{answeredDynamicCount === 1 ? '' : 's'} saved</p>
                   <p className="text-xs text-gray-500 dark:text-gray-400">{activePolicySections.length} active policy section{activePolicySections.length === 1 ? '' : 's'} available</p>
                 </div>
+              )}
+            </div>
+            <div className="mt-4 rounded-2xl border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-900 p-3">
+	              <p className="px-2 text-[11px] uppercase tracking-wide text-gray-500 dark:text-gray-400 font-bold">Wizard progress</p>
+	              <div className="mt-3 space-y-2">
+	                {WIZARD_FLOW_STEPS.map((flowStep, index) => {
+	                  const isCurrent = index === step;
+                    const isCompleted = index < step;
+                    const isAvailable = index <= step || Boolean(stepHistory.find(snapshot => snapshot.step === index));
+	                  return (
+	                    <button
+	                      type="button"
+	                      key={flowStep.stage}
+	                      onClick={() => isAvailable && goToWizardStep(index)}
+                        disabled={!isAvailable}
+	                      className={`w-full rounded-xl px-3 py-2 text-left transition-colors ${
+	                        isCurrent
+	                          ? 'bg-blue-50 dark:bg-blue-950/30 text-blue-700 dark:text-blue-300'
+	                          : isAvailable
+                            ? 'hover:bg-gray-50 dark:hover:bg-gray-800 text-gray-700 dark:text-gray-200'
+                            : 'text-gray-400 dark:text-gray-600 cursor-not-allowed'
+	                      }`}
+	                    >
+	                      <div className="flex items-start justify-between gap-2">
+	                        <span className="text-sm font-semibold leading-snug">{flowStep.title}</span>
+	                        {isCompleted ? <CheckCircle2 className="w-4 h-4 text-green-600 flex-shrink-0 mt-0.5" /> : isCurrent ? <Clock className="w-4 h-4 text-blue-600 flex-shrink-0 mt-0.5" /> : null}
+	                      </div>
+	                      <p className="text-[11px] text-gray-500 dark:text-gray-400 mt-1">
+	                        {flowStep.description}
+	                      </p>
+	                    </button>
+	                  );
+	                })}
+              </div>
+              {step > 0 && (
+                <p className="mt-3 px-2 text-[11px] text-gray-500 dark:text-gray-400 leading-relaxed">
+                  If you change an earlier answer, Continue reviews the updated details before moving forward.
+                </p>
               )}
             </div>
           </div>
@@ -2042,84 +3933,131 @@ function GuidedResolutionWizard({ isOpen, onClose, onCaseCreated, organizationId
 
             {step === 0 ? (
               <div className="space-y-5">
-                <div>
-                  <h3 className="text-lg font-bold text-gray-900 dark:text-white">How can I help guide you today?</h3>
-                  <p className="text-sm text-gray-500 dark:text-gray-400 mt-1">
-                    Pick the closest starting point. After that, the wizard only shows what the guided workflow asks for.
-                  </p>
+                <div className="rounded-3xl border border-blue-100 dark:border-blue-900/60 bg-gradient-to-br from-blue-50 via-white to-indigo-50 dark:from-blue-950/25 dark:via-gray-900 dark:to-indigo-950/20 p-5 shadow-sm">
+                  <div className="flex items-start gap-3">
+                    <div className="w-10 h-10 rounded-2xl bg-blue-600 text-white flex items-center justify-center flex-shrink-0 shadow-lg shadow-blue-600/20">
+                      <MessageSquare className="w-5 h-5" />
+                    </div>
+                    <div>
+                      <h3 className="text-lg font-bold text-gray-900 dark:text-white">Describe what happened</h3>
+                      <p className="text-sm text-gray-600 dark:text-gray-300 mt-1 leading-relaxed">
+                        Start with a clear summary of the situation. Include what happened, who was involved, where it happened, and any immediate action already taken.
+                      </p>
+                    </div>
+                  </div>
                 </div>
-                <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-3">
-                  {WIZARD_ISSUES.map(option => {
+
+                <div className="grid grid-cols-1 xl:grid-cols-[minmax(0,1.4fr)_minmax(320px,0.8fr)] gap-5">
+                  <div className="space-y-3">
+                    <label className="text-xs font-bold uppercase tracking-wide text-gray-600 dark:text-gray-400">Incident description *</label>
+                    <textarea
+                      value={draft.behaviorSummary}
+                      onChange={e => updateDraft('behaviorSummary', e.target.value)}
+                      rows={10}
+                      className={textareaClass}
+                      placeholder="Explain what happened, who was involved if known, where it happened, what was observed or reported, what immediate action was taken, and any safety, food safety, quality, attendance, conduct, performance, warehouse, or HR concern you already know about."
+                    />
+                    <p className="text-xs text-gray-500 dark:text-gray-400">
+                      Use facts and observations. Avoid conclusions unless they are supported by what was seen, reported, or documented.
+                    </p>
+                  </div>
+
+                  <div className="space-y-4">
+                    <div className="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-1 gap-3">
+                      <label className="space-y-1">
+                        <span className="text-xs font-bold uppercase tracking-wide text-gray-600 dark:text-gray-400">Incident date</span>
+                        <DashDatePicker
+                          value={draft.incidentDate}
+                          onChange={value => updateDraft('incidentDate', value)}
+                          ariaLabel="Incident date"
+                          className="min-h-[48px] rounded-xl px-4 py-3"
+                        />
+                      </label>
+                      <label className="space-y-1">
+                        <span className="text-xs font-bold uppercase tracking-wide text-gray-600 dark:text-gray-400">Location or area</span>
+                        <input value={draft.location} onChange={e => updateDraft('location', e.target.value)} className={inputClass} placeholder="e.g., Line 2, warehouse dock, QA lab" />
+                      </label>
+                      <label className="space-y-1">
+                        <span className="text-xs font-bold uppercase tracking-wide text-gray-600 dark:text-gray-400">Department</span>
+                        <select value={draft.department} onChange={e => updateDraft('department', e.target.value)} className={inputClass} title="Department" disabled={dropdownsLoading}>
+                          <option value="">{dropdownsLoading ? 'Loading departments...' : 'Select department'}</option>
+                          {departments.map(dept => (
+                            <option key={dept.id} value={dept.name}>{dept.name}</option>
+                          ))}
+                        </select>
+                      </label>
+                      <label className="space-y-1">
+                        <span className="text-xs font-bold uppercase tracking-wide text-gray-600 dark:text-gray-400">Shift</span>
+                        <select value={draft.shift} onChange={e => updateDraft('shift', e.target.value)} className={inputClass} title="Shift" disabled={shiftsLoading || !draft.department}>
+                          <option value="">{!draft.department ? 'Select department first' : shiftsLoading ? 'Loading shifts...' : 'Select shift'}</option>
+                          {shifts.map(shiftOption => (
+                            <option key={shiftOption.id} value={shiftLabel(shiftOption)}>{shiftLabel(shiftOption)}</option>
+                          ))}
+                        </select>
+                      </label>
+                    </div>
+
+                    <div className="rounded-2xl border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-900 p-4">
+                      <p className="text-xs font-bold uppercase tracking-wide text-gray-600 dark:text-gray-400 mb-3">Optional starting category</p>
+                      <div className="flex flex-wrap gap-2">
+                        {WIZARD_ISSUES.map(option => {
                     const Icon = option.icon;
                     const selected = draft.issueType === option.key;
                     return (
                       <button
                         key={option.key}
                         onClick={() => selectIssueType(option.key)}
-                        className={`text-left rounded-2xl border p-4 transition-all ${
+                              className={`inline-flex items-center gap-2 rounded-full border px-3 py-2 text-xs font-semibold transition-all ${
                           selected
-                            ? 'border-blue-500 bg-blue-50 dark:bg-blue-900/20 shadow-md shadow-blue-600/10'
-                            : 'border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-900 hover:border-blue-300 dark:hover:border-blue-700'
+                                  ? 'border-blue-500 bg-blue-600 text-white shadow-md shadow-blue-600/20'
+                                  : 'border-gray-200 dark:border-gray-700 bg-gray-50 dark:bg-gray-950 text-gray-700 dark:text-gray-300 hover:border-blue-300 dark:hover:border-blue-700'
                         }`}
                       >
-                        <Icon className={`w-5 h-5 mb-3 ${selected ? 'text-blue-600 dark:text-blue-400' : 'text-gray-400'}`} />
-                        <p className="text-sm font-bold text-gray-900 dark:text-white">{option.title}</p>
-                        <p className="text-xs text-gray-500 dark:text-gray-400 mt-1 leading-relaxed">{option.description}</p>
+                              <Icon className="w-3.5 h-3.5" />
+                              {option.title}
                       </button>
                     );
-                  })}
+                        })}
+                      </div>
+                    </div>
+                  </div>
                 </div>
               </div>
-            ) : (
-              <div className="space-y-5">
-                {renderInlineDynamicQuestions(intakePlan?.currentStepTitle || 'Follow-up questions')}
-
-                {currentStepQuestions.length === 0 && intakePlan && (
-                  <div className="rounded-2xl border border-green-200 dark:border-green-800 bg-green-50 dark:bg-green-950/20 p-6 text-center">
+	            ) : (
+	              <div className="space-y-5">
+	                {currentWizardStage === 'readiness'
+                    ? renderWizardReadinessReview()
+                    : renderInlineDynamicQuestions(guardedWizardStage?.title || intakePlan?.currentStepTitle || 'Follow-up questions')}
+		                {currentWizardStage !== 'readiness' && currentStepQuestions.length === 0 && intakePlan && (
+	                  <div className="rounded-2xl border border-green-200 dark:border-green-800 bg-green-50 dark:bg-green-950/20 p-6 text-center">
                     <CheckCircle2 className="w-10 h-10 text-green-600 mx-auto mb-3" />
                     <p className="text-sm font-semibold text-gray-900 dark:text-white">No additional questions right now</p>
                     <p className="text-sm text-gray-600 dark:text-gray-300 mt-1">
-                      Generate guidance when you are ready, or continue if you want the wizard to check for another gap.
+                      Continue to let the wizard review the latest responses and decide whether another step is needed.
                     </p>
                   </div>
                 )}
-
-                {plan && (
-                  <div className="space-y-4">
-                    <div className="rounded-2xl border border-gray-200 dark:border-gray-700 bg-gray-50 dark:bg-gray-900 p-5">
-                      <div className="flex items-center justify-between gap-3 mb-3">
-                        <p className="text-sm font-bold text-gray-900 dark:text-white">Guidance</p>
-                        <span className={`px-3 py-1 rounded-full text-xs font-semibold ${plan.hrReviewRequired ? 'bg-red-100 text-red-700 dark:bg-red-900/30 dark:text-red-300' : 'bg-green-100 text-green-700 dark:bg-green-900/30 dark:text-green-300'}`}>
-                          {plan.hrReviewRequired ? 'HR Review Required' : 'Supervisor Review Ready'}
-                        </span>
-                      </div>
-                      <p className="text-sm text-gray-700 dark:text-gray-300 leading-relaxed">{plan.executiveSummary}</p>
-                      <p className="text-sm text-gray-600 dark:text-gray-400 mt-3">{plan.hrReviewReason}</p>
-                    </div>
-                    <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
-                      <WizardList title="Missing information" items={plan.missingInformation} icon={AlertTriangle} />
-                      <WizardList title="Supervisor checklist" items={plan.supervisorChecklist} icon={CheckCircle2} />
-                      <WizardList title="Conversation questions" items={plan.employeeConversationQuestions} icon={MessageSquare} />
-                      <WizardList title="Audit notes" items={plan.auditNotes} icon={FileText} />
-                    </div>
-                  </div>
-                )}
-              </div>
-            )}
+	              </div>
+	            )}
           </div>
         </div>
 
         <div className="px-7 py-4 border-t border-gray-200 dark:border-gray-700 bg-gray-50 dark:bg-gray-900/60 flex items-center justify-between gap-3">
           <button onClick={resetWizard} className="text-sm text-gray-500 dark:text-gray-400 hover:text-red-600 dark:hover:text-red-400">Reset wizard</button>
           <div className="flex items-center gap-3">
-            {step > 0 && !plan && (
-              <button onClick={generateGuidance} disabled={!canGenerate || generating || intakeLoading} className="px-4 py-2.5 rounded-xl text-sm font-semibold border border-blue-200 dark:border-blue-800 text-blue-700 dark:text-blue-300 hover:bg-blue-50 dark:hover:bg-blue-900/20 disabled:opacity-50 flex items-center gap-2">
-                {generating ? <Loader2 className="w-4 h-4 animate-spin" /> : <Sparkles className="w-4 h-4" />}
-                Generate guidance
+            {step > 0 && (
+              <button
+                type="button"
+                onClick={() => goToWizardStep(step - 1)}
+                disabled={intakeLoading || generating || creatingCase}
+                className="px-4 py-2.5 rounded-xl text-sm font-semibold border border-gray-200 dark:border-gray-700 text-gray-700 dark:text-gray-200 bg-white dark:bg-gray-900 hover:bg-gray-50 dark:hover:bg-gray-800 disabled:opacity-50 disabled:cursor-not-allowed flex items-center gap-2"
+              >
+                <ArrowLeft className="w-4 h-4" />
+                Back
               </button>
             )}
-	            {!plan ? (
-	              <button onClick={continueWizard} disabled={intakeLoading} className="px-5 py-2.5 rounded-xl text-sm font-semibold text-white bg-blue-600 hover:bg-blue-700 disabled:opacity-60 disabled:cursor-wait flex items-center gap-2">
+	            {currentWizardStage !== 'readiness' ? (
+		              <button onClick={continueWizard} disabled={intakeLoading} className="px-5 py-2.5 rounded-xl text-sm font-semibold text-white bg-blue-600 hover:bg-blue-700 disabled:opacity-60 disabled:cursor-wait flex items-center gap-2">
                 {intakeLoading ? (
                   <>
                     <Loader2 className="w-4 h-4 animate-spin" />
@@ -2131,13 +4069,13 @@ function GuidedResolutionWizard({ isOpen, onClose, onCaseCreated, organizationId
                     <ChevronRight className="w-4 h-4" />
                   </>
                 )}
-              </button>
-            ) : (
-              <button onClick={createCaseFromWizard} disabled={creatingCase || !canGenerate} className="px-5 py-2.5 rounded-xl text-sm font-semibold text-white bg-green-600 hover:bg-green-700 disabled:opacity-50 flex items-center gap-2">
-                {creatingCase ? <Loader2 className="w-4 h-4 animate-spin" /> : <Plus className="w-4 h-4" />}
-                Create Case From Wizard
-              </button>
-            )}
+	              </button>
+		            ) : (
+		              <button onClick={createCaseFromWizard} disabled={creatingCase || !canGenerate} className={`px-5 py-2.5 rounded-xl text-sm font-semibold text-white disabled:opacity-50 flex items-center gap-2 ${evidenceQualityReview.score < 50 ? 'bg-amber-600 hover:bg-amber-700' : 'bg-green-600 hover:bg-green-700'}`}>
+		                {creatingCase ? <Loader2 className="w-4 h-4 animate-spin" /> : <Plus className="w-4 h-4" />}
+		                {evidenceQualityReview.score < 50 ? 'Create Case Anyway' : 'Create Case'}
+		              </button>
+		            )}
           </div>
         </div>
         {!wizardMaximized && (
@@ -2336,11 +4274,10 @@ function CreatePolicyModal({ isOpen, onClose, onCreated, organizationId, userId 
 // ────────────────────────────────────────────────────────────────────────────────
 // CASES TAB
 // ────────────────────────────────────────────────────────────────────────────────
-function CasesTab({ cases, loading, onRefresh, onCreateCase, onOpenGuidedWizard, onDeleteCase }: {
+function CasesTab({ cases, loading, onRefresh, onOpenGuidedWizard, onDeleteCase }: {
   cases: ConflictCase[];
   loading: boolean;
   onRefresh: () => void;
-  onCreateCase: () => void;
   onOpenGuidedWizard: () => void;
   onDeleteCase: (id: string, caseNumber: string) => void;
 }) {
@@ -2401,9 +4338,9 @@ function CasesTab({ cases, loading, onRefresh, onCreateCase, onOpenGuidedWizard,
               <Sparkles className="w-5 h-5 text-white" />
             </div>
             <div>
-              <h3 className="text-base font-bold text-gray-900 dark:text-white">Guided Resolution</h3>
+              <h3 className="text-base font-bold text-gray-900 dark:text-white">Guided Case Wizard</h3>
               <p className="text-sm text-gray-600 dark:text-gray-300 mt-1 max-w-3xl">
-                Start a structured wizard to gather facts, identify missing information, flag HR-sensitive risk, and prepare a supervisor-reviewable action plan.
+                Start every new case through the wizard. Saved cases remain here for review, HR reports, counseling guides, and audit history.
               </p>
             </div>
           </div>
@@ -2472,16 +4409,10 @@ function CasesTab({ cases, loading, onRefresh, onCreateCase, onOpenGuidedWizard,
           <RefreshCw className={`w-4 h-4 text-gray-500 ${loading ? 'animate-spin' : ''}`} />
         </button>
         <button
-          onClick={onCreateCase}
+          onClick={onOpenGuidedWizard}
           className="ml-auto px-5 py-2.5 rounded-xl text-sm font-semibold text-white bg-blue-600 hover:bg-blue-700 transition-colors flex items-center gap-2 shadow-lg shadow-blue-600/25"
         >
-          <Plus className="w-4 h-4" /> New Case
-        </button>
-        <button
-          onClick={onOpenGuidedWizard}
-          className="px-5 py-2.5 rounded-xl text-sm font-semibold text-white bg-indigo-600 hover:bg-indigo-700 transition-colors flex items-center gap-2 shadow-lg shadow-indigo-600/20"
-        >
-          <Sparkles className="w-4 h-4" /> Guided Wizard
+          <Sparkles className="w-4 h-4" /> Start New Case
         </button>
       </div>
 
@@ -2498,14 +4429,9 @@ function CasesTab({ cases, loading, onRefresh, onCreateCase, onOpenGuidedWizard,
             {cases.length === 0 ? 'Create your first case to get started' : 'Try adjusting your filters'}
           </p>
           {cases.length === 0 && (
-            <div className="mt-4 flex items-center gap-3">
-              <button onClick={onOpenGuidedWizard} className="px-6 py-2.5 rounded-xl text-sm font-semibold text-white bg-indigo-600 hover:bg-indigo-700 transition-colors inline-flex items-center gap-2">
-                <Sparkles className="w-4 h-4" /> Start Guided Wizard
-              </button>
-              <button onClick={onCreateCase} className="px-6 py-2.5 rounded-xl text-sm font-semibold text-white bg-blue-600 hover:bg-blue-700 transition-colors inline-flex items-center gap-2">
-                <Plus className="w-4 h-4" /> Create Case
-              </button>
-            </div>
+            <button onClick={onOpenGuidedWizard} className="mt-4 px-6 py-2.5 rounded-xl text-sm font-semibold text-white bg-blue-600 hover:bg-blue-700 transition-colors inline-flex items-center gap-2">
+              <Sparkles className="w-4 h-4" /> Start New Case
+            </button>
           )}
         </div>
       ) : (
@@ -3227,7 +5153,6 @@ function HRPageContent() {
   const [analyticsLoading, setAnalyticsLoading] = useState(false);
 
   // Modals
-  const [showCreateCase, setShowCreateCase] = useState(false);
   const [showGuidedWizard, setShowGuidedWizard] = useState(false);
   const [showCreatePolicy, setShowCreatePolicy] = useState(false);
 
@@ -3355,7 +5280,6 @@ function HRPageContent() {
 	            cases={cases}
 	            loading={casesLoading}
 	            onRefresh={loadCases}
-	            onCreateCase={() => setShowCreateCase(true)}
 	            onOpenGuidedWizard={() => setShowGuidedWizard(true)}
 	            onDeleteCase={async (id, caseNumber) => {
 	              if (!confirm(`Delete case ${caseNumber}? This action cannot be undone.`)) return;
@@ -3396,16 +5320,6 @@ function HRPageContent() {
       </div>
 
       {/* Modals */}
-      <CreateCaseModal
-        isOpen={showCreateCase}
-	        onClose={() => setShowCreateCase(false)}
-	        onCreated={(c) => {
-	          setCases(prev => [c, ...prev]);
-	          router.push(`/hr/case/${c.id}`);
-        }}
-        organizationId={orgId}
-        userId={user?.id || ''}
-      />
       <GuidedResolutionWizard
         isOpen={showGuidedWizard}
         onClose={() => setShowGuidedWizard(false)}

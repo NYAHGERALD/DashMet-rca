@@ -1,6 +1,7 @@
 import { Router, Request, Response } from 'express';
 import OpenAI from 'openai';
 import { sanitizeForPrompt, sanitizeForSystemPrompt, wrapUserContent, detectPromptInjection } from '../utils/promptSanitizer';
+import { buildGuidedResolutionContext, type GuidedResolutionContext } from '../services/guidedResolutionPlaybooks';
 
 const router = Router();
 
@@ -149,6 +150,35 @@ interface GuidedActionPlanRequest {
 type GuidedIntakeAnswerType = 'text' | 'textarea' | 'select' | 'date' | 'person' | 'document' | 'yes_no';
 type GuidedIntakeStep = 'issue' | 'facts' | 'people' | 'documents' | 'risk' | 'guidance' | 'all';
 
+interface GuidedIntakeAnswerFeedback {
+  question?: string;
+  answer?: string;
+  issue: string;
+  reason: string;
+  suggestedAction: string;
+  severity?: 'info' | 'needs_clarification' | 'high_risk';
+}
+
+type GuidedIntakeQualityStatus = 'strong' | 'partial' | 'weak' | 'missing';
+
+interface GuidedIntakeInformationAccount {
+  area: string;
+  status: GuidedIntakeQualityStatus;
+  detail: string;
+  source?: string;
+  recommendedImprovement?: string;
+}
+
+interface GuidedIntakeResponseQualityFinding {
+  question?: string;
+  area: string;
+  score: number;
+  status: GuidedIntakeQualityStatus;
+  finding: string;
+  improvement?: string;
+  source?: string;
+}
+
 interface GuidedIntakeQuestionRequest {
   caseDetails: GuidedActionPlanRequest['caseDetails'];
   issueType?: string;
@@ -165,6 +195,10 @@ interface GuidedIntakeQuestionRequest {
   documents?: Array<{
     title?: string;
     type?: string;
+    personName?: string;
+    personInvolvement?: string;
+    personRole?: string;
+    personDepartment?: string;
     content?: string;
     summary?: string;
     createdFrom?: string;
@@ -186,12 +220,6 @@ const GUIDED_RISK_LABELS: Record<GuidedRiskKey, string> = {
   wage_hour_or_leave: 'Wage, hour, leave, or schedule-protection concern',
   none: 'No sensitive risk flag selected'
 };
-
-function clampInt(value: any, min: number, max: number, fallback: number) {
-  const parsed = Number(value);
-  if (!Number.isFinite(parsed)) return fallback;
-  return Math.max(min, Math.min(max, Math.round(parsed)));
-}
 
 function normalizeGuidedStep(value: any): GuidedIntakeStep {
   return GUIDED_INTAKE_STEPS.includes(value) ? value : 'all';
@@ -244,6 +272,561 @@ function isNearDuplicateQuestion(questionKey: string, existingKeys: string[]): b
     const longer = existing.length < questionKey.length ? questionKey : existing;
     return shorter.length >= 28 && longer.includes(shorter);
   });
+}
+
+function normalizeFeedbackText(value: string): string {
+  return (value || '').replace(/\s+/g, ' ').trim();
+}
+
+function answerLooksLikeAcknowledgement(question: string): boolean {
+  return /response clarification acknowledged|continue with current response|supervisor chose to continue/i.test(question || '');
+}
+
+function buildDeterministicAnswerFeedback(answers: Array<{ question: string; answer: string }>): GuidedIntakeAnswerFeedback[] {
+  const feedback: GuidedIntakeAnswerFeedback[] = [];
+  const acknowledged = answers
+    .filter(item => answerLooksLikeAcknowledgement(item.question) || answerLooksLikeAcknowledgement(item.answer))
+    .map(item => `${item.question} ${item.answer}`.toLowerCase());
+
+  answers.forEach(item => {
+    if (answerLooksLikeAcknowledgement(item.question)) return;
+    const question = normalizeFeedbackText(item.question);
+    const answer = normalizeFeedbackText(item.answer);
+    if (!question || !answer) return;
+
+    const combinedKey = `${question} ${answer}`.toLowerCase();
+    if (acknowledged.some(note => note.includes(question.slice(0, 80).toLowerCase()))) return;
+
+    const questionNeedsNarrative = /\b(describe|explain|summarize|provide details|what happened|employee response|employee statement|witness statement|complaint|why|how|timeline|sequence|specific|detail)\b/i.test(question);
+    const documentOrStatementQuestion = /\b(statement|written|complaint|response|witness report|employee report|handwritten|signed|documentation|document|upload|attach)\b/i.test(question);
+    const weakPlaceholder = /^(n\/?a|none|no|yes|ok|okay|unknown|not sure|idk|i don't know|don't know|maybe|pending|tbd|same)$/i.test(answer);
+    const wordCount = answer.split(/\s+/).filter(Boolean).length;
+
+    if (questionNeedsNarrative && (answer.length < 24 || wordCount < 5 || weakPlaceholder)) {
+      feedback.push({
+        question,
+        answer,
+        issue: 'Response needs clarification',
+        reason: 'The response does not yet give enough specific facts for a fair HR review.',
+        suggestedAction: 'Add the specific facts known right now, or state exactly what is unknown and who will provide the missing information.',
+        severity: 'needs_clarification'
+      });
+      return;
+    }
+
+    if (documentOrStatementQuestion && weakPlaceholder) {
+      feedback.push({
+        question,
+        answer,
+        issue: 'Written record status is unclear',
+        reason: 'The answer does not clearly say whether the employee-provided record exists, was requested, was refused, or is not applicable.',
+        suggestedAction: 'Clarify the status and upload or transcribe the employee-provided record if it exists.',
+        severity: 'needs_clarification'
+      });
+    }
+
+    if (!questionNeedsNarrative && answer.length < 3) {
+      feedback.push({
+        question,
+        answer,
+        issue: 'Answer is too limited',
+        reason: 'The answer is too short to show what was confirmed.',
+        suggestedAction: 'Add a brief confirmation or select Unknown / needs review if the information is not available.',
+        severity: 'needs_clarification'
+      });
+    }
+  });
+
+  return feedback.slice(0, 6);
+}
+
+function normalizeAnswerFeedback(items: any[]): GuidedIntakeAnswerFeedback[] {
+  if (!Array.isArray(items)) return [];
+  return items.slice(0, 8).map(item => ({
+    question: item?.question ? String(item.question).slice(0, 500) : undefined,
+    answer: item?.answer ? String(item.answer).slice(0, 700) : undefined,
+    issue: String(item?.issue || 'Response needs clarification').slice(0, 120),
+    reason: String(item?.reason || 'The response should be clarified before relying on it.').slice(0, 700),
+    suggestedAction: String(item?.suggestedAction || 'Update the response with specific facts, or choose to continue with the current response if appropriate.').slice(0, 700),
+    severity: ['info', 'needs_clarification', 'high_risk'].includes(item?.severity) ? item.severity : 'needs_clarification'
+  }));
+}
+
+function guidedReadinessLabel(score: number): string {
+  if (score >= 100) return 'Ready for supervisor decision';
+  if (score >= 85) return 'Supervisor-ready with HR check';
+  if (score >= 65) return 'HR review likely';
+  if (score >= 35) return 'Needs facts';
+  return 'Not ready';
+}
+
+function buildGuidedReadiness(
+  context: GuidedResolutionContext,
+  answerFeedback: GuidedIntakeAnswerFeedback[] = []
+): { readinessScore: number; readinessLabel: string } {
+  const requiredSlots = context.requiredInformationSlots.filter(slot => slot.required);
+  if (!requiredSlots.length) {
+    return { readinessScore: 100, readinessLabel: guidedReadinessLabel(100) };
+  }
+
+  const completedCount = requiredSlots.filter(slot => slot.completed).length;
+  const rawScore = Math.round((completedCount / requiredSlots.length) * 100);
+  const feedbackPenalty = answerFeedback.filter(item => item.severity !== 'info').length;
+  const readinessScore = feedbackPenalty ? Math.min(rawScore, Math.max(0, rawScore - feedbackPenalty * 4)) : rawScore;
+
+  return {
+    readinessScore,
+    readinessLabel: guidedReadinessLabel(readinessScore)
+  };
+}
+
+function guidedQualityLabel(score: number): string {
+  if (score >= 90) return 'Strong response package';
+  if (score >= 75) return 'Solid with review notes';
+  if (score >= 50) return 'Usable but needs improvement';
+  return 'Weak - improve before relying on it';
+}
+
+function clampGuidedScore(value: unknown, fallback = 0): number {
+  const numeric = Number(value);
+  if (!Number.isFinite(numeric)) return Math.max(0, Math.min(100, Math.round(fallback)));
+  return Math.max(0, Math.min(100, Math.round(numeric)));
+}
+
+function normalizeQualityStatus(value: unknown, fallback: GuidedIntakeQualityStatus = 'partial'): GuidedIntakeQualityStatus {
+  return ['strong', 'partial', 'weak', 'missing'].includes(String(value)) ? String(value) as GuidedIntakeQualityStatus : fallback;
+}
+
+function normalizeInformationAccounting(items: any[], fallback: GuidedIntakeInformationAccount[]): GuidedIntakeInformationAccount[] {
+  if (!Array.isArray(items) || !items.length) return fallback;
+  return items.slice(0, 8).map(item => ({
+    area: String(item?.area || 'Review area').slice(0, 120),
+    status: normalizeQualityStatus(item?.status),
+    detail: String(item?.detail || 'Review this area before relying on the case file.').slice(0, 900),
+    source: item?.source ? String(item.source).slice(0, 180) : undefined,
+    recommendedImprovement: item?.recommendedImprovement ? String(item.recommendedImprovement).slice(0, 700) : undefined
+  }));
+}
+
+function normalizeResponseQualityFindings(items: any[], fallback: GuidedIntakeResponseQualityFinding[]): GuidedIntakeResponseQualityFinding[] {
+  if (!Array.isArray(items) || !items.length) return fallback;
+  return items.slice(0, 10).map(item => ({
+    question: item?.question ? String(item.question).slice(0, 500) : undefined,
+    area: String(item?.area || 'Response quality').slice(0, 120),
+    score: clampGuidedScore(item?.score, 50),
+    status: normalizeQualityStatus(item?.status),
+    finding: String(item?.finding || 'The response should be reviewed for completeness.').slice(0, 900),
+    improvement: item?.improvement ? String(item.improvement).slice(0, 700) : undefined,
+    source: item?.source ? String(item.source).slice(0, 180) : undefined
+  }));
+}
+
+function normalizeStringList(items: any[], fallback: string[], limit = 8): string[] {
+  const source = Array.isArray(items) && items.length ? items : fallback;
+  return Array.from(new Set(source.map(item => String(item || '').trim()).filter(Boolean))).slice(0, limit);
+}
+
+function normalizeEvidenceText(value?: string | null): string {
+  return String(value || '').replace(/\s+/g, ' ').trim().toLowerCase();
+}
+
+function personNameCue(person: any): string {
+  return normalizeEvidenceText(person?.name);
+}
+
+function narrativeSuggestsPersonIsSubject(person: any, narrative: string): boolean {
+  const name = personNameCue(person);
+  const text = normalizeEvidenceText(narrative);
+  if (!name || !text) return false;
+  return [
+    `reported that ${name}`,
+    `${name} made`,
+    `${name} allegedly`,
+    `${name}'s behavior`,
+    `${name}’s behavior`,
+    `${name} behaved`,
+    `${name} said`,
+    `behavior of ${name}`,
+    `conduct of ${name}`,
+    `complaint against ${name}`,
+    `concern about ${name}`,
+    `allegation against ${name}`
+  ].some(cue => text.includes(cue));
+}
+
+function narrativeSuggestsPersonIsReporter(person: any, narrative: string): boolean {
+  const name = personNameCue(person);
+  const text = normalizeEvidenceText(narrative);
+  if (!name || !text) return false;
+  return [
+    `${name} reported`,
+    `${name} complained`,
+    `${name} raised`,
+    `${name} notified`,
+    `reported by ${name}`,
+    `complaint from ${name}`
+  ].some(cue => text.includes(cue));
+}
+
+function requiredRecordTypeForPerson(person: any): string {
+  const involvement = normalizeEvidenceText(person?.involvement);
+  if (involvement === 'witness') return 'witness_statement';
+  if (involvement === 'subject' || involvement === 'employee') return 'employee_response';
+  if (involvement === 'complainant' || involvement === 'affected_party') return 'complaint';
+  return '';
+}
+
+function documentBelongsToPerson(doc: any, person: any): boolean {
+  const docPerson = normalizeEvidenceText(doc?.personName);
+  const personName = personNameCue(person);
+  return Boolean(docPerson && personName && docPerson === personName);
+}
+
+function documentMatchesPersonRequirement(doc: any, person: any): boolean {
+  if (!documentBelongsToPerson(doc, person)) return false;
+  const requiredType = requiredRecordTypeForPerson(person);
+  const docType = normalizeEvidenceText(doc?.type);
+  if (requiredType === 'complaint') return docType === 'complaint' || docType === 'witness_statement';
+  return Boolean(requiredType && docType === requiredType);
+}
+
+function buildDeterministicEvidenceFindings(
+  context: GuidedResolutionContext,
+  people: any[],
+  documents: any[],
+  behaviorSummary = ''
+): GuidedIntakeResponseQualityFinding[] {
+  const findings: GuidedIntakeResponseQualityFinding[] = [];
+  const narrative = behaviorSummary;
+  const sourceAnswerCount = context.sourceBackedAnswers.length;
+  const allegationOrConductReview = people.length > 0 && /\b(complaint|reported that|alleged|harass|assault|threat|behavior|conduct|comment|retaliat|discriminat|hostile|warning|counsel)\b/.test(normalizeEvidenceText(narrative));
+
+  const addFinding = (
+    area: string,
+    finding: string,
+    improvement: string,
+    status: GuidedIntakeQualityStatus = 'weak',
+    score = status === 'missing' ? 15 : status === 'weak' ? 30 : 55,
+    source?: string
+  ) => findings.push({ area, finding, improvement, status, score, source });
+
+  if (documents.length > 0 && sourceAnswerCount === 0) {
+    addFinding(
+      'Employee-provided records',
+      'Records were added, but no source-backed answers were extracted for the structured review questions.',
+      'Review the transcription quality, link each record to the correct person, and add clearer text where the record answers a review question.',
+      'weak',
+      25
+    );
+  }
+
+  documents
+    .filter(doc => ['complaint', 'witness_statement', 'employee_response'].includes(normalizeEvidenceText(doc?.type)) && !normalizeEvidenceText(doc?.personName))
+    .forEach(doc => {
+      addFinding(
+        'Record ownership',
+        `${doc.title || doc.type || 'A record'} is not linked to the employee who provided it.`,
+        'Select the employee who provided this complaint, witness statement, or response so the wizard can use it correctly.',
+        'weak',
+        30,
+        doc.title || doc.type
+      );
+    });
+
+  people.forEach(person => {
+    const involvement = normalizeEvidenceText(person?.involvement);
+    if (narrativeSuggestsPersonIsSubject(person, narrative) && !['subject', 'employee'].includes(involvement)) {
+      addFinding(
+        'People and roles',
+        `${person.name} appears in the description as the person whose conduct may need review, but is marked as ${person.involvement || 'another role'}.`,
+        'Review the role assignment before relying on the file, because the role controls which statements and HR review steps are required.',
+        'weak',
+        30,
+        person.name
+      );
+    }
+    if (narrativeSuggestsPersonIsReporter(person, narrative) && involvement === 'subject') {
+      addFinding(
+        'People and roles',
+        `${person.name} appears to be a reporting party in the description, but is marked as subject of concern.`,
+        'Review and correct the person role if the description identifies this person as the complainant or affected employee.',
+        'weak',
+        35,
+        person.name
+      );
+    }
+
+    const requiredType = requiredRecordTypeForPerson(person);
+    if (requiredType && !documents.some(doc => documentMatchesPersonRequirement(doc, person))) {
+      addFinding(
+        'Missing employee-provided record',
+        `${person.name} does not have a linked ${requiredType.replace(/_/g, ' ')} in the records provided to the wizard.`,
+        'Collect the original handwritten record if it exists, or document why it is not available before relying on the case file.',
+        'partial',
+        55,
+        person.name
+      );
+    }
+  });
+
+  const hasSubjectOfConcern = people.some(person => ['subject', 'employee'].includes(normalizeEvidenceText(person?.involvement)));
+  if (allegationOrConductReview && !hasSubjectOfConcern) {
+    addFinding(
+      'People and roles',
+      'No subject of concern or responding employee is identified, even though the description appears to involve reported conduct or a workplace complaint.',
+      'Add the employee whose conduct or response is being reviewed, or document why there is no subject of concern for this matter.',
+      'missing',
+      20
+    );
+  }
+
+  const hasReportingOrAffectedParty = people.some(person => ['complainant', 'affected_party'].includes(normalizeEvidenceText(person?.involvement)));
+  if (allegationOrConductReview && !hasReportingOrAffectedParty) {
+    addFinding(
+      'People and roles',
+      'No reporting party, complainant, or affected employee is identified for this review.',
+      'Add the person who reported the concern or the employee directly affected by the situation.',
+      'missing',
+      25
+    );
+  }
+
+  return findings.slice(0, 12);
+}
+
+function buildGuidedEvidenceQuality(
+  context: GuidedResolutionContext,
+  answerFeedback: GuidedIntakeAnswerFeedback[],
+  readinessScore: number,
+  parsed: any,
+  peopleCount: number,
+  documentCount: number,
+  people: any[] = [],
+  documents: any[] = [],
+  behaviorSummary = ''
+) {
+  const requiredSlots = context.requiredInformationSlots.filter(slot => slot.required);
+  const missingRequiredSlots = requiredSlots.filter(slot => !slot.completed);
+  const sourceAnswerCount = context.sourceBackedAnswers.length;
+  const nonInfoFeedback = answerFeedback.filter(item => item.severity !== 'info');
+  const highRiskFeedback = answerFeedback.filter(item => item.severity === 'high_risk');
+  const deterministicFindings = buildDeterministicEvidenceFindings(context, people, documents, behaviorSummary);
+  const blockingFindings = deterministicFindings.filter(item => item.status === 'weak' || item.status === 'missing');
+
+  let deterministicCap = 100;
+  if (peopleCount === 0) deterministicCap = Math.min(deterministicCap, 35);
+  if (documentCount === 0 && context.documentationPlan.some(doc => doc.required)) deterministicCap = Math.min(deterministicCap, 60);
+  if (sourceAnswerCount === 0 && documentCount > 0) deterministicCap = Math.min(deterministicCap, 35);
+  if (missingRequiredSlots.length > 0) deterministicCap = Math.min(deterministicCap, Math.max(25, 88 - missingRequiredSlots.length * 7));
+  if (nonInfoFeedback.length > 0) deterministicCap = Math.min(deterministicCap, Math.max(20, 76 - nonInfoFeedback.length * 8));
+  if (highRiskFeedback.length > 0) deterministicCap = Math.min(deterministicCap, 55);
+  if (blockingFindings.length > 0) deterministicCap = Math.min(deterministicCap, Math.max(18, 72 - blockingFindings.length * 10));
+
+  const aiResponseScore = parsed && Object.prototype.hasOwnProperty.call(parsed, 'responseStrengthScore')
+    ? clampGuidedScore(parsed.responseStrengthScore, readinessScore)
+    : readinessScore;
+  const aiAlignmentScore = parsed && Object.prototype.hasOwnProperty.call(parsed, 'alignmentScore')
+    ? clampGuidedScore(parsed.alignmentScore, aiResponseScore)
+    : aiResponseScore;
+  const responseStrengthScore = Math.min(aiResponseScore, aiAlignmentScore, deterministicCap);
+  const responseStrengthLabel = String(deterministicCap < 75 ? guidedQualityLabel(responseStrengthScore) : parsed?.responseStrengthLabel || guidedQualityLabel(responseStrengthScore)).slice(0, 120);
+
+  const fallbackAccounting: GuidedIntakeInformationAccount[] = [
+    {
+      area: 'People and roles',
+      status: peopleCount > 0
+        ? deterministicFindings.some(item => item.area === 'People and roles' && (item.status === 'weak' || item.status === 'missing'))
+          ? 'weak'
+          : deterministicFindings.some(item => item.area === 'People and roles')
+            ? 'partial'
+            : 'strong'
+        : 'missing',
+      detail: peopleCount > 0
+        ? `${peopleCount} involved person${peopleCount === 1 ? '' : 's'} identified for the review.`
+        : 'No involved people have been identified yet.',
+      recommendedImprovement: deterministicFindings.find(item => item.area === 'People and roles')?.improvement ||
+        (peopleCount > 0 ? undefined : 'Add the reporting party, subject of concern, affected employee, witnesses, supervisor, HR partner, or other involved people.')
+    },
+    {
+      area: 'Employee-provided records',
+      status: documentCount > 0 ? (sourceAnswerCount > 0 ? 'strong' : 'weak') : 'missing',
+      detail: documentCount > 0
+        ? `${documentCount} record${documentCount === 1 ? '' : 's'} added; ${sourceAnswerCount} source-backed answer${sourceAnswerCount === 1 ? '' : 's'} identified for supervisor review.`
+        : 'No complaint, witness statement, employee response, or supporting record has been added yet.',
+      recommendedImprovement: deterministicFindings.find(item => item.area === 'Employee-provided records')?.improvement ||
+        (documentCount > 0 ? undefined : 'Upload or transcribe the original handwritten complaint, witness statements, employee response, and supporting records when they exist.')
+    },
+    {
+      area: 'Required facts',
+      status: missingRequiredSlots.length === 0 ? 'strong' : missingRequiredSlots.length <= 2 ? 'partial' : 'weak',
+      detail: missingRequiredSlots.length === 0
+        ? 'The structured playbook does not show open required fact slots.'
+        : `${missingRequiredSlots.length} required review item${missingRequiredSlots.length === 1 ? '' : 's'} still need a documented answer, source record, or HR-review status.`,
+      recommendedImprovement: missingRequiredSlots.length === 0 ? undefined : missingRequiredSlots.slice(0, 3).map(slot => slot.label).join('; ')
+    },
+    {
+      area: 'Response alignment',
+      status: (nonInfoFeedback.length + blockingFindings.length) === 0 ? 'strong' : (nonInfoFeedback.length + blockingFindings.length) <= 2 ? 'partial' : 'weak',
+      detail: (nonInfoFeedback.length + blockingFindings.length) === 0
+        ? 'Responses, roles, and linked source records currently align with the review structure.'
+        : `${nonInfoFeedback.length + blockingFindings.length} response, role, or source-record issue${nonInfoFeedback.length + blockingFindings.length === 1 ? '' : 's'} may weaken the case review if not corrected.`,
+      recommendedImprovement: nonInfoFeedback[0]?.suggestedAction || deterministicFindings.find(item => ['People and roles', 'Record ownership', 'Missing employee-provided record'].includes(item.area))?.improvement
+    }
+  ];
+
+  const fallbackFindings: GuidedIntakeResponseQualityFinding[] = nonInfoFeedback.map(item => {
+    const status: GuidedIntakeQualityStatus = item.severity === 'high_risk' ? 'weak' : 'partial';
+    return {
+      question: item.question,
+      area: item.issue || 'Response quality',
+      score: item.severity === 'high_risk' ? 30 : 55,
+      status,
+      finding: item.reason,
+      improvement: item.suggestedAction
+    };
+  }).slice(0, 8);
+
+  const fallbackStrengths = [
+    peopleCount > 0 && !deterministicFindings.some(item => item.area === 'People and roles') ? 'Involved people have been identified for the review with no obvious role conflict.' : '',
+    documentCount > 0 && sourceAnswerCount > 0 ? 'Employee-provided records or supporting notes have been added and source-backed answers were found.' : '',
+    sourceAnswerCount > 0 ? 'Some answers were found in uploaded or typed records and can be reviewed before relying on them.' : '',
+    missingRequiredSlots.length === 0 ? 'Required structured playbook items are documented or source-backed.' : ''
+  ].filter(Boolean);
+
+  const fallbackWeaknesses = [
+    peopleCount === 0 ? 'No involved people are listed yet.' : '',
+    documentCount === 0 ? 'No original complaint, witness statement, employee response, or supporting record is attached or transcribed yet.' : '',
+    ...missingRequiredSlots.slice(0, 5).map(slot => slot.label),
+    ...deterministicFindings.slice(0, 5).map(item => item.finding),
+    ...nonInfoFeedback.slice(0, 5).map(item => item.issue || item.reason)
+  ].filter(Boolean);
+  const deterministicAssessment = deterministicFindings.length
+    ? `The current review has ${deterministicFindings.length} source, role, or statement issue${deterministicFindings.length === 1 ? '' : 's'} that should be corrected or reviewed before relying on the case file. ${deterministicFindings[0].finding}`
+    : '';
+  const normalizedAccounting = normalizeInformationAccounting(parsed?.informationAccounting, fallbackAccounting);
+  const qualityRank: Record<GuidedIntakeQualityStatus, number> = {
+    strong: 0,
+    partial: 1,
+    weak: 2,
+    missing: 3
+  };
+  const accountingByArea = new Map(
+    normalizedAccounting.map(item => [normalizeEvidenceText(item.area), item])
+  );
+  const mergedAccounting = [
+    ...fallbackAccounting.map(fallback => {
+      const parsedItem = accountingByArea.get(normalizeEvidenceText(fallback.area));
+      if (!parsedItem) return fallback;
+      if (qualityRank[fallback.status] > qualityRank[parsedItem.status]) {
+        return {
+          ...parsedItem,
+          status: fallback.status,
+          detail: fallback.detail,
+          recommendedImprovement: fallback.recommendedImprovement || parsedItem.recommendedImprovement
+        };
+      }
+      return parsedItem;
+    }),
+    ...normalizedAccounting.filter(item => !fallbackAccounting.some(fallback => normalizeEvidenceText(fallback.area) === normalizeEvidenceText(item.area)))
+  ].slice(0, 8);
+
+  return {
+    responseStrengthScore,
+    alignmentScore: Math.min(aiAlignmentScore, deterministicCap),
+    responseStrengthLabel,
+    caseStrengthAssessment: String(
+      (responseStrengthScore < 75 && deterministicAssessment) ||
+      parsed?.caseStrengthAssessment ||
+      (responseStrengthScore >= 75
+        ? 'The current intake has enough structure to create a case record, but supervisors and HR should still review source records before deciding corrective action.'
+        : responseStrengthScore >= 50
+          ? 'The current intake is usable as a draft, but it still has gaps that could affect the strength or fairness of the case review.'
+          : 'The current intake is not strong enough to rely on without additional facts, source records, or HR review.')
+    ).slice(0, 1200),
+    informationAccounting: mergedAccounting,
+    responseQualityFindings: normalizeResponseQualityFindings(
+      [
+        ...deterministicFindings,
+        ...(Array.isArray(parsed?.responseQualityFindings) ? parsed.responseQualityFindings : fallbackFindings)
+      ],
+      [...deterministicFindings, ...fallbackFindings]
+    ),
+    strengthFactors: normalizeStringList(parsed?.strengthFactors, fallbackStrengths, 8),
+    weaknessFactors: normalizeStringList(parsed?.weaknessFactors, fallbackWeaknesses, 8)
+  };
+}
+
+function buildGuidedStageCopy(context: GuidedResolutionContext): {
+  title: string;
+  purpose: string;
+  summary: string;
+  missingInformation: string[];
+  nextBestActions: string[];
+} {
+  const slotIds = new Set(context.nextQuestions.map(question => question.slotId));
+  const requiredNextLabels = context.nextQuestions
+    .filter(question => question.required)
+    .map(question => {
+      const slot = context.requiredInformationSlots.find(item => item.id === question.slotId);
+      return slot?.label || question.category;
+    });
+  const nextLabels = requiredNextLabels.length
+    ? requiredNextLabels
+    : context.nextQuestions.map(question => question.category);
+
+  if (slotIds.has('involved_people')) {
+    return {
+      title: 'Identify involved employees',
+      purpose: 'Add the people connected to this issue before the wizard asks follow-up questions about conduct, training, impact, or next steps.',
+      summary: 'The wizard needs the people and their roles first so later questions can be fair, specific, and properly routed.',
+      missingInformation: nextLabels,
+      nextBestActions: [
+        'Add the reporting party, subject of concern, affected employee, witnesses, supervisor, HR partner, representative, or other involved person as applicable.',
+        'Use the correct role for each person so the record separates complainants, subjects, affected employees, witnesses, and support roles.',
+        'Continue after the involved people list is accurate.'
+      ]
+    };
+  }
+
+  if (slotIds.has('documentation_package') || slotIds.has('evidence_available') || slotIds.has('witness_statement_need') || slotIds.has('employee_response')) {
+    return {
+      title: 'Collect statements and records',
+      purpose: 'Attach or enter available written records before deeper follow-up so the wizard does not ask for facts already documented by employees or source records.',
+      summary: 'The wizard is waiting for the available complaint, witness statements, employee response, or other supporting records before moving into policy, risk, and conversation guidance.',
+      missingInformation: nextLabels,
+      nextBestActions: [
+        'Attach or enter the original complaint, witness statements, employee response, photos, messages, or other records that are available.',
+        'Keep original handwritten statements and any translated copies in the HR file for audit purposes.',
+        'If a record is not available yet, document that status clearly before continuing.'
+      ]
+    };
+  }
+
+  if (slotIds.has('direct_observation_source') || slotIds.has('prior_history') || slotIds.has('training_acknowledgment') || slotIds.has('policy_or_standard')) {
+    return {
+      title: 'Confirm remaining review facts',
+      purpose: 'Review the source, prior history, training, and policy facts that were not answered by the people list or uploaded records.',
+      summary: 'The wizard is now checking only the remaining facts needed to make the review fair and audit-ready.',
+      missingInformation: nextLabels,
+      nextBestActions: [
+        'Answer only from known records or direct knowledge.',
+        'If a fact is unknown, document that it needs HR review instead of guessing.',
+        'Use policy or training records when they are available.'
+      ]
+    };
+  }
+
+  return {
+    title: context.nextQuestions[0]?.category || 'Review remaining facts',
+    purpose: 'Answer the remaining questions needed before the supervisor can move forward responsibly.',
+    summary: 'The wizard is asking only the remaining gaps that were not already covered by prior answers or records.',
+    missingInformation: nextLabels,
+    nextBestActions: [
+      'Answer the required guided questions or document that a fact is unknown.',
+      'Attach supporting records if the wizard requests them.',
+      'Route the matter to HR if any sensitive risk gate is triggered.'
+    ]
+  };
 }
 
 // ─── Per-Employee GPT Call ─────────────────────────────────────
@@ -539,17 +1122,9 @@ router.post('/guided-intake-questions', async (req: Request, res: Response) => {
       policySections
     } = req.body as GuidedIntakeQuestionRequest;
 
-    if (!caseDetails || !issueType) {
+    if (!caseDetails) {
       return res.status(400).json({
-        error: 'Issue type and case details are required to prepare dynamic intake questions'
-      });
-    }
-
-    const openai = getOpenAIClient();
-    if (!openai) {
-      return res.status(503).json({
-        error: 'Guided intake service unavailable',
-        message: 'Guided intake service is not configured. Please contact your administrator.'
+        error: 'Case details are required to prepare dynamic intake questions'
       });
     }
 
@@ -577,6 +1152,10 @@ router.post('/guided-intake-questions', async (req: Request, res: Response) => {
     const safeDocuments = (documents || []).slice(0, 12).map(doc => ({
       title: sanitizeForPrompt(doc.title || 'Untitled document', { maxLength: 180, context: 'intake-document-title' }),
       type: sanitizeForPrompt(doc.type || 'other', { maxLength: 80, context: 'intake-document-type' }),
+      personName: sanitizeForPrompt(doc.personName || '', { maxLength: 120, context: 'intake-document-person-name' }),
+      personInvolvement: sanitizeForPrompt(doc.personInvolvement || '', { maxLength: 80, context: 'intake-document-person-involvement' }),
+      personRole: sanitizeForPrompt(doc.personRole || '', { maxLength: 120, context: 'intake-document-person-role' }),
+      personDepartment: sanitizeForPrompt(doc.personDepartment || '', { maxLength: 120, context: 'intake-document-person-department' }),
       summary: sanitizeForPrompt(doc.summary || '', { maxLength: 500, context: 'intake-document-summary' }),
       createdFrom: sanitizeForPrompt(doc.createdFrom || '', { maxLength: 80, context: 'intake-document-source' }),
       contentPreview: sanitizeForPrompt(doc.content || '', { maxLength: 1000, context: 'intake-document-content' })
@@ -597,6 +1176,7 @@ router.post('/guided-intake-questions', async (req: Request, res: Response) => {
       question: sanitizeForPrompt(question, { maxLength: 220, context: 'intake-dynamic-question' }),
       answer: sanitizeForPrompt(answer, { maxLength: 1200, context: 'intake-dynamic-answer' })
     })).filter(item => item.answer);
+    const deterministicAnswerFeedback = buildDeterministicAnswerFeedback(safeDynamicAnswers);
 
     const safePolicySections = (policySections || []).slice(0, 28).map(section => ({
       policyName: sanitizeForPrompt(section.policyName || 'Workplace policy', { maxLength: 180, context: 'intake-policy-name' }),
@@ -607,15 +1187,124 @@ router.post('/guided-intake-questions', async (req: Request, res: Response) => {
       content: sanitizeForPrompt(section.content || '', { maxLength: 1400, context: 'intake-policy-content' })
     })).filter(section => section.content);
 
+    if (!safeGuidedReview.behaviorSummary.trim()) {
+      return res.status(400).json({
+        error: 'Describe what happened before the guided intake can analyze the next step.'
+      });
+    }
+
+    const guidedResolutionContext = buildGuidedResolutionContext({
+      caseDetails: safeCaseDetails,
+      issueType: sanitizeForPrompt(issueType || 'unsure', { maxLength: 80, context: 'intake-issue-type' }),
+      guidedReview: { ...safeGuidedReview, riskFlags: selectedRisks },
+      people: safePeople,
+      documents: safeDocuments,
+      dynamicAnswers: safeDynamicAnswers,
+      policySections: safePolicySections
+    });
+    const deterministicReadiness = buildGuidedReadiness(guidedResolutionContext, deterministicAnswerFeedback);
+    const deterministicQuality = buildGuidedEvidenceQuality(
+      guidedResolutionContext,
+      deterministicAnswerFeedback,
+      deterministicReadiness.readinessScore,
+      {},
+      safePeople.length,
+      safeDocuments.length,
+      safePeople,
+      safeDocuments,
+      safeGuidedReview.behaviorSummary
+    );
+
+    const completedSlotIds = new Set<string>(guidedResolutionContext.completedSlotIds);
+    const deterministicQuestionIds = new Set<string>(guidedResolutionContext.nextQuestions.map(question => question.id));
+    const fallbackProgressSteps = [
+      'Classifying the incident narrative against workplace playbooks',
+      'Checking sensitive HR and compliance risk gates',
+      'Reviewing completed and missing evidence slots',
+      'Selecting the next non-duplicative supervisor question'
+    ];
+    const triggeredRiskSignals = guidedResolutionContext.complianceRiskGates
+      .filter(gate => gate.triggered)
+      .map(gate => `${gate.label}: ${gate.recommendedAction}`);
+    const playbookEscalationSignals = guidedResolutionContext.selectedPlaybooks
+      .flatMap(playbook => playbook.escalationSignals);
+    const stageCopy = buildGuidedStageCopy(guidedResolutionContext);
+    const mappedFallbackQuestions = guidedResolutionContext.nextQuestions.map(question => ({
+      id: question.id,
+      slotId: question.slotId,
+      playbookKey: question.playbookKey,
+      step: normalizeGuidedStep(question.step),
+      category: question.category,
+      question: question.question,
+      whyNeeded: question.whyNeeded,
+      answerType: question.answerType,
+      options: question.answerType === 'yes_no' ? ['Yes', 'No', 'Unknown / needs review'] : question.options || [],
+      required: question.required,
+      policyReference: question.policyReference || '',
+      riskArea: question.riskArea || ''
+    }));
+    const playbookMetadata = {
+      caseClassification: guidedResolutionContext.caseClassification,
+      selectedPlaybooks: guidedResolutionContext.selectedPlaybooks.map(playbook => ({
+        key: playbook.key,
+        title: playbook.title,
+        sectorAreas: playbook.sectorAreas,
+        resolutionPathways: playbook.resolutionPathways
+      })),
+      resolutionPathways: guidedResolutionContext.resolutionPathways,
+      complianceRiskGates: guidedResolutionContext.complianceRiskGates,
+      documentationPlan: guidedResolutionContext.documentationPlan,
+      sourceBackedAnswers: guidedResolutionContext.sourceBackedAnswers,
+      requiredInformationSlots: guidedResolutionContext.requiredInformationSlots.map(slot => ({
+        id: slot.id,
+        label: slot.label,
+        step: slot.step,
+        category: slot.category,
+        required: slot.required,
+        completed: slot.completed,
+        completionEvidence: slot.completionEvidence
+      }))
+    };
+
+    const openai = getOpenAIClient();
+    if (!openai) {
+      return res.json({
+        success: true,
+        data: {
+          currentStepTitle: stageCopy.title,
+          currentStepPurpose: stageCopy.purpose,
+          progressSteps: fallbackProgressSteps,
+          summaryAssessment: stageCopy.summary,
+          readinessScore: deterministicReadiness.readinessScore,
+          readinessLabel: deterministicReadiness.readinessLabel,
+          ...deterministicQuality,
+          questions: mappedFallbackQuestions,
+          answerFeedback: deterministicAnswerFeedback,
+          missingInformation: stageCopy.missingInformation,
+          recommendedDocuments: guidedResolutionContext.documentationPlan.slice(0, 8),
+          escalationSignals: Array.from(new Set([...triggeredRiskSignals, ...playbookEscalationSignals])).slice(0, 12),
+          nextBestActions: stageCopy.nextBestActions,
+          ...playbookMetadata,
+          generatedAt: new Date().toISOString()
+        }
+      });
+    }
+
     const systemPrompt = `You are a senior HR intake strategist and employee-relations advisor inside an enterprise workplace resolution platform.
 
 Your job is not to decide discipline. Your job is to help supervisors gather a complete, fair, policy-aligned record before coaching, resolving, documenting, or escalating.
 
 You must behave like a dynamic intake coach:
+- Work inside the provided structured playbooks, evidence slots, and compliance risk gates.
+- Treat the first supervisor narrative as the intake anchor. Do not ask for a generic issue type when the narrative already exists.
 - Identify exactly what HR would still need before a fair decision.
 - Ask targeted follow-up questions based on the current facts, not generic checklist questions.
 - Treat each request as the moment before the next wizard step opens: analyze prior answers first, then build the questions that should appear on that step.
-- Follow a realistic HR intake flow: clarify the concern, confirm timeline/location, identify people, confirm documents/evidence, assess sensitive-risk or consistency concerns, then prepare the supervisor conversation or HR handoff.
+- Follow a realistic HR intake flow: clarify the concern, confirm timeline/location, identify people, collect or confirm documents/evidence, then assess prior history, policy/training, sensitive-risk, consistency concerns, and supervisor conversation or HR handoff needs.
+- After the opening narrative, identify all involved people before asking deeper case questions.
+- Before asking detailed follow-up questions that employee statements may already answer, collect or confirm the relevant written records: original complaint, witness statements, employee response to allegations, prior records, training/policy records, and other supporting evidence.
+- Treat facts extracted from uploaded or typed records as draft, source-backed information only. Do not silently treat extraction as final truth. Make the source visible and ask for review only when the extracted fact materially affects the flow.
+- Do not ask a supervisor to handtype facts that should reasonably come from an employee-provided statement when the structure calls for that statement. Ask for the document first, analyze it, then ask only what remains missing.
 - Do not jump backward to earlier topics unless a new answer creates a specific gap.
 - Use active policy sections when relevant, but do not invent policy language.
 - Consider: who/what/when/where, observed vs reported facts, witness availability, employee response, training acknowledgment, prior coaching, consistency/comparators, safety impact, business impact, mitigating factors, protected activity, leave/accommodation, retaliation risk, and documentation quality.
@@ -623,15 +1312,48 @@ You must behave like a dynamic intake coach:
 - Ask for meetings, 1-on-1 conversation preparation, employee response, witness follow-up, policy proof, training records, prior documentation, or HR escalation only when the facts make that useful.
 - Keep tone practical, professional, and supervisor-friendly.
 - Leave no critical unknown unasked, but keep the response usable and prioritized. Ask one complete question per gap instead of several versions of the same question.
+- When an answer exists but is too vague, off-topic, unsupported, or does not answer the question, do not ask the same question again as a normal question. Put it in answerFeedback with a clear reason and suggested correction.
+- If the user documented "unknown", "not available", or "needs HR review" for a fact that is realistically unknown at this stage, treat that as a documented status instead of repeatedly asking the same question.
+- For employee responses, witness statements, written complaints, handwritten reports, signed statements, or similar employee-provided records, make the record need explicit and use document upload/type guidance only when the content itself is needed.
 - The final experience should feel like an experienced HR partner guiding a leader through a careful intake, not a static form.`;
 
     const userPrompt = `Review this guided workplace-resolution intake and generate targeted dynamic questions.
 
 CURRENT WIZARD STEP: ${normalizeGuidedStep(currentStep)}
-ISSUE TYPE: ${sanitizeForPrompt(issueType || 'unsure', { maxLength: 80, context: 'intake-issue-type' })}
+ISSUE TYPE HINT: ${sanitizeForPrompt(issueType || 'unsure', { maxLength: 80, context: 'intake-issue-type' })}
 
 CASE DETAILS:
 ${JSON.stringify(safeCaseDetails, null, 2)}
+
+STRUCTURED PLAYBOOK CONTEXT:
+${wrapUserContent(JSON.stringify({
+  caseClassification: guidedResolutionContext.caseClassification,
+  selectedPlaybooks: guidedResolutionContext.selectedPlaybooks.map(playbook => ({
+    key: playbook.key,
+    title: playbook.title,
+    sectorAreas: playbook.sectorAreas,
+    requiredSlots: playbook.requiredSlots,
+    conditionalSlots: playbook.conditionalSlots,
+    resolutionPathways: playbook.resolutionPathways,
+    escalationSignals: playbook.escalationSignals
+  })),
+  complianceRiskGates: guidedResolutionContext.complianceRiskGates,
+  documentationPlan: guidedResolutionContext.documentationPlan,
+  unresolvedRequiredSlots: guidedResolutionContext.unresolvedRequiredSlots.map(slot => ({
+    id: slot.id,
+    label: slot.label,
+    step: slot.step,
+    category: slot.category,
+    question: slot.question,
+    whyNeeded: slot.whyNeeded,
+    answerType: slot.answerType,
+    required: slot.required,
+    options: slot.options
+  })),
+  completedSlotIds: guidedResolutionContext.completedSlotIds,
+  sourceBackedAnswers: guidedResolutionContext.sourceBackedAnswers,
+  deterministicNextQuestions: guidedResolutionContext.nextQuestions
+}, null, 2), 'guided_resolution_playbook_context')}
 
 CURRENT FACTS AND SUPERVISOR ANSWERS:
 ${wrapUserContent(JSON.stringify(safeGuidedReview, null, 2), 'guided_review')}
@@ -656,9 +1378,37 @@ Return valid JSON only:
   "summaryAssessment": "plain-language assessment of intake completeness and the current HR risk posture",
   "readinessScore": 0,
   "readinessLabel": "Not ready | Needs facts | HR review likely | Supervisor-ready with HR check | Ready for supervisor decision",
+  "responseStrengthScore": 0,
+  "alignmentScore": 0,
+  "responseStrengthLabel": "Weak - improve before relying on it | Usable but needs improvement | Solid with review notes | Strong response package",
+  "caseStrengthAssessment": "plain-language explanation of how strong the current responses and records are for fair review or HR escalation",
+  "informationAccounting": [
+    {
+      "area": "People and roles | Employee-provided records | Required facts | Policy alignment | Risk and escalation | Response alignment",
+      "status": "strong | partial | weak | missing",
+      "detail": "what information is currently provided and how useful it is",
+      "source": "record title or answer source if applicable",
+      "recommendedImprovement": "what would make this area stronger, if needed"
+    }
+  ],
+  "responseQualityFindings": [
+    {
+      "question": "question or review area evaluated",
+      "area": "response area",
+      "score": 0,
+      "status": "strong | partial | weak | missing",
+      "finding": "why the response is strong, weak, unsupported, off topic, or incomplete",
+      "improvement": "what the supervisor should add or collect to improve it",
+      "source": "record title or user answer if applicable"
+    }
+  ],
+  "strengthFactors": ["specific strengths in the current case file"],
+  "weaknessFactors": ["specific weak areas to improve before relying on the case file"],
   "questions": [
     {
       "id": "stable_snake_case_id",
+      "slotId": "required information slot id from STRUCTURED PLAYBOOK CONTEXT",
+      "playbookKey": "selected playbook key",
       "step": "issue | facts | people | documents | risk | guidance | all",
       "category": "Fact gap | Policy alignment | People | Documentation | Risk | 1-on-1 preparation | Consistency",
       "question": "specific question the supervisor should answer",
@@ -668,6 +1418,16 @@ Return valid JSON only:
       "required": true,
       "policyReference": "policy name/section if applicable",
       "riskArea": "optional risk area"
+    }
+  ],
+  "answerFeedback": [
+    {
+      "question": "previous question that needs clarification",
+      "answer": "the response provided by the user",
+      "issue": "short label such as Response needs clarification",
+      "reason": "specific reason the answer is not enough or not aligned",
+      "suggestedAction": "what the supervisor should add or clarify",
+      "severity": "info | needs_clarification | high_risk"
     }
   ],
   "missingInformation": ["prioritized unknown that should be resolved"],
@@ -686,14 +1446,21 @@ Return valid JSON only:
 
 Question rules:
 - Choose currentStepTitle from the case facts and the next most important gap. Do not use generic labels like Facts, People, Documents, Risk, or Guidance unless that is truly the best case-specific label.
+- Every question must map to one unresolved slotId or deterministicNextQuestions slotId from STRUCTURED PLAYBOOK CONTEXT. Do not ask about completedSlotIds.
+- If STRUCTURED PLAYBOOK CONTEXT includes fallback question wording for a missing slot, you may improve the wording, but keep the same slotId and intent.
 - progressSteps must be 4 to 6 short action phrases specific to this case, such as checking active policy, reviewing witness statement gaps, deciding whether employee response is required, or identifying needed documentation.
-- If CURRENT WIZARD STEP is not "all", generate 3 to 6 questions for that exact step and set each question.step to that step unless the question is truly cross-step "all".
-- If CURRENT WIZARD STEP is "all", generate 4 to 7 questions total across the most important unresolved areas.
-- At least 2 questions should be directly tied to missing facts in the current intake.
+- Use deterministicNextQuestions as the stage boundary. If it contains people slots, ask only those people questions. If it contains document/evidence slots, ask for those records before prior-history, policy, training, safety, or conversation-preparation follow-ups. If it contains later fact/risk slots, ask the most important missing case details.
+- If CURRENT WIZARD STEP is not "all", generate questions for that exact step and set each question.step to that step unless deterministicNextQuestions says the next fair step is different.
+- If CURRENT WIZARD STEP is "all", generate only the next stage of questions from deterministicNextQuestions, not a full mixed checklist.
+- Questions should be directly tied to the current intake and the active stage.
 - Do not repeat questions that are already answered in DYNAMIC QUESTIONS ALREADY ANSWERED. Do not ask the same question in different words.
+- Do not ask for information already present in sourceBackedAnswers. If the extracted source-backed answer appears relevant but needs human review, reference that it was found in the uploaded record instead of asking from scratch.
+- If a previous answer is weak, unclear, or not aligned with the question, use answerFeedback instead of repeating that same question. Explain the gap in plain supervisor language and tell the user what better response or record is needed.
+- answerFeedback is non-punitive coaching for the user. Use it only when the existing answer is too vague, off topic, unsupported, or missing the specific employee-provided record being discussed.
+- Do not put a weak-answer issue in both questions and answerFeedback. If feedback is enough, leave the user the choice to improve the answer or continue with the current response.
 - If a user already answered "No" to a document, witness, evidence, or training question, do not ask them to upload or provide that same item in the same next step. Instead, ask what alternative record exists only if that is materially needed.
 - Mark a question required only when HR or the supervisor should not move forward without an answer, a documented "unknown", or a decision to escalate.
-- Use answerType "person" when the next needed input is an involved employee, complainant, witness, supervisor, or HR partner.
+- Use answerType "person" when the next needed input is a reporting party/complainant, subject of concern, affected employee, witness, supervisor/manager, HR partner, employee representative, or other involved person.
 - Use answerType "yes_no" for confirmation, existence, or status questions that start with Have, Has, Had, Did, Do, Does, Is, Are, Was, Were, Can, Could, Will, Would, or Should.
 - Do not use answerType "document" to ask whether a document exists or whether witness statements were collected. Ask that as "yes_no" first. Use answerType "document" only when asking the user to upload, type, paste, or transcribe the actual document content.
 - Use answerType "select" when the answer should come from controlled choices such as department, shift, training status, risk status, or outcome; include clear options unless the frontend should use organization data.
@@ -701,7 +1468,19 @@ Question rules:
 - If active policies exist, include policy-alignment questions referencing the relevant policy section.
 - If risk flags or facts suggest harassment, discrimination, retaliation, medical/accommodation, wage/hour, protected activity, or safety complaint concerns, make HR escalation explicit.
 - Include realistic examples in whyNeeded only when they help the supervisor understand what good documentation looks like.
-- Do not ask for information already answered unless it needs clarification.`;
+- Do not ask for information already answered unless it needs clarification.
+
+Quality scoring rules:
+- readinessScore is only about whether required structured items are answered; responseStrengthScore and alignmentScore must judge whether the answers and source records are strong enough to rely on for fair resolution or HR escalation.
+- Score below 50 when the current package is weak, unsupported, missing employee-provided records that should exist, missing the subject employee's response in an allegation case, or too vague to support a defensible decision.
+- Score 50-74 when the case can be saved as a draft but needs stronger facts, clearer source records, or HR review before relying on it.
+- Score 75-89 when the responses are mostly specific, source-backed, and aligned to the selected playbook, with minor review notes.
+- Score 90-100 only when people, written records, source-backed answers, and remaining HR-risk explanations are strong and specific. Do not score 100 if missingInformation or answerFeedback contains real gaps.
+- Do not mark Response alignment strong when uploaded or typed records exist but sourceBackedAnswers is empty, when a record is not tied to the employee who provided it, or when a person's role conflicts with the incident narrative.
+- Treat misleading, contradictory, or role-inconsistent facts as weak until the supervisor corrects the record or documents why the apparent inconsistency is acceptable.
+- In informationAccounting, give a detailed account of what is known, what source it came from, and whether it is strong, partial, weak, or missing.
+- In responseQualityFindings, explain weak or misaligned answers in plain supervisor language. Do not shame the user; tell them how to improve the record.
+- If a response is not aligned to resolving the case or deciding HR escalation, say why and what better response, record, or employee statement is needed.`;
 
     const completion = await openai.chat.completions.create({
       model: 'gpt-4o',
@@ -709,7 +1488,7 @@ Question rules:
         { role: 'system', content: systemPrompt },
         { role: 'user', content: userPrompt }
       ],
-      max_tokens: 4200,
+      max_tokens: 5200,
       temperature: 0.2,
       response_format: { type: 'json_object' }
     });
@@ -717,24 +1496,38 @@ Question rules:
     const parsed = JSON.parse(completion.choices[0]?.message?.content || '{}');
     const answeredQuestionKeys = safeDynamicAnswers.map(item => normalizeQuestionForDedupe(item.question)).filter(Boolean);
     const emittedQuestionKeys: string[] = [];
-    const questions = Array.isArray(parsed.questions) ? parsed.questions.slice(0, 14).map((question: any, index: number) => {
-      const questionText = String(question?.question || 'What additional fact should be documented?').slice(0, 500);
-      const answerType = inferGuidedAnswerType(questionText, question?.answerType);
+    const allowedStageSlotIds = new Set<string>(guidedResolutionContext.nextQuestions.map(question => question.slotId));
+    const fallbackQuestionBySlotId = new Map<string, (typeof guidedResolutionContext.nextQuestions)[number]>(
+      guidedResolutionContext.nextQuestions.map(question => [question.slotId, question])
+    );
+    const primaryPlaybookKey = guidedResolutionContext.caseClassification.primaryPlaybook;
+    const questionsFromAi = Array.isArray(parsed.questions) ? parsed.questions.slice(0, 14).map((question: any, index: number) => {
+      const slotId = String(question?.slotId || '').replace(/[^a-zA-Z0-9_-]/g, '_').slice(0, 80);
+      const fallbackQuestion = fallbackQuestionBySlotId.get(slotId);
+      if (!fallbackQuestion) return null;
+      const questionText = fallbackQuestion.question;
+      const answerType = inferGuidedAnswerType(questionText, fallbackQuestion.answerType);
+      const playbookKey = String(fallbackQuestion.playbookKey || question?.playbookKey || primaryPlaybookKey).replace(/[^a-zA-Z0-9_-]/g, '_').slice(0, 80);
       return {
-        id: String(question?.id || `question_${index + 1}`).replace(/[^a-zA-Z0-9_-]/g, '_').slice(0, 80),
-        step: normalizeGuidedStep(question?.step),
-        category: String(question?.category || 'Fact gap').slice(0, 120),
+        id: fallbackQuestion.id || String(question?.id || `question_${index + 1}`).replace(/[^a-zA-Z0-9_-]/g, '_').slice(0, 80),
+        slotId,
+        playbookKey,
+        step: normalizeGuidedStep(fallbackQuestion.step),
+        category: fallbackQuestion.category,
         question: questionText,
-        whyNeeded: String(question?.whyNeeded || 'This helps complete the record before action.').slice(0, 700),
+        whyNeeded: fallbackQuestion.whyNeeded,
         answerType,
         options: answerType === 'yes_no'
           ? ['Yes', 'No', 'Unknown / needs review']
-          : Array.isArray(question?.options) ? question.options.slice(0, 8).map(String) : [],
-        required: question?.required !== false,
-        policyReference: question?.policyReference ? String(question.policyReference).slice(0, 240) : '',
-        riskArea: question?.riskArea ? String(question.riskArea).slice(0, 180) : ''
+          : fallbackQuestion.options || [],
+        required: fallbackQuestion.required,
+        policyReference: fallbackQuestion.policyReference || '',
+        riskArea: fallbackQuestion.riskArea || ''
       };
     }).filter((question: any) => {
+      if (!question) return false;
+      if (question.slotId && completedSlotIds.has(question.slotId)) return false;
+      if (question.slotId && !allowedStageSlotIds.has(question.slotId)) return false;
       const key = normalizeQuestionForDedupe(question.question);
       if (!key) return false;
       if (isNearDuplicateQuestion(key, answeredQuestionKeys)) return false;
@@ -743,25 +1536,83 @@ Question rules:
       return true;
     }).slice(0, 8) : [];
 
+    const fallbackQuestions = guidedResolutionContext.nextQuestions
+      .filter(question => !questionsFromAi.some((existing: any) => existing.slotId === question.slotId))
+      .filter(question => {
+        if (deterministicQuestionIds.has(question.id) && completedSlotIds.has(question.slotId)) return false;
+        const key = normalizeQuestionForDedupe(question.question);
+        if (!key) return false;
+        if (isNearDuplicateQuestion(key, answeredQuestionKeys)) return false;
+        if (isNearDuplicateQuestion(key, emittedQuestionKeys)) return false;
+        emittedQuestionKeys.push(key);
+        return true;
+      })
+      .map(question => ({
+        id: question.id,
+        slotId: question.slotId,
+        playbookKey: question.playbookKey,
+        step: normalizeGuidedStep(question.step),
+        category: question.category,
+        question: question.question,
+        whyNeeded: question.whyNeeded,
+        answerType: question.answerType,
+        options: question.answerType === 'yes_no' ? ['Yes', 'No', 'Unknown / needs review'] : question.options || [],
+        required: question.required,
+        policyReference: question.policyReference || '',
+        riskArea: question.riskArea || ''
+      }));
+
+    const questions = [...questionsFromAi, ...fallbackQuestions].slice(0, 8);
+    const aiAnswerFeedback = normalizeAnswerFeedback(Array.isArray(parsed.answerFeedback) ? parsed.answerFeedback : []);
+    const answerFeedback = [...deterministicAnswerFeedback, ...aiAnswerFeedback]
+      .filter((item, index, arr) => {
+        const key = `${normalizeQuestionForDedupe(item.question || '')}|${normalizeFeedbackText(item.issue).toLowerCase()}`;
+        return key !== '|' && arr.findIndex(other => `${normalizeQuestionForDedupe(other.question || '')}|${normalizeFeedbackText(other.issue).toLowerCase()}` === key) === index;
+      })
+      .slice(0, 8);
+    const finalReadiness = buildGuidedReadiness(guidedResolutionContext, answerFeedback);
+    const evidenceQuality = buildGuidedEvidenceQuality(
+      guidedResolutionContext,
+      answerFeedback,
+      finalReadiness.readinessScore,
+      parsed,
+      safePeople.length,
+      safeDocuments.length,
+      safePeople,
+      safeDocuments,
+      safeGuidedReview.behaviorSummary
+    );
+
     const data = {
-      currentStepTitle: String(parsed.currentStepTitle || questions[0]?.category || 'Follow-up').slice(0, 100),
-      currentStepPurpose: String(parsed.currentStepPurpose || 'More information is needed before the supervisor can move forward.').slice(0, 300),
-      progressSteps: Array.isArray(parsed.progressSteps) ? parsed.progressSteps.slice(0, 6).map(String) : [],
-      summaryAssessment: String(parsed.summaryAssessment || 'The intake should be reviewed for missing facts before deciding next steps.'),
-      readinessScore: clampInt(parsed.readinessScore, 0, 100, 25),
-      readinessLabel: String(parsed.readinessLabel || 'Needs facts').slice(0, 80),
+      currentStepTitle: stageCopy.title,
+      currentStepPurpose: stageCopy.purpose,
+      progressSteps: Array.isArray(parsed.progressSteps) && parsed.progressSteps.length
+        ? parsed.progressSteps.slice(0, 6).map(String)
+        : fallbackProgressSteps,
+      summaryAssessment: stageCopy.summary,
+      readinessScore: finalReadiness.readinessScore,
+      readinessLabel: finalReadiness.readinessLabel,
+      ...evidenceQuality,
       questions,
-      missingInformation: Array.isArray(parsed.missingInformation) ? parsed.missingInformation.slice(0, 12).map(String) : [],
-      recommendedDocuments: Array.isArray(parsed.recommendedDocuments)
+      answerFeedback,
+      missingInformation: stageCopy.missingInformation,
+      recommendedDocuments: Array.isArray(parsed.recommendedDocuments) && parsed.recommendedDocuments.length
         ? parsed.recommendedDocuments.slice(0, 8).map((doc: any) => ({
             title: String(doc?.title || 'Supporting document').slice(0, 180),
             documentType: String(doc?.documentType || 'other').slice(0, 80),
             whyNeeded: String(doc?.whyNeeded || 'Supports the review record.').slice(0, 600),
             required: doc?.required !== false
           }))
-        : [],
-      escalationSignals: Array.isArray(parsed.escalationSignals) ? parsed.escalationSignals.slice(0, 10).map(String) : [],
-      nextBestActions: Array.isArray(parsed.nextBestActions) ? parsed.nextBestActions.slice(0, 10).map(String) : [],
+        : guidedResolutionContext.documentationPlan.slice(0, 8),
+      escalationSignals: Array.from(new Set([
+        ...(Array.isArray(parsed.escalationSignals) ? parsed.escalationSignals.slice(0, 10).map(String) : []),
+        ...triggeredRiskSignals,
+        ...playbookEscalationSignals
+      ])).slice(0, 12),
+      nextBestActions: Array.isArray(parsed.nextBestActions) && parsed.nextBestActions.length
+        ? Array.from(new Set([...stageCopy.nextBestActions, ...parsed.nextBestActions.slice(0, 6).map(String)])).slice(0, 10)
+        : stageCopy.nextBestActions,
+      ...playbookMetadata,
       generatedAt: parsed.generatedAt || new Date().toISOString()
     };
 

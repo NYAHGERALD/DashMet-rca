@@ -194,6 +194,8 @@ export type GuidedIntakeStep = 'issue' | 'facts' | 'people' | 'documents' | 'ris
 
 export interface GuidedIntakeQuestion {
   id: string;
+  slotId?: string;
+  playbookKey?: string;
   step: GuidedIntakeStep;
   category: string;
   question: string;
@@ -212,14 +214,90 @@ export interface GuidedIntakeDocumentRequest {
   required: boolean;
 }
 
+export interface GuidedIntakeAnswerFeedback {
+  question?: string;
+  answer?: string;
+  issue: string;
+  reason: string;
+  suggestedAction: string;
+  severity?: 'info' | 'needs_clarification' | 'high_risk';
+}
+
+export interface GuidedIntakeInformationAccount {
+  area: string;
+  status: 'strong' | 'partial' | 'weak' | 'missing';
+  detail: string;
+  source?: string;
+  recommendedImprovement?: string;
+}
+
+export interface GuidedIntakeResponseQualityFinding {
+  question?: string;
+  area: string;
+  score: number;
+  status: 'strong' | 'partial' | 'weak' | 'missing';
+  finding: string;
+  improvement?: string;
+  source?: string;
+}
+
 export interface GuidedIntakePlan {
   currentStepTitle?: string;
   currentStepPurpose?: string;
   progressSteps?: string[];
+  caseClassification?: {
+    primaryPlaybook: string;
+    issueType: string;
+    confidence: number;
+    matchedSignals: string[];
+  };
+  selectedPlaybooks?: Array<{
+    key: string;
+    title: string;
+    sectorAreas: string[];
+    resolutionPathways: string[];
+  }>;
+  resolutionPathways?: string[];
+  complianceRiskGates?: Array<{
+    key: string;
+    label: string;
+    triggered: boolean;
+    whyItMatters: string;
+    recommendedAction: string;
+  }>;
+  documentationPlan?: GuidedIntakeDocumentRequest[];
+  sourceBackedAnswers?: Array<{
+    slotId: string;
+    label: string;
+    value: string;
+    sourceTitle: string;
+    sourceType: string;
+    excerpt: string;
+    confidence: number;
+    needsReview: boolean;
+  }>;
+  requiredInformationSlots?: Array<{
+    id: string;
+    label: string;
+    step: GuidedIntakeStep;
+    category: string;
+    required: boolean;
+    completed: boolean;
+    completionEvidence: string[];
+  }>;
   summaryAssessment: string;
   readinessScore: number;
   readinessLabel: string;
+  responseStrengthScore?: number;
+  alignmentScore?: number;
+  responseStrengthLabel?: string;
+  caseStrengthAssessment?: string;
+  informationAccounting?: GuidedIntakeInformationAccount[];
+  responseQualityFindings?: GuidedIntakeResponseQualityFinding[];
+  strengthFactors?: string[];
+  weaknessFactors?: string[];
   questions: GuidedIntakeQuestion[];
+  answerFeedback?: GuidedIntakeAnswerFeedback[];
   missingInformation: string[];
   recommendedDocuments: GuidedIntakeDocumentRequest[];
   escalationSignals: string[];

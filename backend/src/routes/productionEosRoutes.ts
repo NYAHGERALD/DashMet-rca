@@ -6,13 +6,16 @@ import { prisma } from '../utils/prisma';
 import {
   autosaveProductionEosNotes,
   calculateProductionEosReport,
+  getProductionEosAuditTrailForSelection,
   getProductionEosReferenceData,
   getProductionEosReferenceSources,
   getProductionEosDashboard,
+  getProductionEosKpiTargets,
   getProductionEosReportAuditTrail,
   getProductionEosReportById,
   getProductionEosTemplate,
   listProductionEosReports,
+  PRODUCTION_EOS_KPI_TARGET_CONFIGS,
   saveProductionEosReport,
   searchProductionEosItems,
 } from '../services/productionEosService';
@@ -51,6 +54,36 @@ function integerOrNull(value: unknown) {
   return parsed;
 }
 
+function kpiTargetDecimal(
+  value: unknown,
+  config: typeof PRODUCTION_EOS_KPI_TARGET_CONFIGS[keyof typeof PRODUCTION_EOS_KPI_TARGET_CONFIGS],
+) {
+  if (value === null || value === undefined || value === '') {
+    const error: any = new Error(`${config.metricLabel} target is required.`);
+    error.statusCode = 400;
+    throw error;
+  }
+  const raw = String(value).replace(/%/g, '').replace(/,/g, '').trim();
+  let parsed = Number(raw);
+  if (!Number.isFinite(parsed)) {
+    const error: any = new Error(`${config.metricLabel} target must be a valid number.`);
+    error.statusCode = 400;
+    throw error;
+  }
+  if (config.valueUnit === 'PERCENT' && parsed > 2) parsed /= 100;
+  const max = config.valueUnit === 'PERCENT' ? 2 : 1000000000;
+  if (parsed < 0 || parsed > max) {
+    const error: any = new Error(
+      config.valueUnit === 'PERCENT'
+        ? `${config.metricLabel} target must be between 0% and 200%.`
+        : `${config.metricLabel} target must be between 0 and 1,000,000,000.`,
+    );
+    error.statusCode = 400;
+    throw error;
+  }
+  return new Prisma.Decimal(parsed);
+}
+
 router.get('/template', async (req: AuthRequest, res: Response) => {
   try {
     const template = await getProductionEosTemplate(req.user!);
@@ -82,8 +115,10 @@ router.get('/dashboard', async (req: AuthRequest, res: Response) => {
   try {
     const dashboard = await getProductionEosDashboard(req.user!, {
       endDate: req.query.endDate as string | undefined,
+      lineDate: req.query.lineDate as string | undefined,
       shiftId: req.query.shiftId as string | undefined,
       days: req.query.days as string | undefined,
+      dates: req.query.dates as string | undefined,
     });
     res.json({ success: true, dashboard });
   } catch (error: any) {
@@ -101,6 +136,18 @@ router.get('/reports', async (req: AuthRequest, res: Response) => {
     res.json({ success: true, reports });
   } catch (error: any) {
     handleError(res, error, 'Failed to list Production EOS reports');
+  }
+});
+
+router.get('/audit-trail', async (req: AuthRequest, res: Response) => {
+  try {
+    const { report, auditTrail } = await getProductionEosAuditTrailForSelection(req.user!, {
+      date: req.query.date as string | undefined,
+      shiftId: req.query.shiftId as string | undefined,
+    });
+    res.json({ success: true, report, auditTrail });
+  } catch (error: any) {
+    handleError(res, error, 'Failed to load Production EOS audit trail');
   }
 });
 
@@ -184,8 +231,11 @@ router.post('/reports/:id/submit', async (req: AuthRequest, res: Response) => {
         itemNo: line.itemNo,
         casesScheduled: line.casesScheduled?.toString(),
         casesProduced: line.casesProduced?.toString(),
+        scheduledStartTime: line.scheduledStartTime,
+        scheduledStartOverridden: line.scheduledStartOverridden,
         actualStartTime: line.actualStartTime,
         actualEndTime: line.actualEndTime,
+        oeePct: line.oeePct?.toString(),
         downMinutes: line.downMinutes?.toString(),
         downtimeComment: line.downtimeComment,
         wasteLbs: line.wasteLbs?.toString(),
@@ -219,6 +269,71 @@ router.get('/admin/reference-sources', requireAdmin, async (req: AuthRequest, re
     res.json({ success: true, sources });
   } catch (error: any) {
     handleError(res, error, 'Failed to load Production EOS reference sources');
+  }
+});
+
+router.get('/admin/kpi-targets', requireAdmin, async (req: AuthRequest, res: Response) => {
+  try {
+    const targets = await getProductionEosKpiTargets(req.user!);
+    res.json({ success: true, targets });
+  } catch (error: any) {
+    handleError(res, error, 'Failed to load Production EOS KPI targets');
+  }
+});
+
+router.put('/admin/kpi-targets', requireAdmin, async (req: AuthRequest, res: Response) => {
+  try {
+    const user = req.user!;
+    const organizationId = user.organizationId || null;
+    const incomingTargets = Array.isArray(req.body?.targets) ? req.body.targets : [];
+    if (!incomingTargets.length) {
+      return res.status(400).json({ success: false, error: 'At least one KPI target is required.' });
+    }
+
+    await prisma.$transaction(async (tx) => {
+      for (const incoming of incomingTargets) {
+        const config = PRODUCTION_EOS_KPI_TARGET_CONFIGS[String(incoming.metricKey) as keyof typeof PRODUCTION_EOS_KPI_TARGET_CONFIGS];
+        if (!config) {
+          const error: any = new Error('Unknown Production EOS KPI target.');
+          error.statusCode = 400;
+          throw error;
+        }
+        const existing = await tx.productionEosKpiTarget.findFirst({
+          where: {
+            organizationId,
+            metricKey: config.metricKey,
+          },
+        });
+        const data = {
+          organizationId,
+          metricKey: config.metricKey,
+          metricLabel: config.metricLabel,
+          targetValue: kpiTargetDecimal(incoming.targetValue ?? incoming.targetPct, config),
+          valueUnit: config.valueUnit,
+          comparisonDirection: config.comparisonDirection,
+          isActive: incoming.isActive !== undefined ? Boolean(incoming.isActive) : true,
+          updatedByUserId: user.id,
+        };
+        if (existing) {
+          await tx.productionEosKpiTarget.update({
+            where: { id: existing.id },
+            data,
+          });
+        } else {
+          await tx.productionEosKpiTarget.create({
+            data: {
+              ...data,
+              createdByUserId: user.id,
+            },
+          });
+        }
+      }
+    });
+
+    const targets = await getProductionEosKpiTargets(user);
+    res.json({ success: true, targets });
+  } catch (error: any) {
+    handleError(res, error, 'Failed to save Production EOS KPI targets');
   }
 });
 

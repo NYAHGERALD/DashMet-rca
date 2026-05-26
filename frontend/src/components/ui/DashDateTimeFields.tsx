@@ -40,6 +40,7 @@ type DashTimeFieldProps = {
   className?: string;
   variant?: FieldVariant;
   isDisabled?: boolean;
+  placeholderTime?: string;
 };
 
 function parseDateValue(value: string) {
@@ -66,6 +67,11 @@ function dateToInputValue(value: DateValue | null) {
 
 function timeToInputValue(value: TimeValue | null) {
   return value ? value.toString().slice(0, 5) : '';
+}
+
+function periodFromTimeValue(value: TimeValue | null) {
+  if (!value) return null;
+  return value.hour >= 12 ? 'PM' : 'AM';
 }
 
 function formatTimeLabel(value: TimeValue) {
@@ -101,14 +107,18 @@ export function DashTimeField({
   className,
   variant = 'field',
   isDisabled = false,
+  placeholderTime,
 }: DashTimeFieldProps) {
   const timeValue = useMemo(() => parseTimeValue(value), [value]);
+  const placeholderValue = useMemo(() => parseTimeValue(placeholderTime || ''), [placeholderTime]);
+  const placeholderPeriod = !timeValue ? periodFromTimeValue(placeholderValue) : null;
 
   return (
     <TimeField
       aria-label={ariaLabel}
       value={timeValue}
       onChange={(nextValue) => onChange(timeToInputValue(nextValue))}
+      placeholderValue={placeholderValue || undefined}
       hourCycle={12}
       granularity="minute"
       shouldForceLeadingZeros
@@ -116,7 +126,15 @@ export function DashTimeField({
       className={clsx('w-full', isDisabled && 'opacity-60')}
     >
       <DateInput className={shellClass(variant, className)}>
-        {(segment) => <DateSegment segment={segment} className={segmentClass(variant)} />}
+        {(segment) => (
+          <DateSegment segment={segment} className={segmentClass(variant)}>
+            {({ defaultChildren, type, isPlaceholder }) => (
+              placeholderPeriod && isPlaceholder && type === 'dayPeriod'
+                ? placeholderPeriod
+                : defaultChildren
+            )}
+          </DateSegment>
+        )}
       </DateInput>
     </TimeField>
   );

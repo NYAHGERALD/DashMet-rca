@@ -5,6 +5,32 @@ export const PRODUCTION_EOS_CALC_VERSION = 'excel-2026-05-15-v2';
 
 const DAY_OPTIONS = ['Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday', 'Sunday'];
 const DAY_NAMES_BY_JS_DAY = ['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday'];
+export const PRODUCTION_EOS_KPI_TARGET_CONFIGS = {
+  LBS_PRODUCED: {
+    metricKey: 'LBS_PRODUCED',
+    metricLabel: 'Pounds Produced',
+    comparisonDirection: 'MINIMUM',
+    valueUnit: 'POUNDS',
+    defaultTargetValue: 0,
+    defaultIsActive: false,
+  },
+  ATTAINMENT_PCT: {
+    metricKey: 'ATTAINMENT_PCT',
+    metricLabel: 'Attainment %',
+    comparisonDirection: 'MINIMUM',
+    valueUnit: 'PERCENT',
+    defaultTargetValue: 1,
+    defaultIsActive: true,
+  },
+  WASTE_PCT: {
+    metricKey: 'WASTE_PCT',
+    metricLabel: 'Waste %',
+    comparisonDirection: 'MAXIMUM',
+    valueUnit: 'PERCENT',
+    defaultTargetValue: 0.03,
+    defaultIsActive: true,
+  },
+} as const;
 
 export type ProductionEosSection = 'PRODUCTION' | 'CHANGEOVER' | 'REWORK';
 
@@ -25,7 +51,9 @@ export interface ProductionEosLineInput {
   actualStartTime?: string | null;
   actualEndTime?: string | null;
   scheduledStartTime?: string | null;
+  scheduledStartOverridden?: boolean;
   scheduledStartTimes?: Array<{ shiftId: string; scheduledStartTime: string }> | null;
+  oeePct?: number | string | null;
   downMinutes?: number | string | null;
   downtimeComment?: string | null;
   wasteLbs?: number | string | null;
@@ -71,6 +99,8 @@ type DashboardMetricAccumulator = {
   lbsScheduled: number;
   lbsProduced: number;
   wasteLbs: number;
+  oeeTotal: number;
+  oeeLineCount: number;
   lateStartMinutes: number;
   totalMinutes: number;
   downMinutes: number;
@@ -90,6 +120,29 @@ type AuthUser = {
   role: string;
   organizationId: string;
 };
+
+export async function getProductionEosKpiTargets(user: AuthUser) {
+  const organizationId = user.organizationId || null;
+  const savedTargets = await prisma.productionEosKpiTarget.findMany({
+    where: { organizationId },
+    orderBy: [{ metricKey: 'asc' }],
+  });
+  const savedByMetric = new Map(savedTargets.map((target) => [target.metricKey, target]));
+
+  return Object.values(PRODUCTION_EOS_KPI_TARGET_CONFIGS).map((config) => {
+    const saved = savedByMetric.get(config.metricKey);
+    return {
+      id: saved?.id || null,
+      metricKey: config.metricKey,
+      metricLabel: config.metricLabel,
+      comparisonDirection: config.comparisonDirection,
+      valueUnit: config.valueUnit,
+      targetValue: saved?.targetValue ?? new Prisma.Decimal(config.defaultTargetValue),
+      isActive: saved?.isActive ?? config.defaultIsActive,
+      updatedAt: saved?.updatedAt || null,
+    };
+  });
+}
 
 type RateReferenceRow = {
   id: string;
@@ -126,9 +179,10 @@ const LINE_AUDIT_FIELDS = [
   ['itemNo', 'Item number'],
   ['casesScheduled', 'Cases scheduled'],
   ['casesProduced', 'Cases produced'],
+  ['scheduledStartTime', 'Scheduled start'],
   ['actualStartTime', 'Actual start'],
   ['actualEndTime', 'Actual end'],
-  ['downMinutes', 'Downtime minutes'],
+  ['oeePct', 'OEE'],
   ['downtimeComment', 'Downtime comment'],
   ['wasteLbs', 'Waste lbs'],
   ['actualHeadcount', 'Actual headcount'],
@@ -248,13 +302,25 @@ function safeDiv(numerator: number | null, denominator: number | null) {
   return numerator / denominator;
 }
 
+function toPercentRatio(value: unknown) {
+  const parsed = toNumber(String(value ?? '').replace(/%/g, ''));
+  if (parsed === null || parsed < 0) return null;
+  return parsed > 1 ? parsed / 100 : parsed;
+}
+
 function calculateTotals(calculatedLines: any[]) {
+  const oeeValues = calculatedLines
+    .map((line) => toNumber(line.oeePct))
+    .filter((value): value is number => value !== null && Number.isFinite(value));
+
   return {
     casesScheduled: round(sum(calculatedLines.map((line) => line.casesScheduled)), 3),
     casesProduced: round(sum(calculatedLines.map((line) => line.casesProduced)), 3),
     lbsScheduled: round(sum(calculatedLines.map((line) => line.lbsScheduled)), 3),
     lbsProduced: round(sum(calculatedLines.map((line) => line.lbsProduced)), 3),
     attainmentPct: round(average(calculatedLines.map((line) => line.attainmentPct))),
+    oeePct: round(average(oeeValues)),
+    oeeLineCount: oeeValues.length,
     totalMinutes: round(sum(calculatedLines.map((line) => line.totalMinutes)), 3),
     lateStartMinutes: round(sum(calculatedLines.map((line) => line.lateStartMinutes)), 3),
     wasteLbs: round(sum(calculatedLines.map((line) => line.wasteLbs)), 3),
@@ -369,6 +435,8 @@ function dashboardAccumulator(): DashboardMetricAccumulator {
     lbsScheduled: 0,
     lbsProduced: 0,
     wasteLbs: 0,
+    oeeTotal: 0,
+    oeeLineCount: 0,
     lateStartMinutes: 0,
     totalMinutes: 0,
     downMinutes: 0,
@@ -387,6 +455,11 @@ function addDashboardLine(acc: DashboardMetricAccumulator, line: any) {
   acc.lbsScheduled += toNumber(line.lbsScheduled) || 0;
   acc.lbsProduced += toNumber(line.lbsProduced) || 0;
   acc.wasteLbs += toNumber(line.wasteLbs) || 0;
+  const oeePct = toNumber(line.oeePct);
+  if (oeePct !== null && Number.isFinite(oeePct)) {
+    acc.oeeTotal += oeePct;
+    acc.oeeLineCount += 1;
+  }
   acc.lateStartMinutes += toNumber(line.lateStartMinutes) || 0;
   acc.totalMinutes += toNumber(line.totalMinutes) || 0;
   acc.downMinutes += toNumber(line.downMinutes) || 0;
@@ -418,6 +491,8 @@ function dashboardMetrics(acc: DashboardMetricAccumulator) {
     wasteLbs: round(acc.wasteLbs, 3) || 0,
     attainmentPct: round(safeDiv(acc.casesProduced, acc.casesScheduled)) || null,
     wastePct: round(safeDiv(acc.wasteLbs, acc.lbsProduced)) || null,
+    oeePct: acc.oeeLineCount > 0 ? round(acc.oeeTotal / acc.oeeLineCount) : null,
+    oeeLineCount: acc.oeeLineCount,
     lateStartMinutes: round(acc.lateStartMinutes, 3) || 0,
     totalMinutes: round(acc.totalMinutes, 3) || 0,
     downMinutes: round(acc.downMinutes, 3) || 0,
@@ -437,7 +512,76 @@ function dashboardDateKey(value: Date) {
 function dashboardDays(value?: string) {
   const parsed = Number(value);
   if (!Number.isFinite(parsed)) return 30;
-  return Math.max(7, Math.min(180, Math.trunc(parsed)));
+  return Math.max(1, Math.min(180, Math.trunc(parsed)));
+}
+
+function dashboardSelectedDateKeys(value?: string) {
+  if (!value) return [];
+  return Array.from(new Set(
+    value
+      .split(',')
+      .map((date) => date.trim())
+      .filter((date) => /^\d{4}-\d{2}-\d{2}$/.test(date)),
+  ))
+    .sort()
+    .slice(0, 93);
+}
+
+function dashboardRangeDateKeys(startDate: Date, days: number) {
+  return Array.from({ length: days }, (_, index) => {
+    const date = new Date(startDate);
+    date.setDate(startDate.getDate() + index);
+    return dashboardDateKey(date);
+  });
+}
+
+function dashboardShiftBucket(report: any): 'firstShift' | 'secondShift' | null {
+  const text = `${report.shiftNameSnapshot || ''} ${report.shiftKey || ''}`.toLowerCase();
+  if (/\b(first|1st)\b/.test(text) || text.includes('first_shift')) return 'firstShift';
+  if (/\b(second|2nd)\b/.test(text) || text.includes('second_shift')) return 'secondShift';
+  return null;
+}
+
+function dashboardLineNumber(line: any) {
+  const text = `${line.lineGroup || ''} ${line.location || ''}`;
+  const match = text.match(/\bline\s*(\d+)\b/i);
+  return match ? Number(match[1]) : null;
+}
+
+function dashboardLinePerformanceOrder(line: any) {
+  const lineNumber = dashboardLineNumber(line);
+  const lineOrder: Record<number, number> = { 1: 10, 2: 20, 3: 30, 5: 40 };
+  return lineNumber ? lineOrder[lineNumber] ?? 80 + lineNumber : 99;
+}
+
+function dashboardLinePerformanceLabel(line: any) {
+  const lineNumber = dashboardLineNumber(line);
+  return lineNumber ? `LINE ${lineNumber}` : line.location || line.lineGroup || 'LINE';
+}
+
+function dashboardLinePerformanceKey(line: any) {
+  const lineNumber = dashboardLineNumber(line);
+  return lineNumber && [1, 2, 3, 5].includes(lineNumber) ? `LINE_${lineNumber}` : null;
+}
+
+async function getProductionEosShiftIds(user: AuthUser) {
+  const productionLines = await getProductionLineReferences(user);
+  const productionLineIds = productionLines.map((line) => line.id);
+  if (!productionLineIds.length) return [];
+
+  const shifts = await prisma.shift.findMany({
+    where: {
+      ...(user.role === 'SYSTEM_ADMIN' ? {} : { Facility: { organizationId: user.organizationId } }),
+      OR: [
+        { lineId: { in: productionLineIds } },
+        { ShiftLine: { some: { lineId: { in: productionLineIds } } } },
+        { LineScheduledStartTime: { some: { lineId: { in: productionLineIds } } } },
+      ],
+    },
+    select: { id: true },
+  });
+
+  return shifts.map((shift) => shift.id);
 }
 
 function applyDerivedLineLocation(line: ProductionEosLineInput) {
@@ -557,6 +701,7 @@ export async function getProductionEosTemplate(user: AuthUser) {
     lineOptions: lineOptionsFromRows(rows),
     dayOptions: DAY_OPTIONS,
     shifts,
+    kpiTargets: await getProductionEosKpiTargets(user),
     reporter: {
       mode: canChooseReporter ? 'select_by_role' : 'current_user',
       current: currentReporter,
@@ -706,7 +851,9 @@ export async function calculateProductionEosReport(user: AuthUser, payload: Prod
     const casesProduced = toNumber(line.casesProduced);
     const parentCasesProduced = toNumber(parent?.casesProduced);
     const downMinutes = toNumber(line.downMinutes) || 0;
-    const wasteLbs = toNumber(line.wasteLbs) || 0;
+    const oeePct = toPercentRatio(line.oeePct);
+    const wasteLbs = toNumber(line.wasteLbs);
+    const wasteLbsForCalculation = wasteLbs || 0;
     const actualHeadcount = toNumber(line.actualHeadcount);
     const poundsPerCase = toNumber(rateRef?.weightPerCaseLb);
     const standardHeadcount = standardHeadcountForLine(rateRef, line);
@@ -721,12 +868,17 @@ export async function calculateProductionEosReport(user: AuthUser, payload: Prod
     const lbsScheduled = isAssembly && poundsPerCase !== null && casesScheduled !== null ? poundsPerCase * casesScheduled : null;
     const lbsProduced = isAssembly && poundsPerCase !== null && casesProduced !== null ? poundsPerCase * casesProduced : null;
     const totalMinutes = minutesBetween(line.actualStartTime, line.actualEndTime);
-    const scheduledStartTime = line.productionLineId
+    const defaultScheduledStartTime = line.productionLineId
       ? selectedShiftStartByLineId.get(line.productionLineId) || null
       : null;
+    const incomingScheduledStartTime = toStringOrNull(line.scheduledStartTime);
+    const scheduledStartOverridden = Boolean(line.scheduledStartOverridden);
+    const scheduledStartTime = scheduledStartOverridden
+      ? incomingScheduledStartTime
+      : defaultScheduledStartTime;
     const lateStartMinutes = scheduledStartTime ? minutesBetween(scheduledStartTime, line.actualStartTime, true) : null;
     const wasteBase = stationType === 'PACK_OFF' ? parentLbsProduced : lbsProduced;
-    const wastePct = safeDiv(wasteLbs, wasteBase);
+    const wastePct = safeDiv(wasteLbsForCalculation, wasteBase);
     const attainmentPct = line.lineGroup === 'Line 2' && isAssembly
       ? safeDiv(casesProduced, casesScheduled)
       : safeDiv(lbsProduced, lbsScheduled);
@@ -739,9 +891,11 @@ export async function calculateProductionEosReport(user: AuthUser, payload: Prod
       casesScheduled,
       casesProduced,
       downMinutes,
+      oeePct: round(oeePct),
       wasteLbs,
       actualHeadcount,
       scheduledStartTime,
+      scheduledStartOverridden,
       lbsScheduled: round(lbsScheduled, 3),
       lbsProduced: round(lbsProduced, 3),
       attainmentPct: round(attainmentPct),
@@ -796,10 +950,12 @@ function lineDataForSave(line: any) {
     actualStartTime: line.actualStartTime || null,
     actualEndTime: line.actualEndTime || null,
     downMinutes: decimal(line.downMinutes),
+    oeePct: decimal(line.oeePct),
     downtimeComment: line.downtimeComment || null,
     wasteLbs: decimal(line.wasteLbs),
     actualHeadcount: decimal(line.actualHeadcount),
     scheduledStartTime: line.scheduledStartTime || null,
+    scheduledStartOverridden: Boolean(line.scheduledStartOverridden),
     lbsScheduled: decimal(line.lbsScheduled),
     lbsProduced: decimal(line.lbsProduced),
     attainmentPct: decimal(line.attainmentPct),
@@ -843,6 +999,7 @@ const NUMERIC_AUDIT_FIELDS = new Set([
   'casesScheduled',
   'casesProduced',
   'downMinutes',
+  'oeePct',
   'wasteLbs',
   'actualHeadcount',
 ]);
@@ -945,10 +1102,12 @@ function reportSnapshotFromExisting(report: any) {
       actualStartTime: line.actualStartTime,
       actualEndTime: line.actualEndTime,
       downMinutes: line.downMinutes,
+      oeePct: line.oeePct,
       downtimeComment: line.downtimeComment,
       wasteLbs: line.wasteLbs,
       actualHeadcount: line.actualHeadcount,
       scheduledStartTime: line.scheduledStartTime,
+      scheduledStartOverridden: Boolean(line.scheduledStartOverridden),
       lbsScheduled: line.lbsScheduled,
       lbsProduced: line.lbsProduced,
       attainmentPct: line.attainmentPct,
@@ -1571,6 +1730,29 @@ export async function getProductionEosReportAuditTrail(user: AuthUser, reportId:
   });
 }
 
+export async function getProductionEosAuditTrailForSelection(user: AuthUser, filters: { date?: string; shiftId?: string }) {
+  if (!filters.date || !filters.shiftId) {
+    return { report: null, auditTrail: [] };
+  }
+
+  const report = await prisma.productionEosReport.findFirst({
+    where: {
+      ...(user.role === 'SYSTEM_ADMIN' ? {} : { organizationId: user.organizationId }),
+      reportDate: new Date(`${filters.date}T00:00:00`),
+      shiftId: filters.shiftId,
+    },
+    include: {
+      lines: { orderBy: { sortOrder: 'asc' } },
+      notes: { orderBy: { sortOrder: 'asc' } },
+    },
+    orderBy: [{ updatedAt: 'desc' }],
+  });
+
+  if (!report) return { report: null, auditTrail: [] };
+  const auditTrail = await getProductionEosReportAuditTrail(user, report.id);
+  return { report, auditTrail: auditTrail || [] };
+}
+
 export async function listProductionEosReports(user: AuthUser, filters: { date?: string; shiftId?: string; status?: string } = {}) {
   return prisma.productionEosReport.findMany({
     where: {
@@ -1583,6 +1765,7 @@ export async function listProductionEosReports(user: AuthUser, filters: { date?:
       id: true,
       reportDate: true,
       dayOfWeek: true,
+      shiftId: true,
       shiftNameSnapshot: true,
       reportedByName: true,
       status: true,
@@ -1597,22 +1780,53 @@ export async function listProductionEosReports(user: AuthUser, filters: { date?:
 
 export async function getProductionEosDashboard(
   user: AuthUser,
-  filters: { endDate?: string; shiftId?: string; days?: string } = {},
+  filters: { endDate?: string; lineDate?: string; shiftId?: string; days?: string; dates?: string } = {},
 ) {
-  const endDateValue = filters.endDate || new Date().toISOString().slice(0, 10);
+  const selectedDateKeys = dashboardSelectedDateKeys(filters.dates);
+  const endDateValue = selectedDateKeys.length
+    ? selectedDateKeys[selectedDateKeys.length - 1]
+    : filters.endDate || new Date().toISOString().slice(0, 10);
+  const lineDateValue = filters.lineDate || endDateValue;
   const days = dashboardDays(filters.days);
   const endDate = new Date(`${endDateValue}T00:00:00`);
+  const lineDate = new Date(`${lineDateValue}T00:00:00`);
   const startDate = new Date(endDate);
   startDate.setDate(startDate.getDate() - (days - 1));
+  const effectiveStartDate = selectedDateKeys.length ? new Date(`${selectedDateKeys[0]}T00:00:00`) : startDate;
+  const dashboardDateKeys = selectedDateKeys.length ? selectedDateKeys : dashboardRangeDateKeys(startDate, days);
+  const effectiveDays = dashboardDateKeys.length || days;
+  const selectedDateWhere = selectedDateKeys.map((date) => {
+    const start = new Date(`${date}T00:00:00`);
+    const next = new Date(start);
+    next.setDate(start.getDate() + 1);
+    return {
+      reportDate: {
+        gte: start,
+        lt: next,
+      },
+    };
+  });
+  const productionShiftIds = await getProductionEosShiftIds(user);
+  const scopedReportWhere = {
+    ...(user.role === 'SYSTEM_ADMIN' ? {} : { organizationId: user.organizationId }),
+    ...(filters.shiftId
+      ? { shiftId: filters.shiftId }
+      : productionShiftIds.length
+        ? { shiftId: { in: productionShiftIds } }
+        : { id: '__no_production_eos_dashboard_reports__' }),
+  };
 
   const reports = await prisma.productionEosReport.findMany({
     where: {
-      ...(user.role === 'SYSTEM_ADMIN' ? {} : { organizationId: user.organizationId }),
-      reportDate: {
-        gte: startDate,
-        lte: endDate,
-      },
-      ...(filters.shiftId ? { shiftId: filters.shiftId } : {}),
+      ...scopedReportWhere,
+      ...(selectedDateKeys.length
+        ? { OR: selectedDateWhere }
+        : {
+            reportDate: {
+              gte: startDate,
+              lte: endDate,
+            },
+          }),
     },
     include: {
       lines: { orderBy: { sortOrder: 'asc' } },
@@ -1620,19 +1834,51 @@ export async function getProductionEosDashboard(
     },
     orderBy: [{ reportDate: 'asc' }, { updatedAt: 'asc' }],
   });
-
   const overall = dashboardAccumulator();
   const byDate = new Map<string, DashboardMetricAccumulator>();
+  const byDateShift = new Map<string, { firstShift: DashboardMetricAccumulator; secondShift: DashboardMetricAccumulator }>();
   const bySection = new Map<string, DashboardMetricAccumulator>();
   const byLine = new Map<string, DashboardMetricAccumulator & { location: string; section: string; lineGroup: string | null }>();
+  const byProductionLine = new Map<string, DashboardMetricAccumulator & {
+    location: string;
+    section: string;
+    lineGroup: string | null;
+    stationType: string | null;
+    sortOrder: number;
+    firstShift: DashboardMetricAccumulator;
+    secondShift: DashboardMetricAccumulator;
+  }>();
+  const byProductionLineDateShift = new Map<string, {
+    date: string;
+    location: string;
+    section: string;
+    lineGroup: string | null;
+    sortOrder: number;
+    firstShift: DashboardMetricAccumulator;
+    secondShift: DashboardMetricAccumulator;
+  }>();
   const byShift = new Map<string, DashboardMetricAccumulator & { shiftId: string | null; shiftName: string }>();
   const itemMix = new Map<string, DashboardMetricAccumulator & { itemNo: string; description: string }>();
 
-  for (let index = 0; index < days; index += 1) {
-    const date = new Date(startDate);
-    date.setDate(startDate.getDate() + index);
-    byDate.set(dashboardDateKey(date), dashboardAccumulator());
-  }
+  dashboardDateKeys.forEach((dateKey) => {
+    byDate.set(dateKey, dashboardAccumulator());
+    byDateShift.set(dateKey, {
+      firstShift: dashboardAccumulator(),
+      secondShift: dashboardAccumulator(),
+    });
+    [1, 2, 3, 5].forEach((lineNumber) => {
+      const seedLine = { lineGroup: `Line ${lineNumber}`, location: `Line ${lineNumber}` };
+      byProductionLineDateShift.set(`${dateKey}:LINE_${lineNumber}`, {
+        date: dateKey,
+        location: `LINE ${lineNumber}`,
+        section: 'PRODUCTION',
+        lineGroup: `Line ${lineNumber}`,
+        sortOrder: dashboardLinePerformanceOrder(seedLine),
+        firstShift: dashboardAccumulator(),
+        secondShift: dashboardAccumulator(),
+      });
+    });
+  });
 
   reports.forEach((report) => {
     addDashboardReport(overall, report);
@@ -1641,6 +1887,11 @@ export async function getProductionEosDashboard(
     const dateAcc = byDate.get(dateKey) || dashboardAccumulator();
     addDashboardReport(dateAcc, report);
     byDate.set(dateKey, dateAcc);
+
+    const shiftBucket = dashboardShiftBucket(report);
+    const dateShiftAcc = byDateShift.get(dateKey);
+    const dateShiftBucketAcc = shiftBucket && dateShiftAcc ? dateShiftAcc[shiftBucket] : null;
+    if (dateShiftBucketAcc) addDashboardReport(dateShiftBucketAcc, report);
 
     const shiftKey = report.shiftId || report.shiftNameSnapshot || 'Unassigned';
     if (!byShift.has(shiftKey)) {
@@ -1656,6 +1907,7 @@ export async function getProductionEosDashboard(
     (report.lines || []).forEach((line) => {
       addDashboardLine(overall, line);
       addDashboardLine(dateAcc, line);
+      if (dateShiftBucketAcc) addDashboardLine(dateShiftBucketAcc, line);
       addDashboardLine(shiftAcc, line);
 
       const sectionKey = String(line.section || 'UNASSIGNED');
@@ -1693,15 +1945,84 @@ export async function getProductionEosDashboard(
     });
   });
 
+  [1, 2, 3, 5].forEach((lineNumber) => {
+    const seedLine = { lineGroup: `Line ${lineNumber}`, location: `Line ${lineNumber}` };
+    const productionLineKey = `LINE_${lineNumber}`;
+    byProductionLine.set(productionLineKey, {
+      ...dashboardAccumulator(),
+      location: `LINE ${lineNumber}`,
+      section: 'PRODUCTION',
+      lineGroup: `Line ${lineNumber}`,
+      stationType: null,
+      sortOrder: dashboardLinePerformanceOrder(seedLine),
+      firstShift: dashboardAccumulator(),
+      secondShift: dashboardAccumulator(),
+    });
+  });
+
+  reports.forEach((report) => {
+    const shiftBucket = dashboardShiftBucket(report);
+
+    (report.lines || []).forEach((line) => {
+      const sectionKey = String(line.section || 'UNASSIGNED');
+      if (sectionKey === 'PRODUCTION') {
+        const productionLineKey = dashboardLinePerformanceKey(line);
+        if (productionLineKey) {
+          if (!byProductionLine.has(productionLineKey)) {
+            byProductionLine.set(productionLineKey, {
+              ...dashboardAccumulator(),
+              location: dashboardLinePerformanceLabel(line),
+              section: sectionKey,
+              lineGroup: line.lineGroup || null,
+              stationType: null,
+              sortOrder: dashboardLinePerformanceOrder(line),
+              firstShift: dashboardAccumulator(),
+              secondShift: dashboardAccumulator(),
+            });
+          }
+          const productionLineAcc = byProductionLine.get(productionLineKey)!;
+          addDashboardReport(productionLineAcc, report);
+          addDashboardLine(productionLineAcc, line);
+          if (shiftBucket) {
+            addDashboardReport(productionLineAcc[shiftBucket], report);
+            addDashboardLine(productionLineAcc[shiftBucket], line);
+
+            const dateKey = dashboardDateKey(report.reportDate);
+            const productionLineDateShiftKey = `${dateKey}:${productionLineKey}`;
+            if (!byProductionLineDateShift.has(productionLineDateShiftKey)) {
+              byProductionLineDateShift.set(productionLineDateShiftKey, {
+                date: dateKey,
+                location: dashboardLinePerformanceLabel(line),
+                section: sectionKey,
+                lineGroup: line.lineGroup || null,
+                sortOrder: dashboardLinePerformanceOrder(line),
+                firstShift: dashboardAccumulator(),
+                secondShift: dashboardAccumulator(),
+              });
+            }
+            const productionLineDateShiftAcc = byProductionLineDateShift.get(productionLineDateShiftKey)!;
+            addDashboardReport(productionLineDateShiftAcc[shiftBucket], report);
+            addDashboardLine(productionLineDateShiftAcc[shiftBucket], line);
+          }
+        }
+      }
+    });
+  });
+
   const sectionOrder: Record<string, number> = { PRODUCTION: 1, CHANGEOVER: 2, REWORK: 3 };
   const trend = Array.from(byDate.entries()).map(([date, acc]) => ({
     date,
     ...dashboardMetrics(acc),
   }));
+  const trendByShift = Array.from(byDateShift.entries()).map(([date, acc]) => ({
+    date,
+    firstShift: dashboardMetrics(acc.firstShift),
+    secondShift: dashboardMetrics(acc.secondShift),
+  }));
   const sectionMix = Array.from(bySection.entries())
     .map(([section, acc]) => ({ section, ...dashboardMetrics(acc) }))
     .sort((a, b) => (sectionOrder[a.section] || 99) - (sectionOrder[b.section] || 99));
-  const linePerformance = Array.from(byLine.values())
+  const allLinePerformance = Array.from(byLine.values())
     .map((acc) => ({
       location: acc.location,
       section: acc.section,
@@ -1709,6 +2030,29 @@ export async function getProductionEosDashboard(
       ...dashboardMetrics(acc),
     }))
     .sort((a, b) => b.lbsProduced - a.lbsProduced);
+  const linePerformance = Array.from(byProductionLine.values())
+    .map((acc) => ({
+      location: acc.location,
+      section: acc.section,
+      lineGroup: acc.lineGroup,
+      stationType: acc.stationType,
+      sortOrder: acc.sortOrder,
+      firstShift: dashboardMetrics(acc.firstShift),
+      secondShift: dashboardMetrics(acc.secondShift),
+      ...dashboardMetrics(acc),
+    }))
+    .sort((a, b) => a.sortOrder - b.sortOrder);
+  const lineTrendByShift = Array.from(byProductionLineDateShift.values())
+    .map((acc) => ({
+      date: acc.date,
+      location: acc.location,
+      section: acc.section,
+      lineGroup: acc.lineGroup,
+      sortOrder: acc.sortOrder,
+      firstShift: dashboardMetrics(acc.firstShift),
+      secondShift: dashboardMetrics(acc.secondShift),
+    }))
+    .sort((a, b) => a.sortOrder - b.sortOrder || a.date.localeCompare(b.date));
   const shiftPerformance = Array.from(byShift.values())
     .map((acc) => ({
       shiftId: acc.shiftId,
@@ -1725,15 +2069,15 @@ export async function getProductionEosDashboard(
     .sort((a, b) => b.lbsProduced - a.lbsProduced)
     .slice(0, 12);
 
-  const wasteDrivers = [...linePerformance]
+  const wasteDrivers = [...allLinePerformance]
     .filter((row) => row.wasteLbs > 0)
     .sort((a, b) => b.wasteLbs - a.wasteLbs)
     .slice(0, 8);
-  const lateStartDrivers = [...linePerformance]
+  const lateStartDrivers = [...allLinePerformance]
     .filter((row) => row.lateStartMinutes > 0)
     .sort((a, b) => b.lateStartMinutes - a.lateStartMinutes)
     .slice(0, 8);
-  const attainmentWatchlist = [...linePerformance]
+  const attainmentWatchlist = [...allLinePerformance]
     .filter((row) => row.casesScheduled > 0 && row.attainmentPct !== null)
     .sort((a, b) => (a.attainmentPct || 0) - (b.attainmentPct || 0))
     .slice(0, 8);
@@ -1753,15 +2097,19 @@ export async function getProductionEosDashboard(
 
   return {
     range: {
-      startDate: dashboardDateKey(startDate),
+      startDate: dashboardDateKey(effectiveStartDate),
       endDate: dashboardDateKey(endDate),
-      days,
+      lineDate: dashboardDateKey(lineDate),
+      days: effectiveDays,
       shiftId: filters.shiftId || null,
+      selectedDates: selectedDateKeys,
     },
     summary: dashboardMetrics(overall),
     trend,
+    trendByShift,
     sectionMix,
     linePerformance,
+    lineTrendByShift,
     shiftPerformance,
     itemPerformance,
     wasteDrivers,

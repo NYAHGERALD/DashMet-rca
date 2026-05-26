@@ -4155,6 +4155,27 @@ model ProductionEosRateReference {
   @@map("production_eos_rate_references")
 }
 
+model ProductionEosKpiTarget {
+  id                  String   @id @default(uuid())
+  organizationId      String?
+  metricKey           String   @db.VarChar(80)
+  metricLabel         String   @db.VarChar(120)
+  targetValue         Decimal  @default(0) @db.Decimal(14, 4)
+  valueUnit           String   @default("PERCENT") @db.VarChar(20)
+  comparisonDirection String   @db.VarChar(20)
+  isActive            Boolean  @default(true)
+  createdByUserId     String?
+  updatedByUserId     String?
+  createdAt           DateTime @default(now())
+  updatedAt           DateTime @updatedAt
+
+  @@unique([organizationId, metricKey])
+  @@index([organizationId])
+  @@index([metricKey])
+  @@index([isActive])
+  @@map("production_eos_kpi_targets")
+}
+
 model ProductionEosReport {
   id                 String    @id @default(uuid())
   organizationId     String
@@ -4207,10 +4228,12 @@ model ProductionEosReportLine {
   actualStartTime         String?  @db.VarChar(20)
   actualEndTime           String?  @db.VarChar(20)
   downMinutes             Decimal? @db.Decimal(14, 3)
+  oeePct                  Decimal? @db.Decimal(10, 4)
   downtimeComment         String?  @db.Text
   wasteLbs                Decimal? @db.Decimal(14, 3)
   actualHeadcount         Decimal? @db.Decimal(14, 3)
   scheduledStartTime      String?  @db.VarChar(20)
+  scheduledStartOverridden Boolean  @default(false)
   lbsScheduled            Decimal? @db.Decimal(14, 3)
   lbsProduced             Decimal? @db.Decimal(14, 3)
   attainmentPct           Decimal? @db.Decimal(10, 4)

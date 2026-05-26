@@ -132,6 +132,17 @@ export default function AppLayout({ children }: AppLayoutProps) {
   const pathname = usePathname();
   const prevAccessRef = useRef<boolean | null>(null);
 
+  const openProductionEosDashboard = useCallback(() => {
+    setMobileMenuOpen(false);
+    setMobileQuickNavOpen(false);
+    if (typeof window !== 'undefined') {
+      window.dispatchEvent(new Event('production-eos:show-dashboard'));
+    }
+    if (pathname !== '/production-eos') {
+      router.push('/production-eos');
+    }
+  }, [pathname, router]);
+
   // Real-time access revocation detection
   // When privileges update via WebSocket, check if the current page is still accessible
   useEffect(() => {
@@ -479,7 +490,7 @@ export default function AppLayout({ children }: AppLayoutProps) {
             { href: '/workplace-safety', icon: <ShieldCheck size={18} strokeWidth={1.8} />, label: 'Safety Assessment', show: hasNavAccess(NAV_PRIVILEGES.SAFETY_ASSESSMENT), group: 'Safety & Compliance' },
             { href: '/hr', icon: <Gavel size={18} strokeWidth={1.8} />, label: 'Conflict Resolution', show: hasNavAccess(NAV_PRIVILEGES.HR), group: 'Safety & Compliance' },
             { href: '/bakery-metrics', icon: <PieChart size={18} strokeWidth={1.8} />, label: 'Bakery Metrics', show: hasNavAccess(NAV_PRIVILEGES.BAKERY_METRICS), group: 'Operations' },
-            { href: '/production-eos', icon: <Factory size={18} strokeWidth={1.8} />, label: 'Production EOS', show: hasNavAccess(NAV_PRIVILEGES.PRODUCTION_EOS), group: 'Operations' },
+            { icon: <Factory size={18} strokeWidth={1.8} />, label: 'Production EOS', show: hasNavAccess(NAV_PRIVILEGES.PRODUCTION_EOS), group: 'Operations', onClick: openProductionEosDashboard },
             { href: '/lsw', icon: <ClipboardEdit size={18} strokeWidth={1.8} />, label: 'LSW', show: hasNavAccess(NAV_PRIVILEGES.LSW), group: 'Operations' },
             { href: '/vacation', icon: <Palmtree size={18} strokeWidth={1.8} />, label: 'Vacation Hub', show: hasNavAccess(NAV_PRIVILEGES.VACATION), group: 'Operations' },
             { href: '/meetings', icon: <Mic size={18} strokeWidth={1.8} />, label: 'Meeting Intelligence', show: hasNavAccess(NAV_PRIVILEGES.MEETINGS), group: 'Operations' },
@@ -579,7 +590,7 @@ export default function AppLayout({ children }: AppLayoutProps) {
                     { href: '/workplace-safety', icon: <ShieldCheck size={18} strokeWidth={1.8} />, label: 'Safety Assessment', show: hasNavAccess(NAV_PRIVILEGES.SAFETY_ASSESSMENT) },
                     { href: '/hr', icon: <Gavel size={18} strokeWidth={1.8} />, label: 'Conflict Resolution', show: hasNavAccess(NAV_PRIVILEGES.HR) },
                     { href: '/bakery-metrics', icon: <PieChart size={18} strokeWidth={1.8} />, label: 'Bakery Metrics', show: hasNavAccess(NAV_PRIVILEGES.BAKERY_METRICS) },
-                    { href: '/production-eos', icon: <Factory size={18} strokeWidth={1.8} />, label: 'Production EOS', show: hasNavAccess(NAV_PRIVILEGES.PRODUCTION_EOS) },
+                    { icon: <Factory size={18} strokeWidth={1.8} />, label: 'Production EOS', show: hasNavAccess(NAV_PRIVILEGES.PRODUCTION_EOS), onClick: openProductionEosDashboard },
                     { href: '/lsw', icon: <ClipboardEdit size={18} strokeWidth={1.8} />, label: 'LSW', show: hasNavAccess(NAV_PRIVILEGES.LSW) },
                     { href: '/vacation', icon: <Palmtree size={18} strokeWidth={1.8} />, label: 'Vacation Hub', show: hasNavAccess(NAV_PRIVILEGES.VACATION) },
                     { href: '/meetings', icon: <Mic size={18} strokeWidth={1.8} />, label: 'Meeting Intelligence', show: hasNavAccess(NAV_PRIVILEGES.MEETINGS) },
