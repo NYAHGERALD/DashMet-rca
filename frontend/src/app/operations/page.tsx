@@ -393,6 +393,11 @@ export default function OperationsPage() {
     }
   };
 
+  const reconcileIssue = (issueId: string, updatedIssue: Partial<MachineIssue>) => {
+    setIssues(prev => prev.map(issue => (issue.id === issueId ? { ...issue, ...updatedIssue } : issue)));
+    setSelectedIssue(prev => (prev?.id === issueId ? { ...prev, ...updatedIssue } : prev));
+  };
+
   const saveCellEdit = async (issueId: string, field: string, value: string | null) => {
     setEditingCell(null);
 
@@ -451,23 +456,19 @@ export default function OperationsPage() {
       const filteredComps = value ? components.filter(c => c.equipmentId === value) : [];
       updates.componentId = filteredComps[0]?.id || null;
     }
+    if (field === 'status' && (value === 'OPEN' || value === 'IN_PROGRESS')) {
+      updates.resolution = null;
+      updates.resolvedAt = null;
+      updates.resolvedById = null;
+    }
 
     // Optimistic update — reflect all cascaded changes in UI immediately
-    setIssues(prev => prev.map(i => {
-      if (i.id !== issueId) return i;
-      return { ...i, ...updates };
-    }));
-    if (selectedIssue?.id === issueId) {
-      setSelectedIssue(prev => prev ? { ...prev, ...updates } : prev);
-    }
+    reconcileIssue(issueId, updates);
     try {
       const res = await api.patch(`/operations/issues/${issueId}`, updates);
       if (res.data.success) {
         // Reconcile with server response (includes relation data)
-        setIssues(prev => prev.map(i => i.id === issueId ? { ...i, ...res.data.data } : i));
-        if (selectedIssue?.id === issueId) {
-          setSelectedIssue(prev => prev ? { ...prev, ...res.data.data } : prev);
-        }
+        reconcileIssue(issueId, res.data.data);
       }
     } catch {
       // Revert on failure — reload issues
@@ -1013,12 +1014,12 @@ export default function OperationsPage() {
   const updateIssueStatus = async (issueId: string, newStatus: IssueStatus) => {
     setUpdatingStatus(issueId);
     try {
-      await api.patch(`/operations/issues/${issueId}`, { status: newStatus });
+      const res = await api.patch(`/operations/issues/${issueId}`, { status: newStatus });
       setSuccess(`Status updated to ${statusConfig[newStatus].label}`);
-      loadIssues();
-      if (selectedIssue?.id === issueId) {
-        setSelectedIssue(prev => prev ? { ...prev, status: newStatus } : null);
+      if (res.data?.success && res.data.data) {
+        reconcileIssue(issueId, res.data.data);
       }
+      loadIssues();
     } catch (err: any) {
       setError(err?.response?.data?.error || 'Failed to update status');
     } finally {
@@ -1198,12 +1199,15 @@ export default function OperationsPage() {
   const submitResolution = async () => {
     if (!selectedIssue || !resolutionText.trim()) return;
     try {
-      await api.patch(`/operations/issues/${selectedIssue.id}`, { resolution: resolutionText.trim(), status: 'RESOLVED' });
+      const issueId = selectedIssue.id;
+      const res = await api.patch(`/operations/issues/${issueId}`, { resolution: resolutionText.trim(), status: 'RESOLVED' });
       setSuccess('Issue resolved');
       setShowResolutionInput(false);
       setResolutionText('');
+      if (res.data?.success && res.data.data) {
+        reconcileIssue(issueId, res.data.data);
+      }
       loadIssues();
-      setSelectedIssue(prev => prev ? { ...prev, status: 'RESOLVED', resolution: resolutionText.trim() } : null);
     } catch (err: any) {
       setError(err?.response?.data?.error || 'Failed to resolve issue');
     }
@@ -1222,9 +1226,9 @@ export default function OperationsPage() {
 
   return (
     <ProtectedRoute>
-      <div className="h-screen flex flex-col bg-gray-50 dark:bg-gray-900 w-full overflow-hidden">
+      <div className="h-full min-h-0 flex flex-col bg-gray-50 dark:bg-gray-900 w-full overflow-hidden">
         {/* ─── Header ────────────────────────────────────────────────── */}
-        <div className="flex-shrink-0 sticky top-0 z-30 bg-gray-50 dark:bg-gray-900 border-b border-gray-200 dark:border-gray-700 shadow-sm">
+        <div className="flex-shrink-0 sticky top-0 z-40 bg-gray-50/95 dark:bg-gray-900/95 backdrop-blur border-b border-gray-200 dark:border-gray-700 shadow-sm">
           <div className="w-full px-4 sm:px-6 lg:px-8 py-4">
             <div className="flex items-center justify-between">
               <div className="flex items-center gap-3">
@@ -1306,7 +1310,7 @@ export default function OperationsPage() {
           </div>
         )}
 
-        <div className="flex-1 flex flex-col min-h-0 w-full px-2 sm:px-3 lg:px-4 py-4">
+        <div className="flex-1 flex flex-col min-h-0 w-full px-2 sm:px-3 lg:px-4 py-3">
           {/* ─── Search Bar ──────────────────────────────────────── */}
           <div className="flex-shrink-0 flex items-center justify-center mb-3">
             <div className="flex items-center w-full max-w-2xl bg-white dark:bg-gray-800 rounded-full shadow-sm border-2 border-gray-900 dark:border-gray-300 focus-within:ring-2 focus-within:ring-[#3aa8e8] focus-within:border-[#3aa8e8] transition-all">
@@ -1338,7 +1342,7 @@ export default function OperationsPage() {
           </div>
 
           {/* ─── Main Layout: Filter Panel + Table ────────────────── */}
-          <div className={`flex flex-1 min-h-0 ${showFilters ? 'gap-3' : 'gap-0'}`}>
+          <div className={`flex flex-1 min-h-0 overflow-hidden ${showFilters ? 'gap-3' : 'gap-0'}`}>
             {/* ─── Slide-out Filter Panel ─────────────────────────── */}
             <div
               className={`flex-shrink-0 overflow-hidden transition-all duration-300 ease-[cubic-bezier(0.4,0,0.2,1)] ${
@@ -1536,7 +1540,7 @@ export default function OperationsPage() {
             </div>
 
             {/* ─── Table Section ──────────────────────────────────── */}
-            <div className="flex-1 bg-white dark:bg-gray-800 rounded-xl border border-gray-200 dark:border-gray-700 overflow-hidden flex flex-col min-w-0">
+            <div className="flex-1 min-h-0 bg-white dark:bg-gray-800 rounded-xl border border-gray-200 dark:border-gray-700 overflow-hidden flex flex-col min-w-0">
               {/* Table Header Bar */}
               <div className="px-4 py-2.5 bg-[#3aa8e8] dark:bg-[#2d8abf] border-b border-[#3aa8e8]/20 flex items-center justify-between flex-shrink-0 rounded-t-xl">
                 <span className="text-sm font-semibold text-white uppercase tracking-wider">
@@ -1638,8 +1642,8 @@ export default function OperationsPage() {
                   </p>
                 </div>
               ) : (
-                <div className={`overflow-y-auto flex-1 ${showFilters ? 'overflow-x-auto' : 'overflow-x-hidden'}`}>
-                  <table className={`w-full text-sm text-left ${showFilters ? 'min-w-[1400px]' : ''}`}>
+                <div className={`overflow-y-auto flex-1 min-h-0 [&_table]:text-[11px] [&_table]:leading-tight [&_th]:px-2 [&_th]:py-2 [&_th]:text-[9px] [&_td]:px-2 [&_td]:py-2 [&_td]:text-[11px] [&_td_p]:text-[11px] [&_td_span]:text-[10px] ${showFilters ? 'overflow-x-auto' : 'overflow-x-hidden'}`}>
+                  <table className={`w-full text-[11px] text-left ${showFilters ? 'min-w-[1320px]' : ''}`}>
                     <thead className="bg-gray-50 dark:bg-gray-700/50 border-b border-gray-900 dark:border-gray-300 sticky top-0 z-10">
                       <tr className="divide-x divide-gray-200 dark:divide-gray-600">
                         {selectionMode && (
@@ -2917,14 +2921,19 @@ export default function OperationsPage() {
                 )}
 
                 {/* ── Resolution ── */}
-                {selectedIssue.resolution && (
+                {(selectedIssue.status === 'RESOLVED' || selectedIssue.status === 'CLOSED') && (
                   <div className="bg-green-50 dark:bg-green-900/20 rounded-lg p-3 border border-green-200 dark:border-green-800">
-                    <h4 className="text-xs font-semibold text-green-700 dark:text-green-400 uppercase mb-1">Resolution</h4>
-                    <p className="text-sm text-gray-900 dark:text-white whitespace-pre-wrap">{selectedIssue.resolution}</p>
-                    {selectedIssue.ResolvedBy && (
+                    <h4 className="text-xs font-semibold text-green-700 dark:text-green-400 uppercase mb-1">
+                      {selectedIssue.status === 'CLOSED' ? 'Closure' : 'Resolution'}
+                    </h4>
+                    <p className="text-sm text-gray-900 dark:text-white whitespace-pre-wrap">
+                      {selectedIssue.resolution?.trim() || (selectedIssue.status === 'CLOSED' ? 'Closed' : 'Resolved')}
+                    </p>
+                    {(selectedIssue.ResolvedBy || selectedIssue.resolvedAt) && (
                       <p className="text-[10px] text-gray-500 dark:text-gray-400 mt-1">
-                        Resolved by {selectedIssue.ResolvedBy.firstName} {selectedIssue.ResolvedBy.lastName}
-                        {selectedIssue.resolvedAt && ` on ${format(new Date(selectedIssue.resolvedAt), 'MMM d, yyyy')}`}
+                        {selectedIssue.status === 'CLOSED' ? 'Closed' : 'Resolved'}
+                        {selectedIssue.ResolvedBy && ` by ${selectedIssue.ResolvedBy.firstName} ${selectedIssue.ResolvedBy.lastName}`}
+                        {selectedIssue.resolvedAt && ` on ${format(new Date(selectedIssue.resolvedAt), 'MMM d, yyyy h:mm a')}`}
                       </p>
                     )}
                   </div>

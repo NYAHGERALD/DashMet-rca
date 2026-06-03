@@ -244,6 +244,10 @@ router.patch('/issues/:id', async (req: any, res: Response, next: NextFunction) 
       if (status === 'RESOLVED' || status === 'CLOSED') {
         data.resolvedAt = new Date();
         data.resolvedById = req.user.id;
+      } else if (status === 'OPEN' || status === 'IN_PROGRESS') {
+        data.resolution = null;
+        data.resolvedAt = null;
+        data.resolvedById = null;
       }
     }
 

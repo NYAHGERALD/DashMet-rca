@@ -302,10 +302,10 @@ export default function SlidingSidebar({
         </button>
 
         {/* Header */}
-        <div className="px-3 py-2.5 border-b border-white/20 dark:border-gray-700/40" style={{ background: isDark ? 'linear-gradient(135deg, rgba(14,165,233,0.12) 0%, rgba(14,165,233,0.04) 100%)' : 'linear-gradient(135deg, rgba(14,165,233,0.08) 0%, rgba(14,165,233,0.02) 100%)' }}>
-          <h2 className="text-[11px] font-semibold text-gray-500 dark:text-gray-400 flex items-center gap-2 tracking-wide uppercase cursor-default group/title transition-colors duration-200 hover:text-primary-600 dark:hover:text-primary-400">
-            <div className="w-5 h-5 rounded-md bg-primary-500/15 dark:bg-primary-400/20 flex items-center justify-center transition-all duration-300 group-hover/title:bg-primary-500/25 group-hover/title:scale-110 group-hover/title:rotate-6">
-              <svg className="w-3 h-3 text-primary-600 dark:text-primary-400" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2.2}>
+        <div className="px-2.5 py-2 border-b border-white/20 dark:border-gray-700/40" style={{ background: isDark ? 'linear-gradient(135deg, rgba(14,165,233,0.12) 0%, rgba(14,165,233,0.04) 100%)' : 'linear-gradient(135deg, rgba(14,165,233,0.08) 0%, rgba(14,165,233,0.02) 100%)' }}>
+          <h2 className="text-[10px] font-semibold text-gray-500 dark:text-gray-400 flex items-center gap-1.5 tracking-wide uppercase cursor-default group/title transition-colors duration-200 hover:text-primary-600 dark:hover:text-primary-400">
+            <div className="w-[18px] h-[18px] rounded-md bg-primary-500/15 dark:bg-primary-400/20 flex items-center justify-center transition-all duration-300 group-hover/title:bg-primary-500/25 group-hover/title:scale-110 group-hover/title:rotate-6">
+              <svg className="w-2.5 h-2.5 text-primary-600 dark:text-primary-400" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2.2}>
                 <path strokeLinecap="round" strokeLinejoin="round" d="M13 10V3L4 14h7v7l9-11h-7z" />
               </svg>
             </div>
@@ -343,7 +343,7 @@ export default function SlidingSidebar({
         )}
 
         {/* Links — expanded */}
-        <nav ref={navRef} className="p-2 space-y-0.5 overflow-y-auto scroll-smooth flex-1 min-h-0" style={{ scrollbarWidth: 'thin', scrollbarColor: 'rgba(14,165,233,0.25) transparent' }}>
+        <nav ref={navRef} className="p-1.5 space-y-px overflow-y-auto scroll-smooth flex-1 min-h-0" style={{ scrollbarWidth: 'thin', scrollbarColor: 'rgba(14,165,233,0.25) transparent' }}>
           {visibleLinks.map((link, index) => {
             const isEmoji = typeof link.icon === 'string';
             const prevGroup = index > 0 ? visibleLinks[index - 1].group : undefined;
@@ -351,12 +351,12 @@ export default function SlidingSidebar({
             const inGroup = !!link.group;
             const content = (
               <>
-                <span className={`shrink-0 flex items-center justify-center w-8 h-8 rounded-lg transition-all duration-200 ${
+                <span className={`shrink-0 flex items-center justify-center w-7 h-7 rounded-lg transition-all duration-200 [&_svg]:h-4 [&_svg]:w-4 ${
                   isEmoji ? 'text-base' : 'text-gray-500 dark:text-gray-400 group-hover:text-primary-600 dark:group-hover:text-primary-400'
                 } bg-white/60 dark:bg-gray-700/50 group-hover:bg-sky-200/70 dark:group-hover:bg-primary-800/40 group-hover:scale-110 group-hover:shadow-md group-hover:shadow-sky-300/50`}>
                   {link.icon}
                 </span>
-                <span className="text-[12px] sm:text-[13px] font-medium text-gray-700 dark:text-gray-200 group-hover:text-primary-700 dark:group-hover:text-primary-300 truncate">{link.label}</span>
+                <span className="text-[11px] sm:text-xs font-medium text-gray-700 dark:text-gray-200 group-hover:text-primary-700 dark:group-hover:text-primary-300 truncate">{link.label}</span>
                 <svg
                   className="w-3 h-3 ml-auto shrink-0 opacity-0 -translate-x-1 group-hover:opacity-100 group-hover:translate-x-0 transition-all duration-200 text-primary-400 dark:text-primary-500"
                   fill="none" viewBox="0 0 24 24" stroke="currentColor"
@@ -366,7 +366,7 @@ export default function SlidingSidebar({
               </>
             );
 
-            const itemClass = `w-full flex items-center gap-2.5 px-2 py-1.5 rounded-lg text-gray-700 dark:text-gray-200 hover:bg-sky-200/60 dark:hover:bg-primary-900/30 transition-all duration-200 group ${inGroup ? 'ml-3 border-l border-sky-200/70 dark:border-gray-700/60 pl-2' : ''}`;
+            const itemClass = `w-full flex items-center gap-2 px-2 py-1 rounded-lg text-gray-700 dark:text-gray-200 hover:bg-sky-200/60 dark:hover:bg-primary-900/30 transition-all duration-200 group ${inGroup ? 'ml-2.5 border-l border-sky-200/70 dark:border-gray-700/60 pl-1.5' : ''}`;
 
             const item = link.onClick ? (
               <button
@@ -387,7 +387,7 @@ export default function SlidingSidebar({
             return (
               <div key={index}>
                 {showGroupHeader && (
-                  <div className="px-2 pt-2 pb-0.5 text-[10px] font-semibold uppercase tracking-wider text-gray-400 dark:text-gray-500">
+                  <div className="px-1.5 pt-1.5 pb-0.5 text-[9px] font-semibold uppercase tracking-wider text-gray-400 dark:text-gray-500">
                     {link.group}
                   </div>
                 )}
