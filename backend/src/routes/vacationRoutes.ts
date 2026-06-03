@@ -17,7 +17,7 @@ router.post('/', async (req: AuthRequest, res: Response) => {
     const organizationId = req.user!.organizationId;
     const {
       employeeId, firstName, lastName, department, shift, line, area, phone, employeeCode,
-      leaveType, startDate, endDate, durationDays, returnToWork, reason, coveragePlan,
+      leaveType, startDate, endDate, durationDays, durationHours, returnToWork, reason, coveragePlan,
       emergencyPhone, emergencyEmail, autoApprove
     } = req.body;
 
@@ -44,6 +44,7 @@ router.post('/', async (req: AuthRequest, res: Response) => {
       startDate,
       endDate,
       durationDays: durationDays ? parseInt(durationDays) : undefined,
+      durationHours: durationHours ? parseInt(durationHours) : undefined,
       returnToWork,
       reason: reason || '',
       coveragePlan,
@@ -198,7 +199,7 @@ router.get('/settings', async (req: AuthRequest, res: Response) => {
 router.put('/settings', async (req: AuthRequest, res: Response) => {
   try {
     const organizationId = req.user!.organizationId || undefined;
-    const { standardAllocationDays, minimumNoticeDays, maxConsecutiveDays, minTeamCoveragePercent, maxSimultaneousAbsences, criticalRoleCoverageRequired } = req.body;
+    const { standardAllocationDays, minimumNoticeDays, maxConsecutiveDays, minTeamCoveragePercent, maxSimultaneousAbsences, criticalRoleCoverageRequired, leaveTypes, vacationHoursPerDay } = req.body;
     console.log('[PUT /vacation/settings] orgId=%s, body=%j', organizationId, req.body);
     const settings = await vacationService.updateVacationSettings({
       standardAllocationDays: standardAllocationDays != null ? Number(standardAllocationDays) : undefined,
@@ -207,6 +208,8 @@ router.put('/settings', async (req: AuthRequest, res: Response) => {
       minTeamCoveragePercent: minTeamCoveragePercent != null ? Number(minTeamCoveragePercent) : undefined,
       maxSimultaneousAbsences: maxSimultaneousAbsences != null ? Number(maxSimultaneousAbsences) : undefined,
       criticalRoleCoverageRequired,
+      leaveTypes: Array.isArray(leaveTypes) ? leaveTypes : undefined,
+      vacationHoursPerDay: vacationHoursPerDay != null ? Number(vacationHoursPerDay) : undefined,
       organizationId,
     });
     console.log('[PUT /vacation/settings] saved id=%d, allocation=%d, maxConsec=%d, maxSimul=%d',
@@ -515,6 +518,7 @@ router.get('/employees/departments', async (req: AuthRequest, res: Response) => 
 // POST /api/vacation/:id/approve
 // POST /api/vacation/:id/deny
 // POST /api/vacation/:id/cancel
+// POST /api/vacation/:id/put-back
 // GET /api/vacation/:id
 // PUT /api/vacation/:id
 // DELETE /api/vacation/:id
@@ -556,7 +560,22 @@ router.post('/:id/cancel', async (req: AuthRequest, res: Response) => {
     res.json({ success: true, data: vacation });
   } catch (error: any) {
     console.error('Error cancelling vacation:', error);
-    const status = error.message.includes('not found') ? 404 : error.message.includes('pending') ? 400 : 500;
+    const message = String(error.message || '');
+    const status = message.includes('not found') ? 404 : message.includes('cancelled') ? 400 : 500;
+    res.status(status).json({ success: false, error: error.message });
+  }
+});
+
+router.post('/:id/put-back', async (req: AuthRequest, res: Response) => {
+  try {
+    const vacationId = parseInt(req.params.id);
+    const userId = req.user!.id;
+    const vacation = await vacationService.putBackVacation(vacationId, userId);
+    res.json({ success: true, data: vacation });
+  } catch (error: any) {
+    console.error('Error putting back vacation:', error);
+    const message = String(error.message || '');
+    const status = message.includes('not found') ? 404 : message.includes('cancelled') || message.includes('original') ? 400 : 500;
     res.status(status).json({ success: false, error: error.message });
   }
 });
@@ -576,12 +595,12 @@ router.get('/:id', async (req: AuthRequest, res: Response) => {
 router.put('/:id', async (req: AuthRequest, res: Response) => {
   try {
     const vacationId = parseInt(req.params.id);
-    const { startDate, endDate, leaveType, reason, durationDays } = req.body;
+    const { startDate, endDate, leaveType, reason, durationDays, durationHours } = req.body;
     if (!startDate || !endDate) {
       return res.status(400).json({ success: false, error: 'startDate and endDate are required' });
     }
     const vacation = await vacationService.updateVacationRequest(vacationId, {
-      startDate, endDate, leaveType, reason, durationDays,
+      startDate, endDate, leaveType, reason, durationDays, durationHours,
     });
     res.json({ success: true, data: vacation });
   } catch (error: any) {

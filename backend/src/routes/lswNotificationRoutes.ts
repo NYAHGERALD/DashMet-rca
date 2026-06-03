@@ -64,6 +64,17 @@ router.put('/', async (req: AuthRequest, res: Response) => {
       incidentTeamInvitePushEnabled,
       capaMobilePushEnabled,
       capaBoardCreatedPushEnabled,
+      vacationMobilePushEnabled,
+      vacationRequestCreatedPushEnabled,
+      vacationRequestApprovedPushEnabled,
+      vacationRequestDeniedPushEnabled,
+      vacationRequestCancelledPushEnabled,
+      vacationRequestDeletedPushEnabled,
+      vacationPendingReminderPushEnabled,
+      vacationPendingReminderDaysBefore,
+      vacationStartDayPushEnabled,
+      vacationReturnReminderPushEnabled,
+      vacationReturnReminderDaysBefore,
       notifyTaskOverdue,
       notifyTodoOverdue,
       notifyMeetingOverdue,
@@ -136,6 +147,30 @@ router.put('/', async (req: AuthRequest, res: Response) => {
       });
     }
 
+    if (
+      vacationPendingReminderDaysBefore !== undefined &&
+      (!Number.isFinite(Number(vacationPendingReminderDaysBefore)) ||
+        Number(vacationPendingReminderDaysBefore) < 0 ||
+        Number(vacationPendingReminderDaysBefore) > 60)
+    ) {
+      return res.status(400).json({
+        success: false,
+        error: 'vacationPendingReminderDaysBefore must be between 0 and 60',
+      });
+    }
+
+    if (
+      vacationReturnReminderDaysBefore !== undefined &&
+      (!Number.isFinite(Number(vacationReturnReminderDaysBefore)) ||
+        Number(vacationReturnReminderDaysBefore) < 0 ||
+        Number(vacationReturnReminderDaysBefore) > 60)
+    ) {
+      return res.status(400).json({
+        success: false,
+        error: 'vacationReturnReminderDaysBefore must be between 0 and 60',
+      });
+    }
+
     // Validate quiet hours format
     const timeRegex = /^([01]\d|2[0-3]):[0-5]\d$/;
     if (quietHoursStart && !timeRegex.test(quietHoursStart)) {
@@ -171,6 +206,17 @@ router.put('/', async (req: AuthRequest, res: Response) => {
     if (incidentTeamInvitePushEnabled !== undefined) updateData.incidentTeamInvitePushEnabled = Boolean(incidentTeamInvitePushEnabled);
     if (capaMobilePushEnabled !== undefined) updateData.capaMobilePushEnabled = Boolean(capaMobilePushEnabled);
     if (capaBoardCreatedPushEnabled !== undefined) updateData.capaBoardCreatedPushEnabled = Boolean(capaBoardCreatedPushEnabled);
+    if (vacationMobilePushEnabled !== undefined) updateData.vacationMobilePushEnabled = Boolean(vacationMobilePushEnabled);
+    if (vacationRequestCreatedPushEnabled !== undefined) updateData.vacationRequestCreatedPushEnabled = Boolean(vacationRequestCreatedPushEnabled);
+    if (vacationRequestApprovedPushEnabled !== undefined) updateData.vacationRequestApprovedPushEnabled = Boolean(vacationRequestApprovedPushEnabled);
+    if (vacationRequestDeniedPushEnabled !== undefined) updateData.vacationRequestDeniedPushEnabled = Boolean(vacationRequestDeniedPushEnabled);
+    if (vacationRequestCancelledPushEnabled !== undefined) updateData.vacationRequestCancelledPushEnabled = Boolean(vacationRequestCancelledPushEnabled);
+    if (vacationRequestDeletedPushEnabled !== undefined) updateData.vacationRequestDeletedPushEnabled = Boolean(vacationRequestDeletedPushEnabled);
+    if (vacationPendingReminderPushEnabled !== undefined) updateData.vacationPendingReminderPushEnabled = Boolean(vacationPendingReminderPushEnabled);
+    if (vacationPendingReminderDaysBefore !== undefined) updateData.vacationPendingReminderDaysBefore = Math.min(60, Math.max(0, Number(vacationPendingReminderDaysBefore)));
+    if (vacationStartDayPushEnabled !== undefined) updateData.vacationStartDayPushEnabled = Boolean(vacationStartDayPushEnabled);
+    if (vacationReturnReminderPushEnabled !== undefined) updateData.vacationReturnReminderPushEnabled = Boolean(vacationReturnReminderPushEnabled);
+    if (vacationReturnReminderDaysBefore !== undefined) updateData.vacationReturnReminderDaysBefore = Math.min(60, Math.max(0, Number(vacationReturnReminderDaysBefore)));
     if (notifyTaskOverdue !== undefined) updateData.notifyTaskOverdue = Boolean(notifyTaskOverdue);
     if (notifyTodoOverdue !== undefined) updateData.notifyTodoOverdue = Boolean(notifyTodoOverdue);
     if (notifyMeetingOverdue !== undefined) updateData.notifyMeetingOverdue = Boolean(notifyMeetingOverdue);

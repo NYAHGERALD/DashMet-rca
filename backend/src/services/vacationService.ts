@@ -1,9 +1,117 @@
 import { prisma } from '../utils/prisma';
+import {
+  notifyVacationRequestPushSubscribers,
+  notifyVacationSnapshotPushSubscribers,
+} from './vacationPushNotificationService';
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Helper: calculate business days between two dates
 // ─────────────────────────────────────────────────────────────────────────────
 const DATE_ONLY_REGEX = /^\d{4}-\d{2}-\d{2}$/;
+const DEFAULT_LEAVE_TYPES = ['vacation', 'bereavement', 'sick', 'emergency', 'unpaid', 'personal'];
+const DEFAULT_VACATION_HOURS_PER_DAY = 8;
+const PUT_BACK_STATUSES = ['pending', 'approved', 'denied'] as const;
+type PutBackStatus = typeof PUT_BACK_STATUSES[number];
+
+function queueVacationPush(promise: Promise<unknown>) {
+  promise.catch((error) => {
+    console.error('[VacationPush] Failed to queue vacation push notification:', error);
+  });
+}
+
+function normalizePutBackStatus(input?: string | null): PutBackStatus | null {
+  const value = String(input || '').trim().toLowerCase();
+  return PUT_BACK_STATUSES.includes(value as PutBackStatus) ? (value as PutBackStatus) : null;
+}
+
+function getStatusHistoryArray(statusHistory: unknown): Array<Record<string, any>> {
+  return Array.isArray(statusHistory)
+    ? statusHistory.filter((entry): entry is Record<string, any> => Boolean(entry && typeof entry === 'object'))
+    : [];
+}
+
+function appendVacationStatusHistory(
+  statusHistory: unknown,
+  entry: Record<string, any>,
+): Array<Record<string, any>> {
+  return [...getStatusHistoryArray(statusHistory), entry];
+}
+
+function getCancelledFromStatus(vacation: { statusHistory?: unknown; decisionReason?: string | null }): PutBackStatus | null {
+  const history = getStatusHistoryArray(vacation.statusHistory);
+  const latestCancellation = [...history]
+    .reverse()
+    .find((entry) => String(entry.status || '').toLowerCase() === 'cancelled');
+  const previousFromHistory = normalizePutBackStatus(
+    latestCancellation?.previousStatus || latestCancellation?.fromStatus || latestCancellation?.cancelledFrom,
+  );
+  if (previousFromHistory) return previousFromHistory;
+
+  const reasonMatch = String(vacation.decisionReason || '').match(/from\s+(pending|approved|denied)\s+status/i);
+  const previousFromReason = normalizePutBackStatus(reasonMatch?.[1]);
+  if (previousFromReason) return previousFromReason;
+
+  return [...history]
+    .reverse()
+    .map((entry) => normalizePutBackStatus(entry.status))
+    .find(Boolean) || null;
+}
+
+function normalizeLeaveTypeName(input?: string | null): string {
+  return (input || '').trim().replace(/\s+/g, ' ');
+}
+
+function leaveTypeKey(input?: string | null): string {
+  return normalizeLeaveTypeName(input).toLowerCase();
+}
+
+function normalizeLeaveTypes(types?: string[] | null): string[] {
+  const seen = new Set<string>();
+  const normalized: string[] = [];
+
+  for (const type of types || []) {
+    const name = normalizeLeaveTypeName(type);
+    const key = leaveTypeKey(name);
+    if (!name || seen.has(key)) continue;
+    seen.add(key);
+    normalized.push(name);
+  }
+
+  return normalized.length > 0 ? normalized : DEFAULT_LEAVE_TYPES;
+}
+
+function resolveConfiguredLeaveType(input: string, configuredTypes?: string[] | null): string {
+  const requestedKey = leaveTypeKey(input);
+  const leaveTypes = normalizeLeaveTypes(configuredTypes);
+  const match = leaveTypes.find(type => leaveTypeKey(type) === requestedKey);
+
+  if (!match) {
+    throw new Error(`Invalid leave type. Must be one of: ${leaveTypes.join(', ')}`);
+  }
+
+  return match;
+}
+
+function normalizeVacationHoursPerDay(input?: number | null): number {
+  const value = Number(input);
+  return Number.isFinite(value) && value > 0 ? Math.round(value) : DEFAULT_VACATION_HOURS_PER_DAY;
+}
+
+async function recalculateVacationDurationHours(organizationId: string | undefined, hoursPerDay: number) {
+  if (organizationId) {
+    await prisma.$executeRaw`
+      UPDATE "vacations"
+      SET "durationHours" = "durationDays" * ${hoursPerDay}
+      WHERE "organizationId" = ${organizationId}
+    `;
+    return;
+  }
+
+  await prisma.$executeRaw`
+    UPDATE "vacations"
+    SET "durationHours" = "durationDays" * ${hoursPerDay}
+  `;
+}
 
 function startOfUtcDay(input: Date): Date {
   return new Date(Date.UTC(input.getUTCFullYear(), input.getUTCMonth(), input.getUTCDate()));
@@ -72,6 +180,7 @@ export async function createVacationRequest(data: {
   startDate: string;
   endDate: string;
   durationDays?: number;
+  durationHours?: number;
   returnToWork?: string | null;
   reason: string;
   coveragePlan?: string | null;
@@ -137,17 +246,15 @@ export async function createVacationRequest(data: {
     employeeId = employee.id;
   }
 
-  // Validate leave type
-  const validTypes = ['vacation', 'bereavement', 'sick', 'emergency', 'unpaid', 'personal'];
-  const leaveType = data.leaveType.toLowerCase();
-  if (!validTypes.includes(leaveType)) throw new Error(`Invalid leave type. Must be one of: ${validTypes.join(', ')}`);
+  // ── Constraint enforcement ──────────────────────────────────────────────
+  const constraintSettings = await getVacationSettings(data.organizationId);
+  const leaveType = resolveConfiguredLeaveType(data.leaveType, constraintSettings.leaveTypes);
+  const vacationHoursPerDay = normalizeVacationHoursPerDay(constraintSettings.vacationHoursPerDay);
 
   const startDate = parseVacationDateInput(data.startDate);
   const endDate = parseVacationDateInput(data.endDate);
   const durationDays = data.durationDays && data.durationDays > 0 ? data.durationDays : calcBusinessDays(startDate, endDate);
-
-  // ── Constraint enforcement ──────────────────────────────────────────────
-  const constraintSettings = await getVacationSettings(data.organizationId);
+  const durationHours = durationDays * vacationHoursPerDay;
 
   // 1. Max consecutive days
   if (durationDays > constraintSettings.maxConsecutiveDays) {
@@ -217,6 +324,7 @@ export async function createVacationRequest(data: {
       startDate,
       endDate,
       durationDays,
+      durationHours,
       returnToWork: data.returnToWork ? parseVacationDateInput(data.returnToWork) : null,
       reason: data.reason,
       coveragePlan: data.coveragePlan || null,
@@ -245,6 +353,13 @@ export async function createVacationRequest(data: {
     relatedVacationId: vacation.id,
     organizationId: data.organizationId || employee.organizationId || undefined,
   });
+
+  queueVacationPush(
+    notifyVacationRequestPushSubscribers({
+      event: 'created',
+      vacationId: vacation.id,
+    }),
+  );
 
   return vacation;
 }
@@ -343,6 +458,13 @@ export async function approveVacation(vacationId: number, userId: string, reason
     organizationId: vacation.organizationId || undefined,
   });
 
+  queueVacationPush(
+    notifyVacationRequestPushSubscribers({
+      event: 'approved',
+      vacationId,
+    }),
+  );
+
   return updated;
 }
 
@@ -372,6 +494,13 @@ export async function denyVacation(vacationId: number, userId: string, reason: s
     organizationId: vacation.organizationId || undefined,
   });
 
+  queueVacationPush(
+    notifyVacationRequestPushSubscribers({
+      event: 'denied',
+      vacationId,
+    }),
+  );
+
   return updated;
 }
 
@@ -381,9 +510,16 @@ export async function cancelVacation(vacationId: number, userId: string, reason?
     include: { Employee: true },
   });
   if (!vacation) throw new Error('Vacation request not found');
-  if (vacation.status !== 'pending') throw new Error('Only pending requests can be cancelled');
+  if (vacation.status === 'cancelled') throw new Error('Vacation request is already cancelled');
 
-  const decisionReason = reason?.trim() || 'Cancelled by administrator';
+  const decisionReason = reason?.trim() || `Cancelled by administrator from ${vacation.status} status`;
+  const statusHistory = appendVacationStatusHistory(vacation.statusHistory, {
+    status: 'cancelled',
+    previousStatus: vacation.status,
+    timestamp: new Date().toISOString(),
+    changed_by: userId,
+    reason: decisionReason,
+  });
 
   const updated = await prisma.vacation.update({
     where: { id: vacationId },
@@ -392,6 +528,7 @@ export async function cancelVacation(vacationId: number, userId: string, reason?
       approvedByUserId: userId,
       decidedAt: new Date(),
       decisionReason,
+      statusHistory: statusHistory as any,
     },
   });
 
@@ -402,6 +539,60 @@ export async function cancelVacation(vacationId: number, userId: string, reason?
     notificationType: 'vacation_cancelled',
     title: 'Vacation Request Cancelled',
     message: `Your vacation request for ${startStr} - ${endStr} was cancelled. ${decisionReason}`,
+    relatedVacationId: vacationId,
+    organizationId: vacation.organizationId || undefined,
+  });
+
+  queueVacationPush(
+    notifyVacationRequestPushSubscribers({
+      event: 'cancelled',
+      vacationId,
+    }),
+  );
+
+  return updated;
+}
+
+export async function putBackVacation(vacationId: number, userId: string) {
+  const vacation = await prisma.vacation.findUnique({
+    where: { id: vacationId },
+    include: { Employee: true },
+  });
+  if (!vacation) throw new Error('Vacation request not found');
+  if (vacation.status !== 'cancelled') throw new Error('Only cancelled requests can be put back');
+
+  const restoredStatus = getCancelledFromStatus(vacation);
+  if (!restoredStatus) {
+    throw new Error('Unable to determine the original request status');
+  }
+
+  const now = new Date();
+  const statusHistory = appendVacationStatusHistory(vacation.statusHistory, {
+    status: restoredStatus,
+    previousStatus: 'cancelled',
+    timestamp: now.toISOString(),
+    changed_by: userId,
+    reason: `Put back to ${restoredStatus} from cancelled`,
+  });
+
+  const updated = await prisma.vacation.update({
+    where: { id: vacationId },
+    data: {
+      status: restoredStatus,
+      approvedByUserId: restoredStatus === 'pending' ? null : userId,
+      decidedAt: restoredStatus === 'pending' ? null : now,
+      decisionReason: restoredStatus === 'pending' ? null : `Put back to ${restoredStatus} from cancelled`,
+      statusHistory: statusHistory as any,
+    },
+  });
+
+  const startStr = formatVacationDate(vacation.startDate, { month: 'short', day: 'numeric' });
+  const endStr = formatVacationDate(vacation.endDate, { month: 'short', day: 'numeric', year: 'numeric' });
+  await createVacationNotification({
+    employeeId: vacation.employeeId,
+    notificationType: 'vacation_put_back',
+    title: 'Vacation Request Put Back',
+    message: `Your vacation request for ${startStr} - ${endStr} was put back to ${restoredStatus}.`,
     relatedVacationId: vacationId,
     organizationId: vacation.organizationId || undefined,
   });
@@ -427,6 +618,7 @@ export async function updateVacationRequest(vacationId: number, data: {
   leaveType?: string;
   reason?: string;
   durationDays?: number;
+  durationHours?: number;
 }) {
   const vacation = await prisma.vacation.findUnique({ where: { id: vacationId } });
   if (!vacation) throw new Error('Vacation request not found');
@@ -437,6 +629,12 @@ export async function updateVacationRequest(vacationId: number, data: {
   if (endDate < startDate) throw new Error('End date must be after or equal to start date');
 
   const durationDays = data.durationDays && data.durationDays > 0 ? data.durationDays : calcBusinessDays(startDate, endDate);
+  const settings = await getVacationSettings(vacation.organizationId || undefined);
+  const vacationHoursPerDay = normalizeVacationHoursPerDay(settings.vacationHoursPerDay);
+  const durationHours = durationDays * vacationHoursPerDay;
+  const leaveType = data.leaveType
+    ? resolveConfiguredLeaveType(data.leaveType, settings.leaveTypes)
+    : vacation.leaveType;
 
   const updated = await prisma.vacation.update({
     where: { id: vacationId },
@@ -444,7 +642,8 @@ export async function updateVacationRequest(vacationId: number, data: {
       startDate,
       endDate,
       durationDays,
-      leaveType: data.leaveType || vacation.leaveType,
+      durationHours,
+      leaveType,
       reason: data.reason || vacation.reason,
     },
   });
@@ -459,7 +658,7 @@ export async function updateVacationRequest(vacationId: number, data: {
         startDate,
         endDate,
         durationDays,
-        leaveType: data.leaveType || vacation.leaveType,
+        leaveType,
         status: 'pending',
         organizationId: vacation.organizationId,
       },
@@ -474,6 +673,7 @@ export async function updateVacationRequest(vacationId: number, data: {
 export async function deleteVacationRequest(vacationId: number, options?: { organizationId?: string }) {
   const vacation = await prisma.vacation.findUnique({
     where: { id: vacationId },
+    include: { Employee: { select: { firstName: true, lastName: true, userId: true } } },
   });
   if (!vacation) throw new Error('Vacation request not found');
 
@@ -484,6 +684,13 @@ export async function deleteVacationRequest(vacationId: number, options?: { orga
   if (vacation.status !== 'cancelled') {
     throw new Error('Only cancelled requests can be deleted');
   }
+
+  queueVacationPush(
+    notifyVacationSnapshotPushSubscribers({
+      event: 'deleted',
+      vacation,
+    }),
+  );
 
   await prisma.vacation.delete({
     where: { id: vacationId },
@@ -591,6 +798,8 @@ export async function getVacationSettings(organizationId?: string) {
       minTeamCoveragePercent: 0,
       maxSimultaneousAbsences: 0,
       criticalRoleCoverageRequired: false,
+      leaveTypes: DEFAULT_LEAVE_TYPES,
+      vacationHoursPerDay: DEFAULT_VACATION_HOURS_PER_DAY,
       organizationId: organizationId ?? null,
     },
   });
@@ -605,6 +814,8 @@ export async function updateVacationSettings(data: {
   minTeamCoveragePercent?: number;
   maxSimultaneousAbsences?: number;
   criticalRoleCoverageRequired?: boolean;
+  leaveTypes?: string[];
+  vacationHoursPerDay?: number;
   organizationId?: string;
 }) {
   // Get (or create) the single settings record
@@ -620,6 +831,10 @@ export async function updateVacationSettings(data: {
     data.maxConsecutiveDays, data.minTeamCoveragePercent,
     data.maxSimultaneousAbsences, data.criticalRoleCoverageRequired);
 
+  const nextVacationHoursPerDay = data.vacationHoursPerDay === undefined
+    ? undefined
+    : normalizeVacationHoursPerDay(data.vacationHoursPerDay);
+
   const updated = await prisma.vacationSettings.update({
     where: { id: existing.id },
     data: {
@@ -629,8 +844,17 @@ export async function updateVacationSettings(data: {
       minTeamCoveragePercent: data.minTeamCoveragePercent,
       maxSimultaneousAbsences: data.maxSimultaneousAbsences,
       criticalRoleCoverageRequired: data.criticalRoleCoverageRequired,
+      leaveTypes: data.leaveTypes === undefined ? undefined : normalizeLeaveTypes(data.leaveTypes),
+      vacationHoursPerDay: nextVacationHoursPerDay,
     },
   });
+
+  if (
+    nextVacationHoursPerDay !== undefined &&
+    nextVacationHoursPerDay !== normalizeVacationHoursPerDay(existing.vacationHoursPerDay)
+  ) {
+    await recalculateVacationDurationHours(data.organizationId, nextVacationHoursPerDay);
+  }
 
   console.log('[VacationSettings] AFTER update id=%d → allocation=%d, notice=%d, maxConsec=%d, coverage=%d, maxSimul=%d, critical=%s',
     updated.id, updated.standardAllocationDays, updated.minimumNoticeDays,
@@ -657,9 +881,12 @@ export async function resetVacationSettings(organizationId?: string) {
       minTeamCoveragePercent: 0,
       maxSimultaneousAbsences: 0,
       criticalRoleCoverageRequired: false,
+      leaveTypes: DEFAULT_LEAVE_TYPES,
+      vacationHoursPerDay: DEFAULT_VACATION_HOURS_PER_DAY,
       organizationId: organizationId ?? null,
     },
   });
+  await recalculateVacationDurationHours(organizationId, DEFAULT_VACATION_HOURS_PER_DAY);
   console.log('[VacationSettings] RESET: Created fresh record id=%d with all zeros', fresh.id);
   return fresh;
 }
@@ -896,8 +1123,10 @@ export async function getMyVacationStats(employeeId: number) {
   const employee = await prisma.vacationEmployee.findUnique({ where: { id: employeeId } });
   if (!employee) throw new Error('Employee not found');
 
-  const vacationHours = employee.allocatedVacationHours || (employee.annualAllocation ? employee.annualAllocation * 8 : 200);
-  const totalDays = vacationHours / 8;
+  const settings = await getVacationSettings(employee.organizationId || undefined);
+  const vacationHoursPerDay = normalizeVacationHoursPerDay(settings.vacationHoursPerDay);
+  const vacationHours = employee.allocatedVacationHours || (employee.annualAllocation ? employee.annualAllocation * vacationHoursPerDay : 200);
+  const totalDays = vacationHours / vacationHoursPerDay;
 
   const currentYear = new Date().getFullYear();
   const yearStart = new Date(currentYear, 0, 1);

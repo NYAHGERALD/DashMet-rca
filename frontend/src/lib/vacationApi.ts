@@ -30,6 +30,7 @@ export interface VacationRequest {
   startDate: string;
   endDate: string;
   durationDays: number;
+  durationHours: number;
   returnToWork: string | null;
   reason: string;
   coveragePlan: string | null;
@@ -70,6 +71,8 @@ export interface VacationSettings {
   minTeamCoveragePercent: number;
   maxSimultaneousAbsences: number;
   criticalRoleCoverageRequired: boolean;
+  leaveTypes: string[];
+  vacationHoursPerDay: number;
 }
 
 export interface BlackoutPeriod {
@@ -227,6 +230,7 @@ export async function updateVacation(id: number, data: {
   leaveType?: string;
   reason?: string;
   durationDays?: number;
+  durationHours?: number;
 }): Promise<VacationRequest> {
   const res = await api.put(`/vacation/${id}`, data);
   return res.data.data;
@@ -246,6 +250,11 @@ export async function denyVacation(id: number, reason: string): Promise<Vacation
 
 export async function cancelVacation(id: number, reason?: string): Promise<VacationRequest> {
   const res = await api.post(`/vacation/${id}/cancel`, { reason });
+  return res.data.data;
+}
+
+export async function putBackVacation(id: number): Promise<VacationRequest> {
+  const res = await api.post(`/vacation/${id}/put-back`);
   return res.data.data;
 }
 
