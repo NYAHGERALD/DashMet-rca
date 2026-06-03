@@ -13,6 +13,7 @@ import {
   cleanupOldNotificationLogs,
 } from './lswNotificationService';
 import { checkPendingExpoPushReceipts } from './pushNotificationService';
+import { processVacationPushReminders } from './vacationPushNotificationService';
 
 let isRunning = false;
 
@@ -31,9 +32,12 @@ export function startLswNotificationCron() {
     isRunning = true;
     try {
       console.log('[LSW Cron] Running notification check...');
-      const result = await processAllLswNotifications();
+      const [result, vacationResult] = await Promise.all([
+        processAllLswNotifications(),
+        processVacationPushReminders(),
+      ]);
       console.log(
-        `[LSW Cron] Done — ${result.usersProcessed} users, ${result.totalSent} notifications sent`
+        `[LSW Cron] Done — ${result.usersProcessed} LSW users, ${result.totalSent} LSW notifications sent; ${vacationResult.usersProcessed} vacation users, ${vacationResult.totalSent} vacation push notifications sent`
       );
     } catch (err) {
       console.error('[LSW Cron] Error processing notifications:', err);

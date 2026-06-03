@@ -4321,6 +4321,7 @@ model Vacation {
   startDate          DateTime  @db.Date
   endDate            DateTime  @db.Date
   durationDays       Int       @default(1)
+  durationHours      Int       @default(8)
   returnToWork       DateTime? @db.Date
   reason             String
   coveragePlan       String?
@@ -4363,6 +4364,8 @@ model VacationSettings {
   minTeamCoveragePercent       Int      @default(0)
   maxSimultaneousAbsences      Int      @default(0)
   criticalRoleCoverageRequired Boolean  @default(false)
+  leaveTypes                   String[] @default(["vacation", "bereavement", "sick", "emergency", "unpaid", "personal"])
+  vacationHoursPerDay          Int      @default(8)
   organizationId               String?
   createdAt                    DateTime @default(now())
   updatedAt                    DateTime @updatedAt
@@ -4744,6 +4747,19 @@ model LswNotificationPreference {
   incidentTeamInvitePushEnabled Boolean @default(true) // Mobile push when invited to an incident team
   capaMobilePushEnabled        Boolean @default(true) // Master mobile push toggle for CAPA events
   capaBoardCreatedPushEnabled  Boolean @default(true) // Mobile push when a CAPA Board is created
+
+  // ── Vacation Notification Toggles ──
+  vacationMobilePushEnabled           Boolean @default(true) // Master mobile push toggle for vacation activity
+  vacationRequestCreatedPushEnabled   Boolean @default(true) // Mobile push when a vacation request is created
+  vacationRequestApprovedPushEnabled  Boolean @default(true) // Mobile push when a vacation request is approved
+  vacationRequestDeniedPushEnabled    Boolean @default(true) // Mobile push when a vacation request is denied
+  vacationRequestCancelledPushEnabled Boolean @default(true) // Mobile push when a vacation request is cancelled
+  vacationRequestDeletedPushEnabled   Boolean @default(true) // Mobile push when a cancelled vacation request is deleted
+  vacationPendingReminderPushEnabled  Boolean @default(true) // Mobile push before a pending vacation starts
+  vacationPendingReminderDaysBefore   Int     @default(3) // Days before vacation start to remind about pending approval
+  vacationStartDayPushEnabled         Boolean @default(true) // Mobile push on the vacation start date
+  vacationReturnReminderPushEnabled   Boolean @default(true) // Mobile push before an employee returns from vacation
+  vacationReturnReminderDaysBefore    Int     @default(1) // Days before return-to-work date to send reminder
 
   // ── Past-Due Notification Toggles ──
   notifyTaskOverdue     Boolean @default(true) // Daily tasks past their scheduled time
