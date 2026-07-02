@@ -9,6 +9,8 @@ runtime upgrade of the existing Next.js web app.
 After native phone sign-in succeeds, the app requests a short-lived backend
 handoff code and opens the existing DashMet web UI. Tokens are not placed in the
 URL; the web app redeems the code for its normal secure cookie session.
+`capacitor.config.ts` allowlists `www.dashmet.com` so this handoff stays inside
+the native WebView instead of opening the system browser.
 
 ## Requirements
 
