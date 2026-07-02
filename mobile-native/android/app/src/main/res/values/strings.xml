@@ -1,0 +1,8 @@
+<?xml version='1.0' encoding='utf-8'?>
+<resources>
+    <string name="app_name">DashMet</string>
+    <string name="title_activity_main">DashMet</string>
+    <string name="package_name">com.dashmet.operations</string>
+    <string name="custom_url_scheme">com.dashmet.operations</string>
+    <string name="default_notification_channel_id">dashmet_alerts</string>
+</resources>

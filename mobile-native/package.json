@@ -1,0 +1,42 @@
+{
+  "name": "dashmet-native-mobile",
+  "version": "1.0.0",
+  "private": true,
+  "type": "module",
+  "engines": {
+    "node": ">=22.12.0"
+  },
+  "scripts": {
+    "dev": "vite --host 0.0.0.0",
+    "build": "tsc --noEmit && vite build",
+    "cap": "cap",
+    "cap:add:android": "cap add android",
+    "cap:add:ios": "cap add ios",
+    "cap:sync": "npm run build && cap sync",
+    "cap:sync:android": "npm run build && cap sync android",
+    "cap:sync:ios": "npm run build && cap sync ios",
+    "cap:open:android": "cap open android",
+    "cap:open:ios": "cap open ios"
+  },
+  "dependencies": {
+    "@capacitor-firebase/authentication": "8.3.0",
+    "@capacitor/android": "8.4.1",
+    "@capacitor/app": "8.0.0",
+    "@capacitor/core": "8.4.1",
+    "@capacitor/device": "8.0.0",
+    "@capacitor/ios": "8.4.1",
+    "@capacitor/push-notifications": "8.0.0",
+    "capacitor-secure-storage-plugin": "0.13.0",
+    "firebase": "12.6.0",
+    "react": "19.2.3",
+    "react-dom": "19.2.3"
+  },
+  "devDependencies": {
+    "@capacitor/cli": "8.4.1",
+    "@types/react": "19.2.7",
+    "@types/react-dom": "19.2.3",
+    "@vitejs/plugin-react": "6.0.3",
+    "typescript": "5.9.3",
+    "vite": "8.1.2"
+  }
+}

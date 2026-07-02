@@ -5,6 +5,7 @@ console.log('🔧 Node version:', process.version);
 
 import express, { Application } from 'express';
 import cors from 'cors';
+import type { CorsOptions } from 'cors';
 import helmet from 'helmet';
 import dotenv from 'dotenv';
 import path from 'path';
@@ -107,27 +108,61 @@ const ALLOWED_ORIGINS: string[] = (() => {
   ];
 })();
 
-const corsOptions = {
-  origin: (origin: string | undefined, callback: (err: Error | null, allow?: boolean) => void) => {
-    // Allow requests with no origin (mobile apps, server-to-server, curl in dev)
-    if (!origin) {
-      return callback(null, true);
-    }
-    if (ALLOWED_ORIGINS.includes(origin)) {
-      return callback(null, true);
-    }
-    callback(new Error('CORS: Origin not allowed'));
-  },
-  credentials: true,
-  methods: ['GET', 'POST', 'PUT', 'PATCH', 'DELETE', 'OPTIONS'],
-  allowedHeaders: ['Content-Type', 'Authorization', 'X-Requested-With', 'X-CSRF-Token', 'Accept', 'Origin'],
-  exposedHeaders: ['Content-Range', 'X-Content-Range', 'X-Request-Id', 'X-CSRF-Token'],
-  maxAge: 3600, // 1 hour (not 24 hours)
+const NATIVE_MOBILE_ORIGINS = new Set(
+  (process.env.NATIVE_MOBILE_CORS_ORIGIN || 'capacitor://localhost,ionic://localhost,http://localhost,https://localhost')
+    .split(',')
+    .map((origin) => origin.trim().replace(/\/+$/, ''))
+    .filter(Boolean)
+);
+
+const isNativeMobileCorsRequest = (req: express.Request): boolean => {
+  const appHeader = String(req.header('x-dashmet-mobile-app') || '').trim().toLowerCase();
+  if (appHeader === 'rca-mobile') return true;
+
+  const requestedHeaders = String(req.header('access-control-request-headers') || '').toLowerCase();
+  return requestedHeaders
+    .split(',')
+    .map((header) => header.trim())
+    .includes('x-dashmet-mobile-app');
+};
+
+const corsOptionsDelegate = (req: express.Request, callback: (err: Error | null, options?: CorsOptions) => void) => {
+  const corsOptions: CorsOptions = {
+    origin: (origin: string | undefined, originCallback: (err: Error | null, allow?: boolean) => void) => {
+      // Allow requests with no origin (mobile apps, server-to-server, curl in dev)
+      if (!origin) {
+        return originCallback(null, true);
+      }
+      const normalizedOrigin = origin.replace(/\/+$/, '');
+      if (ALLOWED_ORIGINS.includes(normalizedOrigin)) {
+        return originCallback(null, true);
+      }
+      if (NATIVE_MOBILE_ORIGINS.has(normalizedOrigin) && isNativeMobileCorsRequest(req)) {
+        return originCallback(null, true);
+      }
+      originCallback(new Error('CORS: Origin not allowed'));
+    },
+    credentials: true,
+    methods: ['GET', 'POST', 'PUT', 'PATCH', 'DELETE', 'OPTIONS'],
+    allowedHeaders: [
+      'Content-Type',
+      'Authorization',
+      'X-Requested-With',
+      'X-CSRF-Token',
+      'X-DashMet-Mobile-App',
+      'X-DashMet-Trusted-Device',
+      'Accept',
+      'Origin',
+    ],
+    exposedHeaders: ['Content-Range', 'X-Content-Range', 'X-Request-Id', 'X-CSRF-Token'],
+    maxAge: 3600, // 1 hour (not 24 hours)
+  };
+  callback(null, corsOptions);
 };
 
 // Apply CORS before everything else
-app.use(cors(corsOptions));
-app.options('*', cors(corsOptions));
+app.use(cors(corsOptionsDelegate));
+app.options('*', cors(corsOptionsDelegate));
 app.use(exposeRequestCsrfToken);
 
 // Security headers (Helmet)
@@ -226,7 +261,8 @@ const HOST = process.env.HOST || '0.0.0.0';
 const server = httpServer.listen(PORT, HOST, () => {
   console.log(`🚀 DashMet Operations Intelligence API Server running on http://${HOST}:${PORT}`);
   console.log(`📡 Environment: ${process.env.NODE_ENV || 'development'}`);
-  console.log(`🌍 CORS enabled for:`, corsOptions.origin);
+  console.log(`🌍 Web CORS enabled for:`, ALLOWED_ORIGINS);
+  console.log(`📱 Native mobile CORS enabled for:`, [...NATIVE_MOBILE_ORIGINS]);
   console.log(`🔌 WebSocket server ready`);
 
   // Start auto-week cron job

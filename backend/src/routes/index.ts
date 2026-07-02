@@ -38,6 +38,7 @@ import transcriptRoutes from './transcriptRoutes';
 import spotlightRoutes from './spotlight';
 import recordingsRoutes from './recordings';
 import mobileAuthRoutes from './mobileAuthRoutes';
+import mobileSessionRoutes from './mobileSessionRoutes';
 import mobilePushRoutes from './mobilePushRoutes';
 import taskRoutes from './taskRoutes';
 import meetingRoutes from './meetingRoutes';
@@ -90,6 +91,7 @@ router.use('/firebase-auth', (_req, res) => {
 router.use('/mobile/check-phone', enumerationRateLimiter);
 router.use('/mobile/check-email', enumerationRateLimiter);
 router.use('/mobile/register', authRateLimiter);
+router.use('/mobile/session', authRateLimiter, mobileSessionRoutes);
 router.use('/mobile', mobileAuthRoutes);
 router.use('/mobile/push', rateLimiter, mobilePushRoutes);
 

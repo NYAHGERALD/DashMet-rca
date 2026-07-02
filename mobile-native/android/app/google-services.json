@@ -1,0 +1,82 @@
+{
+  "project_info": {
+    "project_number": "589525716102",
+    "project_id": "dashmet-resolve-1ce6d",
+    "storage_bucket": "dashmet-resolve-1ce6d.firebasestorage.app"
+  },
+  "client": [
+    {
+      "client_info": {
+        "mobilesdk_app_id": "1:589525716102:android:206bd6959fbd06302d9507",
+        "android_client_info": {
+          "package_name": "com.dashmet.meetingintelligence"
+        }
+      },
+      "oauth_client": [
+        {
+          "client_id": "589525716102-79b4cu71i2jragbgdfub86kgs9jm22lo.apps.googleusercontent.com",
+          "client_type": 3
+        }
+      ],
+      "api_key": [
+        {
+          "current_key": "AIzaSyC2XiBuOXnYNsaoUbURrVotJjqlFW680lY"
+        }
+      ],
+      "services": {
+        "appinvite_service": {
+          "other_platform_oauth_client": [
+            {
+              "client_id": "589525716102-79b4cu71i2jragbgdfub86kgs9jm22lo.apps.googleusercontent.com",
+              "client_type": 3
+            },
+            {
+              "client_id": "589525716102-u92qufei1ernlkjcbmhbadpmfsb3ekpa.apps.googleusercontent.com",
+              "client_type": 2,
+              "ios_info": {
+                "bundle_id": "com.dashmet.MeetingIntelligence"
+              }
+            }
+          ]
+        }
+      }
+    },
+    {
+      "client_info": {
+        "mobilesdk_app_id": "1:589525716102:android:f3e6d023700304632d9507",
+        "android_client_info": {
+          "package_name": "com.dashmet.operations"
+        }
+      },
+      "oauth_client": [
+        {
+          "client_id": "589525716102-79b4cu71i2jragbgdfub86kgs9jm22lo.apps.googleusercontent.com",
+          "client_type": 3
+        }
+      ],
+      "api_key": [
+        {
+          "current_key": "AIzaSyC2XiBuOXnYNsaoUbURrVotJjqlFW680lY"
+        }
+      ],
+      "services": {
+        "appinvite_service": {
+          "other_platform_oauth_client": [
+            {
+              "client_id": "589525716102-79b4cu71i2jragbgdfub86kgs9jm22lo.apps.googleusercontent.com",
+              "client_type": 3
+            },
+            {
+              "client_id": "589525716102-u92qufei1ernlkjcbmhbadpmfsb3ekpa.apps.googleusercontent.com",
+              "client_type": 2,
+              "ios_info": {
+                "bundle_id": "com.dashmet.MeetingIntelligence"
+              }
+            }
+          ]
+        }
+      }
+    }
+  ],
+  "configuration_version": "1"
+}
