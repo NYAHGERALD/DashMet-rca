@@ -3,6 +3,7 @@
 import { useState, useEffect, useRef, useMemo } from 'react';
 import api from '@/lib/api';
 import { alertSoundService, type SoundType } from '@/lib/alertSounds';
+import { Send, ShieldCheck } from 'lucide-react';
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Types
@@ -27,8 +28,34 @@ interface DndCustomSlot {
 interface NotificationPreferences {
   emailEnabled: boolean;
   browserEnabled: boolean;
+  mobilePushEnabled: boolean;
+  mobileSoundEnabled: boolean;
   bakeryEmailEnabled: boolean;
   bakeryBrowserEnabled: boolean;
+  bakeryMobilePushEnabled: boolean;
+  bakerySubmissionPushEnabled: boolean;
+  bakeryOeeBelowTargetPushEnabled: boolean;
+  issueMobilePushEnabled: boolean;
+  issueCreatedPushEnabled: boolean;
+  issueStatusPushEnabled: boolean;
+  issueEditedPushEnabled: boolean;
+  issueDeletedPushEnabled: boolean;
+  incidentMobilePushEnabled: boolean;
+  incidentCreatedPushEnabled: boolean;
+  incidentTeamInvitePushEnabled: boolean;
+  capaMobilePushEnabled: boolean;
+  capaBoardCreatedPushEnabled: boolean;
+  vacationMobilePushEnabled: boolean;
+  vacationRequestCreatedPushEnabled: boolean;
+  vacationRequestApprovedPushEnabled: boolean;
+  vacationRequestDeniedPushEnabled: boolean;
+  vacationRequestCancelledPushEnabled: boolean;
+  vacationRequestDeletedPushEnabled: boolean;
+  vacationPendingReminderPushEnabled: boolean;
+  vacationPendingReminderDaysBefore: number;
+  vacationStartDayPushEnabled: boolean;
+  vacationReturnReminderPushEnabled: boolean;
+  vacationReturnReminderDaysBefore: number;
   notifyTaskOverdue: boolean;
   notifyTodoOverdue: boolean;
   notifyMeetingOverdue: boolean;
@@ -72,6 +99,21 @@ interface NotificationPreferences {
   escalationAction: string;
 }
 
+type BooleanPreferenceKey = {
+  [K in keyof NotificationPreferences]: NotificationPreferences[K] extends boolean ? K : never;
+}[keyof NotificationPreferences];
+
+type MobilePushGroup = {
+  title: string;
+  description: string;
+  masterField: BooleanPreferenceKey;
+  items: {
+    field: BooleanPreferenceKey;
+    label: string;
+    description: string;
+  }[];
+};
+
 const DEFAULT_SECTION: SectionOverride = {
   enabled: true,
   reminderMinutes: 15,
@@ -85,8 +127,34 @@ const DEFAULT_SECTION: SectionOverride = {
 const DEFAULT_PREFS: NotificationPreferences = {
   emailEnabled: false,
   browserEnabled: false,
+  mobilePushEnabled: true,
+  mobileSoundEnabled: true,
   bakeryEmailEnabled: true,
   bakeryBrowserEnabled: true,
+  bakeryMobilePushEnabled: true,
+  bakerySubmissionPushEnabled: true,
+  bakeryOeeBelowTargetPushEnabled: true,
+  issueMobilePushEnabled: false,
+  issueCreatedPushEnabled: true,
+  issueStatusPushEnabled: true,
+  issueEditedPushEnabled: true,
+  issueDeletedPushEnabled: true,
+  incidentMobilePushEnabled: true,
+  incidentCreatedPushEnabled: true,
+  incidentTeamInvitePushEnabled: true,
+  capaMobilePushEnabled: true,
+  capaBoardCreatedPushEnabled: true,
+  vacationMobilePushEnabled: true,
+  vacationRequestCreatedPushEnabled: true,
+  vacationRequestApprovedPushEnabled: true,
+  vacationRequestDeniedPushEnabled: true,
+  vacationRequestCancelledPushEnabled: true,
+  vacationRequestDeletedPushEnabled: true,
+  vacationPendingReminderPushEnabled: true,
+  vacationPendingReminderDaysBefore: 3,
+  vacationStartDayPushEnabled: true,
+  vacationReturnReminderPushEnabled: true,
+  vacationReturnReminderDaysBefore: 1,
   notifyTaskOverdue: true,
   notifyTodoOverdue: true,
   notifyMeetingOverdue: true,
@@ -129,6 +197,129 @@ const DEFAULT_PREFS: NotificationPreferences = {
   escalationMinutes: 30,
   escalationAction: 'sound_repeat',
 };
+
+const MOBILE_PUSH_GROUPS: MobilePushGroup[] = [
+  {
+    title: 'Bakery metrics',
+    description: 'Production metrics, submitted reports, and OEE exceptions.',
+    masterField: 'bakeryMobilePushEnabled',
+    items: [
+      {
+        field: 'bakerySubmissionPushEnabled',
+        label: 'Metrics submitted',
+        description: 'Alert when bakery production metrics are submitted.',
+      },
+      {
+        field: 'bakeryOeeBelowTargetPushEnabled',
+        label: 'OEE below target',
+        description: 'Alert when submitted OEE falls below the configured target.',
+      },
+    ],
+  },
+  {
+    title: 'Operations issues',
+    description: 'Issue reporting activity from the operations workspace.',
+    masterField: 'issueMobilePushEnabled',
+    items: [
+      {
+        field: 'issueCreatedPushEnabled',
+        label: 'Issue reported',
+        description: 'Alert when a new operations issue is created.',
+      },
+      {
+        field: 'issueStatusPushEnabled',
+        label: 'Status changes',
+        description: 'Alert when an issue moves to another status.',
+      },
+      {
+        field: 'issueEditedPushEnabled',
+        label: 'Issue edited',
+        description: 'Alert when an issue is updated.',
+      },
+      {
+        field: 'issueDeletedPushEnabled',
+        label: 'Issue deleted',
+        description: 'Alert when an issue is deleted.',
+      },
+    ],
+  },
+  {
+    title: 'RCA incidents',
+    description: 'RCA incident activity and team assignments.',
+    masterField: 'incidentMobilePushEnabled',
+    items: [
+      {
+        field: 'incidentCreatedPushEnabled',
+        label: 'Incident created',
+        description: 'Alert when a new RCA incident is opened.',
+      },
+      {
+        field: 'incidentTeamInvitePushEnabled',
+        label: 'Team invite',
+        description: 'Alert when you are added to an RCA incident team.',
+      },
+    ],
+  },
+  {
+    title: 'CAPA boards',
+    description: 'Corrective and preventive action workflow activity.',
+    masterField: 'capaMobilePushEnabled',
+    items: [
+      {
+        field: 'capaBoardCreatedPushEnabled',
+        label: 'CAPA board created',
+        description: 'Alert when a CAPA board is generated or assigned.',
+      },
+    ],
+  },
+  {
+    title: 'Vacation workflow',
+    description: 'Vacation request approvals, reminders, and schedule changes.',
+    masterField: 'vacationMobilePushEnabled',
+    items: [
+      {
+        field: 'vacationRequestCreatedPushEnabled',
+        label: 'Request created',
+        description: 'Alert approvers when a vacation request is submitted.',
+      },
+      {
+        field: 'vacationRequestApprovedPushEnabled',
+        label: 'Request approved',
+        description: 'Alert when a vacation request is approved.',
+      },
+      {
+        field: 'vacationRequestDeniedPushEnabled',
+        label: 'Request denied',
+        description: 'Alert when a vacation request is denied.',
+      },
+      {
+        field: 'vacationRequestCancelledPushEnabled',
+        label: 'Request cancelled',
+        description: 'Alert when a vacation request is cancelled.',
+      },
+      {
+        field: 'vacationRequestDeletedPushEnabled',
+        label: 'Cancelled request deleted',
+        description: 'Alert when a cancelled vacation request is removed.',
+      },
+      {
+        field: 'vacationPendingReminderPushEnabled',
+        label: 'Pending approval reminder',
+        description: 'Alert before a pending request reaches its start date.',
+      },
+      {
+        field: 'vacationStartDayPushEnabled',
+        label: 'Vacation start day',
+        description: 'Alert on the first day of an approved vacation.',
+      },
+      {
+        field: 'vacationReturnReminderPushEnabled',
+        label: 'Return reminder',
+        description: 'Alert before an employee returns from vacation.',
+      },
+    ],
+  },
+];
 
 const DAYS_OF_WEEK = [
   { key: 'monday', label: 'Mon', full: 'Monday' },
@@ -264,7 +455,7 @@ function CollapsibleSection({
       </button>
       <div
         className={`transition-all duration-300 ease-in-out overflow-hidden ${
-          isOpen ? 'max-h-[2000px] opacity-100' : 'max-h-0 opacity-0'
+          isOpen ? 'max-h-[5000px] opacity-100' : 'max-h-0 opacity-0'
         }`}
       >
         <div className="px-4 sm:px-6 pb-4 sm:pb-6 pt-0">
@@ -429,6 +620,9 @@ export default function LswNotificationSettings() {
   const [error, setError] = useState('');
   const [browserPermission, setBrowserPermission] = useState<NotificationPermission>('default');
   const [currentTime, setCurrentTime] = useState('');
+  const [testingPush, setTestingPush] = useState(false);
+  const [pushTestMessage, setPushTestMessage] = useState('');
+  const [pushTestError, setPushTestError] = useState('');
   const prefsRef = useRef(prefs);
   prefsRef.current = prefs;
   const saveTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -479,26 +673,41 @@ export default function LswNotificationSettings() {
     return raw;
   };
 
+  const parseArrayField = (raw: any, fallback: string[]) => {
+    if (!raw) return fallback;
+    if (typeof raw === 'string') {
+      try {
+        const parsed = JSON.parse(raw);
+        return Array.isArray(parsed) ? parsed : fallback;
+      } catch {
+        return fallback;
+      }
+    }
+    return Array.isArray(raw) ? raw : fallback;
+  };
+
+  const normalizePrefs = (raw: any): NotificationPreferences => ({
+    ...DEFAULT_PREFS,
+    ...raw,
+    dndDays: parseArrayField(raw?.dndDays, DEFAULT_PREFS.dndDays),
+    digestDays: parseArrayField(raw?.digestDays, DEFAULT_PREFS.digestDays),
+    dndCustomSlots: parseJsonField(raw?.dndCustomSlots),
+    sectionDailyTasks: parseJsonField(raw?.sectionDailyTasks),
+    sectionTodoItems: parseJsonField(raw?.sectionTodoItems),
+    sectionMeetingRails: parseJsonField(raw?.sectionMeetingRails),
+    sectionFollowUps: parseJsonField(raw?.sectionFollowUps),
+    sectionFreqTasks: parseJsonField(raw?.sectionFreqTasks),
+    sectionProjects: parseJsonField(raw?.sectionProjects),
+    sectionKeyResults: parseJsonField(raw?.sectionKeyResults),
+    sectionPersonalGoals: parseJsonField(raw?.sectionPersonalGoals),
+  });
+
   const loadPrefs = async () => {
     try {
       setLoading(true);
       const res = await api.get('/lsw/notification-preferences');
       if (res.data.success) {
-        const raw = res.data.data;
-        const loaded: NotificationPreferences = {
-          ...DEFAULT_PREFS,
-          ...raw,
-          dndDays: typeof raw.dndDays === 'string' ? JSON.parse(raw.dndDays) : (raw.dndDays || DEFAULT_PREFS.dndDays),
-          dndCustomSlots: parseJsonField(raw.dndCustomSlots),
-          sectionDailyTasks: parseJsonField(raw.sectionDailyTasks),
-          sectionTodoItems: parseJsonField(raw.sectionTodoItems),
-          sectionMeetingRails: parseJsonField(raw.sectionMeetingRails),
-          sectionFollowUps: parseJsonField(raw.sectionFollowUps),
-          sectionFreqTasks: parseJsonField(raw.sectionFreqTasks),
-          sectionProjects: parseJsonField(raw.sectionProjects),
-          sectionKeyResults: parseJsonField(raw.sectionKeyResults),
-          sectionPersonalGoals: parseJsonField(raw.sectionPersonalGoals),
-        };
+        const loaded = normalizePrefs(res.data.data);
         setPrefs(loaded);
         prefsRef.current = loaded;
       }
@@ -518,13 +727,7 @@ export default function LswNotificationSettings() {
     try {
       const res = await api.put('/lsw/notification-preferences', data);
       if (res.data.success) {
-        const raw = res.data.data;
-        const saved: NotificationPreferences = {
-          ...DEFAULT_PREFS,
-          ...raw,
-          dndDays: typeof raw.dndDays === 'string' ? JSON.parse(raw.dndDays) : (raw.dndDays || DEFAULT_PREFS.dndDays),
-          dndCustomSlots: parseJsonField(raw.dndCustomSlots),
-        };
+        const saved = normalizePrefs(res.data.data);
         setPrefs(saved);
         prefsRef.current = saved;
         setMessage('Settings saved');
@@ -554,6 +757,41 @@ export default function LswNotificationSettings() {
     setBrowserPermission(permission);
     if (permission === 'granted') {
       updateField('browserEnabled', true);
+    }
+  };
+
+  const sendTestPush = async () => {
+    setTestingPush(true);
+    setPushTestMessage('');
+    setPushTestError('');
+
+    try {
+      if (saveTimerRef.current) {
+        clearTimeout(saveTimerRef.current);
+        saveTimerRef.current = null;
+        await savePrefs(prefsRef.current);
+      }
+
+      const res = await api.post('/mobile/push/test', { delaySeconds: 0 });
+      if (!res.data?.success) {
+        throw new Error(res.data?.error || 'Failed to send test notification');
+      }
+
+      const data = res.data.data || {};
+      const successCount = Number(data.successCount || 0);
+      const failureCount = Number(data.failureCount || 0);
+
+      if (successCount > 0) {
+        setPushTestMessage(`Test sent to ${successCount} registered mobile device${successCount === 1 ? '' : 's'}.`);
+      } else if (failureCount > 0) {
+        setPushTestError(`Test attempted, but ${failureCount} device${failureCount === 1 ? '' : 's'} failed. Reopen the native app and allow notifications, then try again.`);
+      } else {
+        setPushTestError('No registered native device was found for this account. Sign in from the installed app and allow notifications first.');
+      }
+    } catch (err: any) {
+      setPushTestError(err.response?.data?.error || err.message || 'Failed to send test notification');
+    } finally {
+      setTestingPush(false);
     }
   };
 
@@ -591,7 +829,8 @@ export default function LswNotificationSettings() {
     );
   }
 
-  const isAnyChannelEnabled = prefs.emailEnabled || prefs.browserEnabled;
+  const isAnyChannelEnabled = prefs.emailEnabled || prefs.browserEnabled || prefs.mobilePushEnabled;
+  const enabledMobilePushGroups = MOBILE_PUSH_GROUPS.filter((group) => Boolean(prefs[group.masterField])).length;
 
   return (
     <div className="space-y-5">
@@ -647,7 +886,130 @@ export default function LswNotificationSettings() {
         {prefs.browserEnabled && browserPermission === 'default' && (
           <button onClick={requestBrowserPermission} className="text-xs text-primary-600 dark:text-primary-400 hover:underline ml-1 -mt-2">Click to allow browser notifications</button>
         )}
+        <div className="border-t border-gray-200 dark:border-gray-600" />
+        <Toggle
+          enabled={prefs.mobilePushEnabled}
+          onChange={(v) => updateField('mobilePushEnabled', v)}
+          label="Native App Push Notifications"
+          description="Send alerts to installed iOS and Android apps registered to this account"
+        />
+        <div className="mt-3 rounded-xl border border-primary-100 bg-white p-3 dark:border-primary-900/40 dark:bg-gray-800/70">
+          <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+            <div className="flex items-start gap-2">
+              <ShieldCheck className="mt-0.5 h-4 w-4 flex-shrink-0 text-primary-600 dark:text-primary-400" />
+              <div>
+                <p className="text-sm font-medium text-gray-900 dark:text-white">Device delivery test</p>
+                <p className="text-xs text-gray-500 dark:text-gray-400">
+                  Use this after signing in from the installed app and allowing notifications.
+                </p>
+              </div>
+            </div>
+            <button
+              type="button"
+              onClick={sendTestPush}
+              disabled={testingPush || !prefs.mobilePushEnabled}
+              className="inline-flex items-center justify-center gap-2 rounded-lg bg-primary-600 px-3 py-2 text-xs font-medium text-white transition-colors hover:bg-primary-700 disabled:cursor-not-allowed disabled:opacity-50"
+            >
+              <Send className="h-3.5 w-3.5" />
+              {testingPush ? 'Sending...' : 'Send test push'}
+            </button>
+          </div>
+          {pushTestMessage && (
+            <p className="mt-2 text-xs font-medium text-green-700 dark:text-green-300">{pushTestMessage}</p>
+          )}
+          {pushTestError && (
+            <p className="mt-2 text-xs font-medium text-red-600 dark:text-red-300">{pushTestError}</p>
+          )}
+        </div>
       </div>
+
+      {/* ━━━ Native Mobile Push Rules ━━━ */}
+      <CollapsibleSection
+        title="Native App Push Rules"
+        icon="📱"
+        description="Choose which backend events can notify installed mobile apps"
+        defaultOpen={true}
+        badge={`${enabledMobilePushGroups}/${MOBILE_PUSH_GROUPS.length} groups`}
+      >
+        <div className={`space-y-4 ${!prefs.mobilePushEnabled ? 'opacity-50 pointer-events-none' : ''}`}>
+          <Toggle
+            enabled={prefs.mobileSoundEnabled}
+            onChange={(v) => updateField('mobileSoundEnabled', v)}
+            label="Mobile Push Sound"
+            description="Allow native push notifications to play the device notification sound"
+            disabled={!prefs.mobilePushEnabled}
+          />
+
+          <div className="space-y-3">
+            {MOBILE_PUSH_GROUPS.map((group) => {
+              const masterEnabled = Boolean(prefs[group.masterField]);
+
+              return (
+                <div key={group.masterField} className="rounded-xl border border-gray-200 bg-white p-4 dark:border-gray-600 dark:bg-gray-800/70">
+                  <Toggle
+                    enabled={masterEnabled}
+                    onChange={(v) => updateField(group.masterField, v)}
+                    label={group.title}
+                    description={group.description}
+                    disabled={!prefs.mobilePushEnabled}
+                  />
+
+                  {masterEnabled && (
+                    <div className="mt-2 space-y-1 border-l border-gray-200 pl-4 dark:border-gray-600">
+                      {group.items.map((item) => (
+                        <div key={item.field} className="border-t border-gray-100 first:border-t-0 dark:border-gray-700">
+                          <Toggle
+                            enabled={Boolean(prefs[item.field])}
+                            onChange={(v) => updateField(item.field, v)}
+                            label={item.label}
+                            description={item.description}
+                            disabled={!prefs.mobilePushEnabled || !masterEnabled}
+                          />
+                        </div>
+                      ))}
+
+                      {group.masterField === 'vacationMobilePushEnabled' && (
+                        <div className="grid grid-cols-1 gap-3 border-t border-gray-100 pt-3 dark:border-gray-700 sm:grid-cols-2">
+                          <div>
+                            <label className="block text-xs font-medium text-gray-700 dark:text-gray-300">Pending reminder</label>
+                            <div className="mt-1 flex items-center gap-2">
+                              <input
+                                type="number"
+                                min={0}
+                                max={60}
+                                value={prefs.vacationPendingReminderDaysBefore}
+                                onChange={(e) => updateField('vacationPendingReminderDaysBefore', Number(e.target.value))}
+                                disabled={!prefs.vacationPendingReminderPushEnabled}
+                                className="w-20 rounded-lg border border-gray-300 bg-white px-2.5 py-1.5 text-sm text-gray-900 focus:ring-2 focus:ring-primary-500 disabled:opacity-50 dark:border-gray-600 dark:bg-gray-800 dark:text-white"
+                              />
+                              <span className="text-xs text-gray-500 dark:text-gray-400">days before start</span>
+                            </div>
+                          </div>
+                          <div>
+                            <label className="block text-xs font-medium text-gray-700 dark:text-gray-300">Return reminder</label>
+                            <div className="mt-1 flex items-center gap-2">
+                              <input
+                                type="number"
+                                min={0}
+                                max={60}
+                                value={prefs.vacationReturnReminderDaysBefore}
+                                onChange={(e) => updateField('vacationReturnReminderDaysBefore', Number(e.target.value))}
+                                disabled={!prefs.vacationReturnReminderPushEnabled}
+                                className="w-20 rounded-lg border border-gray-300 bg-white px-2.5 py-1.5 text-sm text-gray-900 focus:ring-2 focus:ring-primary-500 disabled:opacity-50 dark:border-gray-600 dark:bg-gray-800 dark:text-white"
+                              />
+                              <span className="text-xs text-gray-500 dark:text-gray-400">days before return</span>
+                            </div>
+                          </div>
+                        </div>
+                      )}
+                    </div>
+                  )}
+                </div>
+              );
+            })}
+          </div>
+        </div>
+      </CollapsibleSection>
 
       {/* ━━━ Bakery Metrics ━━━ */}
       <div className="bg-gray-50 dark:bg-gray-700/50 rounded-xl p-4 sm:p-6">
