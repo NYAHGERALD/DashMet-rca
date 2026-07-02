@@ -6,6 +6,10 @@ This package is intentionally separate from `frontend/` so Capacitor 8, native
 Firebase authentication, and native secure-storage dependencies do not force a
 runtime upgrade of the existing Next.js web app.
 
+After native phone sign-in succeeds, the app requests a short-lived backend
+handoff code and opens the existing DashMet web UI. Tokens are not placed in the
+URL; the web app redeems the code for its normal secure cookie session.
+
 ## Requirements
 
 ```bash
@@ -14,8 +18,8 @@ npm install
 cp .env.example .env.local
 ```
 
-Fill `.env.local` with the public Firebase client config and API URL for the
-environment being tested.
+Fill `.env.local` with the public Firebase client config, API URL, and web app
+URL for the environment being tested.
 
 ## Development
 

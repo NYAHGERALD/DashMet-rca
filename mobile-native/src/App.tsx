@@ -1,5 +1,6 @@
 import { FormEvent, useEffect, useMemo, useState } from 'react';
 import {
+  createWebHandoff,
   createFirebaseMobileSession,
   getCurrentUser,
   logoutMobileSession,
@@ -35,10 +36,40 @@ function getFriendlyError(error: unknown): string {
   return message || 'Something went wrong. Please try again.';
 }
 
+function getLocalAppOrigin(): string {
+  if (window.location.origin && window.location.origin !== 'null') {
+    return window.location.origin;
+  }
+  return `${window.location.protocol}//${window.location.host}`;
+}
+
+function buildNativeLogoutReturnUrl(): string {
+  const url = new URL('/', getLocalAppOrigin());
+  url.searchParams.set('nativeSignedOut', '1');
+  return url.toString();
+}
+
+function buildWebHandoffUrl(code: string): string {
+  const url = new URL('/mobile-session', mobileConfig.webAppUrl);
+  url.searchParams.set('code', code);
+  url.searchParams.set('returnTo', buildNativeLogoutReturnUrl());
+  return url.toString();
+}
+
+function isNativeSignedOutReturn(): boolean {
+  return new URLSearchParams(window.location.search).get('nativeSignedOut') === '1';
+}
+
+function clearNativeSignedOutReturn() {
+  if (!isNativeSignedOutReturn()) return;
+  window.history.replaceState({}, '', window.location.pathname || '/');
+}
+
 export default function App() {
   const [session, setSession] = useState<MobileSession | null>(null);
   const [loading, setLoading] = useState(true);
   const [busy, setBusy] = useState(false);
+  const [openingWeb, setOpeningWeb] = useState(false);
   const [step, setStep] = useState<LoginStep>('phone');
   const [phone, setPhone] = useState('');
   const [smsCode, setSmsCode] = useState('');
@@ -57,13 +88,29 @@ export default function App() {
 
     async function restoreSession() {
       try {
+        if (isNativeSignedOutReturn()) {
+          const storedSession = await loadMobileSession();
+          if (storedSession) {
+            await logoutMobileSession(storedSession).catch(() => undefined);
+          }
+          await signOutFirebasePhone().catch(() => undefined);
+          await clearMobileSession();
+          clearNativeSignedOutReturn();
+          if (mounted) {
+            setMessage('Signed out. Please sign in again.');
+          }
+          return;
+        }
+
         const storedSession = await loadMobileSession();
         if (!storedSession) return;
 
         const user = await getCurrentUser(storedSession.accessToken);
         if (!mounted) return;
-        setSession({ ...storedSession, user });
-        setPushStatus(await registerPushForSession(storedSession.accessToken));
+        const restoredSession = { ...storedSession, user };
+        setSession(restoredSession);
+        setPushStatus(await registerPushForSession(restoredSession.accessToken));
+        await openDashMetWebSession(restoredSession.accessToken);
       } catch {
         await clearMobileSession();
       } finally {
@@ -77,6 +124,19 @@ export default function App() {
     };
   }, []);
 
+  async function openDashMetWebSession(accessToken: string) {
+    setOpeningWeb(true);
+    setError('');
+
+    try {
+      const handoff = await createWebHandoff(accessToken);
+      window.location.assign(buildWebHandoffUrl(handoff.code));
+    } catch (handoffError) {
+      setError(getFriendlyError(handoffError));
+      setOpeningWeb(false);
+    }
+  }
+
   async function completeDashMetSession(idToken: string) {
     const response = await createFirebaseMobileSession(idToken);
     if (response.requiresEmailVerification) {
@@ -88,8 +148,9 @@ export default function App() {
 
     await saveMobileSession(response.data);
     setSession(response.data);
-    setMessage('Signed in successfully.');
+    setMessage('Opening DashMet...');
     setPushStatus(await registerPushForSession(response.data.accessToken));
+    await openDashMetWebSession(response.data.accessToken);
   }
 
   async function handlePhoneSubmit(event: FormEvent) {
@@ -184,8 +245,9 @@ export default function App() {
       const newSession = await verifyEmailLink(firebaseIdToken, email, emailCode);
       await saveMobileSession(newSession);
       setSession(newSession);
-      setMessage('Phone linked and DashMet session started.');
+      setMessage('Phone linked. Opening DashMet...');
       setPushStatus(await registerPushForSession(newSession.accessToken));
+      await openDashMetWebSession(newSession.accessToken);
     } catch (submitError) {
       setError(getFriendlyError(submitError));
     } finally {
@@ -258,7 +320,17 @@ export default function App() {
 
           {pushStatus && <p className="status success">{pushStatus}</p>}
 
-          <button className="primary-button" onClick={handleLogout} disabled={busy}>
+          {openingWeb && <p className="status success">Opening DashMet web app...</p>}
+
+          <button
+            className="primary-button"
+            onClick={() => openDashMetWebSession(session.accessToken)}
+            disabled={busy || openingWeb}
+          >
+            {openingWeb ? 'Opening...' : 'Open DashMet'}
+          </button>
+
+          <button className="primary-button" onClick={handleLogout} disabled={busy || openingWeb}>
             {busy ? 'Signing out...' : 'Sign out'}
           </button>
         </section>

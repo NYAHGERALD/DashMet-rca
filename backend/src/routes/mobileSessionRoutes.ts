@@ -5,17 +5,19 @@ import { v4 as uuidv4 } from 'uuid';
 import { prisma } from '../utils/prisma';
 import { adminAuth } from '../config/firebase-admin';
 import { encrypt, hmacHash, phoneHashVariants } from '../utils/encryption';
-import { hashToken } from '../utils/sessionCookies';
+import { hashToken, setAuthCookies } from '../utils/sessionCookies';
 import { getIdleTimeoutMsForRole } from '../utils/sessionPolicy';
 import { sendVerificationEmail } from '../services/emailService';
 import { getClientIp, logAuditEvent } from '../services/auditService';
 import { logger } from '../utils/logger';
+import { authenticate, AuthRequest } from '../middleware/auth';
 
 const router = Router();
 const OTP_TTL_MS = 10 * 60 * 1000;
 const OTP_RATE_LIMIT_WINDOW_MS = 60 * 60 * 1000;
 const OTP_RATE_LIMIT_COUNT = 3;
 const MAX_OTP_ATTEMPTS = 5;
+const WEB_HANDOFF_TTL_MS = 2 * 60 * 1000;
 
 type FirebaseIdentity = {
   uid: string;
@@ -478,6 +480,179 @@ router.post('/email-link/verify', async (req: Request, res: Response) => {
       ip: req.ip,
     });
     return res.status(400).json({ success: false, error: 'Unable to verify email code' });
+  }
+});
+
+router.post('/web-handoff', authenticate, async (req: AuthRequest, res: Response) => {
+  try {
+    if (!req.user?.id) {
+      return res.status(401).json({ success: false, error: 'Authentication required' });
+    }
+
+    const now = new Date();
+    await prisma.mobileWebHandoff.deleteMany({
+      where: {
+        userId: req.user.id,
+        OR: [
+          { expiresAt: { lt: now } },
+          { usedAt: { not: null } },
+        ],
+      },
+    });
+
+    const code = crypto.randomBytes(32).toString('base64url');
+    const expiresAt = new Date(Date.now() + WEB_HANDOFF_TTL_MS);
+
+    await prisma.mobileWebHandoff.create({
+      data: {
+        id: uuidv4(),
+        userId: req.user.id,
+        codeHash: sha256(code),
+        expiresAt,
+        ipAddress: getClientIp(req),
+        userAgent: String(req.headers['user-agent'] || 'DashMet native mobile').slice(0, 512),
+      },
+    });
+
+    res.set('Cache-Control', 'no-store');
+    return res.json({
+      success: true,
+      data: {
+        code,
+        expiresAt: expiresAt.toISOString(),
+      },
+    });
+  } catch (error: any) {
+    logger.warn('Mobile web handoff creation failed', {
+      userId: req.user?.id,
+      message: error?.message || 'unknown',
+      ip: req.ip,
+    });
+    return res.status(500).json({ success: false, error: 'Unable to prepare mobile web session' });
+  }
+});
+
+router.post('/web-handoff/redeem', async (req: Request, res: Response) => {
+  try {
+    const appHeader = String(req.header('x-dashmet-mobile-app') || '').trim().toLowerCase();
+    if (appHeader !== 'rca-mobile') {
+      return res.status(400).json({ success: false, error: 'Invalid mobile handoff request' });
+    }
+
+    const code = String(req.body?.code || '').trim();
+    if (!/^[A-Za-z0-9_-]{32,}$/.test(code)) {
+      return res.status(400).json({ success: false, error: 'Invalid mobile handoff code' });
+    }
+
+    const now = new Date();
+    const codeHash = sha256(code);
+
+    const result = await prisma.$transaction(async (tx) => {
+      const handoff = await tx.mobileWebHandoff.findUnique({
+        where: { codeHash },
+        select: {
+          id: true,
+          expiresAt: true,
+          usedAt: true,
+          user: {
+            select: selectMobileSessionUser,
+          },
+        },
+      });
+
+      if (!handoff || handoff.usedAt || handoff.expiresAt <= now) {
+        throw new Error('INVALID_HANDOFF');
+      }
+
+      const accountBlockReason = assertAccountCanStartMobileSession(handoff.user);
+      if (accountBlockReason) {
+        throw new Error(accountBlockReason);
+      }
+
+      const consumed = await tx.mobileWebHandoff.updateMany({
+        where: {
+          id: handoff.id,
+          usedAt: null,
+          expiresAt: { gt: now },
+        },
+        data: { usedAt: now },
+      });
+
+      if (consumed.count !== 1) {
+        throw new Error('INVALID_HANDOFF');
+      }
+
+      const { accessToken, refreshToken } = generateSessionTokens(handoff.user.id);
+      await tx.session.create({
+        data: {
+          id: uuidv4(),
+          userId: handoff.user.id,
+          token: hashToken(accessToken),
+          refreshToken: hashToken(refreshToken),
+          expiresAt: new Date(Date.now() + getIdleTimeoutMsForRole(handoff.user.role)),
+          ipAddress: req.ip,
+          deviceInfo: String(req.get('user-agent') || 'DashMet native web handoff').slice(0, 512),
+        },
+      });
+
+      await tx.user.update({
+        where: { id: handoff.user.id },
+        data: {
+          loginAttempts: 0,
+          lockedUntil: null,
+          lastLoginAt: new Date(),
+          lastLoginIp: req.ip,
+        },
+      });
+
+      return {
+        accessToken,
+        refreshToken,
+        user: handoff.user,
+      };
+    });
+
+    await logAuditEvent({
+      action: 'LOGIN',
+      entity: 'Session',
+      entityId: result.user.id,
+      userId: result.user.id,
+      organizationId: result.user.organizationId || undefined,
+      changes: {
+        loginMethod: 'native_mobile_web_handoff',
+        result: 'success',
+      },
+      ipAddress: getClientIp(req),
+      userAgent: req.headers['user-agent'],
+    });
+
+    setAuthCookies(res, result.accessToken, result.refreshToken);
+    res.set('Cache-Control', 'no-store');
+    return res.json({
+      success: true,
+      data: {
+        user: {
+          id: result.user.id,
+          email: result.user.email,
+          firstName: result.user.firstName,
+          lastName: result.user.lastName,
+          role: result.user.role,
+          organizationId: result.user.organizationId,
+          theme: result.user.theme,
+          language: result.user.language,
+          timezone: result.user.timezone,
+        },
+      },
+    });
+  } catch (error: any) {
+    logger.warn('Mobile web handoff redemption failed', {
+      code: error?.message || 'unknown',
+      ip: req.ip,
+    });
+    return res.status(401).json({
+      success: false,
+      error: 'Mobile handoff expired or already used. Please sign in again.',
+    });
   }
 });
 

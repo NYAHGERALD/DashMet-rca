@@ -9,6 +9,10 @@ export default defineConfig(({ mode }) => {
       env.VITE_MOBILE_API_URL ||
       env.NEXT_PUBLIC_API_URL ||
       'https://dashmet-rca-api.onrender.com/api',
+    webAppUrl:
+      env.VITE_MOBILE_WEB_URL ||
+      env.NEXT_PUBLIC_WEB_URL ||
+      'https://www.dashmet.com',
     firebase: {
       apiKey: env.VITE_FIREBASE_API_KEY || env.NEXT_PUBLIC_FIREBASE_API_KEY || '',
       authDomain: env.VITE_FIREBASE_AUTH_DOMAIN || env.NEXT_PUBLIC_FIREBASE_AUTH_DOMAIN || '',

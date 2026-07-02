@@ -16,6 +16,11 @@ export type MobileSession = {
   user: DashMetUser;
 };
 
+export type MobileWebHandoff = {
+  code: string;
+  expiresAt: string;
+};
+
 export type SessionResponse =
   | {
       success: true;

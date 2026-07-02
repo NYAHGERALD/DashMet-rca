@@ -1597,6 +1597,7 @@ model User {
   IncidentParticipant_IncidentParticipant_userIdToUser                IncidentParticipant[]                @relation("IncidentParticipant_userIdToUser")
   RecordingsCreated                                                   MeetingRecording[]                   @relation("RecordingRecordedBy")
   MobileVerification                                                  MobileVerification[]
+  MobileWebHandoff                                                    MobileWebHandoff[]
   LoginTrustedDevices                                                 LoginTrustedDevice[]
   OrganizationAccessCode                                              OrganizationAccessCode[]
   InvitationsSent                                                     Invitation[]                         @relation("InvitationsSent")
@@ -4711,6 +4712,28 @@ model MobileVerification {
   @@index([email])
   @@index([expiresAt])
   @@map("mobile_verifications")
+}
+
+// ═══════════════════════════════════════════════════════════════════════════
+// MOBILE WEB HANDOFF — One-time native-to-web session exchange
+// ═══════════════════════════════════════════════════════════════════════════
+
+model MobileWebHandoff {
+  id        String    @id @default(uuid())
+  userId    String
+  codeHash  String    @unique
+  expiresAt DateTime
+  usedAt    DateTime?
+  ipAddress String?
+  userAgent String?
+  createdAt DateTime  @default(now())
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId])
+  @@index([expiresAt])
+  @@index([usedAt])
+  @@map("mobile_web_handoffs")
 }
 
 // ═══════════════════════════════════════════════════════════════════════════

@@ -2,15 +2,20 @@
 
 ## Decision
 
-DashMet keeps two separate client surfaces:
+DashMet keeps two client surfaces with a controlled handoff between them:
 
 - `frontend/`: the existing Next.js web app served at `www.dashmet.com`.
 - `mobile-native/`: the bundled Capacitor native app for Android and iOS.
 
-The native app must not depend on loading `www.dashmet.com` in production. Hosted
-WebView mode is allowed only as a temporary smoke-test build because it makes app
-startup, login behavior, offline behavior, and native plugin availability depend
-on the public website deployment.
+The native package owns the native-only responsibilities: Firebase phone
+authentication, secure local token storage, and push registration. After native
+login succeeds, it opens the existing DashMet web UI through a short-lived,
+one-time backend handoff. This preserves the browser web app while allowing the
+installed Android/iOS app to run the same enterprise workflow UI.
+
+Hosted WebView mode is still treated as a temporary smoke-test build only. The
+production app should start from the bundled native login shell, then enter the
+web UI through the secure handoff.
 
 ## Security Model
 
@@ -51,6 +56,26 @@ Native access and refresh tokens are stored with secure native storage:
 - Browser fallback is not considered secure and is used only for local UI preview.
 
 The existing web app continues using cookie sessions and CSRF protection.
+
+## Native-to-Web Handoff
+
+The native app never passes DashMet access or refresh tokens in a URL. It uses a
+one-time handoff code:
+
+1. Native phone login creates a DashMet mobile session.
+2. Native app calls `POST /api/mobile/session/web-handoff` with its bearer token.
+3. Backend stores only a SHA-256 hash of a random handoff code with a two-minute
+   expiry.
+4. Native app opens `https://www.dashmet.com/mobile-session?code=...`.
+5. The web page calls `POST /api/mobile/session/web-handoff/redeem`.
+6. Backend marks the handoff used, creates a normal web cookie session, sets the
+   existing HttpOnly auth cookies plus CSRF cookie, and redirects the user to the
+   web dashboard.
+
+When the web UI is running inside the installed app, `/mobile-session` stores a
+validated native return URL. Web logout clears the web cookies and returns to the
+bundled native sign-in screen with `nativeSignedOut=1`, allowing the native app
+to clear its secure mobile session too.
 
 ## Push Notifications
 

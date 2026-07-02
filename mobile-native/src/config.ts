@@ -1,5 +1,6 @@
 type MobileRuntimeConfig = {
   apiBaseUrl: string;
+  webAppUrl: string;
   firebase: {
     apiKey: string;
     authDomain: string;

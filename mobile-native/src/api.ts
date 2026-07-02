@@ -1,5 +1,5 @@
 import { mobileConfig } from './config';
-import type { DashMetUser, MobileSession, SessionResponse } from './types';
+import type { DashMetUser, MobileSession, MobileWebHandoff, SessionResponse } from './types';
 
 const MOBILE_HEADERS = {
   'Content-Type': 'application/json',
@@ -82,6 +82,15 @@ export async function getCurrentUser(accessToken: string): Promise<DashMetUser> 
     token: accessToken,
   });
   return response.data.user;
+}
+
+export async function createWebHandoff(accessToken: string): Promise<MobileWebHandoff> {
+  const response = await request<{ success: true; data: MobileWebHandoff }>('/mobile/session/web-handoff', {
+    method: 'POST',
+    token: accessToken,
+    body: {},
+  });
+  return response.data;
 }
 
 export async function logoutMobileSession(session: MobileSession): Promise<void> {

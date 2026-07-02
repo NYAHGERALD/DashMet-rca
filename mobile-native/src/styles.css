@@ -172,6 +172,10 @@ input:focus {
   opacity: 0.58;
 }
 
+.primary-button + .primary-button {
+  margin-top: 10px;
+}
+
 .status {
   margin: 0 0 16px;
   padding: 12px 14px;

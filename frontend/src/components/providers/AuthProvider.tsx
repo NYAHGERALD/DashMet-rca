@@ -93,6 +93,32 @@ const getWarningWindowForRole = (role?: string, idleTimeoutMs?: number): number 
 const getLoginRedirectForRole = (role?: string): string =>
   role === 'SYSTEM_ADMIN' ? '/dashmet-control/login' : '/login';
 
+const NATIVE_SHELL_KEY = 'dashmetNativeShell';
+const NATIVE_RETURN_URL_KEY = 'dashmetNativeReturnUrl';
+
+const getNativeShellLogoutRedirect = (): string | null => {
+  if (typeof window === 'undefined') return null;
+  if (window.localStorage.getItem(NATIVE_SHELL_KEY) !== 'true') return null;
+
+  const rawReturnUrl = window.localStorage.getItem(NATIVE_RETURN_URL_KEY);
+  if (!rawReturnUrl) return null;
+
+  try {
+    const url = new URL(rawReturnUrl);
+    const isLocalHost = url.hostname === 'localhost';
+    const isAllowedProtocol = ['capacitor:', 'ionic:', 'http:', 'https:'].includes(url.protocol);
+    return isLocalHost && isAllowedProtocol ? url.toString() : null;
+  } catch {
+    return null;
+  }
+};
+
+const clearNativeShellLogoutRedirect = () => {
+  if (typeof window === 'undefined') return;
+  window.localStorage.removeItem(NATIVE_SHELL_KEY);
+  window.localStorage.removeItem(NATIVE_RETURN_URL_KEY);
+};
+
 const isTransientAuthLookupError = (error: any): boolean => {
   const status = error?.response?.status;
   const code = String(error?.code || '');
@@ -312,7 +338,8 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   }, [clearIdleTimers, scheduleIdleTimers]);
 
   const logout = async (redirectUrl?: string) => {
-    const targetUrl = redirectUrl || getLoginRedirectForRole(user?.role);
+    const nativeLogoutRedirect = redirectUrl ? null : getNativeShellLogoutRedirect();
+    const targetUrl = redirectUrl || nativeLogoutRedirect || getLoginRedirectForRole(user?.role);
 
     try {
       await api.post('/auth/logout');
@@ -325,6 +352,9 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       setShowIdleWarning(false);
       setIdleCountdownSeconds(0);
       clearIdleTimers();
+      if (nativeLogoutRedirect) {
+        clearNativeShellLogoutRedirect();
+      }
       window.location.href = targetUrl;
     }
   };
@@ -381,7 +411,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
                 {extendingSession ? 'Extending session...' : 'Stay signed in'}
               </button>
               <button
-                onClick={() => logout(getLoginRedirectForRole(user.role))}
+                onClick={() => logout()}
                 className="flex-1 rounded-xl bg-gray-200 hover:bg-gray-300 dark:bg-gray-700 dark:hover:bg-gray-600 text-gray-800 dark:text-gray-100 font-medium px-4 py-2.5 transition-colors"
               >
                 Sign out now
@@ -413,7 +443,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
               Your secure session has ended. For protection, access is now locked. Please sign in again to continue.
             </p>
             <button
-              onClick={() => logout(getLoginRedirectForRole(user.role))}
+              onClick={() => logout()}
               className="mt-6 w-full rounded-xl bg-blue-600 hover:bg-blue-700 text-white font-medium px-4 py-2.5 transition-colors"
             >
               Sign in again
