@@ -110,7 +110,8 @@ router.post('/test', async (req: AuthRequest, res: Response) => {
     const user = req.user!;
     const firstName = user.firstName?.trim() || user.email.split('@')[0] || 'there';
     const token = String(req.body?.token || '').trim();
-    if (token && !Expo.isExpoPushToken(token)) {
+    const provider = token ? normalizeProvider(req.body?.provider, token) : null;
+    if (token && provider === 'EXPO' && !Expo.isExpoPushToken(token)) {
       return res.status(400).json({ success: false, error: 'Invalid Expo push token' });
     }
     const delaySeconds = normalizeTestDelaySeconds(req.body?.delaySeconds);

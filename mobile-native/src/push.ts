@@ -4,10 +4,43 @@ import { Device } from '@capacitor/device';
 import { PushNotifications } from '@capacitor/push-notifications';
 import { registerMobilePushToken } from './api';
 
+async function ensureAndroidNotificationChannels(): Promise<void> {
+  if (Capacitor.getPlatform() !== 'android') return;
+
+  const channels = [
+    {
+      id: 'dashmet_alerts',
+      name: 'DashMet Alerts',
+      description: 'Operational alerts, reminders, and assigned work notifications.',
+    },
+    {
+      id: 'action_items',
+      name: 'Action Items',
+      description: 'Action item assignments and updates.',
+    },
+  ];
+
+  await Promise.all(
+    channels.map((channel) =>
+      PushNotifications.createChannel({
+        ...channel,
+        importance: 5,
+        visibility: 1,
+        lights: true,
+        lightColor: '#14b8a6',
+        vibration: true,
+        sound: 'default',
+      }).catch(() => undefined)
+    )
+  );
+}
+
 export async function registerPushForSession(accessToken: string): Promise<string> {
   if (!Capacitor.isNativePlatform()) {
     return 'Push registration is available on native builds.';
   }
+
+  await ensureAndroidNotificationChannels();
 
   const permission = await PushNotifications.requestPermissions();
   if (permission.receive !== 'granted') {

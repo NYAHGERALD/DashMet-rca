@@ -43,6 +43,9 @@ const toExpoData = (data?: Record<string, string>) =>
 const getNotificationSound = (payload: PushNotificationPayload) =>
   payload.sound === null ? undefined : (payload.sound || 'default');
 
+const getAndroidChannelId = (payload: PushNotificationPayload) =>
+  payload.data?.channelId || 'dashmet_alerts';
+
 const toExpoMessage = (token: string, payload: PushNotificationPayload): ExpoPushMessage => {
   const message: ExpoPushMessage = {
     to: token,
@@ -553,7 +556,7 @@ export async function sendPushNotification(
         notification: {
           sound: payload.sound || 'default',
           priority: 'high',
-          channelId: 'action_items',
+          channelId: getAndroidChannelId(payload),
         },
       },
     };
@@ -629,7 +632,7 @@ export async function sendPushNotificationToMultiple(
           notification: {
             sound: getNotificationSound(payload),
             priority: 'high',
-            channelId: 'action_items',
+            channelId: getAndroidChannelId(payload),
           },
         },
       };
