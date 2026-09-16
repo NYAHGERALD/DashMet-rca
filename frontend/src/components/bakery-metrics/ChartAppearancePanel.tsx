@@ -1,5 +1,7 @@
 'use client';
 
+import { useEffect, useState } from 'react';
+import { createPortal } from 'react-dom';
 import { Lock, RotateCcw, X } from 'lucide-react';
 
 import {
@@ -11,6 +13,12 @@ import {
   type ChartPresetId,
   type SeriesColours
 } from '@/lib/chartAppearance';
+import {
+  DAY_RANGE_STYLES,
+  WEEK_NUMBER_STYLES,
+  type DayRangeStyle,
+  type WeekNumberStyle
+} from '@/lib/chartAxisLabels';
 
 /**
  * Where somebody makes these charts read the way their site reads data.
@@ -27,6 +35,15 @@ import {
  * is free except in one respect: an alert colour too close to a bar colour
  * withdraws the whole-bar fill, because that mode leans hardest on hue. The
  * outline and its pulse stay in every mode.
+ *
+ * Rendered through a portal into `document.body`, and that is not a stylistic
+ * choice. The chart cards carry `periodFadeIn`, which ends on
+ * `transform: translateY(0) scale(1)` with `both` fill — so a transform stays
+ * applied for good. A transformed ancestor becomes the containing block for any
+ * `position: fixed` descendant, which quietly redefines `inset-0` from "the
+ * viewport" to "that element's box": the overlay sat inside the content column
+ * and scrolled away with the page. A portal puts it beyond every ancestor, so
+ * fixed means fixed.
  */
 export function ChartAppearancePanel({
   onChange,
@@ -52,20 +69,70 @@ export function ChartAppearancePanel({
   const setSeries = (key: 'dc1' | 'dc2', field: keyof SeriesColours, value: string) =>
     onChange({ ...palette, [key]: { ...palette[key], [field]: value } });
 
-  return (
+  const [isMounted, setIsMounted] = useState(false);
+
+  // `document` does not exist while this renders on the server, so the portal
+  // waits for the client. One extra render, and no SSR crash.
+  useEffect(() => setIsMounted(true), []);
+
+  /**
+   * Nothing behind the panel moves while it is open.
+   *
+   * Closing the door as well as standing in it: the overlay no longer scrolls
+   * because it is portalled, and the page underneath no longer scrolls because
+   * of this. Scrolling a dimmed page that cannot be read or clicked only ever
+   * loses somebody their place.
+   */
+  useEffect(() => {
+    const previousOverflow = document.body.style.overflow;
+
+    document.body.style.overflow = 'hidden';
+
+    return () => {
+      document.body.style.overflow = previousOverflow;
+    };
+  }, []);
+
+  // Escape closes it, because a full-screen overlay with one way out is a trap
+  // for anyone who reaches for the keyboard first.
+  useEffect(() => {
+    const onKeyDown = (event: KeyboardEvent) => {
+      if (event.key === 'Escape') {
+        onClose();
+      }
+    };
+
+    window.addEventListener('keydown', onKeyDown);
+
+    return () => window.removeEventListener('keydown', onKeyDown);
+  }, [onClose]);
+
+  if (!isMounted) {
+    return null;
+  }
+
+  return createPortal(
     <div
-      className="period-modal-overlay fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4"
+      aria-modal="true"
+      className="period-modal-overlay fixed inset-0 z-[100] flex items-center justify-center bg-black/40 p-4"
       onClick={onClose}
+      role="dialog"
     >
+      {/*
+        * A column with a fixed head and foot and a scrolling middle, rather than
+        * one box that scrolls entirely. The title says what this is and the
+        * footer holds the way out, so both scrolling away is the moment somebody
+        * halfway down a long panel loses their bearings and the Done button.
+        */}
       <div
-        className="period-modal-content max-h-[88vh] w-full max-w-2xl overflow-y-auto rounded-2xl bg-white shadow-2xl"
+        className="period-modal-content flex max-h-[88vh] w-full max-w-2xl flex-col overflow-hidden rounded-2xl bg-white shadow-2xl"
         onClick={(event) => event.stopPropagation()}
       >
-        <div className="flex items-center justify-between border-b border-gray-100 px-6 py-4">
+        <div className="flex shrink-0 items-center justify-between border-b border-gray-100 px-6 py-4">
           <div>
             <h3 className="text-lg font-bold text-gray-900">Chart appearance</h3>
             <p className="text-xs text-gray-500">
-              Colours apply to both the OEE and the Waste chart, and are remembered on this device.
+              Applies to both charts. Saved on this device.
             </p>
           </div>
           <button
@@ -78,7 +145,7 @@ export function ChartAppearancePanel({
           </button>
         </div>
 
-        <div className="space-y-6 px-6 py-5">
+        <div className="min-h-0 flex-1 space-y-6 overflow-y-auto px-6 py-5">
           {/* ── The part nobody may edit ─────────────────────────────────── */}
           <section className="rounded-xl bg-gray-50 p-4">
             <div className="mb-2 flex items-center gap-2 text-xs font-semibold uppercase tracking-wide text-gray-500">
@@ -163,7 +230,7 @@ export function ChartAppearancePanel({
                   value={palette[key].barBottom}
                 />
                 <ColourInput
-                  hint="Line, its points and its legend key"
+                  hint="The trend line, its points and its key"
                   label="Trend line"
                   onChange={(value) => setSeries(key, 'line', value)}
                   value={palette[key].line}
@@ -181,7 +248,7 @@ export function ChartAppearancePanel({
           <section>
             <h4 className="mb-1 text-sm font-semibold text-gray-900">Outside target</h4>
             <p className="mb-3 text-xs text-gray-500">
-              Below target on OEE, above target on Waste. One colour covers both.
+              One colour for below target on OEE and above target on Waste.
             </p>
 
             <div className="grid grid-cols-2 gap-3 sm:grid-cols-4">
@@ -204,9 +271,8 @@ export function ChartAppearancePanel({
 
             {clashes.length > 0 && (
               <p className="mt-3 rounded-lg bg-amber-50 px-3 py-2 text-xs text-amber-800">
-                This alert colour is close to {clashes.join(' and ')}. Filling the whole bar is
-                switched off while that is true — the passing point and the failing point on a
-                trend line are the same shape, so colour is the only thing separating them.
+                Too close to {clashes.join(' and ')}. Pick a different alert colour to fill bars
+                as well as outline them.
               </p>
             )}
 
@@ -236,14 +302,68 @@ export function ChartAppearancePanel({
               </label>
             </div>
 
-            <p className="mt-2 text-xs text-gray-400">
-              The outline is always drawn. It is the part of the warning that does not rely on
-              telling two colours apart.
+          </section>
+
+          {/* ── What is drawn at all ─────────────────────────────────────── */}
+          <section>
+            <h4 className="mb-1 text-sm font-semibold text-gray-900">Show</h4>
+            <p className="mb-3 text-xs text-gray-500">
+              Turning these off gives the bars more room.
             </p>
+
+            <div className="space-y-2">
+              <ToggleRow
+                checked={palette.showWeekNumbers}
+                hint="The week shown under each pair of bars."
+                label="Week numbers"
+                onChange={(next) => onChange({ ...palette, showWeekNumbers: next })}
+              />
+              <ToggleRow
+                checked={palette.showDayRanges}
+                hint="The dates shown under each pair of bars."
+                label="Day ranges"
+                onChange={(next) => onChange({ ...palette, showDayRanges: next })}
+              />
+              {palette.showWeekNumbers && (
+                <StyleSelect
+                  label="Week number format"
+                  onChange={(next) =>
+                    onChange({ ...palette, weekNumberStyle: next as WeekNumberStyle })
+                  }
+                  options={WEEK_NUMBER_STYLES}
+                  value={palette.weekNumberStyle}
+                />
+              )}
+
+              {palette.showDayRanges && (
+                <StyleSelect
+                  label="Day range format"
+                  onChange={(next) =>
+                    onChange({ ...palette, dayRangeStyle: next as DayRangeStyle })
+                  }
+                  options={DAY_RANGE_STYLES}
+                  value={palette.dayRangeStyle}
+                />
+              )}
+
+              <ToggleRow
+                checked={palette.showLegend}
+                hint="The colour key under the chart."
+                label="Legend"
+                onChange={(next) => onChange({ ...palette, showLegend: next })}
+              />
+            </div>
+
+            {palette.showDayRanges && palette.dayRangeStyle === 'brackets' && (
+              <p className="mt-3 rounded-lg bg-gray-50 px-3 py-2 text-xs text-gray-600">
+                Choose a format with the month if you share or print this chart.
+              </p>
+            )}
+
           </section>
         </div>
 
-        <div className="flex items-center justify-between border-t border-gray-100 px-6 py-4">
+        <div className="flex shrink-0 items-center justify-between border-t border-gray-100 px-6 py-4">
           <button
             className="flex items-center gap-2 text-sm font-medium text-gray-500 transition hover:text-gray-800"
             onClick={onReset}
@@ -261,7 +381,65 @@ export function ChartAppearancePanel({
           </button>
         </div>
       </div>
-    </div>
+    </div>,
+    document.body
+  );
+}
+
+function StyleSelect({
+  label,
+  onChange,
+  options,
+  value
+}: {
+  label: string;
+  onChange: (next: string) => void;
+  /** Each carries the text it would actually produce, so nobody has to guess. */
+  options: Array<{ id: string; label: string; sample: string }>;
+  value: string;
+}) {
+  return (
+    <label className="block rounded-lg border border-gray-200 px-3 py-2">
+      <span className="mb-1 block text-xs font-medium text-gray-600">{label}</span>
+      <select
+        className="w-full rounded border border-gray-200 bg-white px-2 py-1.5 text-sm text-gray-800"
+        onChange={(event) => onChange(event.target.value)}
+        value={value}
+      >
+        {options.map((option) => (
+          <option key={option.id} value={option.id}>
+            {option.label} — {option.sample}
+          </option>
+        ))}
+      </select>
+    </label>
+  );
+}
+
+function ToggleRow({
+  checked,
+  hint,
+  label,
+  onChange
+}: {
+  checked: boolean;
+  hint: string;
+  label: string;
+  onChange: (next: boolean) => void;
+}) {
+  return (
+    <label className="flex items-start gap-3 rounded-lg border border-gray-200 px-3 py-2">
+      <input
+        checked={checked}
+        className="mt-0.5"
+        onChange={(event) => onChange(event.target.checked)}
+        type="checkbox"
+      />
+      <span>
+        <span className="block text-sm text-gray-800">{label}</span>
+        <span className="block text-xs text-gray-500">{hint}</span>
+      </span>
+    </label>
   );
 }
 

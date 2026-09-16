@@ -9,6 +9,11 @@ import {
   type ChartPalette
 } from '@/lib/chartAppearance';
 import { readChartPalette, writeChartPalette } from '@/lib/chartAppearanceStore';
+import {
+  dayRangeUsesBrackets,
+  formatDayRange,
+  formatWeekNumber
+} from '@/lib/chartAxisLabels';
 import { ChartAppearancePanel } from './ChartAppearancePanel';
 import {
   Bar, XAxis, YAxis, CartesianGrid, Tooltip, Legend,
@@ -81,7 +86,14 @@ function getClippedWeekInfo(
   weekEnd: string,
   rangeStart: string,
   rangeEnd: string,
-): { dayStart: number; dayEnd: number; businessDays: number } {
+): {
+  dayStart: number;
+  dayEnd: number;
+  businessDays: number;
+  /** The clipped dates themselves, so a label can say "Jul 27" and not just "27". */
+  startIso: string;
+  endIso: string;
+} {
   const ws = new Date(weekStart + 'T00:00:00Z');
   const we = new Date(weekEnd + 'T00:00:00Z');
   const rs = new Date(rangeStart + 'T00:00:00Z');
@@ -104,6 +116,8 @@ function getClippedWeekInfo(
     dayStart: effectiveStart.getUTCDate(),
     dayEnd: effectiveEnd.getUTCDate(),
     businessDays: Math.min(bizDays, 5), // cap at 5
+    startIso: effectiveStart.toISOString().slice(0, 10),
+    endIso: effectiveEnd.toISOString().slice(0, 10),
   };
 }
 
@@ -514,6 +528,13 @@ export default function BakeryPeriodOeeChart({ startDate, endDate }: BakeryPerio
       return {
         weekLabel: weekNum ? `W${weekNum}` : w.weekLabel,
         dayRangeLabel: `[${clip.dayStart} - ${clip.dayEnd}]`,
+        // The parts, kept so the axis can be formatted rather than parsed back
+        // out of a string that was built for one shape only.
+        weekNumber: weekNum,
+        rangeStartIso: clip.startIso,
+        rangeEndIso: clip.endIso,
+        dayStart: clip.dayStart,
+        dayEnd: clip.dayEnd,
         dayCountLabel: clip.businessDays === 1 ? '1 DAY' : `${clip.businessDays} DAYS`,
         dieCut1Oee: w.dieCut1Oee,
         dieCut2Oee: w.dieCut2Oee,
@@ -549,28 +570,56 @@ export default function BakeryPeriodOeeChart({ startDate, endDate }: BakeryPerio
     const half = bracketW / 2;
     const rangeY = 22; // vertical position for the bracket line
 
-    // Extract just the numbers from dayRangeLabel e.g. "[13 - 17]" -> "13 - 17"
-    const rangeInner = entry.dayRangeLabel.replace(/[\[\]]/g, '');
+    const labelParts = {
+      dayStart: entry.dayStart,
+      dayEnd: entry.dayEnd,
+      startIso: entry.rangeStartIso,
+      endIso: entry.rangeEndIso,
+      weekNumber: entry.weekNumber,
+      fallbackLabel: entry.weekLabel
+    };
+    const weekText = formatWeekNumber(palette.weekNumberStyle, labelParts);
+    const rangeInner = formatDayRange(palette.dayRangeStyle, labelParts);
+    /*
+     * The two square brackets are drawn as their own larger glyphs, which is
+     * what gives the default its look. Every other style is one plain run, and
+     * brackets left standing around "July 27 - 31" read as a mistake.
+     */
+    const withBrackets = dayRangeUsesBrackets(palette.dayRangeStyle);
+    const rangeText = withBrackets ? rangeInner.replace(/[[\]]/g, '') : rangeInner;
+
+    /*
+     * The day range climbs into the week number's place when that row is
+     * hidden, rather than leaving a gap where it used to be. Two rows that can
+     * each be turned off independently have three shapes, not two.
+     */
+    const rangeRowY = palette.showWeekNumbers ? rangeY : 4;
 
     return (
       <g transform={`translate(${x},${y})`}>
-        {/* Week number — bold black */}
-        <text x={0} y={0} dy={4} textAnchor="middle" fontSize={12} fontWeight={700} fill="#000000">
-          {entry.weekLabel}
-        </text>
+        {palette.showWeekNumbers && (
+          <text x={0} y={0} dy={4} textAnchor="middle" fontSize={12} fontWeight={700} fill="#000000">
+            {weekText}
+          </text>
+        )}
 
-        {/* Left bracket — large bold */}
-        <text x={-half} y={rangeY} textAnchor="middle" fontSize={16} fontWeight={900} fill="#000000">
-          [
-        </text>
-        {/* Day range numbers — bold black centered */}
-        <text x={0} y={rangeY} textAnchor="middle" fontSize={11} fontWeight={700} fill="#000000">
-          {rangeInner}
-        </text>
-        {/* Right bracket — large bold */}
-        <text x={half} y={rangeY} textAnchor="middle" fontSize={16} fontWeight={900} fill="#000000">
-          ]
-        </text>
+        {palette.showDayRanges && (
+          <>
+            {withBrackets && (
+              <text x={-half} y={rangeRowY} textAnchor="middle" fontSize={16} fontWeight={900} fill="#000000">
+                [
+              </text>
+            )}
+            <text x={0} y={rangeRowY} textAnchor="middle" fontSize={11} fontWeight={700} fill="#000000">
+              {rangeText}
+            </text>
+            {withBrackets && (
+              <text x={half} y={rangeRowY} textAnchor="middle" fontSize={16} fontWeight={900} fill="#000000">
+                ]
+              </text>
+            )}
+          </>
+        )}
       </g>
     );
   };
@@ -843,7 +892,7 @@ export default function BakeryPeriodOeeChart({ startDate, endDate }: BakeryPerio
                     animationDuration={1600}
                   />
 
-                  <Legend
+                  {palette.showLegend && <Legend
                     content={() => (
                       <div className="flex flex-wrap items-center justify-center gap-x-5 gap-y-1 pt-3 text-xs">
                         <span className="flex items-center gap-1.5">
@@ -872,7 +921,7 @@ export default function BakeryPeriodOeeChart({ startDate, endDate }: BakeryPerio
                         </span>
                       </div>
                     )}
-                  />
+                  />}
                 </ComposedChart>
               </ResponsiveContainer>
               </div>
@@ -1050,7 +1099,7 @@ export default function BakeryPeriodOeeChart({ startDate, endDate }: BakeryPerio
                     animationDuration={1600}
                   />
 
-                  <Legend
+                  {palette.showLegend && <Legend
                     content={() => (
                       <div className="flex flex-wrap items-center justify-center gap-x-5 gap-y-1 pt-3 text-xs">
                         <span className="flex items-center gap-1.5">
@@ -1079,7 +1128,7 @@ export default function BakeryPeriodOeeChart({ startDate, endDate }: BakeryPerio
                         </span>
                       </div>
                     )}
-                  />
+                  />}
                 </ComposedChart>
               </ResponsiveContainer>
               </div>

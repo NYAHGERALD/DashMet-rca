@@ -1,3 +1,10 @@
+import {
+  DAY_RANGE_STYLES,
+  WEEK_NUMBER_STYLES,
+  type DayRangeStyle,
+  type WeekNumberStyle
+} from './chartAxisLabels';
+
 /**
  * Who paints what on the Die Cut comparison charts.
  *
@@ -48,6 +55,16 @@ export interface ChartPalette {
   blink: boolean;
   oeeTargetLine: string;
   wasteTargetLine: string;
+  /** The bold week number under each pair of bars, "W40". */
+  showWeekNumbers: boolean;
+  /** The bracketed day range under the week number, "[ 27 - 31 ]". */
+  showDayRanges: boolean;
+  /** The key beneath the chart naming each colour. */
+  showLegend: boolean;
+  /** How the week number is written: W40, Week 40, 40, Week of Jul 27. */
+  weekNumberStyle: WeekNumberStyle;
+  /** How the day range is written: [ 27 - 31 ], 27 - 31, Jul 27 - 31, ... */
+  dayRangeStyle: DayRangeStyle;
 }
 
 /** Exactly what BakeryPeriodOeeChart.tsx painted before any of this existed. */
@@ -58,7 +75,12 @@ export const DEFAULT_CHART_PALETTE: ChartPalette = {
   offTargetStyle: 'outline',
   blink: true,
   oeeTargetLine: '#6366f1',
-  wasteTargetLine: '#f59e0b'
+  wasteTargetLine: '#f59e0b',
+  showWeekNumbers: true,
+  showDayRanges: true,
+  showLegend: true,
+  weekNumberStyle: 'short',
+  dayRangeStyle: 'brackets'
 };
 
 export type ChartPresetId = 'dashmet' | 'colourBlindSafe' | 'highContrast' | 'print';
@@ -74,12 +96,12 @@ export type ChartPresetId = 'dashmet' | 'colourBlindSafe' | 'highContrast' | 'pr
 export const CHART_PRESETS: Record<ChartPresetId, { label: string; hint: string; palette: ChartPalette }> = {
   dashmet: {
     label: 'DashMet default',
-    hint: 'The blue and green this dashboard ships with.',
+    hint: 'The standard blue and green.',
     palette: DEFAULT_CHART_PALETTE
   },
   colourBlindSafe: {
     label: 'Colour-blind safe',
-    hint: 'Blue and orange, with a magenta alert. Red and green are the pair most people cannot separate.',
+    hint: 'Blue and orange, easier to tell apart than red and green.',
     palette: {
       dc1: { barTop: '#56a7dc', barBottom: '#0072b2', line: '#0072b2', label: '#00476e' },
       dc2: { barTop: '#f2c25c', barBottom: '#e69f00', line: '#e69f00', label: '#8a6000' },
@@ -87,12 +109,17 @@ export const CHART_PRESETS: Record<ChartPresetId, { label: string; hint: string;
       offTargetStyle: 'outline',
       blink: true,
       oeeTargetLine: '#5d3a9b',
-      wasteTargetLine: '#8a6000'
+      wasteTargetLine: '#8a6000',
+      showWeekNumbers: true,
+      showDayRanges: true,
+      showLegend: true,
+      weekNumberStyle: 'short',
+      dayRangeStyle: 'brackets'
     }
   },
   highContrast: {
     label: 'High contrast',
-    hint: 'Heavier colours for a screen viewed across the floor.',
+    hint: 'Stronger colours for a large or distant screen.',
     palette: {
       dc1: { barTop: '#2563eb', barBottom: '#1e3a8a', line: '#1d4ed8', label: '#1e3a8a' },
       dc2: { barTop: '#047857', barBottom: '#064e3b', line: '#047857', label: '#064e3b' },
@@ -100,12 +127,17 @@ export const CHART_PRESETS: Record<ChartPresetId, { label: string; hint: string;
       offTargetStyle: 'fill',
       blink: true,
       oeeTargetLine: '#4338ca',
-      wasteTargetLine: '#b45309'
+      wasteTargetLine: '#b45309',
+      showWeekNumbers: true,
+      showDayRanges: true,
+      showLegend: true,
+      weekNumberStyle: 'short',
+      dayRangeStyle: 'brackets'
     }
   },
   print: {
     label: 'Greyscale',
-    hint: 'For reports that get photocopied. The alert keeps its colour so it survives.',
+    hint: 'For printing and photocopying.',
     palette: {
       dc1: { barTop: '#9ca3af', barBottom: '#4b5563', line: '#4b5563', label: '#1f2937' },
       dc2: { barTop: '#d1d5db', barBottom: '#9ca3af', line: '#9ca3af', label: '#374151' },
@@ -113,7 +145,14 @@ export const CHART_PRESETS: Record<ChartPresetId, { label: string; hint: string;
       offTargetStyle: 'outline',
       blink: false,
       oeeTargetLine: '#6b7280',
-      wasteTargetLine: '#6b7280'
+      wasteTargetLine: '#6b7280',
+      showWeekNumbers: true,
+      showDayRanges: true,
+      showLegend: true,
+      // Named months, because a printed page has no tooltip to ask and
+      // "27 - 31" means nothing once it has left this screen.
+      weekNumberStyle: 'full',
+      dayRangeStyle: 'monthShort'
     }
   }
 };
@@ -122,6 +161,10 @@ const HEX = /^#[0-9a-fA-F]{6}$/;
 
 function readHex(value: unknown, fallback: string): string {
   return typeof value === 'string' && HEX.test(value) ? value : fallback;
+}
+
+function readFlag(value: unknown, fallback: boolean): boolean {
+  return typeof value === 'boolean' ? value : fallback;
 }
 
 function readSeries(value: unknown, fallback: SeriesColours): SeriesColours {
@@ -153,7 +196,16 @@ export function normalizeChartPalette(value: unknown): ChartPalette {
     offTargetStyle: raw.offTargetStyle === 'fill' ? 'fill' : 'outline',
     blink: typeof raw.blink === 'boolean' ? raw.blink : DEFAULT_CHART_PALETTE.blink,
     oeeTargetLine: readHex(raw.oeeTargetLine, DEFAULT_CHART_PALETTE.oeeTargetLine),
-    wasteTargetLine: readHex(raw.wasteTargetLine, DEFAULT_CHART_PALETTE.wasteTargetLine)
+    wasteTargetLine: readHex(raw.wasteTargetLine, DEFAULT_CHART_PALETTE.wasteTargetLine),
+    showWeekNumbers: readFlag(raw.showWeekNumbers, DEFAULT_CHART_PALETTE.showWeekNumbers),
+    showDayRanges: readFlag(raw.showDayRanges, DEFAULT_CHART_PALETTE.showDayRanges),
+    showLegend: readFlag(raw.showLegend, DEFAULT_CHART_PALETTE.showLegend),
+    weekNumberStyle: WEEK_NUMBER_STYLES.some((style) => style.id === raw.weekNumberStyle)
+      ? (raw.weekNumberStyle as WeekNumberStyle)
+      : DEFAULT_CHART_PALETTE.weekNumberStyle,
+    dayRangeStyle: DAY_RANGE_STYLES.some((style) => style.id === raw.dayRangeStyle)
+      ? (raw.dayRangeStyle as DayRangeStyle)
+      : DEFAULT_CHART_PALETTE.dayRangeStyle
   };
 }
 
