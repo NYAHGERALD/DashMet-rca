@@ -52,6 +52,26 @@ test('pounds add up and waste % is waste over pounds, as before', () => {
   assert.equal(both.wasteAvgPct, (70 / 2500) * 100);
 });
 
+test('waste is never halved: a line that did not run a shift leaves its waste % as the shift that ran', () => {
+  const both = combineShifts([
+    { dieCut2Lbs: 4000, dieCut2WasteLb: 100 },
+    { dieCut2Lbs: 0, dieCut2WasteLb: 0 },
+  ]);
+
+  assert.equal(both.dieCut2WastePct, 2.5);
+});
+
+test('pounds with 0 waste: the waste was not entered, so those pounds do not thin the waste %', () => {
+  const both = combineShifts([
+    { dieCut2Lbs: 4000, dieCut2WasteLb: 100 },
+    { dieCut2Lbs: 4134, dieCut2WasteLb: 0 },
+  ]);
+
+  assert.equal(both.dieCut2WastePct, 2.5);
+  assert.equal(both.dieCut2Lbs, 8134, 'the pounds made still count as production');
+  assert.equal(both.wasteAvgPct, 2.5);
+});
+
 test('one shift saved: its own numbers', () => {
   const both = combineShifts([{ dieCut1OeePct: 70, dieCut2OeePct: 60 }, null]);
 

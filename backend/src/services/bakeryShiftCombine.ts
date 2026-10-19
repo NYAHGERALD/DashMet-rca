@@ -6,7 +6,9 @@
  * that ran one shift showed half its real OEE, and the period chart drew Die Cut 2 at about 40% when it ran near 80%.
  *
  * Pounds and waste pounds add up, and waste % is waste pounds over pounds, so a shift that did not run (0 lb)
- * already counts for nothing there. No database here, so the rules are tested on their own.
+ * already counts for nothing there and waste was never halved. A shift with pounds but 0 waste has not had its waste
+ * entered (the report shows "Missing Data?"), so its pounds are left out of the waste %, rather than thinning it.
+ * No database here, so the rules are tested on their own.
  */
 
 /** Anything a stored value can be: a number, a Prisma Decimal, a string, or nothing. */
@@ -53,6 +55,13 @@ export interface CombinedShifts {
 const sumOf = (values: readonly Stored[]): number => values.reduce<number>((sum, value) => sum + numberOf(value), 0);
 const percentOf = (part: number, whole: number): number => (whole > 0 ? (part / whole) * 100 : 0);
 
+/** Waste over pounds, from the shifts where a line has both: a 0 on either side was not entered. */
+const wastePercentOf = (pairs: ReadonlyArray<{ lbs: Stored; waste: Stored }>): number => {
+  const entered = pairs.filter((pair) => numberOf(pair.lbs) > 0 && numberOf(pair.waste) > 0);
+
+  return percentOf(sumOf(entered.map((pair) => pair.waste)), sumOf(entered.map((pair) => pair.lbs)));
+};
+
 /** The "both shifts" numbers for a day, from whichever of its shifts were saved. */
 export function combineShifts(shifts: ReadonlyArray<ShiftLines | null | undefined>): CombinedShifts {
   const saved = shifts.filter((shift): shift is ShiftLines => Boolean(shift));
@@ -62,6 +71,8 @@ export function combineShifts(shifts: ReadonlyArray<ShiftLines | null | undefine
   const dieCut2Lbs = sumOf(saved.map((shift) => shift.dieCut2Lbs));
   const dieCut1WasteLb = sumOf(saved.map((shift) => shift.dieCut1WasteLb));
   const dieCut2WasteLb = sumOf(saved.map((shift) => shift.dieCut2WasteLb));
+  const line1 = saved.map((shift) => ({ lbs: shift.dieCut1Lbs, waste: shift.dieCut1WasteLb }));
+  const line2 = saved.map((shift) => ({ lbs: shift.dieCut2Lbs, waste: shift.dieCut2WasteLb }));
 
   return {
     dieCut1OeePct,
@@ -72,9 +83,9 @@ export function combineShifts(shifts: ReadonlyArray<ShiftLines | null | undefine
     poundsTotal: dieCut1Lbs + dieCut2Lbs,
     dieCut1WasteLb,
     dieCut2WasteLb,
-    dieCut1WastePct: percentOf(dieCut1WasteLb, dieCut1Lbs),
-    dieCut2WastePct: percentOf(dieCut2WasteLb, dieCut2Lbs),
-    wasteAvgPct: percentOf(dieCut1WasteLb + dieCut2WasteLb, dieCut1Lbs + dieCut2Lbs),
+    dieCut1WastePct: wastePercentOf(line1),
+    dieCut2WastePct: wastePercentOf(line2),
+    wasteAvgPct: wastePercentOf([...line1, ...line2]),
   };
 }
 
