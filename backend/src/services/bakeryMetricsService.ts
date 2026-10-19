@@ -1,4 +1,5 @@
 import { PrismaClient } from '@prisma/client';
+import { averageOfRan, combineShifts, shiftsByDay } from './bakeryShiftCombine';
 
 const prisma = new PrismaClient();
 
@@ -659,7 +660,8 @@ const bakeryMetricsService = {
             weekSubmissionId: submission.id,
             dieCut1OeePct: fs.dieCut1OeePct,
             dieCut2OeePct: fs.dieCut2OeePct,
-            oeeAvgPct: fs.oeeAvgPct ?? (fs.dieCut1OeePct + fs.dieCut2OeePct) / 2,
+            // A line at 0 did not run this shift: the other line's OEE is the shift's (bakeryShiftCombine.ts).
+            oeeAvgPct: fs.oeeAvgPct ?? averageOfRan([fs.dieCut1OeePct, fs.dieCut2OeePct]),
             dieCut1Lbs: fs.dieCut1Lbs,
             dieCut2Lbs: fs.dieCut2Lbs,
             poundsTotal: fs.poundsTotal ?? fs.dieCut1Lbs + fs.dieCut2Lbs,
@@ -681,7 +683,7 @@ const bakeryMetricsService = {
             weekSubmissionId: submission.id,
             dieCut1OeePct: ss.dieCut1OeePct,
             dieCut2OeePct: ss.dieCut2OeePct,
-            oeeAvgPct: ss.oeeAvgPct ?? (ss.dieCut1OeePct + ss.dieCut2OeePct) / 2,
+            oeeAvgPct: ss.oeeAvgPct ?? averageOfRan([ss.dieCut1OeePct, ss.dieCut2OeePct]),
             dieCut1Lbs: ss.dieCut1Lbs,
             dieCut2Lbs: ss.dieCut2Lbs,
             poundsTotal: ss.poundsTotal ?? ss.dieCut1Lbs + ss.dieCut2Lbs,
@@ -697,29 +699,11 @@ const bakeryMetricsService = {
 
       // Both-shifts combined (only when BOTH shifts are provided)
       if (data.firstShift && data.secondShift) {
-        const fs = data.firstShift;
-        const ss = data.secondShift;
-        const bothOee1 = (fs.dieCut1OeePct + ss.dieCut1OeePct) / 2;
-        const bothOee2 = (fs.dieCut2OeePct + ss.dieCut2OeePct) / 2;
-        const bothLbs1 = fs.dieCut1Lbs + ss.dieCut1Lbs;
-        const bothLbs2 = fs.dieCut2Lbs + ss.dieCut2Lbs;
-        const bothWaste1 = fs.dieCut1WasteLb + ss.dieCut1WasteLb;
-        const bothWaste2 = fs.dieCut2WasteLb + ss.dieCut2WasteLb;
-
+        // A line at 0 on one shift did not run it: its OEE is the other shift's, never halved (bakeryShiftCombine.ts).
         await tx.bakeryBothShiftsMetrics.create({
           data: {
             weekSubmissionId: submission.id,
-            dieCut1OeePct: bothOee1,
-            dieCut2OeePct: bothOee2,
-            oeeAvgPct: (bothOee1 + bothOee2) / 2,
-            dieCut1Lbs: bothLbs1,
-            dieCut2Lbs: bothLbs2,
-            poundsTotal: bothLbs1 + bothLbs2,
-            dieCut1WasteLb: bothWaste1,
-            dieCut2WasteLb: bothWaste2,
-            dieCut1WastePct: bothLbs1 > 0 ? (bothWaste1 / bothLbs1) * 100 : 0,
-            dieCut2WastePct: bothLbs2 > 0 ? (bothWaste2 / bothLbs2) * 100 : 0,
-            wasteAvgPct: (bothLbs1 + bothLbs2) > 0 ? ((bothWaste1 + bothWaste2) / (bothLbs1 + bothLbs2)) * 100 : 0,
+            ...combineShifts([data.firstShift, data.secondShift]),
             submittedBy: data.submittedBy,
           },
         });
@@ -869,6 +853,19 @@ const bakeryMetricsService = {
         await tx.bakerySecondShiftMetrics.update({
           where: { weekSubmissionId: data.submissionId },
           data: updateData,
+        });
+      }
+
+      // The both-shifts row is made from the two shifts, so it changes with them. It used to keep the old numbers.
+      const otherShift = data.shift === 'first' ? submission.secondShiftMetrics : submission.firstShiftMetrics;
+
+      if (otherShift) {
+        const both = combineShifts(data.shift === 'first' ? [updateData, otherShift] : [otherShift, updateData]);
+
+        await tx.bakeryBothShiftsMetrics.upsert({
+          where: { weekSubmissionId: data.submissionId },
+          create: { weekSubmissionId: data.submissionId, ...both, submittedBy: data.updatedBy },
+          update: both,
         });
       }
 
@@ -1211,10 +1208,8 @@ const bakeryMetricsService = {
       const ssLine1 = getLineStateFromShift(ss, 1);
       const ssLine2 = getLineStateFromShift(ss, 2);
 
-      const firstShiftOee = combineTwoLines('oee', fsLine1, fsLine2, 'avg');
       const firstShiftPounds = combineTwoLines('pounds', fsLine1, fsLine2, 'sum');
       const firstShiftWaste = combineTwoLines('waste', fsLine1, fsLine2, 'avg');
-      const secondShiftOee = combineTwoLines('oee', ssLine1, ssLine2, 'avg');
       const secondShiftPounds = combineTwoLines('pounds', ssLine1, ssLine2, 'sum');
       const secondShiftWaste = combineTwoLines('waste', ssLine1, ssLine2, 'avg');
 
@@ -1229,14 +1224,15 @@ const bakeryMetricsService = {
         waste: combineTwoShiftsByLine(fsLine2, ssLine2, 'waste'),
       });
 
-      // Match the View Reports table: exclude lines marked as No Production Run
-      // instead of averaging their 0 values into the producing line.
-      oee[idx] = combineTwoLines('oee', bothLine1, bothLine2, 'avg') ?? 0;
+      // OEE: a line at 0 on a shift did not run it, so the shift that ran is used and nothing is halved
+      // (Gerald, 2026-10-19; bakeryShiftCombine.ts). A line with pounds but no OEE used to drop the whole day.
+      // Waste still matches the View Reports table: lines marked as No Production Run are left out.
+      oee[idx] = combineShifts([fs, ss]).oeeAvgPct;
       waste[idx] = combineTwoLines('waste', bothLine1, bothLine2, 'avg') ?? 0;
 
-      oeeFirstShift[idx] = firstShiftOee ?? 0;
+      oeeFirstShift[idx] = fs ? averageOfRan([fs.dieCut1OeePct, fs.dieCut2OeePct]) : 0;
       wasteFirstShift[idx] = firstShiftWaste ?? 0;
-      oeeSecondShift[idx] = secondShiftOee ?? 0;
+      oeeSecondShift[idx] = ss ? averageOfRan([ss.dieCut1OeePct, ss.dieCut2OeePct]) : 0;
       wasteSecondShift[idx] = secondShiftWaste ?? 0;
       poundsFirstShift[idx] = firstShiftPounds ?? 0;
       poundsSecondShift[idx] = secondShiftPounds ?? 0;
@@ -1407,29 +1403,26 @@ const bakeryMetricsService = {
     for (const sheet of sheets) {
       const submissions = await prisma.bakeryWeekSubmission.findMany({
         where: { weekName: sheet.sheetName },
-        include: { bothShiftsMetrics: true },
+        include: { firstShiftMetrics: true, secondShiftMetrics: true },
       });
 
       if (submissions.length === 0) continue;
 
-      // Calculate average Die Cut 1 & 2 OEE and Waste across all days in the week
+      // Average Die Cut 1 & 2 OEE and Waste across the days of the week. Each day comes from its own two shifts, so
+      // a line that did not run a shift (0) is left out rather than halving the day (bakeryShiftCombine.ts), and a
+      // day saved one shift at a time still counts. A day where a line did not run at all is left out of its average.
       const dc1Vals: number[] = [];
       const dc2Vals: number[] = [];
       const dc1WasteVals: number[] = [];
       const dc2WasteVals: number[] = [];
 
-      for (const sub of submissions) {
-        const bs = sub.bothShiftsMetrics;
-        if (bs) {
-          const dc1 = Number(bs.dieCut1OeePct);
-          const dc2 = Number(bs.dieCut2OeePct);
-          if (dc1 > 0) dc1Vals.push(dc1);
-          if (dc2 > 0) dc2Vals.push(dc2);
-          const dc1w = Number(bs.dieCut1WastePct ?? 0);
-          const dc2w = Number(bs.dieCut2WastePct ?? 0);
-          if (dc1w > 0) dc1WasteVals.push(dc1w);
-          if (dc2w > 0) dc2WasteVals.push(dc2w);
-        }
+      for (const day of shiftsByDay(submissions)) {
+        const both = combineShifts([day.first, day.second]);
+
+        if (both.dieCut1OeePct > 0) dc1Vals.push(both.dieCut1OeePct);
+        if (both.dieCut2OeePct > 0) dc2Vals.push(both.dieCut2OeePct);
+        if (both.dieCut1WastePct > 0) dc1WasteVals.push(both.dieCut1WastePct);
+        if (both.dieCut2WastePct > 0) dc2WasteVals.push(both.dieCut2WastePct);
       }
 
       const avg = (arr: number[]) => arr.length ? Math.round((arr.reduce((a, b) => a + b, 0) / arr.length) * 10) / 10 : 0;
@@ -1562,17 +1555,15 @@ const bakeryMetricsService = {
       for (const sheet of sheets) {
         const submissions = await prisma.bakeryWeekSubmission.findMany({
           where: { weekName: sheet.sheetName },
-          include: { bothShiftsMetrics: true },
+          include: { firstShiftMetrics: true, secondShiftMetrics: true },
         });
 
-        for (const sub of submissions) {
-          const bs = sub.bothShiftsMetrics;
-          if (bs) {
-            const dc1 = Number(bs.dieCut1OeePct);
-            const dc2 = Number(bs.dieCut2OeePct);
-            if (dc1 > 0) { dc1Vals.push(dc1); ytdDc1Vals.push(dc1); }
-            if (dc2 > 0) { dc2Vals.push(dc2); ytdDc2Vals.push(dc2); }
-          }
+        // Each day from its own two shifts, as the period chart does (bakeryShiftCombine.ts).
+        for (const day of shiftsByDay(submissions)) {
+          const both = combineShifts([day.first, day.second]);
+
+          if (both.dieCut1OeePct > 0) { dc1Vals.push(both.dieCut1OeePct); ytdDc1Vals.push(both.dieCut1OeePct); }
+          if (both.dieCut2OeePct > 0) { dc2Vals.push(both.dieCut2OeePct); ytdDc2Vals.push(both.dieCut2OeePct); }
         }
       }
 
