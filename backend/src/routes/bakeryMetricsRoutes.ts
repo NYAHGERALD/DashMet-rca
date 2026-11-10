@@ -2,6 +2,7 @@ import { Router, Request, Response } from 'express';
 import { PrismaClient } from '@prisma/client';
 import bakeryMetricsService from '../services/bakeryMetricsService';
 import bakeryAdminService from '../services/bakeryAdminService';
+import { ShiftAlreadyInError } from '../services/bakeryShiftFill';
 import { generateAiInsights, getCachedInsight, saveInsight, logInsightAction, getInsightLogs } from '../services/bakeryAiInsightsService';
 import { generateOperationalDailyReport, getSavedDailyReport, saveDailyReport } from '../services/operationalDailyReportService';
 import {
@@ -531,14 +532,28 @@ router.get('/check-existing', async (req: Request, res: Response) => {
       return;
     }
 
+    // The newest record is the one the report reads, and the one a missing shift is added to (bakeryShiftFill.ts).
     const existing = await prisma.bakeryWeekSubmission.findFirst({
       where: {
         weekName: week,
         dayOfWeek: day,
       },
+      include: {
+        firstShiftMetrics: { select: { submittedBy: true } },
+        secondShiftMetrics: { select: { submittedBy: true } },
+      },
+      orderBy: { createdAt: 'desc' },
     });
 
-    res.json({ success: true, exists: !!existing });
+    // Which shifts the day has, so the Submit Daily Metrics window can offer the one that is missing.
+    res.json({
+      success: true,
+      exists: !!existing,
+      has_first_shift: !!existing?.firstShiftMetrics,
+      has_second_shift: !!existing?.secondShiftMetrics,
+      first_shift_by: existing?.firstShiftMetrics?.submittedBy ?? null,
+      second_shift_by: existing?.secondShiftMetrics?.submittedBy ?? null,
+    });
   } catch (error: any) {
     console.error('Error checking existing record:', error);
     res.status(500).json({ success: false, error: error.message });
@@ -730,6 +745,11 @@ router.post('/submit', async (req: Request, res: Response) => {
       console.error('[BakeryAutoNotif] Non-blocking error:', emailErr.message);
     }
   } catch (error: any) {
+    if (error instanceof ShiftAlreadyInError) {
+      // The form shows `message`; nothing was saved.
+      res.status(409).json({ success: false, error: error.message, message: error.message, shifts: error.shifts });
+      return;
+    }
     console.error('Error submitting metrics:', error);
     res.status(500).json({ success: false, error: error.message });
   }

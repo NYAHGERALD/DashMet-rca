@@ -1,5 +1,6 @@
 import { PrismaClient } from '@prisma/client';
 import { averageOfRan, combineShifts, shiftsByDay } from './bakeryShiftCombine';
+import { planShiftSave, ShiftAlreadyInError } from './bakeryShiftFill';
 
 const prisma = new PrismaClient();
 
@@ -641,8 +642,21 @@ const bakeryMetricsService = {
   }) {
     // Create week submission + shift metrics in a transaction
     return prisma.$transaction(async (tx) => {
-      // Create week submission
-      const submission = await tx.bakeryWeekSubmission.create({
+      // A day is one record: a shift sent for a day that already has one is added to it, and a shift that is
+      // already in is refused (bakeryShiftFill.ts). The newest record is the one the report reads.
+      const existing = await tx.bakeryWeekSubmission.findFirst({
+        where: { weekName: data.weekName, dayOfWeek: data.dayOfWeek },
+        include: { firstShiftMetrics: true, secondShiftMetrics: true },
+        orderBy: { createdAt: 'desc' },
+      });
+      const plan = planShiftSave(
+        existing ? { id: existing.id, first: !!existing.firstShiftMetrics, second: !!existing.secondShiftMetrics } : null,
+        { first: !!data.firstShift, second: !!data.secondShift },
+      );
+
+      if (plan.kind === 'taken') throw new ShiftAlreadyInError(plan.shifts, data.dayOfWeek);
+
+      const submission = existing ?? await tx.bakeryWeekSubmission.create({
         data: {
           weekName: data.weekName,
           weekStart: new Date(data.weekStart),
@@ -697,15 +711,18 @@ const bakeryMetricsService = {
         });
       }
 
-      // Both-shifts combined (only when BOTH shifts are provided)
-      if (data.firstShift && data.secondShift) {
+      // Both-shifts combined, once the day has both shifts: the ones sent now, or one sent now and one already in.
+      const first = data.firstShift ?? existing?.firstShiftMetrics;
+      const second = data.secondShift ?? existing?.secondShiftMetrics;
+
+      if (first && second) {
         // A line at 0 on one shift did not run it: its OEE is the other shift's, never halved (bakeryShiftCombine.ts).
-        await tx.bakeryBothShiftsMetrics.create({
-          data: {
-            weekSubmissionId: submission.id,
-            ...combineShifts([data.firstShift, data.secondShift]),
-            submittedBy: data.submittedBy,
-          },
+        const both = combineShifts([first, second]);
+
+        await tx.bakeryBothShiftsMetrics.upsert({
+          where: { weekSubmissionId: submission.id },
+          create: { weekSubmissionId: submission.id, ...both, submittedBy: data.submittedBy },
+          update: both,
         });
       }
 

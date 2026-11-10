@@ -231,6 +231,9 @@ export default function BakeryMetricsForm({ onStepChange, openRecentSubmissions,
   const [confirmationChecked, setConfirmationChecked] = useState(false);
   const [notifications, setNotifications] = useState<Notification[]>([]);
   const [duplicateWarning, setDuplicateWarning] = useState<string | null>(null);
+  // Which shifts the chosen day's record holds (null: no record, or not known). A day with one shift in can take
+  // the other one: it is added to that same record on the server (backend bakeryShiftFill.ts).
+  const [dayShifts, setDayShifts] = useState<{ first: boolean; second: boolean; firstBy: string | null; secondBy: string | null } | null>(null);
   const [recentSubmissions, setRecentSubmissions] = useState<Submission[]>([]);
   const [recentLoading, setRecentLoading] = useState(true);
   const [showAllModal, setShowAllModal] = useState(false);
@@ -318,6 +321,18 @@ export default function BakeryMetricsForm({ onStepChange, openRecentSubmissions,
     return false;
   });
   const [shiftReminder, setShiftReminder] = useState(false);
+
+  // The one shift missing from a day that already has a record (Gerald, 2026-11-10): the window says so and takes
+  // only that shift. Otherwise the person's own "records only" choice decides.
+  const fillShift: 'first' | 'second' | null = dayShifts && dayShifts.first !== dayShifts.second
+    ? (dayShifts.first ? 'second' : 'first')
+    : null;
+  const singleShift: 'first' | 'second' | null = fillShift ?? (shiftSubmitReady ? shiftTab : null);
+  const shiftInBy = fillShift && dayShifts ? (fillShift === 'first' ? dayShifts.secondBy : dayShifts.firstBy) : null;
+
+  useEffect(() => {
+    if (fillShift) setShiftTab(fillShift);
+  }, [fillShift]);
 
   // ─── Success Modal state ───────────────────────────────────────────────
   const [successModal, setSuccessModal] = useState<{
@@ -692,16 +707,16 @@ export default function BakeryMetricsForm({ onStepChange, openRecentSubmissions,
     }
 
     if (step === 2) {
-      // If checkbox is checked, only validate the current shift tab's fields
-      // If unchecked, validate ALL fields (both shifts) — blocks Next if other shift is empty
-      const fieldsToValidate: (keyof FormData)[] = shiftSubmitReady
+      // One shift (the missing one, or the checkbox is checked): only validate that shift's fields
+      // Otherwise validate ALL fields (both shifts) — blocks Next if other shift is empty
+      const fieldsToValidate: (keyof FormData)[] = singleShift
         ? [
-            `${shiftTab === 'first' ? 'first' : 'second'}_die_cut1_oee_pct` as keyof FormData,
-            `${shiftTab === 'first' ? 'first' : 'second'}_die_cut2_oee_pct` as keyof FormData,
-            `${shiftTab === 'first' ? 'first' : 'second'}_die_cut1_pounds` as keyof FormData,
-            `${shiftTab === 'first' ? 'first' : 'second'}_die_cut2_pounds` as keyof FormData,
-            `${shiftTab === 'first' ? 'first' : 'second'}_die_cut1_waste_lbs` as keyof FormData,
-            `${shiftTab === 'first' ? 'first' : 'second'}_die_cut2_waste_lbs` as keyof FormData,
+            `${singleShift}_die_cut1_oee_pct` as keyof FormData,
+            `${singleShift}_die_cut2_oee_pct` as keyof FormData,
+            `${singleShift}_die_cut1_pounds` as keyof FormData,
+            `${singleShift}_die_cut2_pounds` as keyof FormData,
+            `${singleShift}_die_cut1_waste_lbs` as keyof FormData,
+            `${singleShift}_die_cut2_waste_lbs` as keyof FormData,
           ]
         : [
             'first_die_cut1_oee_pct', 'first_die_cut2_oee_pct',
@@ -854,20 +869,32 @@ export default function BakeryMetricsForm({ onStepChange, openRecentSubmissions,
 
   // ─── Duplicate check ─────────────────────────────────────────────────────────
   const checkDuplicate = useCallback(async (week: string, day: string) => {
-    if (!week || !day) { setDuplicateWarning(null); setDayAvailable(null); return; }
+    if (!week || !day) { setDuplicateWarning(null); setDayAvailable(null); setDayShifts(null); return; }
     try {
       setDuplicateChecking(true);
       const res = await api.get(`/bakery-metrics/check-existing?week=${encodeURIComponent(week)}&day=${encodeURIComponent(day)}`);
-      if (res.data?.exists) {
+      const data = res.data || {};
+      // A server from before 2026-11-10 says only "exists": that is read as a full day, as it was then.
+      const shiftsKnown = 'has_first_shift' in data;
+      const shifts = { first: !!data.has_first_shift, second: !!data.has_second_shift, firstBy: data.first_shift_by ?? null, secondBy: data.second_shift_by ?? null };
+      if (data.exists && (!shiftsKnown || (shifts.first && shifts.second))) {
         setDuplicateWarning(`A record already exists for ${day} of the week ${formatWeekReadable(week)}`);
         setDayAvailable(false);
+        setDayShifts(shiftsKnown ? shifts : null);
+      } else if (data.exists) {
+        // One shift is in (or none): the window offers the missing one, added to the same record.
+        setDuplicateWarning(null);
+        setDayAvailable(!shifts.first && !shifts.second);
+        setDayShifts(shifts);
       } else {
         setDuplicateWarning(null);
         setDayAvailable(true);
+        setDayShifts(null);
       }
     } catch {
       setDuplicateWarning(null);
       setDayAvailable(null);
+      setDayShifts(null);
     } finally {
       setDuplicateChecking(false);
     }
@@ -896,7 +923,7 @@ export default function BakeryMetricsForm({ onStepChange, openRecentSubmissions,
 
   // ─── Navigation ───────────────────────────────────────────────────────────────
   const goNext = () => {
-    if (currentStep === 2 && !shiftSubmitReady) {
+    if (currentStep === 2 && !singleShift) {
       // Check if current shift tab is valid but the OTHER shift has errors
       const currentShiftValid = validateShiftFields(shiftTab);
       if (currentShiftValid) {
@@ -962,9 +989,9 @@ export default function BakeryMetricsForm({ onStepChange, openRecentSubmissions,
       return;
     }
 
-    // If single-shift mode, validate only that shift; otherwise validate both
-    if (shiftSubmitReady) {
-      if (!validateShiftFields(shiftTab)) {
+    // If single-shift mode (or the day is missing one shift), validate only that shift; otherwise validate both
+    if (singleShift) {
+      if (!validateShiftFields(singleShift)) {
         setCurrentStep(2);
         return;
       }
@@ -1010,10 +1037,10 @@ export default function BakeryMetricsForm({ onStepChange, openRecentSubmissions,
         local_timestamp: new Date().toLocaleString(),
       };
 
-      if (shiftSubmitReady) {
-        // Single-shift submission
-        payload.shift_type = shiftTab;
-        const prefix = shiftTab === 'first' ? 'first_' : 'second_';
+      if (singleShift) {
+        // Single-shift submission (a missing shift is added to the day's record on the server)
+        payload.shift_type = singleShift;
+        const prefix = singleShift === 'first' ? 'first_' : 'second_';
         (Object.keys(formData) as (keyof FormData)[]).forEach(key => {
           if (key.startsWith(prefix)) payload[key] = formData[key];
         });
@@ -1036,7 +1063,7 @@ export default function BakeryMetricsForm({ onStepChange, openRecentSubmissions,
 
         // Build metrics summary for the success modal
         const submittedMetrics: { label: string; value: string }[] = [];
-        const activeShift = shiftSubmitReady ? shiftTab : 'both';
+        const activeShift = singleShift ?? 'both';
         if (activeShift === 'first' || activeShift === 'both') {
           submittedMetrics.push(
             { label: 'OEE Die Cut 1', value: `${formData.first_die_cut1_oee_pct}%` },
@@ -1071,12 +1098,23 @@ export default function BakeryMetricsForm({ onStepChange, openRecentSubmissions,
         });
 
         loadRecentSubmissions();
+        // The day may now have both shifts: check it again and go back to the first step, so the window (behind the
+        // success window) and the tracker show what is in, never a review of a shift that was not sent.
+        checkDuplicate(formData.week_name, formData.day_of_week);
+        loadMissingData();
+        setCurrentStep(1);
       } else {
         throw new Error(res.data?.message || 'Submission failed');
       }
     } catch (err: any) {
       clearInterval(interval);
       showNotification(err?.response?.data?.message || err.message || 'Error submitting metrics', 'error');
+      // 409: someone sent that shift first. Nothing was saved; check the day again and go back to the first step,
+      // where the window says what is in.
+      if (err?.response?.status === 409) {
+        checkDuplicate(formData.week_name, formData.day_of_week);
+        setCurrentStep(1);
+      }
     } finally {
       setIsSubmitting(false);
       setSubmitProgress(0);
@@ -1919,6 +1957,20 @@ export default function BakeryMetricsForm({ onStepChange, openRecentSubmissions,
                       </div>
                     </div>
                   </div>
+                ) : fillShift ? (
+                  <div className="px-3 py-2.5 bg-amber-50 dark:bg-amber-900/20 rounded-lg border border-amber-200 dark:border-amber-700/50">
+                    <div className="flex items-start gap-2">
+                      <AlertCircle className="w-4 h-4 text-amber-500 dark:text-amber-400 mt-0.5 flex-shrink-0" />
+                      <div>
+                        <p className="text-amber-800 dark:text-amber-200 font-semibold text-xs">
+                          {fillShift === 'first' ? 'First' : 'Second'} Shift records are missing for {formData.day_of_week} of the week {selectedWeekFormatted}
+                        </p>
+                        <p className="text-amber-700/80 dark:text-amber-300/70 text-[11px] mt-0.5">
+                          {fillShift === 'first' ? 'Second' : 'First'} Shift was submitted{shiftInBy ? ` by ${shiftInBy}` : ''}. Click <strong>Next</strong> to add the {fillShift === 'first' ? 'First' : 'Second'} Shift records.
+                        </p>
+                      </div>
+                    </div>
+                  </div>
                 ) : dayAvailable ? (
                   <div className="px-3 py-2.5 bg-green-50 dark:bg-green-900/20 rounded-lg border border-green-200 dark:border-green-700/50">
                     <div className="flex items-start gap-2">
@@ -2000,7 +2052,9 @@ export default function BakeryMetricsForm({ onStepChange, openRecentSubmissions,
               <button
                 type="button"
                 onClick={() => setShiftTab('first')}
-                className={`flex-1 flex items-center justify-center gap-1.5 px-3 py-1.5 rounded-lg text-xs sm:text-sm font-bold transition-all duration-300 ease-in-out active:scale-[0.96] ${
+                disabled={fillShift === 'second'}
+                title={fillShift === 'second' ? 'First Shift records are already in for this day' : undefined}
+                className={`flex-1 flex items-center justify-center gap-1.5 px-3 py-1.5 rounded-lg text-xs sm:text-sm font-bold transition-all duration-300 ease-in-out active:scale-[0.96] disabled:cursor-not-allowed disabled:opacity-60 disabled:active:scale-100 ${
                   shiftTab === 'first'
                     ? 'bg-gradient-to-r from-blue-500 to-blue-600 text-white shadow-md shadow-blue-500/30 ring-1 ring-blue-400/50'
                     : 'text-gray-500 dark:text-gray-400 hover:text-gray-700 dark:hover:text-gray-200 hover:bg-gray-200/60 dark:hover:bg-gray-600/40'
@@ -2008,14 +2062,18 @@ export default function BakeryMetricsForm({ onStepChange, openRecentSubmissions,
               >
                 <Sun className={`w-4 h-4 transition-transform duration-300 ${shiftTab === 'first' ? 'rotate-0 scale-110' : 'rotate-180 scale-90 opacity-60'}`} />
                 First Shift
-                {(formData.first_die_cut1_oee_pct || formData.first_die_cut2_oee_pct || formData.first_die_cut1_pounds || formData.first_die_cut2_pounds || formData.first_die_cut1_waste_lbs || formData.first_die_cut2_waste_lbs) && (
+                {fillShift === 'second' ? (
+                  <span className="inline-flex items-center gap-0.5 text-[10px] font-medium text-green-600 dark:text-green-400"><Check className="w-3 h-3" />Already in</span>
+                ) : (formData.first_die_cut1_oee_pct || formData.first_die_cut2_oee_pct || formData.first_die_cut1_pounds || formData.first_die_cut2_pounds || formData.first_die_cut1_waste_lbs || formData.first_die_cut2_waste_lbs) && (
                   <span className={`w-2 h-2 rounded-full flex-shrink-0 transition-all duration-300 ${shiftTab === 'first' ? 'bg-white animate-pulse' : 'bg-green-500'}`} />
                 )}
               </button>
               <button
                 type="button"
                 onClick={() => setShiftTab('second')}
-                className={`flex-1 flex items-center justify-center gap-1.5 px-3 py-1.5 rounded-lg text-xs sm:text-sm font-bold transition-all duration-300 ease-in-out active:scale-[0.96] ${
+                disabled={fillShift === 'first'}
+                title={fillShift === 'first' ? 'Second Shift records are already in for this day' : undefined}
+                className={`flex-1 flex items-center justify-center gap-1.5 px-3 py-1.5 rounded-lg text-xs sm:text-sm font-bold transition-all duration-300 ease-in-out active:scale-[0.96] disabled:cursor-not-allowed disabled:opacity-60 disabled:active:scale-100 ${
                   shiftTab === 'second'
                     ? 'bg-gradient-to-r from-orange-500 to-orange-600 text-white shadow-md shadow-orange-500/30 ring-1 ring-orange-400/50'
                     : 'text-gray-500 dark:text-gray-400 hover:text-gray-700 dark:hover:text-gray-200 hover:bg-gray-200/60 dark:hover:bg-gray-600/40'
@@ -2023,7 +2081,9 @@ export default function BakeryMetricsForm({ onStepChange, openRecentSubmissions,
               >
                 <Moon className={`w-4 h-4 transition-transform duration-300 ${shiftTab === 'second' ? 'rotate-0 scale-110' : '-rotate-90 scale-90 opacity-60'}`} />
                 Second Shift
-                {(formData.second_die_cut1_oee_pct || formData.second_die_cut2_oee_pct || formData.second_die_cut1_pounds || formData.second_die_cut2_pounds || formData.second_die_cut1_waste_lbs || formData.second_die_cut2_waste_lbs) && (
+                {fillShift === 'first' ? (
+                  <span className="inline-flex items-center gap-0.5 text-[10px] font-medium text-green-600 dark:text-green-400"><Check className="w-3 h-3" />Already in</span>
+                ) : (formData.second_die_cut1_oee_pct || formData.second_die_cut2_oee_pct || formData.second_die_cut1_pounds || formData.second_die_cut2_pounds || formData.second_die_cut1_waste_lbs || formData.second_die_cut2_waste_lbs) && (
                   <span className={`w-2 h-2 rounded-full flex-shrink-0 transition-all duration-300 ${shiftTab === 'second' ? 'bg-white animate-pulse' : 'bg-green-500'}`} />
                 )}
               </button>
@@ -2139,7 +2199,21 @@ export default function BakeryMetricsForm({ onStepChange, openRecentSubmissions,
               </div>
             )}
 
-            {/* Shift Submit Checkbox */}
+            {/* The day is missing one shift: only that shift is sent, so the checkbox is not needed */}
+            {fillShift ? (
+              <div className="mt-2 bg-amber-50 dark:bg-amber-900/20 rounded-lg px-3 py-2 border border-amber-200 dark:border-amber-700/50 flex items-start gap-2">
+                <Info className="w-4 h-4 text-amber-500 dark:text-amber-400 mt-0.5 flex-shrink-0" />
+                <div>
+                  <span className="text-sm font-semibold text-amber-800 dark:text-amber-200">
+                    Adding {fillShift === 'first' ? 'First' : 'Second'} Shift records to {formData.day_of_week}
+                  </span>
+                  <p className="text-xs text-amber-700/80 dark:text-amber-300/70 mt-0.5">
+                    {fillShift === 'first' ? 'Second' : 'First'} Shift is already in{shiftInBy ? ` (submitted by ${shiftInBy})` : ''} and will not change.
+                  </p>
+                </div>
+              </div>
+            ) : (
+            /* Shift Submit Checkbox */
             <div className="mt-2 bg-gradient-to-r from-gray-50 to-gray-100 dark:from-gray-700/40 dark:to-gray-700/60 rounded-lg px-3 py-2 border border-gray-200 dark:border-gray-600">
               <label className="flex items-center space-x-3 cursor-pointer select-none">
                 <input
@@ -2170,6 +2244,7 @@ export default function BakeryMetricsForm({ onStepChange, openRecentSubmissions,
                 </div>
               </label>
             </div>
+            )}
 
             {/* Red reminder banner — shown when user tried to proceed with missing shift data */}
             {shiftReminder && (
@@ -2212,25 +2287,27 @@ export default function BakeryMetricsForm({ onStepChange, openRecentSubmissions,
             </div>
 
             {/* Single-shift mode indicator */}
-            {shiftSubmitReady && (
+            {singleShift && (
               <div className={`mb-3 px-4 py-2.5 rounded-lg border flex items-center space-x-2 ${
-                shiftTab === 'first'
+                singleShift === 'first'
                   ? 'bg-blue-50 dark:bg-blue-900/20 border-blue-200 dark:border-blue-700'
                   : 'bg-orange-50 dark:bg-orange-900/20 border-orange-200 dark:border-orange-700'
               }`}>
                 <Info className={`w-4 h-4 flex-shrink-0 ${
-                  shiftTab === 'first' ? 'text-blue-600 dark:text-blue-400' : 'text-orange-600 dark:text-orange-400'
+                  singleShift === 'first' ? 'text-blue-600 dark:text-blue-400' : 'text-orange-600 dark:text-orange-400'
                 }`} />
                 <span className={`text-xs font-semibold ${
-                  shiftTab === 'first' ? 'text-blue-700 dark:text-blue-300' : 'text-orange-700 dark:text-orange-300'
+                  singleShift === 'first' ? 'text-blue-700 dark:text-blue-300' : 'text-orange-700 dark:text-orange-300'
                 }`}>
-                  Submitting {shiftTab === 'first' ? 'First' : 'Second'} Shift records only — {shiftTab === 'first' ? 'Second' : 'First'} Shift data will not be included
+                  {fillShift
+                    ? `Adding the missing ${fillShift === 'first' ? 'First' : 'Second'} Shift records to ${formData.day_of_week}. ${fillShift === 'first' ? 'Second' : 'First'} Shift is already in and will not change.`
+                    : `Submitting ${singleShift === 'first' ? 'First' : 'Second'} Shift records only — ${singleShift === 'first' ? 'Second' : 'First'} Shift data will not be included`}
                 </span>
               </div>
             )}
 
             {/* Summary Cards */}
-            <div className={`grid grid-cols-1 ${shiftSubmitReady ? 'md:grid-cols-2' : 'md:grid-cols-3'} gap-3 mb-4`}>
+            <div className={`grid grid-cols-1 ${singleShift ? 'md:grid-cols-2' : 'md:grid-cols-3'} gap-3 mb-4`}>
               <SummaryCard
                 title="Basic Information"
                 icon={<Calendar className="w-5 h-5 text-white" />}
@@ -2241,7 +2318,7 @@ export default function BakeryMetricsForm({ onStepChange, openRecentSubmissions,
                   { label: 'Submitted By', value: formData.submitted_by },
                 ]}
               />
-              {(!shiftSubmitReady || shiftTab === 'first') && (
+              {(!singleShift || singleShift === 'first') && (
                 <SummaryCard
                   title="First Shift"
                   icon={<Sun className="w-5 h-5 text-white" />}
@@ -2256,7 +2333,7 @@ export default function BakeryMetricsForm({ onStepChange, openRecentSubmissions,
                   ]}
                 />
               )}
-              {(!shiftSubmitReady || shiftTab === 'second') && (
+              {(!singleShift || singleShift === 'second') && (
                 <SummaryCard
                   title="Second Shift"
                   icon={<Moon className="w-5 h-5 text-white" />}
@@ -2327,7 +2404,7 @@ export default function BakeryMetricsForm({ onStepChange, openRecentSubmissions,
                 {isSubmitting ? (
                   <><Loader2 className="w-4 h-4 mr-1.5 animate-spin" /> Submitting...</>
                 ) : (
-                  <><Check className="w-4 h-4 mr-1.5" /> {shiftSubmitReady ? `Submit ${shiftTab === 'first' ? 'First' : 'Second'} Shift Records` : 'Submit Metrics'}</>
+                  <><Check className="w-4 h-4 mr-1.5" /> {singleShift ? `Submit ${singleShift === 'first' ? 'First' : 'Second'} Shift Records` : 'Submit Metrics'}</>
                 )}
               </button>
             )}
